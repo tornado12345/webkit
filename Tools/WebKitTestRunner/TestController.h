@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010, 2015-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2010, 2015-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,6 +30,7 @@
 #include "WebNotificationProvider.h"
 #include "WorkQueueManager.h"
 #include <WebKit/WKRetainPtr.h>
+#include <set>
 #include <string>
 #include <vector>
 #include <wtf/HashMap.h>
@@ -44,6 +45,7 @@ class TestInvocation;
 class OriginSettings;
 class PlatformWebView;
 class EventSenderProxy;
+struct TestCommand;
 struct TestOptions;
 
 // FIXME: Rename this TestRunner?
@@ -84,6 +86,8 @@ public:
     bool usingServerMode() const { return m_usingServerMode; }
     void configureViewForTest(const TestInvocation&);
     
+    bool shouldShowTouches() const { return m_shouldShowTouches; }
+    
     bool beforeUnloadReturnValue() const { return m_beforeUnloadReturnValue; }
     void setBeforeUnloadReturnValue(bool value) { m_beforeUnloadReturnValue = value; }
 
@@ -91,7 +95,7 @@ public:
 
     // Geolocation.
     void setGeolocationPermission(bool);
-    void setMockGeolocationPosition(double latitude, double longitude, double accuracy, bool providesAltitude, double altitude, bool providesAltitudeAccuracy, double altitudeAccuracy, bool providesHeading, double heading, bool providesSpeed, double speed);
+    void setMockGeolocationPosition(double latitude, double longitude, double accuracy, bool providesAltitude, double altitude, bool providesAltitudeAccuracy, double altitudeAccuracy, bool providesHeading, double heading, bool providesSpeed, double speed, bool providesFloorLevel, double floorLevel);
     void setMockGeolocationPositionUnavailableError(WKStringRef errorMessage);
     void handleGeolocationPermissionRequest(WKGeolocationPermissionRequestRef);
     bool isGeolocationProviderActive() const;
@@ -101,9 +105,13 @@ public:
     void getUserMediaInfoForOrigin(WKFrameRef, WKStringRef originKey, bool&, WKRetainPtr<WKStringRef>&);
     WKStringRef getUserMediaSaltForOrigin(WKFrameRef, WKStringRef originKey);
     void setUserMediaPermission(bool);
-    void setUserMediaPermissionForOrigin(bool, WKStringRef userMediaDocumentOriginString, WKStringRef topLevelDocumentOriginString);
+    void resetUserMediaPermission();
+    void setUserMediaPersistentPermissionForOrigin(bool, WKStringRef userMediaDocumentOriginString, WKStringRef topLevelDocumentOriginString);
     void handleUserMediaPermissionRequest(WKFrameRef, WKSecurityOriginRef, WKSecurityOriginRef, WKUserMediaPermissionRequestRef);
     void handleCheckOfUserMediaPermissionForOrigin(WKFrameRef, WKSecurityOriginRef, WKSecurityOriginRef, const WKUserMediaPermissionCheckRef&);
+    OriginSettings& settingsForOrigin(const String&);
+    unsigned userMediaPermissionRequestCountForOrigin(WKStringRef userMediaDocumentOriginString, WKStringRef topLevelDocumentOriginString);
+    void resetUserMediaPermissionRequestCountForOrigin(WKStringRef userMediaDocumentOriginString, WKStringRef topLevelDocumentOriginString);
 
     // Policy delegate.
     void setCustomPolicyDelegate(bool enabled, bool permissive);
@@ -129,20 +137,80 @@ public:
     void setHandlesAuthenticationChallenges(bool value) { m_handlesAuthenticationChallenges = value; }
     void setAuthenticationUsername(String username) { m_authenticationUsername = username; }
     void setAuthenticationPassword(String password) { m_authenticationPassword = password; }
+    void setAllowsAnySSLCertificate(bool);
 
     void setBlockAllPlugins(bool shouldBlock) { m_shouldBlockAllPlugins = shouldBlock; }
+    void setPluginSupportedMode(const String&);
 
     void setShouldLogHistoryClientCallbacks(bool shouldLog) { m_shouldLogHistoryClientCallbacks = shouldLog; }
     void setShouldLogCanAuthenticateAgainstProtectionSpace(bool shouldLog) { m_shouldLogCanAuthenticateAgainstProtectionSpace = shouldLog; }
+    void setShouldLogDownloadCallbacks(bool shouldLog) { m_shouldLogDownloadCallbacks = shouldLog; }
 
     bool isCurrentInvocation(TestInvocation* invocation) const { return invocation == m_currentInvocation.get(); }
 
     void setShouldDecideNavigationPolicyAfterDelay(bool value) { m_shouldDecideNavigationPolicyAfterDelay = value; }
+    void setShouldDecideResponsePolicyAfterDelay(bool value) { m_shouldDecideResponsePolicyAfterDelay = value; }
 
     void setNavigationGesturesEnabled(bool value);
     void setIgnoresViewportScaleLimits(bool);
 
     void setShouldDownloadUndisplayableMIMETypes(bool value) { m_shouldDownloadUndisplayableMIMETypes = value; }
+
+    void setStatisticsLastSeen(WKStringRef hostName, double seconds);
+    void setStatisticsPrevalentResource(WKStringRef hostName, bool value);
+    void setStatisticsVeryPrevalentResource(WKStringRef hostName, bool value);
+    bool isStatisticsPrevalentResource(WKStringRef hostName);
+    bool isStatisticsVeryPrevalentResource(WKStringRef hostName);
+    bool isStatisticsRegisteredAsSubFrameUnder(WKStringRef subFrameHost, WKStringRef topFrameHost);
+    bool isStatisticsRegisteredAsRedirectingTo(WKStringRef hostRedirectedFrom, WKStringRef hostRedirectedTo);
+    void setStatisticsHasHadUserInteraction(WKStringRef hostName, bool value);
+    void setStatisticsHasHadNonRecentUserInteraction(WKStringRef hostName);
+    bool isStatisticsHasHadUserInteraction(WKStringRef hostName);
+    void setStatisticsGrandfathered(WKStringRef hostName, bool value);
+    bool isStatisticsGrandfathered(WKStringRef hostName);
+    void setStatisticsSubframeUnderTopFrameOrigin(WKStringRef hostName, WKStringRef topFrameHostName);
+    void setStatisticsSubresourceUnderTopFrameOrigin(WKStringRef hostName, WKStringRef topFrameHostName);
+    void setStatisticsSubresourceUniqueRedirectTo(WKStringRef hostName, WKStringRef hostNameRedirectedTo);
+    void setStatisticsSubresourceUniqueRedirectFrom(WKStringRef host, WKStringRef hostRedirectedFrom);
+    void setStatisticsTopFrameUniqueRedirectTo(WKStringRef host, WKStringRef hostRedirectedTo);
+    void setStatisticsTopFrameUniqueRedirectFrom(WKStringRef host, WKStringRef hostRedirectedFrom);
+    void setStatisticsTimeToLiveUserInteraction(double seconds);
+    void setStatisticsTimeToLiveCookiePartitionFree(double seconds);
+    void statisticsProcessStatisticsAndDataRecords();
+    void statisticsUpdateCookiePartitioning();
+    void statisticsSetShouldPartitionCookiesForHost(WKStringRef hostName, bool value);
+    void statisticsSubmitTelemetry();
+    void setStatisticsNotifyPagesWhenDataRecordsWereScanned(bool);
+    void setStatisticsShouldClassifyResourcesBeforeDataRecordsRemoval(bool);
+    void setStatisticsNotifyPagesWhenTelemetryWasCaptured(bool value);
+    void setStatisticsMinimumTimeBetweenDataRecordsRemoval(double);
+    void setStatisticsGrandfatheringTime(double seconds);
+    void setStatisticsMaxStatisticsEntries(unsigned);
+    void setStatisticsPruneEntriesDownTo(unsigned);
+    void statisticsClearInMemoryAndPersistentStore();
+    void statisticsClearInMemoryAndPersistentStoreModifiedSinceHours(unsigned);
+    void statisticsClearThroughWebsiteDataRemoval();
+    void statisticsResetToConsistentState();
+
+    void getAllStorageAccessEntries();
+
+    WKArrayRef openPanelFileURLs() const { return m_openPanelFileURLs.get(); }
+    void setOpenPanelFileURLs(WKArrayRef fileURLs) { m_openPanelFileURLs = fileURLs; }
+
+    void terminateNetworkProcess();
+    void terminateServiceWorkerProcess();
+
+    void removeAllSessionCredentials();
+
+    void clearServiceWorkerRegistrations();
+
+    void clearDOMCache(WKStringRef origin);
+    void clearDOMCaches();
+    bool hasDOMCache(WKStringRef origin);
+    uint64_t domCacheSize(WKStringRef origin);
+
+    bool didReceiveServerRedirectForProvisionalNavigation() const { return m_didReceiveServerRedirectForProvisionalNavigation; }
+    void clearDidReceiveServerRedirectForProvisionalNavigation() { m_didReceiveServerRedirectForProvisionalNavigation = false; }
 
 private:
     WKRetainPtr<WKPageConfigurationRef> generatePageConfiguration(WKContextConfigurationRef);
@@ -163,18 +231,20 @@ private:
     void platformResetPreferencesToConsistentValues();
     void platformResetStateToConsistentValues();
 #if PLATFORM(COCOA)
+    void cocoaPlatformInitialize();
     void cocoaResetStateToConsistentValues();
 #endif
     void platformConfigureViewForTest(const TestInvocation&);
     void platformWillRunTest(const TestInvocation&);
     void platformRunUntil(bool& done, double timeout);
     void platformDidCommitLoadForFrame(WKPageRef, WKFrameRef);
+    WKContextRef platformContext();
     WKPreferencesRef platformPreferences();
     void initializeInjectedBundlePath();
     void initializeTestPluginDirectory();
 
     void ensureViewSupportsOptionsForTest(const TestInvocation&);
-    TestOptions testOptionsForTest(const std::string& pathOrURL) const;
+    TestOptions testOptionsForTest(const TestCommand&) const;
     void updatePlatformSpecificTestOptionsForTest(TestOptions&, const std::string& pathOrURL) const;
 
     void updateWebViewSizeForTest(const TestInvocation&);
@@ -222,6 +292,8 @@ private:
     void downloadDidFail(WKContextRef, WKDownloadRef, WKErrorRef);
     static void downloadDidCancel(WKContextRef, WKDownloadRef, const void*);
     void downloadDidCancel(WKContextRef, WKDownloadRef);
+    static void downloadDidReceiveServerRedirectToURL(WKContextRef, WKDownloadRef, WKURLRef, const void*);
+    void downloadDidReceiveServerRedirectToURL(WKContextRef, WKDownloadRef, WKURLRef);
     
     static void processDidCrash(WKPageRef, const void* clientInfo);
     void processDidCrash();
@@ -243,6 +315,9 @@ private:
     void decidePolicyForNotificationPermissionRequest(WKPageRef, WKSecurityOriginRef, WKNotificationPermissionRequestRef);
 
     static void unavailablePluginButtonClicked(WKPageRef, WKPluginUnavailabilityReason, WKDictionaryRef, const void*);
+
+    static void didReceiveServerRedirectForProvisionalNavigation(WKPageRef, WKNavigationRef, WKTypeRef, const void*);
+    void didReceiveServerRedirectForProvisionalNavigation(WKPageRef, WKNavigationRef, WKTypeRef);
 
     static bool canAuthenticateAgainstProtectionSpace(WKPageRef, WKProtectionSpaceRef, const void*);
     bool canAuthenticateAgainstProtectionSpace(WKPageRef, WKProtectionSpaceRef);
@@ -285,7 +360,7 @@ private:
     bool m_gcBetweenTests { false };
     bool m_shouldDumpPixelsForAllTests { false };
     std::vector<std::string> m_paths;
-    std::vector<std::string> m_allowedHosts;
+    std::set<std::string> m_allowedHosts;
     WKRetainPtr<WKStringRef> m_injectedBundlePath;
     WKRetainPtr<WKStringRef> m_testPluginDirectory;
 
@@ -316,7 +391,7 @@ private:
     bool m_isGeolocationPermissionSet { false };
     bool m_isGeolocationPermissionAllowed { false };
 
-    HashMap<String, RefPtr<OriginSettings>> m_cahcedUserMediaPermissions;
+    HashMap<String, RefPtr<OriginSettings>> m_cachedUserMediaPermissions;
 
     typedef Vector<std::pair<String, WKRetainPtr<WKUserMediaPermissionRequestRef>>> PermissionRequestList;
     PermissionRequestList m_userMediaPermissionRequests;
@@ -334,20 +409,40 @@ private:
     String m_authenticationPassword;
 
     bool m_shouldBlockAllPlugins { false };
+    String m_unsupportedPluginMode;
 
     bool m_forceComplexText { false };
     bool m_shouldUseAcceleratedDrawing { false };
     bool m_shouldUseRemoteLayerTree { false };
 
     bool m_shouldLogCanAuthenticateAgainstProtectionSpace { false };
+    bool m_shouldLogDownloadCallbacks { false };
     bool m_shouldLogHistoryClientCallbacks { false };
     bool m_shouldShowWebView { false };
     
+    bool m_shouldShowTouches { false };
+
+    bool m_allowAnyHTTPSCertificateForAllowedHosts { false };
+    
     bool m_shouldDecideNavigationPolicyAfterDelay { false };
+    bool m_shouldDecideResponsePolicyAfterDelay { false };
+
+    bool m_didReceiveServerRedirectForProvisionalNavigation { false };
+
+    WKRetainPtr<WKArrayRef> m_openPanelFileURLs;
 
     std::unique_ptr<EventSenderProxy> m_eventSenderProxy;
 
     WorkQueueManager m_workQueueManager;
+};
+
+struct TestCommand {
+    std::string pathOrURL;
+    std::string absolutePath;
+    bool shouldDumpPixels { false };
+    std::string expectedPixelHash;
+    int timeout { 0 };
+    bool dumpJSConsoleLogInStdErr { false };
 };
 
 } // namespace WTR

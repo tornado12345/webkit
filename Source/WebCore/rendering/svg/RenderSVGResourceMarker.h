@@ -17,13 +17,10 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef RenderSVGResourceMarker_h
-#define RenderSVGResourceMarker_h
+#pragma once
 
 #include "RenderSVGResourceContainer.h"
 #include "SVGMarkerElement.h"
-
-#include <wtf/HashSet.h>
 
 namespace WebCore {
 
@@ -31,6 +28,7 @@ class AffineTransform;
 class RenderObject;
 
 class RenderSVGResourceMarker final : public RenderSVGResourceContainer {
+    WTF_MAKE_ISO_ALLOCATED(RenderSVGResourceMarker);
 public:
     RenderSVGResourceMarker(SVGMarkerElement&, RenderStyle&&);
     virtual ~RenderSVGResourceMarker();
@@ -52,7 +50,7 @@ public:
     const AffineTransform& localToParentTransform() const override;
     AffineTransform markerTransformation(const FloatPoint& origin, float angle, float strokeWidth) const;
 
-    bool applyResource(RenderElement&, const RenderStyle&, GraphicsContext*&, unsigned short) override { return false; }
+    bool applyResource(RenderElement&, const RenderStyle&, GraphicsContext*&, OptionSet<RenderSVGResourceMode>) override { return false; }
     FloatRect resourceBoundingBox(const RenderObject&) override { return FloatRect(); }
 
     FloatPoint referencePoint() const;
@@ -76,8 +74,6 @@ private:
     FloatRect m_viewport;
 };
 
-}
+} // namespace WebCore
 
 SPECIALIZE_TYPE_TRAITS_RENDER_SVG_RESOURCE(RenderSVGResourceMarker, MarkerResourceType)
-
-#endif

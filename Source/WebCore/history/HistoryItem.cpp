@@ -28,24 +28,23 @@
 
 #include "CachedPage.h"
 #include "Document.h"
-#include "IconDatabase.h"
 #include "KeyedCoding.h"
 #include "PageCache.h"
 #include "ResourceRequest.h"
 #include "SerializedScriptValue.h"
 #include "SharedBuffer.h"
 #include <stdio.h>
-#include <wtf/CurrentTime.h>
 #include <wtf/DateMath.h>
+#include <wtf/WallTime.h>
 #include <wtf/text/CString.h>
 
 namespace WebCore {
 
-static long long generateSequenceNumber()
+int64_t HistoryItem::generateSequenceNumber()
 {
     // Initialize to the current time to reduce the likelihood of generating
     // identifiers that overlap with those from past/future browser sessions.
-    static long long next = static_cast<long long>(currentTime() * 1000000.0);
+    static long long next = static_cast<long long>(WallTime::now().secondsSinceEpoch().microseconds());
     return ++next;
 }
 
@@ -56,48 +55,33 @@ static void defaultNotifyHistoryItemChanged(HistoryItem*)
 WEBCORE_EXPORT void (*notifyHistoryItemChanged)(HistoryItem*) = defaultNotifyHistoryItemChanged;
 
 HistoryItem::HistoryItem()
-    : m_pageScaleFactor(0)
-    , m_lastVisitWasFailure(false)
-    , m_isTargetItem(false)
-    , m_itemSequenceNumber(generateSequenceNumber())
-    , m_documentSequenceNumber(generateSequenceNumber())
-    , m_pruningReason(PruningReason::None)
+    : HistoryItem({ }, { })
 {
 }
 
 HistoryItem::HistoryItem(const String& urlString, const String& title)
-    : m_urlString(urlString)
-    , m_originalURLString(urlString)
-    , m_title(title)
-    , m_pageScaleFactor(0)
-    , m_lastVisitWasFailure(false)
-    , m_isTargetItem(false)
-    , m_itemSequenceNumber(generateSequenceNumber())
-    , m_documentSequenceNumber(generateSequenceNumber())
-    , m_pruningReason(PruningReason::None)
+    : HistoryItem(urlString, title, { })
 {
-    iconDatabase().retainIconForPageURL(m_urlString);
 }
 
 HistoryItem::HistoryItem(const String& urlString, const String& title, const String& alternateTitle)
+    : HistoryItem(urlString, title, alternateTitle, { Process::identifier(), generateObjectIdentifier<BackForwardItemIdentifier::ItemIdentifierType>() })
+{
+}
+
+HistoryItem::HistoryItem(const String& urlString, const String& title, const String& alternateTitle, BackForwardItemIdentifier BackForwardItemIdentifier)
     : m_urlString(urlString)
     , m_originalURLString(urlString)
     , m_title(title)
     , m_displayTitle(alternateTitle)
-    , m_pageScaleFactor(0)
-    , m_lastVisitWasFailure(false)
-    , m_isTargetItem(false)
-    , m_itemSequenceNumber(generateSequenceNumber())
-    , m_documentSequenceNumber(generateSequenceNumber())
     , m_pruningReason(PruningReason::None)
+    , m_identifier(BackForwardItemIdentifier)
 {
-    iconDatabase().retainIconForPageURL(m_urlString);
 }
 
 HistoryItem::~HistoryItem()
 {
     ASSERT(!m_cachedPage);
-    iconDatabase().releaseIconForPageURL(m_urlString);
 }
 
 inline HistoryItem::HistoryItem(const HistoryItem& item)
@@ -117,7 +101,7 @@ inline HistoryItem::HistoryItem(const HistoryItem& item)
     , m_formContentType(item.m_formContentType)
     , m_pruningReason(PruningReason::None)
 #if PLATFORM(IOS)
-    , m_obscuredInset(item.m_obscuredInset)
+    , m_obscuredInsets(item.m_obscuredInsets)
     , m_scale(item.m_scale)
     , m_scaleIsInitial(item.m_scaleIsInitial)
 #endif
@@ -138,8 +122,6 @@ Ref<HistoryItem> HistoryItem::copy() const
 
 void HistoryItem::reset()
 {
-    iconDatabase().releaseIconForPageURL(m_urlString);
-
     m_urlString = String();
     m_originalURLString = String();
     m_referrer = String();
@@ -216,12 +198,7 @@ void HistoryItem::setAlternateTitle(const String& alternateTitle)
 
 void HistoryItem::setURLString(const String& urlString)
 {
-    if (m_urlString != urlString) {
-        iconDatabase().releaseIconForPageURL(m_urlString);
-        m_urlString = urlString;
-        iconDatabase().retainIconForPageURL(m_urlString);
-    }
-    
+    m_urlString = urlString;
     notifyHistoryItemChanged(this);
 }
 
@@ -269,6 +246,17 @@ void HistoryItem::setScrollPosition(const IntPoint& position)
 void HistoryItem::clearScrollPosition()
 {
     m_scrollPosition = IntPoint();
+}
+
+bool HistoryItem::shouldRestoreScrollPosition() const
+{
+    return m_shouldRestoreScrollPosition;
+}
+
+void HistoryItem::setShouldRestoreScrollPosition(bool shouldRestore)
+{
+    m_shouldRestoreScrollPosition = shouldRestore;
+    notifyHistoryItemChanged(this);
 }
 
 float HistoryItem::pageScaleFactor() const
@@ -319,6 +307,7 @@ void HistoryItem::setIsTargetItem(bool flag)
 void HistoryItem::setStateObject(RefPtr<SerializedScriptValue>&& object)
 {
     m_stateObject = WTFMove(object);
+    notifyHistoryItemChanged(this);
 }
 
 void HistoryItem::addChildItem(Ref<HistoryItem>&& child)

@@ -13,6 +13,7 @@
 #include "common/Color.h"
 #include "libANGLE/Caps.h"
 #include "libANGLE/Error.h"
+#include "platform/WorkaroundsD3D.h"
 
 namespace gl
 {
@@ -22,7 +23,6 @@ class FramebufferAttachment;
 namespace rx
 {
 class RenderTarget9;
-struct WorkaroundsD3D;
 
 namespace gl_d3d9
 {
@@ -33,7 +33,7 @@ D3DBLEND ConvertBlendFunc(GLenum blend);
 D3DBLENDOP ConvertBlendOp(GLenum blendOp);
 D3DSTENCILOP ConvertStencilOp(GLenum stencilOp);
 D3DTEXTUREADDRESS ConvertTextureWrap(GLenum wrap);
-D3DCULL ConvertCullMode(GLenum cullFace, GLenum frontFace);
+D3DCULL ConvertCullMode(gl::CullFaceMode cullFace, GLenum frontFace);
 D3DCUBEMAP_FACES ConvertCubeFace(GLenum cubeFace);
 DWORD ConvertColorMask(bool red, bool green, bool blue, bool alpha);
 D3DTEXTUREFILTERTYPE ConvertMagFilter(GLenum magFilter, float maxAnisotropy);
@@ -87,9 +87,9 @@ inline bool isDeviceLostError(HRESULT errorCode)
     }
 }
 
-WorkaroundsD3D GenerateWorkarounds();
+angle::WorkaroundsD3D GenerateWorkarounds();
 }
 
-}
+}  // namespace d3d9
 
 #endif // LIBANGLE_RENDERER_D3D_D3D9_RENDERER9UTILS_H_

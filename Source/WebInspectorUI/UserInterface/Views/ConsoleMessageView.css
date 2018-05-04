@@ -35,7 +35,7 @@
     border: 1px solid transparent;
     background-color: var(--selected-background-color);
     color: var(--selected-foreground-color);
-    font: 10px -apple-system, sans-serif;
+    font: 10px -webkit-system-font, sans-serif;
     -webkit-user-select: none;
 }
 
@@ -65,6 +65,10 @@
 
 .console-message-text > span {
     -webkit-user-select: text;
+}
+
+.console-message-text > span > :matches(.console-message-enclosed, .console-message-preview, .console-message-preview-divider) {
+    -webkit-user-select: none;
 }
 
 .console-message.expandable .console-top-level-message::before {
@@ -140,7 +144,7 @@
     height: 13px;
     content: "•";
 
-    font-family: -apple-system, sans-serif;
+    font-family: -webkit-system-font, sans-serif;
     font-size: 11px;
     color: var(--console-secondary-text-color);
 
@@ -154,10 +158,6 @@
 
 .console-error-level .console-message-text {
     color: hsl(0, 75%, 45%);
-}
-
-.console-debug-level .console-message-text {
-    color: blue;
 }
 
 .console-warning-level {
@@ -231,10 +231,9 @@
 
 .console-message .console-message-location {
     float: right;
-    font-family: -apple-system, sans-serif;
+    font-family: -webkit-system-font, sans-serif;
     font-size: 12px;
     font-weight: normal;
-    -webkit-user-select: text;
 }
 
 .console-message-extra-parameter .stack-trace {
@@ -243,10 +242,8 @@
 
 .console-message-location.call-frame {
     display: inline-block;
-    -webkit-user-select: text;
+    max-width: 100%;
     max-height: 16px;
-
-    max-width: 50vw;
     overflow: hidden;
     text-overflow: ellipsis;
 }

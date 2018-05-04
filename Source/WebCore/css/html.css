@@ -345,7 +345,7 @@ fieldset {
     -webkit-padding-end: 0.75em;
     -webkit-padding-after: 0.625em;
     border: 2px groove ThreeDFace;
-    min-width: -webkit-min-content;
+    min-width: min-content;
 }
 
 button {
@@ -538,9 +538,20 @@ input::-webkit-inner-spin-button {
      * use RenderTextControlSingleLine as renderer which sets height of spin
      * button in layout(). */
     height: 1.5em;
-    vertical-align: top;
     flex: none;
     -webkit-user-select: none;
+}
+
+input::-webkit-strong-password-auto-fill-button {
+    flex-shrink: 1 !important;
+    font-family: -apple-system !important;
+    -webkit-text-security: none !important;
+    -webkit-user-select: none !important;
+    pointer-events: none !important;
+    text-align: right !important;
+    color: black !important;
+    padding-left: 6px !important;
+    white-space: nowrap !important;
 }
 
 input::-webkit-credentials-auto-fill-button {
@@ -647,12 +658,15 @@ input[type="file"] {
     text-align: start !important;
 }
 
-input:-webkit-autofill {
-#if defined(WTF_PLATFORM_IOS) && WTF_PLATFORM_IOS
-    background-color: #F7EC87 !important;
-#else
+input:-webkit-autofill-strong-password {
+    -webkit-text-security: none !important;
+    -webkit-user-select: none !important;
+    cursor: default !important;
+    font-family: monospace;
+}
+
+input:-webkit-autofill, input:-webkit-autofill-strong-password {
     background-color: #FAFFBD !important;
-#endif
     background-image: none !important;
     color: #000000 !important;
 }
@@ -795,7 +809,7 @@ input[type="checkbox"] {
 #if defined(WTF_PLATFORM_IOS) && WTF_PLATFORM_IOS
 input[type="radio"] {
     -webkit-appearance: radio;
-    border-radius: 8px;
+    border-radius: 50%;
     width: 16px;
     height: 16px;
     padding: 0px;
@@ -1178,7 +1192,7 @@ template {
 }
 
 bdi, output {
-    unicode-bidi: -webkit-isolate;
+    unicode-bidi: isolate;
 }
 
 bdo {
@@ -1219,3 +1233,7 @@ attachment {
 
 /* noscript is handled internally, as it depends on settings. */
 
+/* Default support for "Smart Invert" where all content color except media is inverted. */ 
+@media (inverted-colors) {
+    img:not(picture>img), picture, video { filter: invert(100%); } /* Images and videos double-inverted. */
+}

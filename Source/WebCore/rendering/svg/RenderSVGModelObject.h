@@ -28,8 +28,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef RenderSVGModelObject_h
-#define RenderSVGModelObject_h
+#pragma once
 
 #include "RenderElement.h"
 #include "SVGElement.h"
@@ -45,6 +44,7 @@ namespace WebCore {
 class SVGElement;
 
 class RenderSVGModelObject : public RenderElement {
+    WTF_MAKE_ISO_ALLOCATED(RenderSVGModelObject);
 public:
     LayoutRect clippedOverflowRectForRepaint(const RenderLayerModelObject* repaintContainer) const override;
     FloatRect computeFloatRectForRepaint(const FloatRect&, const RenderLayerModelObject* repaintContainer, bool fixed = false) const final;
@@ -83,5 +83,3 @@ private:
 } // namespace WebCore
 
 SPECIALIZE_TYPE_TRAITS_RENDER_OBJECT(RenderSVGModelObject, isRenderSVGModelObject())
-
-#endif

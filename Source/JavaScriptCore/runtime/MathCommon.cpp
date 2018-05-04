@@ -179,7 +179,7 @@ static double fdlibmPow(double x, double y)
     int hx,hy,ix,iy;
     unsigned lx,ly;
 
-    i0 = ((*(int*)&one)>>29)^1; i1=1-i0;
+    i0 = ((*(const int*)&one)>>29)^1; i1=1-i0;
     hx = __HI(x); lx = __LO(x);
     hy = __HI(y); ly = __LO(y);
     ix = hx&0x7fffffff;  iy = hy&0x7fffffff;
@@ -467,6 +467,11 @@ int32_t JIT_OPERATION operationToInt32(double value)
     return JSC::toInt32(value);
 }
 
+int32_t JIT_OPERATION operationToInt32SensibleSlow(double number)
+{
+    return toInt32Internal<ToInt32Mode::AfterSensibleConversionAttempt>(number);
+}
+
 #if HAVE(ARM_IDIV_INSTRUCTIONS)
 static inline bool isStrictInt32(double value)
 {
@@ -516,4 +521,14 @@ double jsMod(double x, double y)
 #endif
 } // extern "C"
 
+namespace Math {
+
+double JIT_OPERATION log1p(double value)
+{
+    if (value == 0.0)
+        return value;
+    return std::log1p(value);
+}
+
+} // namespace Math
 } // namespace JSC

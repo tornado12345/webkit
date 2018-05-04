@@ -24,13 +24,15 @@
 
 #include "FilterEffect.h"
 #include "RenderStyle.h"
-#include "SVGColor.h"
 #include "SVGFELightElement.h"
 #include "SVGFilterBuilder.h"
 #include "SVGNames.h"
 #include "SVGParserUtilities.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(SVGFESpecularLightingElement);
 
 // Animated property definitions
 DEFINE_ANIMATED_STRING(SVGFESpecularLightingElement, SVGNames::inAttr, In1, in1)
@@ -118,7 +120,8 @@ bool SVGFESpecularLightingElement::setFilterEffectAttribute(FilterEffect* effect
     if (attrName == SVGNames::lighting_colorAttr) {
         RenderObject* renderer = this->renderer();
         ASSERT(renderer);
-        return specularLighting->setLightingColor(renderer->style().svgStyle().lightingColor());
+        Color color = renderer->style().colorByApplyingColorFilter(renderer->style().svgStyle().lightingColor());
+        return specularLighting->setLightingColor(color);
     }
     if (attrName == SVGNames::surfaceScaleAttr)
         return specularLighting->setSurfaceScale(surfaceScale());
@@ -127,31 +130,30 @@ bool SVGFESpecularLightingElement::setFilterEffectAttribute(FilterEffect* effect
     if (attrName == SVGNames::specularExponentAttr)
         return specularLighting->setSpecularExponent(specularExponent());
 
-    LightSource* lightSource = const_cast<LightSource*>(specularLighting->lightSource());
+    auto& lightSource = const_cast<LightSource&>(specularLighting->lightSource());
     const SVGFELightElement* lightElement = SVGFELightElement::findLightElement(this);
-    ASSERT(lightSource);
     ASSERT(lightElement);
 
     if (attrName == SVGNames::azimuthAttr)
-        return lightSource->setAzimuth(lightElement->azimuth());
+        return lightSource.setAzimuth(lightElement->azimuth());
     if (attrName == SVGNames::elevationAttr)
-        return lightSource->setElevation(lightElement->elevation());
+        return lightSource.setElevation(lightElement->elevation());
     if (attrName == SVGNames::xAttr)
-        return lightSource->setX(lightElement->x());
+        return lightSource.setX(lightElement->x());
     if (attrName == SVGNames::yAttr)
-        return lightSource->setY(lightElement->y());
+        return lightSource.setY(lightElement->y());
     if (attrName == SVGNames::zAttr)
-        return lightSource->setZ(lightElement->z());
+        return lightSource.setZ(lightElement->z());
     if (attrName == SVGNames::pointsAtXAttr)
-        return lightSource->setPointsAtX(lightElement->pointsAtX());
+        return lightSource.setPointsAtX(lightElement->pointsAtX());
     if (attrName == SVGNames::pointsAtYAttr)
-        return lightSource->setPointsAtY(lightElement->pointsAtY());
+        return lightSource.setPointsAtY(lightElement->pointsAtY());
     if (attrName == SVGNames::pointsAtZAttr)
-        return lightSource->setPointsAtZ(lightElement->pointsAtZ());
+        return lightSource.setPointsAtZ(lightElement->pointsAtZ());
     if (attrName == SVGNames::specularExponentAttr)
-        return lightSource->setSpecularExponent(lightElement->specularExponent());
+        return lightSource.setSpecularExponent(lightElement->specularExponent());
     if (attrName == SVGNames::limitingConeAngleAttr)
-        return lightSource->setLimitingConeAngle(lightElement->limitingConeAngle());
+        return lightSource.setLimitingConeAngle(lightElement->limitingConeAngle());
 
     ASSERT_NOT_REACHED();
     return false;
@@ -185,23 +187,24 @@ void SVGFESpecularLightingElement::lightElementAttributeChanged(const SVGFELight
 
 RefPtr<FilterEffect> SVGFESpecularLightingElement::build(SVGFilterBuilder* filterBuilder, Filter& filter)
 {
-    FilterEffect* input1 = filterBuilder->getEffectById(in1());
+    auto input1 = filterBuilder->getEffectById(in1());
 
     if (!input1)
         return nullptr;
 
-    auto lightSource = SVGFELightElement::findLightSource(this);
-    if (!lightSource)
+    auto lightElement = makeRefPtr(SVGFELightElement::findLightElement(this));
+    if (!lightElement)
         return nullptr;
+    
+    auto lightSource = lightElement->lightSource(*filterBuilder);
 
     RenderObject* renderer = this->renderer();
     if (!renderer)
         return nullptr;
     
-    const Color& color = renderer->style().svgStyle().lightingColor();
+    Color color = renderer->style().colorByApplyingColorFilter(renderer->style().svgStyle().lightingColor());
 
-    RefPtr<FilterEffect> effect = FESpecularLighting::create(filter, color, surfaceScale(), specularConstant(),
-                                          specularExponent(), kernelUnitLengthX(), kernelUnitLengthY(), WTFMove(lightSource));
+    RefPtr<FilterEffect> effect = FESpecularLighting::create(filter, color, surfaceScale(), specularConstant(), specularExponent(), kernelUnitLengthX(), kernelUnitLengthY(), WTFMove(lightSource));
     effect->inputEffects().append(input1);
     return effect;
 }

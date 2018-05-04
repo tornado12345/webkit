@@ -24,6 +24,7 @@ use warnings;
 use Config;
 use IPC::Open2;
 use IPC::Open3;
+use Text::ParseWords;
 
 BEGIN {
    use Exporter   ();
@@ -47,8 +48,6 @@ sub applyPreprocessor
         require Config;
         if ($ENV{CC}) {
             $preprocessor = $ENV{CC};
-        } elsif (($Config::Config{'osname'}) =~ /solaris/i) {
-            $preprocessor = "/usr/sfw/bin/gcc";
         } elsif (-x "/usr/bin/clang") {
             $preprocessor = "/usr/bin/clang";
         } else {
@@ -64,7 +63,6 @@ sub applyPreprocessor
     if ($Config::Config{"osname"} eq "darwin") {
         push(@args, "-I" . $ENV{BUILT_PRODUCTS_DIR} . "/usr/local/include") if $ENV{BUILT_PRODUCTS_DIR};
         push(@args, "-isysroot", $ENV{SDKROOT}) if $ENV{SDKROOT};
-        $defines .= " WTF_PLATFORM_IOS" if defined $ENV{PLATFORM_NAME} && $ENV{PLATFORM_NAME} !~ /macosx/;
     }
 
     # Remove double quotations from $defines and extract macros.
@@ -104,7 +102,7 @@ sub applyPreprocessor
         use Symbol 'gensym'; my $err = gensym;
         $pid = open3(\*PP_IN, \*PP_OUT, $err, $preprocessor, @args, @macros, $fileName);
     } else {
-        $pid = open2(\*PP_OUT, \*PP_IN, split(' ', $preprocessor), @args, @macros, $fileName);
+        $pid = open2(\*PP_OUT, \*PP_IN, shellwords($preprocessor), @args, @macros, $fileName);
     }
     close PP_IN;
     my @documentContent = <PP_OUT>;

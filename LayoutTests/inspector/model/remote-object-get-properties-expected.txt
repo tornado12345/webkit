@@ -74,6 +74,8 @@ ALL PROPERTIES:
     indexOf
     lastIndexOf
     filter
+    flatMap
+    flatten
     reduce
     reduceRight
     map
@@ -125,6 +127,8 @@ OWN PROPERTIES:
     indexOf
     lastIndexOf
     filter
+    flatMap
+    flatten
     reduce
     reduceRight
     map
@@ -161,6 +165,8 @@ DISPLAYABLE PROPERTIES:
     indexOf
     lastIndexOf
     filter
+    flatMap
+    flatten
     reduce
     reduceRight
     map
@@ -197,6 +203,8 @@ ALL PROPERTIES:
     indexOf
     lastIndexOf
     filter
+    flatMap
+    flatten
     reduce
     reduceRight
     map
@@ -235,14 +243,14 @@ DISPLAYABLE PROPERTIES:
     target
     currentTarget
     eventPhase
+    cancelBubble
     bubbles
     cancelable
+    defaultPrevented
     composed
     timeStamp
-    defaultPrevented
     srcElement
     returnValue
-    cancelBubble
     __proto__
 
 ALL PROPERTIES:
@@ -252,39 +260,23 @@ ALL PROPERTIES:
     target
     currentTarget
     eventPhase
+    cancelBubble
     bubbles
     cancelable
+    defaultPrevented
     composed
     timeStamp
-    defaultPrevented
     srcElement
     returnValue
-    cancelBubble
     composedPath
     stopPropagation
+    stopImmediatePropagation
     preventDefault
     initEvent
-    stopImmediatePropagation
     NONE
     CAPTURING_PHASE
     AT_TARGET
     BUBBLING_PHASE
-    MOUSEDOWN
-    MOUSEUP
-    MOUSEOVER
-    MOUSEOUT
-    MOUSEMOVE
-    MOUSEDRAG
-    CLICK
-    DBLCLICK
-    KEYDOWN
-    KEYUP
-    KEYPRESS
-    DRAGDROP
-    FOCUS
-    BLUR
-    SELECT
-    CHANGE
     toString
     toLocaleString
     valueOf
@@ -417,8 +409,6 @@ description: function unboundFunction() {
 OWN PROPERTIES:
     name
     length
-    arguments
-    caller
     __proto__
     targetFunction
     boundThis
@@ -426,9 +416,9 @@ OWN PROPERTIES:
 
 DISPLAYABLE PROPERTIES:
     length
-    arguments
-    caller
     name
+    caller
+    arguments
     __proto__
     targetFunction
     boundThis
@@ -436,13 +426,13 @@ DISPLAYABLE PROPERTIES:
 
 ALL PROPERTIES:
     length
-    arguments
-    caller
     name
     toString
     apply
     call
     bind
+    caller
+    arguments
     constructor
     Symbol(Symbol.hasInstance)
     toLocaleString
@@ -516,19 +506,20 @@ OWN PROPERTIES:
 
 DISPLAYABLE PROPERTIES:
     0
-    selectedIndex
     length
+    selectedIndex
     __proto__
 
 ALL PROPERTIES:
     0
     constructor
-    selectedIndex
     length
-    item
-    namedItem
+    selectedIndex
     add
     remove
+    item
+    namedItem
+    Symbol(Symbol.iterator)
     toString
     toLocaleString
     valueOf

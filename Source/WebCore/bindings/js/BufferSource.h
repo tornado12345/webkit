@@ -25,8 +25,8 @@
 
 #pragma once
 
-#include <runtime/ArrayBuffer.h>
-#include <runtime/ArrayBufferView.h>
+#include <JavaScriptCore/ArrayBuffer.h>
+#include <JavaScriptCore/ArrayBufferView.h>
 #include <wtf/RefPtr.h>
 #include <wtf/Variant.h>
 
@@ -36,6 +36,7 @@ class BufferSource {
 public:
     using VariantType = WTF::Variant<RefPtr<JSC::ArrayBufferView>, RefPtr<JSC::ArrayBuffer>>;
 
+    BufferSource() { }
     BufferSource(VariantType&& variant)
         : m_variant(WTFMove(variant))
     { }

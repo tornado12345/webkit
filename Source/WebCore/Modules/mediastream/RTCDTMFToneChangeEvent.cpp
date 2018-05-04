@@ -26,7 +26,7 @@
 #include "config.h"
 #include "RTCDTMFToneChangeEvent.h"
 
-#if ENABLE(WEB_RTC)
+#if ENABLE(WEB_RTC_DTMF)
 
 #include "EventNames.h"
 
@@ -54,9 +54,7 @@ RTCDTMFToneChangeEvent::RTCDTMFToneChangeEvent(const AtomicString& type, const I
 {
 }
 
-RTCDTMFToneChangeEvent::~RTCDTMFToneChangeEvent()
-{
-}
+RTCDTMFToneChangeEvent::~RTCDTMFToneChangeEvent() = default;
 
 const String& RTCDTMFToneChangeEvent::tone() const
 {

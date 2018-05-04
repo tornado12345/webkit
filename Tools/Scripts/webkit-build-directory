@@ -1,4 +1,4 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl
 
 # Copyright (C) 2010 Google Inc. All rights reserved.
 # Copyright (C) 2013, 2015 Apple Inc. All rights reserved.
@@ -29,6 +29,7 @@
 
 # A script to expose WebKit's build directory detection logic to non-perl scripts.
 
+use warnings;
 use FindBin;
 use Getopt::Long;
 
@@ -49,7 +50,6 @@ Usage: $programName [options]
   -h|--help             Show this help message
   --top-level           Show the top-level build directory
 
-  --efl                 Find the build directory for the EFL port
   --gtk                 Find the build directory for the GTK+ port
   --wincairo            Find the build directory for using Cairo (rather than CoreGraphics) on Windows
 

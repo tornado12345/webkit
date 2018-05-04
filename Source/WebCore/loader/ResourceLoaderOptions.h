@@ -30,8 +30,14 @@
 
 #pragma once
 
+#include "ContentSecurityPolicyResponseHeaders.h"
 #include "FetchOptions.h"
-#include "ResourceHandleTypes.h"
+#include "HTTPHeaderNames.h"
+#include "ServiceWorkerTypes.h"
+#include "StoredCredentialsPolicy.h"
+#include <wtf/HashSet.h>
+#include <wtf/Vector.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
@@ -85,16 +91,43 @@ enum class SameOriginDataURLFlag {
     Unset
 };
 
+enum class InitiatorContext {
+    Document,
+    Worker,
+};
+
+enum class ServiceWorkersMode {
+    All,
+    None,
+    Only // An error will happen if service worker is not handling the fetch. Used to bypass preflight safely.
+};
+
+enum class ApplicationCacheMode {
+    Use,
+    Bypass
+};
+
+enum class ContentEncodingSniffingPolicy {
+    Sniff,
+    DoNotSniff,
+};
+
+enum class PreflightPolicy {
+    Consider,
+    Force,
+    Prevent
+};
+
 struct ResourceLoaderOptions : public FetchOptions {
     ResourceLoaderOptions() { }
 
-    ResourceLoaderOptions(const FetchOptions& options) : FetchOptions(options) { }
+    ResourceLoaderOptions(FetchOptions options) : FetchOptions { WTFMove(options) } { }
 
-    ResourceLoaderOptions(SendCallbackPolicy sendLoadCallbacks, ContentSniffingPolicy sniffContent, DataBufferingPolicy dataBufferingPolicy, StoredCredentials allowCredentials, ClientCredentialPolicy credentialPolicy, FetchOptions::Credentials credentials, SecurityCheckPolicy securityCheck, FetchOptions::Mode mode, CertificateInfoPolicy certificateInfoPolicy, ContentSecurityPolicyImposition contentSecurityPolicyImposition, DefersLoadingPolicy defersLoadingPolicy, CachingPolicy cachingPolicy)
+    ResourceLoaderOptions(SendCallbackPolicy sendLoadCallbacks, ContentSniffingPolicy sniffContent, DataBufferingPolicy dataBufferingPolicy, StoredCredentialsPolicy storedCredentialsPolicy, ClientCredentialPolicy credentialPolicy, FetchOptions::Credentials credentials, SecurityCheckPolicy securityCheck, FetchOptions::Mode mode, CertificateInfoPolicy certificateInfoPolicy, ContentSecurityPolicyImposition contentSecurityPolicyImposition, DefersLoadingPolicy defersLoadingPolicy, CachingPolicy cachingPolicy)
         : sendLoadCallbacks(sendLoadCallbacks)
         , sniffContent(sniffContent)
         , dataBufferingPolicy(dataBufferingPolicy)
-        , allowCredentials(allowCredentials)
+        , storedCredentialsPolicy(storedCredentialsPolicy)
         , securityCheck(securityCheck)
         , certificateInfoPolicy(certificateInfoPolicy)
         , contentSecurityPolicyImposition(contentSecurityPolicyImposition)
@@ -108,17 +141,30 @@ struct ResourceLoaderOptions : public FetchOptions {
 
     SendCallbackPolicy sendLoadCallbacks { DoNotSendCallbacks };
     ContentSniffingPolicy sniffContent { DoNotSniffContent };
+    ContentEncodingSniffingPolicy sniffContentEncoding { ContentEncodingSniffingPolicy::Sniff };
     DataBufferingPolicy dataBufferingPolicy { BufferData };
-    StoredCredentials allowCredentials { DoNotAllowStoredCredentials };
+    StoredCredentialsPolicy storedCredentialsPolicy { StoredCredentialsPolicy::DoNotUse };
     SecurityCheckPolicy securityCheck { DoSecurityCheck };
     CertificateInfoPolicy certificateInfoPolicy { DoNotIncludeCertificateInfo };
     ContentSecurityPolicyImposition contentSecurityPolicyImposition { ContentSecurityPolicyImposition::DoPolicyCheck };
     DefersLoadingPolicy defersLoadingPolicy { DefersLoadingPolicy::AllowDefersLoading };
     CachingPolicy cachingPolicy { CachingPolicy::AllowCaching };
     SameOriginDataURLFlag sameOriginDataURLFlag { SameOriginDataURLFlag::Unset };
+    InitiatorContext initiatorContext { InitiatorContext::Document };
+    ServiceWorkersMode serviceWorkersMode { ServiceWorkersMode::All };
+    ApplicationCacheMode applicationCacheMode { ApplicationCacheMode::Use };
+#if ENABLE(SERVICE_WORKER)
+    std::optional<ServiceWorkerRegistrationIdentifier> serviceWorkerRegistrationIdentifier;
+#endif
+    HashSet<HTTPHeaderName, WTF::IntHash<HTTPHeaderName>, WTF::StrongEnumHashTraits<HTTPHeaderName>> httpHeadersToKeep;
 
     ClientCredentialPolicy clientCredentialPolicy { ClientCredentialPolicy::CannotAskClientForCredentials };
     unsigned maxRedirectCount { 20 };
+
+    Vector<String> derivedCachedDataTypesToRetrieve;
+
+    PreflightPolicy preflightPolicy { PreflightPolicy::Consider };
+    std::optional<ContentSecurityPolicyResponseHeaders> cspResponseHeaders;
 };
 
 } // namespace WebCore

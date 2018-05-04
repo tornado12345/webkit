@@ -32,19 +32,17 @@
 #include "FileReader.h"
 
 #include "EventNames.h"
-#include "ExceptionCode.h"
 #include "File.h"
 #include "Logging.h"
 #include "ProgressEvent.h"
 #include "ScriptExecutionContext.h"
-#include <runtime/ArrayBuffer.h>
-#include <wtf/CurrentTime.h>
+#include <JavaScriptCore/ArrayBuffer.h>
 #include <wtf/text/CString.h>
 
 namespace WebCore {
 
 // Fire the progress event at least every 50ms.
-static const auto progressNotificationInterval = 50ms;
+static const auto progressNotificationInterval = 50_ms;
 
 Ref<FileReader> FileReader::create(ScriptExecutionContext& context)
 {
@@ -127,9 +125,9 @@ ExceptionOr<void> FileReader::readAsDataURL(Blob* blob)
 
 ExceptionOr<void> FileReader::readInternal(Blob& blob, FileReaderLoader::ReadType type)
 {
-    // If multiple concurrent read methods are called on the same FileReader, INVALID_STATE_ERR should be thrown when the state is LOADING.
+    // If multiple concurrent read methods are called on the same FileReader, InvalidStateError should be thrown when the state is LOADING.
     if (m_state == LOADING)
-        return Exception { INVALID_STATE_ERR };
+        return Exception { InvalidStateError };
 
     setPendingActivity(this);
 
@@ -179,8 +177,8 @@ void FileReader::didStartLoading()
 
 void FileReader::didReceiveData()
 {
-    auto now = std::chrono::steady_clock::now();
-    if (!m_lastProgressNotificationTime.time_since_epoch().count()) {
+    auto now = MonotonicTime::now();
+    if (std::isnan(m_lastProgressNotificationTime)) {
         m_lastProgressNotificationTime = now;
         return;
     }
@@ -228,18 +226,20 @@ void FileReader::fireEvent(const AtomicString& type)
     dispatchEvent(ProgressEvent::create(type, true, m_loader ? m_loader->bytesLoaded() : 0, m_loader ? m_loader->totalBytes() : 0));
 }
 
-RefPtr<ArrayBuffer> FileReader::arrayBufferResult() const
+std::optional<Variant<String, RefPtr<JSC::ArrayBuffer>>> FileReader::result() const
 {
     if (!m_loader || m_error)
-        return nullptr;
-    return m_loader->arrayBufferResult();
-}
-
-String FileReader::stringResult()
-{
-    if (!m_loader || m_error)
-        return String();
-    return m_loader->stringResult();
+        return std::nullopt;
+    if (m_readType == FileReaderLoader::ReadAsArrayBuffer) {
+        auto result = m_loader->arrayBufferResult();
+        if (!result)
+            return std::nullopt;
+        return { result };
+    }
+    String result = m_loader->stringResult();
+    if (result.isNull())
+        return std::nullopt;
+    return { WTFMove(result) };
 }
 
 } // namespace WebCore

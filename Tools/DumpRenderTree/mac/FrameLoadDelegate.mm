@@ -229,6 +229,10 @@
     if (!done && gTestRunner->dumpFrameLoadCallbacks()) {
         NSString *string = [NSString stringWithFormat:@"%@ - didFailProvisionalLoadWithError", [frame _drt_descriptionSuitableForTestResult]];
         printf("%s\n", [string UTF8String]);
+        if (error.code == WebKitErrorCannotShowURL) {
+            string = [NSString stringWithFormat:@"%@ - (ErrorCodeCannotShowURL)", [frame _drt_descriptionSuitableForTestResult]];
+            printf("%s\n", [string UTF8String]);
+        }
     }
 
     if ([error domain] == NSURLErrorDomain && ([error code] == NSURLErrorServerCertificateHasUnknownRoot || [error code] == NSURLErrorServerCertificateUntrusted)) {
@@ -400,6 +404,7 @@
         NSString *string = [NSString stringWithFormat:@"%@ - didCancelClientRedirectForFrame", [frame _drt_descriptionSuitableForTestResult]];
         printf ("%s\n", [string UTF8String]);
     }
+    gTestRunner->setDidCancelClientRedirect(true);
 }
 
 - (void)webView:(WebView *)sender didFinishDocumentLoadForFrame:(WebFrame *)frame

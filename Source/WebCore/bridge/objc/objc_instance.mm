@@ -30,11 +30,11 @@
 #import "ObjCRuntimeObject.h"
 #import "WebScriptObject.h"
 #import "WebScriptObjectProtocol.h"
-#import "runtime/FunctionPrototype.h"
 #import "runtime_method.h"
-#import <runtime/Error.h>
-#import <runtime/JSLock.h>
-#import <runtime/ObjectPrototype.h>
+#import <JavaScriptCore/Error.h>
+#import <JavaScriptCore/FunctionPrototype.h>
+#import <JavaScriptCore/JSLock.h>
+#import <JavaScriptCore/ObjectPrototype.h>
 #import <wtf/Assertions.h>
 #import <wtf/HashMap.h>
 #import <wtf/MainThread.h>
@@ -168,17 +168,18 @@ class ObjCRuntimeMethod : public RuntimeMethod {
 public:
     static ObjCRuntimeMethod* create(ExecState* exec, JSGlobalObject* globalObject, const String& name, Bindings::Method* method)
     {
+        VM& vm = globalObject->vm();
         // FIXME: deprecatedGetDOMStructure uses the prototype off of the wrong global object
         // We need to pass in the right global object for "i".
         Structure* domStructure = WebCore::deprecatedGetDOMStructure<ObjCRuntimeMethod>(exec);
-        ObjCRuntimeMethod* runtimeMethod = new (NotNull, allocateCell<ObjCRuntimeMethod>(*exec->heap())) ObjCRuntimeMethod(globalObject, domStructure, method);
-        runtimeMethod->finishCreation(exec->vm(), name);
+        ObjCRuntimeMethod* runtimeMethod = new (NotNull, allocateCell<ObjCRuntimeMethod>(vm.heap)) ObjCRuntimeMethod(globalObject, domStructure, method);
+        runtimeMethod->finishCreation(vm, name);
         return runtimeMethod;
     }
 
     static Structure* createStructure(VM& vm, JSC::JSGlobalObject* globalObject, JSC::JSValue prototype)
     {
-        return Structure::create(vm, globalObject, prototype, TypeInfo(ObjectType, StructureFlags), &s_info);
+        return Structure::create(vm, globalObject, prototype, TypeInfo(InternalFunctionType, StructureFlags), &s_info);
     }
 
     DECLARE_INFO;
@@ -194,11 +195,11 @@ private:
     void finishCreation(VM& vm, const String& name)
     {
         Base::finishCreation(vm, name);
-        ASSERT(inherits(info()));
+        ASSERT(inherits(vm, info()));
     }
 };
 
-const ClassInfo ObjCRuntimeMethod::s_info = { "ObjCRuntimeMethod", &RuntimeMethod::s_info, 0, CREATE_METHOD_TABLE(ObjCRuntimeMethod) };
+const ClassInfo ObjCRuntimeMethod::s_info = { "ObjCRuntimeMethod", &RuntimeMethod::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(ObjCRuntimeMethod) };
 
 JSC::JSValue ObjcInstance::getMethod(ExecState* exec, PropertyName propertyName)
 {
@@ -211,7 +212,7 @@ JSC::JSValue ObjcInstance::invokeMethod(ExecState* exec, RuntimeMethod* runtimeM
     JSC::VM& vm = exec->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
 
-    if (!asObject(runtimeMethod)->inherits(ObjCRuntimeMethod::info()))
+    if (!asObject(runtimeMethod)->inherits<ObjCRuntimeMethod>(vm))
         return throwTypeError(exec, scope, ASCIILiteral("Attempt to invoke non-plug-in method on plug-in object."));
 
     ObjcMethod *method = static_cast<ObjcMethod*>(runtimeMethod->method());

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -48,7 +48,7 @@ static JSAPIWrapperObjectHandleOwner* jsAPIWrapperObjectHandleOwner()
 
 void JSAPIWrapperObjectHandleOwner::finalize(JSC::Handle<JSC::Unknown> handle, void*)
 {
-    JSC::JSAPIWrapperObject* wrapperObject = JSC::jsCast<JSC::JSAPIWrapperObject*>(handle.get().asCell());
+    JSC::JSAPIWrapperObject* wrapperObject = static_cast<JSC::JSAPIWrapperObject*>(handle.get().asCell());
     if (!wrapperObject->wrappedObject())
         return;
 
@@ -68,7 +68,7 @@ bool JSAPIWrapperObjectHandleOwner::isReachableFromOpaqueRoots(JSC::Handle<JSC::
 
 namespace JSC {
     
-template <> const ClassInfo JSCallbackObject<JSAPIWrapperObject>::s_info = { "JSAPIWrapperObject", &Base::s_info, 0, CREATE_METHOD_TABLE(JSCallbackObject) };
+template <> const ClassInfo JSCallbackObject<JSAPIWrapperObject>::s_info = { "JSAPIWrapperObject", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(JSCallbackObject) };
 
 template<> const bool JSCallbackObject<JSAPIWrapperObject>::needsDestruction = true;
 
@@ -80,7 +80,6 @@ Structure* JSCallbackObject<JSAPIWrapperObject>::createStructure(VM& vm, JSGloba
 
 JSAPIWrapperObject::JSAPIWrapperObject(VM& vm, Structure* structure)
     : Base(vm, structure)
-    , m_wrappedObject(0)
 {
 }
 
@@ -101,8 +100,9 @@ void JSAPIWrapperObject::visitChildren(JSCell* cell, JSC::SlotVisitor& visitor)
     JSAPIWrapperObject* thisObject = JSC::jsCast<JSAPIWrapperObject*>(cell);
     Base::visitChildren(cell, visitor);
 
-    if (thisObject->wrappedObject())
-        scanExternalObjectGraph(cell->structure()->globalObject()->vm(), visitor, thisObject->wrappedObject());
+    void* wrappedObject = thisObject->wrappedObject();
+    if (wrappedObject)
+        scanExternalObjectGraph(visitor.vm(), visitor, wrappedObject);
 }
 
 } // namespace JSC

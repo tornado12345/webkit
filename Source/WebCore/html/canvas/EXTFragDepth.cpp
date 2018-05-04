@@ -30,14 +30,12 @@
 
 namespace WebCore {
 
-EXTFragDepth::EXTFragDepth(WebGLRenderingContextBase* context)
+EXTFragDepth::EXTFragDepth(WebGLRenderingContextBase& context)
     : WebGLExtension(context)
 {
 }
 
-EXTFragDepth::~EXTFragDepth()
-{
-}
+EXTFragDepth::~EXTFragDepth() = default;
 
 WebGLExtension::ExtensionName EXTFragDepth::getName() const
 {

@@ -21,8 +21,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGPathConsumer_h
-#define SVGPathConsumer_h
+#pragma once
 
 #include "FloatPoint.h"
 #include <wtf/FastMalloc.h>
@@ -43,7 +42,7 @@ enum PathParsingMode {
 class SVGPathConsumer {
     WTF_MAKE_NONCOPYABLE(SVGPathConsumer); WTF_MAKE_FAST_ALLOCATED;
 public:
-    SVGPathConsumer() { }
+    SVGPathConsumer() = default;
     virtual void incrementPathSegmentCount() = 0;
     virtual bool continueConsuming() = 0;
 
@@ -62,9 +61,7 @@ public:
     virtual void arcTo(float, float, float, bool largeArcFlag, bool sweepFlag, const FloatPoint&, PathCoordinateMode) = 0;
 
 protected:
-    virtual ~SVGPathConsumer() { }
+    virtual ~SVGPathConsumer() = default;
 };
 
 } // namespace WebCore
-
-#endif // SVGPathConsumer_h

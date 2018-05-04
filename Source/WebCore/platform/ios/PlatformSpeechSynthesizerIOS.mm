@@ -22,19 +22,17 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
-#include "PlatformSpeechSynthesizer.h"
+#import "config.h"
+#import "PlatformSpeechSynthesizer.h"
 
-#if PLATFORM(IOS)
+#if ENABLE(SPEECH_SYNTHESIS) && PLATFORM(IOS)
 
-#if ENABLE(SPEECH_SYNTHESIS)
-
-#include "PlatformSpeechSynthesisUtterance.h"
-#include "PlatformSpeechSynthesisVoice.h"
-#include "SoftLinking.h"
-#include <AVFoundation/AVSpeechSynthesis.h>
-#include <wtf/BlockObjCExceptions.h>
-#include <wtf/RetainPtr.h>
+#import "PlatformSpeechSynthesisUtterance.h"
+#import "PlatformSpeechSynthesisVoice.h"
+#import <AVFoundation/AVSpeechSynthesis.h>
+#import <wtf/BlockObjCExceptions.h>
+#import <wtf/RetainPtr.h>
+#import <wtf/SoftLinking.h>
 
 SOFT_LINK_FRAMEWORK(AVFoundation)
 SOFT_LINK_CLASS(AVFoundation, AVSpeechSynthesizer)
@@ -60,7 +58,7 @@ SOFT_LINK_CONSTANT(AVFoundation, AVSpeechUtteranceMaximumSpeechRate, float)
 }
 
 - (WebSpeechSynthesisWrapper *)initWithSpeechSynthesizer:(WebCore::PlatformSpeechSynthesizer*)synthesizer;
-- (void)speakUtterance:(PassRefPtr<WebCore::PlatformSpeechSynthesisUtterance>)utterance;
+- (void)speakUtterance:(RefPtr<WebCore::PlatformSpeechSynthesisUtterance>&&)utterance;
 
 @end
 
@@ -87,7 +85,7 @@ SOFT_LINK_CONSTANT(AVFoundation, AVSpeechUtteranceMaximumSpeechRate, float)
     return rate;
 }
 
-- (void)speakUtterance:(PassRefPtr<WebCore::PlatformSpeechSynthesisUtterance>)utterance
+- (void)speakUtterance:(RefPtr<WebCore::PlatformSpeechSynthesisUtterance>&&)utterance
 {
     // When speak is called we should not have an existing speech utterance outstanding.
     ASSERT(!m_utterance);
@@ -124,7 +122,7 @@ SOFT_LINK_CONSTANT(AVFoundation, AVSpeechUtteranceMaximumSpeechRate, float)
     [avUtterance setVolume:utterance->volume()];
     [avUtterance setPitchMultiplier:utterance->pitch()];
     [avUtterance setVoice:avVoice];
-    m_utterance = utterance;
+    m_utterance = WTFMove(utterance);
 
     [m_synthesizer speakUtterance:avUtterance];
     END_BLOCK_OBJC_EXCEPTIONS
@@ -281,6 +279,4 @@ void PlatformSpeechSynthesizer::cancel()
 
 } // namespace WebCore
 
-#endif // ENABLE(SPEECH_SYNTHESIS)
-
-#endif // PLATFORM(IOS)
+#endif // ENABLE(SPEECH_SYNTHESIS) && PLATFORM(IOS)

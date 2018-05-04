@@ -23,17 +23,14 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef MockContentFilterSettings_h
-#define MockContentFilterSettings_h
+#pragma once
 
-#include <wtf/NeverDestroyed.h>
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
 class MockContentFilterSettings {
     friend class NeverDestroyed<MockContentFilterSettings>;
-
 public:
     enum class DecisionPoint {
         AfterWillSendRequest,
@@ -91,5 +88,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif // MockContentFilterSettings_h

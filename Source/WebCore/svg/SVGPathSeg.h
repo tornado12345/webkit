@@ -18,8 +18,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGPathSeg_h
-#define SVGPathSeg_h
+#pragma once
 
 #include <wtf/RefCounted.h>
 #include <wtf/text/WTFString.h>
@@ -57,8 +56,8 @@ enum SVGPathSegRole {
 
 class SVGPathSeg : public RefCounted<SVGPathSeg> {
 public:
-    SVGPathSeg() { }
-    virtual ~SVGPathSeg() { }
+    SVGPathSeg() = default;
+    virtual ~SVGPathSeg() = default;
 
     // Forward declare these enums in the w3c naming scheme, for IDL generation
     enum {
@@ -89,5 +88,3 @@ public:
 };
 
 } // namespace WebCore
-
-#endif

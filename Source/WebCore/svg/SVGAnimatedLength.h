@@ -17,8 +17,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGAnimatedLength_h
-#define SVGAnimatedLength_h
+#pragma once
 
 #include "SVGAnimatedPropertyTearOff.h"
 #include "SVGAnimatedTypeAnimator.h"
@@ -26,17 +25,14 @@
 
 namespace WebCore {
 
-template<typename T> 
-class SVGPropertyTearOff;
-
-using SVGAnimatedLength = SVGAnimatedPropertyTearOff<SVGPropertyTearOff<SVGLength>>;
+using SVGAnimatedLength = SVGAnimatedPropertyTearOff<SVGLength>;
 
 // Helper macros to declare/define a SVGAnimatedLength object
 #define DECLARE_ANIMATED_LENGTH(UpperProperty, LowerProperty) \
-DECLARE_ANIMATED_PROPERTY(SVGAnimatedLength, SVGLength, UpperProperty, LowerProperty, )
+DECLARE_ANIMATED_PROPERTY(SVGAnimatedLength, SVGLengthValue, UpperProperty, LowerProperty, )
 
 #define DEFINE_ANIMATED_LENGTH(OwnerType, DOMAttribute, UpperProperty, LowerProperty) \
-DEFINE_ANIMATED_PROPERTY(AnimatedLength, OwnerType, DOMAttribute, DOMAttribute.localName(), UpperProperty, LowerProperty)
+DEFINE_ANIMATED_PROPERTY(AnimatedLength, OwnerType, DOMAttribute, DOMAttribute->localName(), UpperProperty, LowerProperty)
 
 class SVGAnimationElement;
 
@@ -60,5 +56,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif

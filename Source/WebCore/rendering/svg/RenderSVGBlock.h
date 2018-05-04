@@ -17,18 +17,17 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef RenderSVGBlock_h
-#define RenderSVGBlock_h
+#pragma once
 
 #include "RenderBlockFlow.h"
 #include "SVGGraphicsElement.h"
-#include "SVGRenderSupport.h"
 
 namespace WebCore {
 
 class SVGElement;
 
 class RenderSVGBlock : public RenderBlockFlow {
+    WTF_MAKE_ISO_ALLOCATED(RenderSVGBlock);
 public:
     LayoutRect visualOverflowRect() const final;
 
@@ -50,5 +49,6 @@ private:
     void styleDidChange(StyleDifference, const RenderStyle* oldStyle) final;
 };
 
-}
-#endif
+} // namespace WebCore
+
+SPECIALIZE_TYPE_TRAITS_RENDER_OBJECT(RenderSVGBlock, isRenderSVGBlock())

@@ -25,11 +25,13 @@
 #include "Document.h"
 #include "RenderSVGResourceClipper.h"
 #include "SVGNames.h"
-#include "SVGTransformList.h"
 #include "StyleResolver.h"
+#include <wtf/IsoMallocInlines.h>
 #include <wtf/NeverDestroyed.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(SVGClipPathElement);
 
 // Animated property definitions
 DEFINE_ANIMATED_ENUMERATION(SVGClipPathElement, SVGNames::clipPathUnitsAttr, ClipPathUnits, clipPathUnits, SVGUnitTypes::SVGUnitType)
@@ -56,12 +58,13 @@ Ref<SVGClipPathElement> SVGClipPathElement::create(const QualifiedName& tagName,
 
 bool SVGClipPathElement::isSupportedAttribute(const QualifiedName& attrName)
 {
-    static NeverDestroyed<HashSet<QualifiedName>> supportedAttributes;
-    if (supportedAttributes.get().isEmpty()) {
-        SVGLangSpace::addSupportedAttributes(supportedAttributes);
-        SVGExternalResourcesRequired::addSupportedAttributes(supportedAttributes);
-        supportedAttributes.get().add(SVGNames::clipPathUnitsAttr);
-    }
+    static const auto supportedAttributes = makeNeverDestroyed([] {
+        HashSet<QualifiedName> set;
+        SVGLangSpace::addSupportedAttributes(set);
+        SVGExternalResourcesRequired::addSupportedAttributes(set);
+        set.add(SVGNames::clipPathUnitsAttr);
+        return set;
+    }());
     return supportedAttributes.get().contains<SVGAttributeHashTranslator>(attrName);
 }
 
@@ -95,7 +98,7 @@ void SVGClipPathElement::childrenChanged(const ChildChange& change)
 {
     SVGGraphicsElement::childrenChanged(change);
 
-    if (change.source == ChildChangeSourceParser)
+    if (change.source == ChildChangeSource::Parser)
         return;
 
     if (RenderObject* object = renderer())

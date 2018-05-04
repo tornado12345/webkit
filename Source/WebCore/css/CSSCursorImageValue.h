@@ -18,17 +18,19 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef CSSCursorImageValue_h
-#define CSSCursorImageValue_h
+#pragma once
 
-#include "CSSImageValue.h"
+#include "CSSValue.h"
 #include "IntPoint.h"
 #include <wtf/HashSet.h>
 
 namespace WebCore {
 
+class CachedImage;
+class CachedResourceLoader;
 class Document;
 class Element;
+struct ResourceLoaderOptions;
 class SVGCursorElement;
 class SVGElement;
 
@@ -49,6 +51,8 @@ public:
             return m_hotSpot;
         return IntPoint(-1, -1);
     }
+
+    const URL& imageURL() const { return m_originalURL; }
 
     String customCSSText() const;
 
@@ -77,5 +81,3 @@ private:
 } // namespace WebCore
 
 SPECIALIZE_TYPE_TRAITS_CSS_VALUE(CSSCursorImageValue, isCursorImageValue())
-
-#endif // CSSCursorImageValue_h

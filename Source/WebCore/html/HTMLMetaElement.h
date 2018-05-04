@@ -27,7 +27,9 @@
 namespace WebCore {
 
 class HTMLMetaElement final : public HTMLElement {
+    WTF_MAKE_ISO_ALLOCATED(HTMLMetaElement);
 public:
+    static Ref<HTMLMetaElement> create(Document&);
     static Ref<HTMLMetaElement> create(const QualifiedName&, Document&);
 
     const AtomicString& content() const;
@@ -38,7 +40,8 @@ private:
     HTMLMetaElement(const QualifiedName&, Document&);
 
     void parseAttribute(const QualifiedName&, const AtomicString&) final;
-    InsertionNotificationRequest insertedInto(ContainerNode&) final;
+    InsertedIntoAncestorResult insertedIntoAncestor(InsertionType, ContainerNode&) final;
+    void didFinishInsertingNode();
 
     void process();
 };

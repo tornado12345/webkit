@@ -17,8 +17,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGFEDisplacementMapElement_h
-#define SVGFEDisplacementMapElement_h
+#pragma once
 
 #include "FEDisplacementMap.h"
 #include "SVGAnimatedEnumeration.h"
@@ -65,6 +64,7 @@ struct SVGPropertyTraits<ChannelSelectorType> {
 };
 
 class SVGFEDisplacementMapElement final : public SVGFilterPrimitiveStandardAttributes {
+    WTF_MAKE_ISO_ALLOCATED(SVGFEDisplacementMapElement);
 public:
     static Ref<SVGFEDisplacementMapElement> create(const QualifiedName&, Document&);
 
@@ -88,5 +88,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif // SVGFEDisplacementMapElement_h

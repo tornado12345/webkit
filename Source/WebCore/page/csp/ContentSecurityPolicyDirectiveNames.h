@@ -38,6 +38,9 @@ extern const char* const formAction;
 extern const char* const frameAncestors;
 extern const char* const frameSrc;
 extern const char* const imgSrc;
+#if ENABLE(APPLICATION_MANIFEST)
+extern const char* const manifestSrc;
+#endif
 extern const char* const mediaSrc;
 extern const char* const objectSrc;
 extern const char* const pluginTypes;
@@ -46,6 +49,7 @@ extern const char* const sandbox;
 extern const char* const scriptSrc;
 extern const char* const styleSrc;
 extern const char* const upgradeInsecureRequests;
+extern const char* const blockAllMixedContent;
 
 } // namespace ContentSecurityPolicyDirectiveNames
 

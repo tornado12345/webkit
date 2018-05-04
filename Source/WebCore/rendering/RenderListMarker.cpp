@@ -32,14 +32,17 @@
 #include "RenderLayer.h"
 #include "RenderListItem.h"
 #include "RenderView.h"
+#include <wtf/IsoMallocInlines.h>
 #include <wtf/StackStats.h>
 #include <wtf/text/StringBuilder.h>
 #include <wtf/unicode/CharacterNames.h>
 
+
+namespace WebCore {
 using namespace WTF;
 using namespace Unicode;
 
-namespace WebCore {
+WTF_MAKE_ISO_ALLOCATED_IMPL(RenderListMarker);
 
 const int cMarkerPadding = 7;
 
@@ -1128,9 +1131,14 @@ RenderListMarker::RenderListMarker(RenderListItem& listItem, RenderStyle&& style
 
 RenderListMarker::~RenderListMarker()
 {
-    m_listItem.didDestroyListMarker();
+    // Do not add any code here. Add it to willBeDestroyed() instead.
+}
+
+void RenderListMarker::willBeDestroyed()
+{
     if (m_image)
         m_image->removeClient(this);
+    RenderBox::willBeDestroyed();
 }
 
 void RenderListMarker::styleDidChange(StyleDifference diff, const RenderStyle* oldStyle)
@@ -1189,14 +1197,16 @@ void RenderListMarker::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffse
 
     LayoutRect box(boxOrigin, size());
     
-    FloatRect marker = getRelativeMarkerRect();
-    marker.moveBy(boxOrigin);
+    auto markerRect = getRelativeMarkerRect();
+    markerRect.moveBy(boxOrigin);
+    if (markerRect.isEmpty())
+        return;
 
     GraphicsContext& context = paintInfo.context();
 
     if (isImage()) {
-        if (RefPtr<Image> markerImage = m_image->image(this, marker.size()))
-            context.drawImage(*markerImage, marker);
+        if (RefPtr<Image> markerImage = m_image->image(this, markerRect.size()))
+            context.drawImage(*markerImage, markerRect);
         if (selectionState() != SelectionNone) {
             LayoutRect selRect = localSelectionRect();
             selRect.moveBy(boxOrigin);
@@ -1211,7 +1221,7 @@ void RenderListMarker::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffse
         context.fillRect(snappedIntRect(selRect), m_listItem.selectionBackgroundColor());
     }
 
-    const Color color(style().visitedDependentColor(CSSPropertyColor));
+    const Color color(style().visitedDependentColorWithColorFilter(CSSPropertyColor));
     context.setStrokeColor(color);
     context.setStrokeStyle(SolidStroke);
     context.setStrokeThickness(1.0f);
@@ -1220,14 +1230,14 @@ void RenderListMarker::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffse
     EListStyleType type = style().listStyleType();
     switch (type) {
         case Disc:
-            context.drawEllipse(marker);
+            context.drawEllipse(markerRect);
             return;
         case Circle:
             context.setFillColor(Color::transparent);
-            context.drawEllipse(marker);
+            context.drawEllipse(markerRect);
             return;
         case Square:
-            context.drawRect(marker);
+            context.drawRect(markerRect);
             return;
         case NoneListStyle:
             return;
@@ -1318,16 +1328,16 @@ void RenderListMarker::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffse
 
     GraphicsContextStateSaver stateSaver(context, false);
     if (!style().isHorizontalWritingMode()) {
-        marker.moveBy(-boxOrigin);
-        marker = marker.transposedRect();
-        marker.moveBy(FloatPoint(box.x(), box.y() - logicalHeight()));
+        markerRect.moveBy(-boxOrigin);
+        markerRect = markerRect.transposedRect();
+        markerRect.moveBy(FloatPoint(box.x(), box.y() - logicalHeight()));
         stateSaver.save();
-        context.translate(marker.x(), marker.maxY());
+        context.translate(markerRect.x(), markerRect.maxY());
         context.rotate(static_cast<float>(deg2rad(90.)));
-        context.translate(-marker.x(), -marker.maxY());
+        context.translate(-markerRect.x(), -markerRect.maxY());
     }
 
-    FloatPoint textOrigin = FloatPoint(marker.x(), marker.y() + style().fontMetrics().ascent());
+    FloatPoint textOrigin = FloatPoint(markerRect.x(), markerRect.y() + style().fontMetrics().ascent());
     textOrigin = roundPointToDevicePixels(LayoutPoint(textOrigin), document().deviceScaleFactor(), style().isLeftToRightDirection());
 
     if (type == Asterisks || type == Footnotes)
@@ -1370,6 +1380,14 @@ void RenderListMarker::layout()
 {
     StackStats::LayoutCheckPoint layoutCheckPoint;
     ASSERT(needsLayout());
+
+    LayoutUnit blockOffset;
+    for (auto* ancestor = parentBox(); ancestor && ancestor != &m_listItem; ancestor = ancestor->parentBox())
+        blockOffset += ancestor->logicalTop();
+    if (style().isLeftToRightDirection())
+        m_lineOffsetForListItem = m_listItem.logicalLeftOffsetForLine(blockOffset, DoNotIndentText, LayoutUnit());
+    else
+        m_lineOffsetForListItem = m_listItem.logicalRightOffsetForLine(blockOffset, DoNotIndentText, LayoutUnit());
  
     if (isImage()) {
         updateMarginsAndContent();
@@ -1426,7 +1444,7 @@ void RenderListMarker::updateContent()
         LayoutUnit bulletWidth = style().fontMetrics().ascent() / LayoutUnit(2);
         LayoutSize defaultBulletSize(bulletWidth, bulletWidth);
         LayoutSize imageSize = calculateImageIntrinsicDimensions(m_image.get(), defaultBulletSize, DoNotScaleByEffectiveZoom);
-        m_image->setContainerSizeForRenderer(this, imageSize, style().effectiveZoom());
+        m_image->setContainerContextForRenderer(*this, imageSize, style().effectiveZoom());
         return;
     }
 

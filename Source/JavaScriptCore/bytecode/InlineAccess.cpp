@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,11 +35,10 @@
 #include "ScratchRegisterAllocator.h"
 #include "Structure.h"
 #include "StructureStubInfo.h"
-#include "VM.h"
 
 namespace JSC {
 
-void InlineAccess::dumpCacheSizesAndCrash(VM& vm)
+void InlineAccess::dumpCacheSizesAndCrash()
 {
     GPRReg base = GPRInfo::regT0;
     GPRReg value = GPRInfo::regT1;
@@ -50,10 +49,10 @@ void InlineAccess::dumpCacheSizesAndCrash(VM& vm)
 #endif
 
     {
-        CCallHelpers jit(&vm);
+        CCallHelpers jit;
 
         GPRReg scratchGPR = value;
-        jit.load8(CCallHelpers::Address(base, JSCell::indexingTypeOffset()), value);
+        jit.load8(CCallHelpers::Address(base, JSCell::indexingTypeAndMiscOffset()), value);
         jit.and32(CCallHelpers::TrustedImm32(IsArray | IndexingShapeMask), value);
         jit.patchableBranch32(
             CCallHelpers::NotEqual, value, CCallHelpers::TrustedImm32(IsArray | ContiguousShape));
@@ -65,7 +64,7 @@ void InlineAccess::dumpCacheSizesAndCrash(VM& vm)
     }
 
     {
-        CCallHelpers jit(&vm);
+        CCallHelpers jit;
 
         jit.patchableBranch32(
             MacroAssembler::NotEqual,
@@ -82,7 +81,7 @@ void InlineAccess::dumpCacheSizesAndCrash(VM& vm)
     }
 
     {
-        CCallHelpers jit(&vm);
+        CCallHelpers jit;
 
         jit.patchableBranch32(
             MacroAssembler::NotEqual,
@@ -95,7 +94,7 @@ void InlineAccess::dumpCacheSizesAndCrash(VM& vm)
     }
 
     {
-        CCallHelpers jit(&vm);
+        CCallHelpers jit;
 
         jit.patchableBranch32(
             MacroAssembler::NotEqual,
@@ -109,7 +108,7 @@ void InlineAccess::dumpCacheSizesAndCrash(VM& vm)
     }
 
     {
-        CCallHelpers jit(&vm);
+        CCallHelpers jit;
 
         jit.patchableBranch32(
             MacroAssembler::NotEqual,
@@ -133,10 +132,10 @@ ALWAYS_INLINE static bool linkCodeInline(const char* name, CCallHelpers& jit, St
 {
     if (jit.m_assembler.buffer().codeSize() <= stubInfo.patch.inlineSize) {
         bool needsBranchCompaction = false;
-        LinkBuffer linkBuffer(jit, stubInfo.patch.start.dataLocation(), stubInfo.patch.inlineSize, JITCompilationMustSucceed, needsBranchCompaction);
+        LinkBuffer linkBuffer(jit, stubInfo.patch.start, stubInfo.patch.inlineSize, JITCompilationMustSucceed, needsBranchCompaction);
         ASSERT(linkBuffer.isValid());
         function(linkBuffer);
-        FINALIZE_CODE(linkBuffer, ("InlineAccessType: '%s'", name));
+        FINALIZE_CODE(linkBuffer, NoPtrTag, "InlineAccessType: '%s'", name);
         return true;
     }
 
@@ -155,10 +154,10 @@ ALWAYS_INLINE static bool linkCodeInline(const char* name, CCallHelpers& jit, St
     return false;
 }
 
-bool InlineAccess::generateSelfPropertyAccess(VM& vm, StructureStubInfo& stubInfo, Structure* structure, PropertyOffset offset)
+bool InlineAccess::generateSelfPropertyAccess(StructureStubInfo& stubInfo, Structure* structure, PropertyOffset offset)
 {
-    CCallHelpers jit(&vm);
-
+    CCallHelpers jit;
+    
     GPRReg base = static_cast<GPRReg>(stubInfo.patch.baseGPR);
     JSValueRegs value = stubInfo.valueRegs();
 
@@ -173,7 +172,7 @@ bool InlineAccess::generateSelfPropertyAccess(VM& vm, StructureStubInfo& stubInf
         jit.loadPtr(CCallHelpers::Address(base, JSObject::butterflyOffset()), value.payloadGPR());
         storage = value.payloadGPR();
     }
-
+    
     jit.loadValue(
         MacroAssembler::Address(storage, offsetRelativeToBase(offset)), value);
 
@@ -211,11 +210,11 @@ bool InlineAccess::canGenerateSelfPropertyReplace(StructureStubInfo& stubInfo, P
     return hasFreeRegister(stubInfo);
 }
 
-bool InlineAccess::generateSelfPropertyReplace(VM& vm, StructureStubInfo& stubInfo, Structure* structure, PropertyOffset offset)
+bool InlineAccess::generateSelfPropertyReplace(StructureStubInfo& stubInfo, Structure* structure, PropertyOffset offset)
 {
     ASSERT(canGenerateSelfPropertyReplace(stubInfo, offset));
 
-    CCallHelpers jit(&vm);
+    CCallHelpers jit;
 
     GPRReg base = static_cast<GPRReg>(stubInfo.patch.baseGPR);
     JSValueRegs value = stubInfo.valueRegs();
@@ -255,17 +254,17 @@ bool InlineAccess::isCacheableArrayLength(StructureStubInfo& stubInfo, JSArray* 
         || array->indexingType() == ArrayWithContiguous;
 }
 
-bool InlineAccess::generateArrayLength(VM& vm, StructureStubInfo& stubInfo, JSArray* array)
+bool InlineAccess::generateArrayLength(StructureStubInfo& stubInfo, JSArray* array)
 {
     ASSERT(isCacheableArrayLength(stubInfo, array));
 
-    CCallHelpers jit(&vm);
+    CCallHelpers jit;
 
     GPRReg base = static_cast<GPRReg>(stubInfo.patch.baseGPR);
     JSValueRegs value = stubInfo.valueRegs();
     GPRReg scratch = getScratchRegister(stubInfo);
 
-    jit.load8(CCallHelpers::Address(base, JSCell::indexingTypeOffset()), scratch);
+    jit.load8(CCallHelpers::Address(base, JSCell::indexingTypeAndMiscOffset()), scratch);
     jit.and32(CCallHelpers::TrustedImm32(IsArray | IndexingShapeMask), scratch);
     auto branchToSlowPath = jit.patchableBranch32(
         CCallHelpers::NotEqual, scratch, CCallHelpers::TrustedImm32(array->indexingType()));
@@ -279,19 +278,19 @@ bool InlineAccess::generateArrayLength(VM& vm, StructureStubInfo& stubInfo, JSAr
     return linkedCodeInline;
 }
 
-void InlineAccess::rewireStubAsJump(VM& vm, StructureStubInfo& stubInfo, CodeLocationLabel target)
+void InlineAccess::rewireStubAsJump(StructureStubInfo& stubInfo, CodeLocationLabel<JITStubRoutinePtrTag> target)
 {
-    CCallHelpers jit(&vm);
+    CCallHelpers jit;
 
     auto jump = jit.jump();
 
     // We don't need a nop sled here because nobody should be jumping into the middle of an IC.
     bool needsBranchCompaction = false;
-    LinkBuffer linkBuffer(jit, stubInfo.patch.start.dataLocation(), jit.m_assembler.buffer().codeSize(), JITCompilationMustSucceed, needsBranchCompaction);
+    LinkBuffer linkBuffer(jit, stubInfo.patch.start, jit.m_assembler.buffer().codeSize(), JITCompilationMustSucceed, needsBranchCompaction);
     RELEASE_ASSERT(linkBuffer.isValid());
     linkBuffer.link(jump, target);
 
-    FINALIZE_CODE(linkBuffer, ("InlineAccess: linking constant jump"));
+    FINALIZE_CODE(linkBuffer, NoPtrTag, "InlineAccess: linking constant jump");
 }
 
 } // namespace JSC

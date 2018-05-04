@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009, 2013 Apple Inc. All rights reserved.
+ * Copyright (C) 2004-2017 Apple Inc. All rights reserved.
  * Copyright (C) 2008, 2009, 2010, 2011 Google Inc. All rights reserved.
  * Copyright (C) 2011 Igalia S.L.
  * Copyright (C) 2011 Motorola Mobility. All rights reserved.
@@ -29,41 +29,53 @@
 #include "config.h"
 #include "markup.h"
 
+#include "ArchiveResource.h"
 #include "CSSPrimitiveValue.h"
 #include "CSSPropertyNames.h"
 #include "CSSValue.h"
 #include "CSSValueKeywords.h"
+#include "CacheStorageProvider.h"
 #include "ChildListMutationScope.h"
+#include "Comment.h"
 #include "DocumentFragment.h"
+#include "DocumentLoader.h"
 #include "DocumentType.h"
+#include "Editing.h"
 #include "Editor.h"
+#include "EditorClient.h"
 #include "ElementIterator.h"
-#include "ExceptionCode.h"
-#include "ExceptionCodePlaceholder.h"
+#include "EmptyClients.h"
 #include "File.h"
 #include "Frame.h"
+#include "FrameLoader.h"
 #include "HTMLAttachmentElement.h"
 #include "HTMLBRElement.h"
 #include "HTMLBodyElement.h"
 #include "HTMLDivElement.h"
 #include "HTMLHeadElement.h"
 #include "HTMLHtmlElement.h"
+#include "HTMLImageElement.h"
 #include "HTMLNames.h"
+#include "HTMLStyleElement.h"
 #include "HTMLTableElement.h"
 #include "HTMLTextAreaElement.h"
 #include "HTMLTextFormControlElement.h"
-#include "URL.h"
+#include "LibWebRTCProvider.h"
 #include "MarkupAccumulator.h"
 #include "NodeList.h"
+#include "Page.h"
+#include "PageConfiguration.h"
 #include "Range.h"
 #include "RenderBlock.h"
 #include "Settings.h"
+#include "SocketProvider.h"
 #include "StyleProperties.h"
 #include "TextIterator.h"
 #include "TypedElementDescendantIterator.h"
+#include "URL.h"
+#include "URLParser.h"
 #include "VisibleSelection.h"
 #include "VisibleUnits.h"
-#include "htmlediting.h"
 #include <wtf/StdLibExtras.h>
 #include <wtf/text/StringBuilder.h>
 
@@ -76,7 +88,7 @@ static bool propertyMissingOrEqualToNone(StyleProperties*, CSSPropertyID);
 class AttributeChange {
 public:
     AttributeChange()
-        : m_name(nullAtom, nullAtom, nullAtom)
+        : m_name(nullAtom(), nullAtom(), nullAtom())
     {
     }
 
@@ -114,12 +126,97 @@ static void completeURLs(DocumentFragment* fragment, const String& baseURL)
     for (auto& change : changes)
         change.apply();
 }
+
+void replaceSubresourceURLs(Ref<DocumentFragment>&& fragment, HashMap<AtomicString, AtomicString>&& replacementMap)
+{
+    Vector<AttributeChange> changes;
+    for (auto& element : descendantsOfType<Element>(fragment)) {
+        if (!element.hasAttributes())
+            continue;
+        for (const Attribute& attribute : element.attributesIterator()) {
+            // FIXME: This won't work for srcset.
+            if (element.attributeContainsURL(attribute) && !attribute.value().isEmpty()) {
+                auto replacement = replacementMap.get(attribute.value());
+                if (!replacement.isNull())
+                    changes.append({ &element, attribute.name(), replacement });
+            }
+        }
+    }
+    for (auto& change : changes)
+        change.apply();
+}
+
+struct ElementAttribute {
+    Ref<Element> element;
+    QualifiedName attributeName;
+};
+
+void removeSubresourceURLAttributes(Ref<DocumentFragment>&& fragment, WTF::Function<bool(const URL&)> shouldRemoveURL)
+{
+    Vector<ElementAttribute> attributesToRemove;
+    for (auto& element : descendantsOfType<Element>(fragment)) {
+        if (!element.hasAttributes())
+            continue;
+        for (const Attribute& attribute : element.attributesIterator()) {
+            // FIXME: This won't work for srcset.
+            if (element.attributeContainsURL(attribute) && !attribute.value().isEmpty()) {
+                URL url = URLParser { attribute.value() }.result();
+                if (shouldRemoveURL(url))
+                    attributesToRemove.append({ element, attribute.name() });
+            }
+        }
+    }
+    for (auto& item : attributesToRemove)
+        item.element->removeAttribute(item.attributeName);
+}
+
+std::unique_ptr<Page> createPageForSanitizingWebContent()
+{
+    PageConfiguration pageConfiguration(createEmptyEditorClient(), SocketProvider::create(), LibWebRTCProvider::create(), CacheStorageProvider::create());
+
+    fillWithEmptyClients(pageConfiguration);
     
+    auto page = std::make_unique<Page>(WTFMove(pageConfiguration));
+    page->settings().setMediaEnabled(false);
+    page->settings().setScriptEnabled(false);
+    page->settings().setPluginsEnabled(false);
+    page->settings().setAcceleratedCompositingEnabled(false);
+
+    Frame& frame = page->mainFrame();
+    frame.setView(FrameView::create(frame));
+    frame.init();
+
+    FrameLoader& loader = frame.loader();
+    static char markup[] = "<!DOCTYPE html><html><body></body></html>";
+    ASSERT(loader.activeDocumentLoader());
+    loader.activeDocumentLoader()->writer().setMIMEType("text/html");
+    loader.activeDocumentLoader()->writer().begin();
+    loader.activeDocumentLoader()->writer().addData(markup, sizeof(markup));
+    loader.activeDocumentLoader()->writer().end();
+
+    return page;
+}
+
+String sanitizeMarkup(const String& rawHTML, MSOListQuirks msoListQuirks, std::optional<WTF::Function<void(DocumentFragment&)>> fragmentSanitizer)
+{
+    auto page = createPageForSanitizingWebContent();
+    Document* stagingDocument = page->mainFrame().document();
+    ASSERT(stagingDocument);
+
+    auto fragment = createFragmentFromMarkup(*stagingDocument, rawHTML, emptyString(), DisallowScriptingAndPluginContent);
+
+    if (fragmentSanitizer)
+        (*fragmentSanitizer)(fragment);
+
+    return sanitizedMarkupForFragmentInDocument(WTFMove(fragment), *stagingDocument, msoListQuirks, rawHTML);
+}
+
+enum class MSOListMode { Preserve, DoNotPreserve };
 class StyledMarkupAccumulator final : public MarkupAccumulator {
 public:
     enum RangeFullySelectsNode { DoesFullySelectNode, DoesNotFullySelectNode };
 
-    StyledMarkupAccumulator(Vector<Node*>* nodes, EAbsoluteURLs, EAnnotateForInterchange, const Range*, bool needsPositionStyleConversion, Node* highestNodeToBeSerialized = nullptr);
+    StyledMarkupAccumulator(Vector<Node*>* nodes, EAbsoluteURLs, EAnnotateForInterchange, MSOListMode, const Range*, bool needsPositionStyleConversion, Node* highestNodeToBeSerialized = nullptr);
 
     Node* serializeNodes(Node* startNode, Node* pastEnd);
     void wrapWithNode(Node&, bool convertBlocksToInlines = false, RangeFullySelectsNode = DoesFullySelectNode);
@@ -138,6 +235,8 @@ private:
     String renderedText(const Node&, const Range*);
     String stringValueForRange(const Node&, const Range*);
 
+    bool shouldPreserveMSOListStyleForElement(const Element&);
+
     void appendElement(StringBuilder& out, const Element&, bool addDisplayInline, RangeFullySelectsNode);
     void appendCustomAttributes(StringBuilder&, const Element&, Namespaces*) override;
 
@@ -149,6 +248,8 @@ private:
 
     enum NodeTraversalMode { EmitString, DoNotEmitString };
     Node* traverseNodesForSerialization(Node* startNode, Node* pastEnd, NodeTraversalMode);
+
+    bool appendNodeToPreserveMSOList(Node&);
 
     bool shouldAnnotate()
     {
@@ -167,15 +268,18 @@ private:
     bool m_needRelativeStyleWrapper;
     bool m_needsPositionStyleConversion;
     bool m_needClearingDiv;
+    bool m_shouldPreserveMSOList;
+    bool m_inMSOList { false };
 };
 
-inline StyledMarkupAccumulator::StyledMarkupAccumulator(Vector<Node*>* nodes, EAbsoluteURLs shouldResolveURLs, EAnnotateForInterchange shouldAnnotate, const Range* range, bool needsPositionStyleConversion, Node* highestNodeToBeSerialized)
+inline StyledMarkupAccumulator::StyledMarkupAccumulator(Vector<Node*>* nodes, EAbsoluteURLs shouldResolveURLs, EAnnotateForInterchange shouldAnnotate, MSOListMode msoListMode, const Range* range, bool needsPositionStyleConversion, Node* highestNodeToBeSerialized)
     : MarkupAccumulator(nodes, shouldResolveURLs, range)
     , m_shouldAnnotate(shouldAnnotate)
     , m_highestNodeToBeSerialized(highestNodeToBeSerialized)
     , m_needRelativeStyleWrapper(false)
     , m_needsPositionStyleConversion(needsPositionStyleConversion)
     , m_needClearingDiv(false)
+    , m_shouldPreserveMSOList(msoListMode == MSOListMode::Preserve)
 {
 }
 
@@ -214,8 +318,8 @@ void StyledMarkupAccumulator::appendStyleNodeOpenTag(StringBuilder& out, StylePr
 
 const String& StyledMarkupAccumulator::styleNodeCloseTag(bool isBlock)
 {
-    static NeverDestroyed<const String> divClose(ASCIILiteral("</div>"));
-    static NeverDestroyed<const String> styleSpanClose(ASCIILiteral("</span>"));
+    static NeverDestroyed<const String> divClose(MAKE_STATIC_STRING_IMPL("</div>"));
+    static NeverDestroyed<const String> styleSpanClose(MAKE_STATIC_STRING_IMPL("</span>"));
     return isBlock ? divClose : styleSpanClose;
 }
 
@@ -297,20 +401,36 @@ String StyledMarkupAccumulator::stringValueForRange(const Node& node, const Rang
     return nodeValue;
 }
 
-void StyledMarkupAccumulator::appendCustomAttributes(StringBuilder& out, const Element&element, Namespaces* namespaces)
+void StyledMarkupAccumulator::appendCustomAttributes(StringBuilder& out, const Element& element, Namespaces* namespaces)
 {
 #if ENABLE(ATTACHMENT_ELEMENT)
     if (!is<HTMLAttachmentElement>(element))
         return;
     
     const HTMLAttachmentElement& attachment = downcast<HTMLAttachmentElement>(element);
-    if (attachment.file())
-        appendAttribute(out, element, Attribute(webkitattachmentpathAttr, attachment.file()->path()), namespaces);
+    appendAttribute(out, element, { webkitattachmentidAttr, attachment.uniqueIdentifier() }, namespaces);
+    if (auto* file = attachment.file()) {
+        // These attributes are only intended for File deserialization, and are removed from the generated attachment
+        // element after we've deserialized and set its backing File.
+        appendAttribute(out, element, { webkitattachmentpathAttr, file->path() }, namespaces);
+        appendAttribute(out, element, { webkitattachmentbloburlAttr, file->url().string() }, namespaces);
+    }
 #else
     UNUSED_PARAM(out);
     UNUSED_PARAM(element);
     UNUSED_PARAM(namespaces);
 #endif
+}
+
+bool StyledMarkupAccumulator::shouldPreserveMSOListStyleForElement(const Element& element)
+{
+    if (m_inMSOList)
+        return true;
+    if (m_shouldPreserveMSOList) {
+        auto style = element.getAttribute(styleAttr);
+        return style.startsWith("mso-list:") || style.contains(";mso-list:") || style.contains("\nmso-list:");
+    }
+    return false;
 }
 
 void StyledMarkupAccumulator::appendElement(StringBuilder& out, const Element& element, bool addDisplayInline, RangeFullySelectsNode rangeFullySelectsNode)
@@ -321,11 +441,13 @@ void StyledMarkupAccumulator::appendElement(StringBuilder& out, const Element& e
     appendCustomAttributes(out, element, nullptr);
 
     const bool shouldAnnotateOrForceInline = element.isHTMLElement() && (shouldAnnotate() || addDisplayInline);
-    const bool shouldOverrideStyleAttr = shouldAnnotateOrForceInline || shouldApplyWrappingStyle(element);
+    bool shouldOverrideStyleAttr = (shouldAnnotateOrForceInline || shouldApplyWrappingStyle(element)) && !shouldPreserveMSOListStyleForElement(element);
     if (element.hasAttributes()) {
         for (const Attribute& attribute : element.attributesIterator()) {
             // We'll handle the style attribute separately, below.
             if (attribute.name() == styleAttr && shouldOverrideStyleAttr)
+                continue;
+            if (element.isEventHandlerAttribute(attribute) || element.isJavaScriptURLAttribute(attribute))
                 continue;
             appendAttribute(out, element, attribute, 0);
         }
@@ -336,8 +458,8 @@ void StyledMarkupAccumulator::appendElement(StringBuilder& out, const Element& e
 
         if (shouldApplyWrappingStyle(element)) {
             newInlineStyle = m_wrappingStyle->copy();
-            newInlineStyle->removePropertiesInElementDefaultStyle(const_cast<Element*>(&element));
-            newInlineStyle->removeStyleConflictingWithStyleOfNode(const_cast<Element*>(&element));
+            newInlineStyle->removePropertiesInElementDefaultStyle(*const_cast<Element*>(&element));
+            newInlineStyle->removeStyleConflictingWithStyleOfNode(*const_cast<Element*>(&element));
         } else
             newInlineStyle = EditingStyle::create();
 
@@ -346,7 +468,7 @@ void StyledMarkupAccumulator::appendElement(StringBuilder& out, const Element& e
 
         if (shouldAnnotateOrForceInline) {
             if (shouldAnnotate())
-                newInlineStyle->mergeStyleFromRulesForSerialization(downcast<HTMLElement>(const_cast<Element*>(&element)));
+                newInlineStyle->mergeStyleFromRulesForSerialization(downcast<HTMLElement>(*const_cast<Element*>(&element)));
 
             if (addDisplayInline)
                 newInlineStyle->forceInline();
@@ -391,6 +513,7 @@ Node* StyledMarkupAccumulator::traverseNodesForSerialization(Node* startNode, No
     Vector<Node*> ancestorsToClose;
     Node* next;
     Node* lastClosed = nullptr;
+    m_inMSOList = false;
     for (Node* n = startNode; n != pastEnd; n = next) {
         // According to <rdar://problem/5730668>, it is possible for n to blow
         // past pastEnd and become null here. This shouldn't be possible.
@@ -408,10 +531,14 @@ Node* StyledMarkupAccumulator::traverseNodesForSerialization(Node* startNode, No
             continue;
         }
 
-        if (!n->renderer() && !enclosingElementWithTag(firstPositionInOrBeforeNode(n), selectTag)) {
+        bool shouldSkipNode = !n->renderer() && !enclosingElementWithTag(firstPositionInOrBeforeNode(n), selectTag);
+        if (UNLIKELY(m_shouldPreserveMSOList) && shouldEmit)
+            shouldSkipNode = appendNodeToPreserveMSOList(*n) || shouldSkipNode;
+
+        if (shouldSkipNode) {
             next = NodeTraversal::nextSkippingChildren(*n);
             // Don't skip over pastEnd.
-            if (pastEnd && pastEnd->isDescendantOf(n))
+            if (pastEnd && pastEnd->isDescendantOf(*n))
                 next = pastEnd;
         } else {
             // Add the node to the markup if we're not skipping the descendants
@@ -453,7 +580,7 @@ Node* StyledMarkupAccumulator::traverseNodesForSerialization(Node* startNode, No
                     if (!parent->renderer())
                         continue;
                     // or b) ancestors that we never encountered during a pre-order traversal starting at startNode:
-                    ASSERT(startNode->isDescendantOf(parent));
+                    ASSERT(startNode->isDescendantOf(*parent));
                     if (shouldEmit)
                         wrapWithNode(*parent);
                     lastClosed = parent;
@@ -463,6 +590,47 @@ Node* StyledMarkupAccumulator::traverseNodesForSerialization(Node* startNode, No
     }
 
     return lastClosed;
+}
+
+bool StyledMarkupAccumulator::appendNodeToPreserveMSOList(Node& node)
+{
+    if (is<Comment>(node)) {
+        auto& commentNode = downcast<Comment>(node);
+        if (!m_inMSOList && commentNode.data() == "[if !supportLists]")
+            m_inMSOList = true;
+        else if (m_inMSOList && commentNode.data() == "[endif]")
+            m_inMSOList = false;
+        else
+            return false;
+        appendStartTag(commentNode);
+        return true;
+    }
+    if (is<HTMLStyleElement>(node)) {
+        auto* firstChild = node.firstChild();
+        if (!is<Text>(firstChild))
+            return false;
+
+        auto& textChild = downcast<Text>(*firstChild);
+        auto& styleContent = textChild.data();
+
+        const auto msoStyleDefinitionsStart = styleContent.find("/* Style Definitions */");
+        const auto msoListDefinitionsStart = styleContent.find("/* List Definitions */");
+        const auto lastListItem = styleContent.reverseFind("\n@list");
+        if (msoListDefinitionsStart == notFound || lastListItem == notFound)
+            return false;
+        const auto start = msoStyleDefinitionsStart != notFound && msoStyleDefinitionsStart < msoListDefinitionsStart ? msoStyleDefinitionsStart : msoListDefinitionsStart;
+
+        const auto msoListDefinitionsEnd = styleContent.find(";}\n", lastListItem);
+        if (msoListDefinitionsEnd == notFound || start >= msoListDefinitionsEnd)
+            return false;
+
+        appendString("<head><style class=\"" WebKitMSOListQuirksStyle "\">\n<!--\n");
+        appendTextSubstring(textChild, start, msoListDefinitionsEnd - start + 3);
+        appendString("\n-->\n</style></head>");
+
+        return true;
+    }
+    return false;
 }
 
 static Node* ancestorToRetainStructureAndAppearanceForBlock(Node* commonAncestorBlock)
@@ -510,15 +678,13 @@ static bool needInterchangeNewlineAfter(const VisiblePosition& v)
     return isEndOfParagraph(v) && isStartOfParagraph(next) && !(upstreamNode->hasTagName(brTag) && upstreamNode == downstreamNode);
 }
 
-static RefPtr<EditingStyle> styleFromMatchedRulesAndInlineDecl(const Node* node)
+static RefPtr<EditingStyle> styleFromMatchedRulesAndInlineDecl(Node& node)
 {
-    if (!node->isHTMLElement())
+    if (!is<HTMLElement>(node))
         return nullptr;
 
-    // FIXME: Having to const_cast here is ugly, but it is quite a bit of work to untangle
-    // the non-const-ness of styleFromMatchedRulesForElement.
-    HTMLElement* element = const_cast<HTMLElement*>(static_cast<const HTMLElement*>(node));
-    RefPtr<EditingStyle> style = EditingStyle::create(element->inlineStyle());
+    auto& element = downcast<HTMLElement>(node);
+    RefPtr<EditingStyle> style = EditingStyle::create(element.inlineStyle());
     style->mergeStyleFromRules(element);
     return style;
 }
@@ -577,20 +743,20 @@ static Node* highestAncestorToWrapMarkup(const Range* range, EAnnotateForInterch
 // FIXME: Shouldn't we omit style info when annotate == DoNotAnnotateForInterchange? 
 // FIXME: At least, annotation and style info should probably not be included in range.markupString()
 static String createMarkupInternal(Document& document, const Range& range, Vector<Node*>* nodes,
-    EAnnotateForInterchange shouldAnnotate, bool convertBlocksToInlines, EAbsoluteURLs shouldResolveURLs)
+    EAnnotateForInterchange shouldAnnotate, bool convertBlocksToInlines, EAbsoluteURLs shouldResolveURLs, MSOListMode msoListMode)
 {
-    static NeverDestroyed<const String> interchangeNewlineString(ASCIILiteral("<br class=\"" AppleInterchangeNewline "\">"));
+    static NeverDestroyed<const String> interchangeNewlineString(MAKE_STATIC_STRING_IMPL("<br class=\"" AppleInterchangeNewline "\">"));
 
     bool collapsed = range.collapsed();
     if (collapsed)
         return emptyString();
-    Node* commonAncestor = range.commonAncestorContainer();
+    RefPtr<Node> commonAncestor = range.commonAncestorContainer();
     if (!commonAncestor)
         return emptyString();
 
     document.updateLayoutIgnorePendingStylesheets();
 
-    auto* body = enclosingElementWithTag(firstPositionInNode(commonAncestor), bodyTag);
+    auto* body = enclosingElementWithTag(firstPositionInNode(commonAncestor.get()), bodyTag);
     Element* fullySelectedRoot = nullptr;
     // FIXME: Do this for all fully selected blocks, not just the body.
     if (body && VisiblePosition(firstPositionInNode(body)) == VisiblePosition(range.startPosition())
@@ -599,8 +765,8 @@ static String createMarkupInternal(Document& document, const Range& range, Vecto
     Node* specialCommonAncestor = highestAncestorToWrapMarkup(&range, shouldAnnotate);
 
     bool needsPositionStyleConversion = body && fullySelectedRoot == body
-        && document.settings() && document.settings()->shouldConvertPositionStyleOnCopy();
-    StyledMarkupAccumulator accumulator(nodes, shouldResolveURLs, shouldAnnotate, &range, needsPositionStyleConversion, specialCommonAncestor);
+        && document.settings().shouldConvertPositionStyleOnCopy();
+    StyledMarkupAccumulator accumulator(nodes, shouldResolveURLs, shouldAnnotate, msoListMode, &range, needsPositionStyleConversion, specialCommonAncestor);
     Node* pastEnd = range.pastLastNode();
 
     Node* startNode = range.firstNode();
@@ -623,7 +789,7 @@ static String createMarkupInternal(Document& document, const Range& range, Vecto
         // Also include all of the ancestors of lastClosed up to this special ancestor.
         for (ContainerNode* ancestor = lastClosed->parentNode(); ancestor; ancestor = ancestor->parentNode()) {
             if (ancestor == fullySelectedRoot && !convertBlocksToInlines) {
-                RefPtr<EditingStyle> fullySelectedRootStyle = styleFromMatchedRulesAndInlineDecl(fullySelectedRoot);
+                RefPtr<EditingStyle> fullySelectedRootStyle = styleFromMatchedRulesAndInlineDecl(*fullySelectedRoot);
 
                 // Bring the background attribute over, but not as an attribute because a background attribute on a div
                 // appears to have no effect.
@@ -657,7 +823,7 @@ static String createMarkupInternal(Document& document, const Range& range, Vecto
     if (accumulator.needRelativeStyleWrapper() && needsPositionStyleConversion) {
         if (accumulator.needClearingDiv())
             accumulator.appendString("<div style=\"clear: both;\"></div>");
-        RefPtr<EditingStyle> positionRelativeStyle = styleFromMatchedRulesAndInlineDecl(body);
+        RefPtr<EditingStyle> positionRelativeStyle = styleFromMatchedRulesAndInlineDecl(*body);
         positionRelativeStyle->style()->setProperty(CSSPropertyPosition, CSSValueRelative);
         accumulator.wrapWithStyleNode(positionRelativeStyle->style(), document, true);
     }
@@ -671,7 +837,46 @@ static String createMarkupInternal(Document& document, const Range& range, Vecto
 
 String createMarkup(const Range& range, Vector<Node*>* nodes, EAnnotateForInterchange shouldAnnotate, bool convertBlocksToInlines, EAbsoluteURLs shouldResolveURLs)
 {
-    return createMarkupInternal(range.ownerDocument(), range, nodes, shouldAnnotate, convertBlocksToInlines, shouldResolveURLs);
+    return createMarkupInternal(range.ownerDocument(), range, nodes, shouldAnnotate, convertBlocksToInlines, shouldResolveURLs, MSOListMode::DoNotPreserve);
+}
+
+static bool shouldPreserveMSOLists(const String& markup)
+{
+    if (!markup.startsWith("<html xmlns:"))
+        return false;
+    auto tagClose = markup.find('>');
+    if (tagClose == notFound)
+        return false;
+    auto htmlTag = markup.substring(0, tagClose);
+    return htmlTag.contains("xmlns:o=\"urn:schemas-microsoft-com:office:office\"")
+        && htmlTag.contains("xmlns:w=\"urn:schemas-microsoft-com:office:word\"");
+}
+
+String sanitizedMarkupForFragmentInDocument(Ref<DocumentFragment>&& fragment, Document& document, MSOListQuirks msoListQuirks, const String& originalMarkup)
+{
+    MSOListMode msoListMode = msoListQuirks == MSOListQuirks::CheckIfNeeded && shouldPreserveMSOLists(originalMarkup)
+        ? MSOListMode::Preserve : MSOListMode::DoNotPreserve;
+
+    auto bodyElement = makeRefPtr(document.body());
+    ASSERT(bodyElement);
+    bodyElement->appendChild(WTFMove(fragment));
+
+    auto range = Range::create(document);
+    range->selectNodeContents(*bodyElement);
+    auto result = createMarkupInternal(document, range.get(), nullptr, AnnotateForInterchange, false, ResolveNonLocalURLs, msoListMode);
+
+    if (msoListMode == MSOListMode::Preserve) {
+        StringBuilder builder;
+        builder.appendLiteral("<html xmlns:o=\"urn:schemas-microsoft-com:office:office\"\n"
+            "xmlns:w=\"urn:schemas-microsoft-com:office:word\"\n"
+            "xmlns:m=\"http://schemas.microsoft.com/office/2004/12/omml\"\n"
+            "xmlns=\"http://www.w3.org/TR/REC-html40\">");
+        builder.append(result);
+        builder.appendLiteral("</html>");
+        return builder.toString();
+    }
+
+    return result;
 }
 
 Ref<DocumentFragment> createFragmentFromMarkup(Document& document, const String& markup, const String& baseURL, ParserContentPolicy parserContentPolicy)
@@ -689,8 +894,18 @@ Ref<DocumentFragment> createFragmentFromMarkup(Document& document, const String&
         attachments.append(attachment);
 
     for (auto& attachment : attachments) {
-        attachment->setFile(File::create(attachment->attributeWithoutSynchronization(webkitattachmentpathAttr)).ptr());
+        attachment->setUniqueIdentifier(attachment->attributeWithoutSynchronization(webkitattachmentidAttr));
+
+        auto attachmentPath = attachment->attachmentPath();
+        auto blobURL = attachment->blobURL();
+        if (!attachmentPath.isEmpty())
+            attachment->setFile(File::create(attachmentPath));
+        else if (!blobURL.isEmpty())
+            attachment->setFile(File::deserialize({ }, blobURL, attachment->attachmentType(), attachment->attachmentTitle()));
+
+        attachment->removeAttribute(webkitattachmentidAttr);
         attachment->removeAttribute(webkitattachmentpathAttr);
+        attachment->removeAttribute(webkitattachmentbloburlAttr);
     }
 #endif
     if (!baseURL.isEmpty() && baseURL != blankURL() && baseURL != document.baseURL())
@@ -894,7 +1109,7 @@ ExceptionOr<Ref<DocumentFragment>> createFragmentForInnerOuterHTML(Element& cont
 
     bool wasValid = fragment->parseXML(markup, &contextElement, parserContentPolicy);
     if (!wasValid)
-        return Exception { SYNTAX_ERR };
+        return Exception { SyntaxError };
     return WTFMove(fragment);
 }
 
@@ -919,6 +1134,17 @@ RefPtr<DocumentFragment> createFragmentForTransformToFragment(Document& outputDo
     
     // FIXME: Do we need to mess with URLs here?
     
+    return fragment;
+}
+
+Ref<DocumentFragment> createFragmentForImageAndURL(Document& document, const String& url)
+{
+    auto imageElement = HTMLImageElement::create(document);
+    imageElement->setAttributeWithoutSynchronization(HTMLNames::srcAttr, url);
+
+    auto fragment = document.createDocumentFragment();
+    fragment->appendChild(imageElement);
+
     return fragment;
 }
 
@@ -950,13 +1176,6 @@ static void removeElementFromFragmentPreservingChildren(DocumentFragment& fragme
 
 ExceptionOr<Ref<DocumentFragment>> createContextualFragment(Element& element, const String& markup, ParserContentPolicy parserContentPolicy)
 {
-    if (element.ieForbidsInsertHTML())
-        return Exception { NOT_SUPPORTED_ERR };
-
-    if (element.hasTagName(colTag) || element.hasTagName(colgroupTag) || element.hasTagName(framesetTag)
-        || element.hasTagName(headTag) || element.hasTagName(styleTag) || element.hasTagName(titleTag))
-        return Exception { NOT_SUPPORTED_ERR };
-
     auto result = createFragmentForInnerOuterHTML(element, markup, parserContentPolicy);
     if (result.hasException())
         return result.releaseException();
@@ -1023,25 +1242,6 @@ ExceptionOr<void> replaceChildrenWithFragment(ContainerNode& container, Ref<Docu
 
     containerNode->removeChildren();
     return containerNode->appendChild(fragment);
-}
-
-ExceptionOr<void> replaceChildrenWithText(ContainerNode& container, const String& text)
-{
-    Ref<ContainerNode> containerNode(container);
-    ChildListMutationScope mutation(containerNode);
-
-    if (hasOneTextChild(containerNode)) {
-        downcast<Text>(*containerNode->firstChild()).setData(text);
-        return { };
-    }
-
-    auto textNode = Text::create(containerNode->document(), text);
-
-    if (hasOneChild(containerNode))
-        return containerNode->replaceChild(textNode, *containerNode->firstChild());
-
-    containerNode->removeChildren();
-    return containerNode->appendChild(textNode);
 }
 
 }

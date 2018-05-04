@@ -27,13 +27,18 @@
 
 #include "config.h"
 
-#if USE(OPENGL_ES_2)
+#if USE(OPENGL_ES)
 #include "Extensions3DOpenGLES.h"
 
 #if ENABLE(GRAPHICS_CONTEXT_3D)
 #include "GraphicsContext3D.h"
 #include "NotImplemented.h"
+
+#if USE(LIBEPOXY)
+#include "EpoxyEGL.h"
+#else
 #include <EGL/egl.h>
+#endif
 
 namespace WebCore {
 
@@ -59,9 +64,7 @@ Extensions3DOpenGLES::Extensions3DOpenGLES(GraphicsContext3D* context, bool useI
 {
 }
 
-Extensions3DOpenGLES::~Extensions3DOpenGLES()
-{
-}
+Extensions3DOpenGLES::~Extensions3DOpenGLES() = default;
 
 void Extensions3DOpenGLES::framebufferTexture2DMultisampleIMG(unsigned long target, unsigned long attachment, unsigned long textarget, unsigned int texture, int level, unsigned long samples)
 {
@@ -305,4 +308,4 @@ String Extensions3DOpenGLES::getExtensions()
 
 #endif // ENABLE(GRAPHICS_CONTEXT_3D)
 
-#endif // USE(OPENGL_ES_2)
+#endif // USE(OPENGL_ES)

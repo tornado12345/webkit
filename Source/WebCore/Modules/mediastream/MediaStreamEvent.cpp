@@ -27,7 +27,6 @@
 
 #if ENABLE(WEB_RTC)
 
-#include "EventNames.h"
 #include "MediaStream.h"
 
 namespace WebCore {
@@ -54,9 +53,7 @@ MediaStreamEvent::MediaStreamEvent(const AtomicString& type, const Init& initial
 {
 }
 
-MediaStreamEvent::~MediaStreamEvent()
-{
-}
+MediaStreamEvent::~MediaStreamEvent() = default;
 
 MediaStream* MediaStreamEvent::stream() const
 {

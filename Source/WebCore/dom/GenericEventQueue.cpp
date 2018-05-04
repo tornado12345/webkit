@@ -40,9 +40,7 @@ GenericEventQueue::GenericEventQueue(EventTarget& owner)
 {
 }
 
-GenericEventQueue::~GenericEventQueue()
-{
-}
+GenericEventQueue::~GenericEventQueue() = default;
 
 void GenericEventQueue::enqueueEvent(RefPtr<Event>&& event)
 {
@@ -89,6 +87,16 @@ bool GenericEventQueue::hasPendingEvents() const
     return !m_pendingEvents.isEmpty();
 }
 
+bool GenericEventQueue::hasPendingEventsOfType(const AtomicString& type) const
+{
+    for (auto& event : m_pendingEvents) {
+        if (event->type() == type)
+            return true;
+    }
+
+    return false;
+}
+
 void GenericEventQueue::suspend()
 {
     ASSERT(!m_isSuspended);
@@ -102,9 +110,6 @@ void GenericEventQueue::resume()
         return;
 
     m_isSuspended = false;
-
-    if (m_pendingEvents.isEmpty())
-        return;
 
     for (unsigned i = 0; i < m_pendingEvents.size(); ++i)
         m_taskQueue.enqueueTask(std::bind(&GenericEventQueue::dispatchOneEvent, this));

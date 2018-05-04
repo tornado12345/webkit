@@ -24,23 +24,22 @@
 #import "FontCascade.h"
 
 #import "ComplexTextController.h"
-#import "CoreGraphicsSPI.h"
-#import "CoreTextSPI.h"
 #import "DashArray.h"
 #import "Font.h"
 #import "GlyphBuffer.h"
 #import "GraphicsContext.h"
 #import "LayoutRect.h"
 #import "Logging.h"
-#import "WebCoreSystemInterface.h"
+#import <pal/spi/cg/CoreGraphicsSPI.h>
+#import <pal/spi/cocoa/CoreTextSPI.h>
 #if USE(APPKIT)
 #import <AppKit/AppKit.h>
 #endif
 #import <wtf/MathExtras.h>
 
 #if ENABLE(LETTERPRESS)
-#import "CoreUISPI.h"
-#import "SoftLinking.h"
+#import <pal/spi/ios/CoreUISPI.h>
+#import <wtf/SoftLinking.h>
 
 SOFT_LINK_PRIVATE_FRAMEWORK(CoreUI)
 SOFT_LINK_CLASS(CoreUI, CUICatalog)
@@ -148,7 +147,7 @@ static void showGlyphsWithAdvances(const FloatPoint& point, const Font& font, CG
         CGAffineTransform rotateLeftTransform = CGAffineTransformMake(0, -1, 1, 0, 0, 0);
         CGAffineTransform textMatrix = CGContextGetTextMatrix(context);
         CGAffineTransform runMatrix = CGAffineTransformConcat(textMatrix, rotateLeftTransform);
-        CGContextSetTextMatrix(context, runMatrix);
+        ScopedTextMatrix savedMatrix(runMatrix, context);
 
         Vector<CGSize, 256> translations(count);
         CTFontGetVerticalTranslationsForGlyphs(platformData.ctFont(), glyphs, translations.data(), count);
@@ -243,9 +242,12 @@ void FontCascade::drawGlyphs(GraphicsContext& context, const Font& font, const G
     matrix.d = -matrix.d;
     if (platformData.syntheticOblique()) {
         static float obliqueSkew = tanf(syntheticObliqueAngle() * piFloat / 180);
-        if (platformData.orientation() == Vertical)
-            matrix = CGAffineTransformConcat(matrix, CGAffineTransformMake(1, obliqueSkew, 0, 1, 0, 0));
-        else
+        if (platformData.orientation() == Vertical) {
+            if (font.isTextOrientationFallback())
+                matrix = CGAffineTransformConcat(matrix, CGAffineTransformMake(1, obliqueSkew, 0, 1, 0, 0));
+            else
+                matrix = CGAffineTransformConcat(matrix, CGAffineTransformMake(1, -obliqueSkew, 0, 1, 0, 0));
+        } else
             matrix = CGAffineTransformConcat(matrix, CGAffineTransformMake(1, 0, -obliqueSkew, 1, 0, 0));
     }
     ScopedTextMatrix restorer(matrix, cgContext);
@@ -488,73 +490,7 @@ bool FontCascade::primaryFontIsSystemFont() const
     return CTFontDescriptorIsSystemUIFont(adoptCF(CTFontCopyFontDescriptor(fontData.platformData().ctFont())).get());
 }
 
-void FontCascade::adjustSelectionRectForComplexText(const TextRun& run, LayoutRect& selectionRect, unsigned from, unsigned to) const
-{
-    ComplexTextController controller(*this, run);
-    controller.advance(from);
-    float beforeWidth = controller.runWidthSoFar();
-    controller.advance(to);
-    float afterWidth = controller.runWidthSoFar();
-
-    if (run.rtl())
-        selectionRect.move(controller.totalWidth() - afterWidth + controller.leadingExpansion(), 0);
-    else
-        selectionRect.move(beforeWidth, 0);
-    selectionRect.setWidth(LayoutUnit::fromFloatCeil(afterWidth - beforeWidth));
-}
-
-float FontCascade::getGlyphsAndAdvancesForComplexText(const TextRun& run, unsigned from, unsigned to, GlyphBuffer& glyphBuffer, ForTextEmphasisOrNot forTextEmphasis) const
-{
-    float initialAdvance;
-
-    ComplexTextController controller(*this, run, false, 0, forTextEmphasis);
-    controller.advance(from);
-    float beforeWidth = controller.runWidthSoFar();
-    controller.advance(to, &glyphBuffer);
-
-    if (glyphBuffer.isEmpty())
-        return 0;
-
-    float afterWidth = controller.runWidthSoFar();
-
-    if (run.rtl()) {
-        initialAdvance = controller.totalWidth() - afterWidth + controller.leadingExpansion();
-        glyphBuffer.reverse(0, glyphBuffer.size());
-    } else
-        initialAdvance = beforeWidth;
-
-    return initialAdvance;
-}
-
-void FontCascade::drawEmphasisMarksForComplexText(GraphicsContext& context, const TextRun& run, const AtomicString& mark, const FloatPoint& point, unsigned from, unsigned to) const
-{
-    GlyphBuffer glyphBuffer;
-    float initialAdvance = getGlyphsAndAdvancesForComplexText(run, from, to, glyphBuffer, ForTextEmphasis);
-
-    if (glyphBuffer.isEmpty())
-        return;
-
-    drawEmphasisMarks(context, glyphBuffer, mark, FloatPoint(point.x() + initialAdvance, point.y()));
-}
-
-float FontCascade::floatWidthForComplexText(const TextRun& run, HashSet<const Font*>* fallbackFonts, GlyphOverflow* glyphOverflow) const
-{
-    ComplexTextController controller(*this, run, true, fallbackFonts);
-    if (glyphOverflow) {
-        glyphOverflow->top = std::max<int>(glyphOverflow->top, ceilf(-controller.minGlyphBoundingBoxY()) - (glyphOverflow->computeBounds ? 0 : fontMetrics().ascent()));
-        glyphOverflow->bottom = std::max<int>(glyphOverflow->bottom, ceilf(controller.maxGlyphBoundingBoxY()) - (glyphOverflow->computeBounds ? 0 : fontMetrics().descent()));
-        glyphOverflow->left = std::max<int>(0, ceilf(-controller.minGlyphBoundingBoxX()));
-        glyphOverflow->right = std::max<int>(0, ceilf(controller.maxGlyphBoundingBoxX() - controller.totalWidth()));
-    }
-    return controller.totalWidth();
-}
-
-int FontCascade::offsetForPositionForComplexText(const TextRun& run, float x, bool includePartialGlyphs) const
-{
-    ComplexTextController controller(*this, run);
-    return controller.offsetForPosition(x, includePartialGlyphs);
-}
-
+// FIXME: Use this on all ports.
 const Font* FontCascade::fontForCombiningCharacterSequence(const UChar* characters, size_t length) const
 {
     UChar32 baseCharacter;

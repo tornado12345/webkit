@@ -32,21 +32,20 @@ public:
 
     static const AtomicString& effectName();
 
-    virtual void platformApplySoftware();
-    virtual void dump();
-
-    virtual void determineAbsolutePaintRect();
-
-    virtual FilterEffectType filterEffectType() const { return FilterEffectTypeSourceInput; }
-
-    virtual TextStream& externalRepresentation(TextStream&, int indention) const;
-
 private:
     SourceGraphic(Filter& filter)
         : FilterEffect(filter)
     {
         setOperatingColorSpace(ColorSpaceSRGB);
     }
+
+    const char* filterName() const final { return "SourceGraphic"; }
+
+    void determineAbsolutePaintRect() override;
+    void platformApplySoftware() override;
+    WTF::TextStream& externalRepresentation(WTF::TextStream&, RepresentationType) const override;
+
+    FilterEffectType filterEffectType() const override { return FilterEffectTypeSourceInput; }
 };
 
 } //namespace WebCore

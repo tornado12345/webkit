@@ -30,8 +30,6 @@
 #include "CSSValueKeywords.h"
 #include "CSSValuePool.h"
 #include "ElementChildIterator.h"
-#include "ExceptionCode.h"
-#include "ExceptionCodePlaceholder.h"
 #include "GenericCachedHTMLCollection.h"
 #include "HTMLNames.h"
 #include "HTMLParserIdioms.h"
@@ -42,9 +40,12 @@
 #include "NodeRareData.h"
 #include "RenderTable.h"
 #include "StyleProperties.h"
+#include <wtf/IsoMallocInlines.h>
 #include <wtf/Ref.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(HTMLTableElement);
 
 using namespace HTMLNames;
 
@@ -64,7 +65,7 @@ Ref<HTMLTableElement> HTMLTableElement::create(const QualifiedName& tagName, Doc
     return adoptRef(*new HTMLTableElement(tagName, document));
 }
 
-HTMLTableCaptionElement* HTMLTableElement::caption() const
+RefPtr<HTMLTableCaptionElement> HTMLTableElement::caption() const
 {
     return childrenOfType<HTMLTableCaptionElement>(const_cast<HTMLTableElement&>(*this)).first();
 }
@@ -77,11 +78,11 @@ ExceptionOr<void> HTMLTableElement::setCaption(RefPtr<HTMLTableCaptionElement>&&
     return insertBefore(*newCaption, firstChild());
 }
 
-HTMLTableSectionElement* HTMLTableElement::tHead() const
+RefPtr<HTMLTableSectionElement> HTMLTableElement::tHead() const
 {
-    for (Node* child = firstChild(); child; child = child->nextSibling()) {
+    for (RefPtr<Node> child = firstChild(); child; child = child->nextSibling()) {
         if (child->hasTagName(theadTag))
-            return downcast<HTMLTableSectionElement>(child);
+            return downcast<HTMLTableSectionElement>(child.get());
     }
     return nullptr;
 }
@@ -89,26 +90,26 @@ HTMLTableSectionElement* HTMLTableElement::tHead() const
 ExceptionOr<void> HTMLTableElement::setTHead(RefPtr<HTMLTableSectionElement>&& newHead)
 {
     if (UNLIKELY(newHead && !newHead->hasTagName(theadTag)))
-        return Exception { HIERARCHY_REQUEST_ERR };
+        return Exception { HierarchyRequestError };
 
     deleteTHead();
     if (!newHead)
         return { };
 
-    Node* child;
+    RefPtr<Node> child;
     for (child = firstChild(); child; child = child->nextSibling()) {
         if (child->isElementNode() && !child->hasTagName(captionTag) && !child->hasTagName(colgroupTag))
             break;
     }
 
-    return insertBefore(*newHead, child);
+    return insertBefore(*newHead, child.get());
 }
 
-HTMLTableSectionElement* HTMLTableElement::tFoot() const
+RefPtr<HTMLTableSectionElement> HTMLTableElement::tFoot() const
 {
-    for (Node* child = firstChild(); child; child = child->nextSibling()) {
+    for (RefPtr<Node> child = firstChild(); child; child = child->nextSibling()) {
         if (child->hasTagName(tfootTag))
-            return downcast<HTMLTableSectionElement>(child);
+            return downcast<HTMLTableSectionElement>(child.get());
     }
     return nullptr;
 }
@@ -116,7 +117,7 @@ HTMLTableSectionElement* HTMLTableElement::tFoot() const
 ExceptionOr<void> HTMLTableElement::setTFoot(RefPtr<HTMLTableSectionElement>&& newFoot)
 {
     if (UNLIKELY(newFoot && !newFoot->hasTagName(tfootTag)))
-        return Exception { HIERARCHY_REQUEST_ERR };
+        return Exception { HierarchyRequestError };
     deleteTFoot();
     if (!newFoot)
         return { };
@@ -125,8 +126,8 @@ ExceptionOr<void> HTMLTableElement::setTFoot(RefPtr<HTMLTableSectionElement>&& n
 
 Ref<HTMLTableSectionElement> HTMLTableElement::createTHead()
 {
-    if (auto* existingHead = tHead())
-        return *existingHead;
+    if (auto existingHead = tHead())
+        return existingHead.releaseNonNull();
     auto head = HTMLTableSectionElement::create(theadTag, document());
     setTHead(head.copyRef());
     return head;
@@ -134,14 +135,14 @@ Ref<HTMLTableSectionElement> HTMLTableElement::createTHead()
 
 void HTMLTableElement::deleteTHead()
 {
-    if (auto* head = tHead())
+    if (auto head = tHead())
         removeChild(*head);
 }
 
 Ref<HTMLTableSectionElement> HTMLTableElement::createTFoot()
 {
-    if (auto* existingFoot = tFoot())
-        return *existingFoot;
+    if (auto existingFoot = tFoot())
+        return existingFoot.releaseNonNull();
     auto foot = HTMLTableSectionElement::create(tfootTag, document());
     setTFoot(foot.copyRef());
     return foot;
@@ -149,22 +150,22 @@ Ref<HTMLTableSectionElement> HTMLTableElement::createTFoot()
 
 void HTMLTableElement::deleteTFoot()
 {
-    if (auto* foot = tFoot())
+    if (auto foot = tFoot())
         removeChild(*foot);
 }
 
 Ref<HTMLTableSectionElement> HTMLTableElement::createTBody()
 {
     auto body = HTMLTableSectionElement::create(tbodyTag, document());
-    Node* referenceElement = lastBody() ? lastBody()->nextSibling() : nullptr;
-    insertBefore(body, referenceElement);
+    RefPtr<Node> referenceElement = lastBody() ? lastBody()->nextSibling() : nullptr;
+    insertBefore(body, referenceElement.get());
     return body;
 }
 
 Ref<HTMLTableCaptionElement> HTMLTableElement::createCaption()
 {
-    if (auto* existingCaption = caption())
-        return *existingCaption;
+    if (auto existingCaption = caption())
+        return existingCaption.releaseNonNull();
     auto caption = HTMLTableCaptionElement::create(captionTag, document());
     setCaption(caption.copyRef());
     return caption;
@@ -172,15 +173,15 @@ Ref<HTMLTableCaptionElement> HTMLTableElement::createCaption()
 
 void HTMLTableElement::deleteCaption()
 {
-    if (auto* caption = this->caption())
+    if (auto caption = this->caption())
         removeChild(*caption);
 }
 
 HTMLTableSectionElement* HTMLTableElement::lastBody() const
 {
-    for (Node* child = lastChild(); child; child = child->previousSibling()) {
+    for (RefPtr<Node> child = lastChild(); child; child = child->previousSibling()) {
         if (child->hasTagName(tbodyTag))
-            return downcast<HTMLTableSectionElement>(child);
+            return downcast<HTMLTableSectionElement>(child.get());
     }
     return nullptr;
 }
@@ -188,7 +189,7 @@ HTMLTableSectionElement* HTMLTableElement::lastBody() const
 ExceptionOr<Ref<HTMLElement>> HTMLTableElement::insertRow(int index)
 {
     if (index < -1)
-        return Exception { INDEX_SIZE_ERR };
+        return Exception { IndexSizeError };
 
     Ref<HTMLTableElement> protectedThis(*this);
 
@@ -201,7 +202,7 @@ ExceptionOr<Ref<HTMLElement>> HTMLTableElement::insertRow(int index)
             row = HTMLTableRowsCollection::rowAfter(*this, lastRow.get());
             if (!row) {
                 if (i != index)
-                    return Exception { INDEX_SIZE_ERR };
+                    return Exception { IndexSizeError };
                 break;
             }
             lastRow = row;
@@ -234,19 +235,19 @@ ExceptionOr<Ref<HTMLElement>> HTMLTableElement::insertRow(int index)
 
 ExceptionOr<void> HTMLTableElement::deleteRow(int index)
 {
-    HTMLTableRowElement* row = nullptr;
+    RefPtr<HTMLTableRowElement> row;
     if (index == -1) {
         row = HTMLTableRowsCollection::lastRow(*this);
         if (!row)
             return { };
     } else {
         for (int i = 0; i <= index; ++i) {
-            row = HTMLTableRowsCollection::rowAfter(*this, row);
+            row = HTMLTableRowsCollection::rowAfter(*this, row.get());
             if (!row)
                 break;
         }
         if (!row)
-            return Exception { INDEX_SIZE_ERR };
+            return Exception { IndexSizeError };
     }
     return row->remove();
 }

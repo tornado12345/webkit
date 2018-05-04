@@ -23,8 +23,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef RemoteCommandListenerIOS_h
-#define RemoteCommandListenerIOS_h
+#pragma once
 
 #include "RemoteCommandListener.h"
 
@@ -45,7 +44,7 @@ public:
     virtual ~RemoteCommandListenerIOS();
 
 protected:
-    WeakPtr<RemoteCommandListenerIOS> createWeakPtr() { return m_weakPtrFactory.createWeakPtr(); }
+    WeakPtr<RemoteCommandListenerIOS> createWeakPtr() { return m_weakPtrFactory.createWeakPtr(*this); }
     void updateSupportedCommands() override;
 
     WeakPtrFactory<RemoteCommandListenerIOS> m_weakPtrFactory;
@@ -59,6 +58,4 @@ protected:
 
 }
 
-#endif
-
-#endif
+#endif // PLATFORM(IOS)

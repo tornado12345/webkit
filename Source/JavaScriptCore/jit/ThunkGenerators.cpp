@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010, 2012-2014, 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2010-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,12 +28,13 @@
 
 #include "CodeBlock.h"
 #include "DFGSpeculativeJIT.h"
+#include "JITExceptions.h"
 #include "JITOperations.h"
 #include "JSArray.h"
 #include "JSBoundFunction.h"
+#include "JSCInlines.h"
 #include "MathCommon.h"
 #include "MaxFrameExtentForSlowPathCall.h"
-#include "JSCInlines.h"
 #include "SpecializedThunkJIT.h"
 #include <wtf/InlineASM.h>
 #include <wtf/StringPrintStream.h>
@@ -43,7 +44,8 @@
 
 namespace JSC {
 
-inline void emitPointerValidation(CCallHelpers& jit, GPRReg pointerGPR)
+template<typename TagType>
+inline void emitPointerValidation(CCallHelpers& jit, GPRReg pointerGPR, TagType tag)
 {
     if (ASSERT_DISABLED)
         return;
@@ -51,35 +53,36 @@ inline void emitPointerValidation(CCallHelpers& jit, GPRReg pointerGPR)
     jit.abortWithReason(TGInvalidPointer);
     isNonZero.link(&jit);
     jit.pushToSave(pointerGPR);
+    jit.untagPtr(pointerGPR, tag);
     jit.load8(pointerGPR, pointerGPR);
     jit.popToRestore(pointerGPR);
 }
 
 // We will jump here if the JIT code tries to make a call, but the
 // linking helper (C++ code) decides to throw an exception instead.
-MacroAssemblerCodeRef throwExceptionFromCallSlowPathGenerator(VM* vm)
+MacroAssemblerCodeRef<JITThunkPtrTag> throwExceptionFromCallSlowPathGenerator(VM* vm)
 {
-    CCallHelpers jit(vm);
+    CCallHelpers jit;
     
     // The call pushed a return address, so we need to pop it back off to re-align the stack,
     // even though we won't use it.
     jit.preserveReturnAddressAfterCall(GPRInfo::nonPreservedNonReturnGPR);
 
-    jit.copyCalleeSavesToVMEntryFrameCalleeSavesBuffer();
+    jit.copyCalleeSavesToEntryFrameCalleeSavesBuffer(vm->topEntryFrame);
 
-    jit.setupArguments(CCallHelpers::TrustedImmPtr(vm), GPRInfo::callFrameRegister);
-    jit.move(CCallHelpers::TrustedImmPtr(bitwise_cast<void*>(lookupExceptionHandler)), GPRInfo::nonArgGPR0);
-    emitPointerValidation(jit, GPRInfo::nonArgGPR0);
-    jit.call(GPRInfo::nonArgGPR0);
-    jit.jumpToExceptionHandler();
+    jit.setupArguments<decltype(lookupExceptionHandler)>(CCallHelpers::TrustedImmPtr(vm), GPRInfo::callFrameRegister);
+    jit.move(CCallHelpers::TrustedImmPtr(tagCFunctionPtr<OperationPtrTag>(lookupExceptionHandler)), GPRInfo::nonArgGPR0);
+    emitPointerValidation(jit, GPRInfo::nonArgGPR0, OperationPtrTag);
+    jit.call(GPRInfo::nonArgGPR0, OperationPtrTag);
+    jit.jumpToExceptionHandler(*vm);
 
-    LinkBuffer patchBuffer(*vm, jit, GLOBAL_THUNK_ID);
-    return FINALIZE_CODE(patchBuffer, ("Throw exception from call slow path thunk"));
+    LinkBuffer patchBuffer(jit, GLOBAL_THUNK_ID);
+    return FINALIZE_CODE(patchBuffer, JITThunkPtrTag, "Throw exception from call slow path thunk");
 }
 
-static void slowPathFor(
-    CCallHelpers& jit, VM* vm, Sprt_JITOperation_ECli slowPathFunction)
+static void slowPathFor(CCallHelpers& jit, VM* vm, Sprt_JITOperation_ECli slowPathFunction)
 {
+    jit.sanitizeStackInline(*vm, GPRInfo::nonArgGPR0);
     jit.emitFunctionPrologue();
     jit.storePtr(GPRInfo::callFrameRegister, &vm->topCallFrame);
 #if OS(WINDOWS) && CPU(X86_64)
@@ -91,19 +94,19 @@ static void slowPathFor(
     jit.move(GPRInfo::regT2, GPRInfo::argumentGPR2);
     jit.addPtr(CCallHelpers::TrustedImm32(32), CCallHelpers::stackPointerRegister, GPRInfo::argumentGPR0);
     jit.move(GPRInfo::callFrameRegister, GPRInfo::argumentGPR1);
-    jit.move(CCallHelpers::TrustedImmPtr(bitwise_cast<void*>(slowPathFunction)), GPRInfo::nonArgGPR0);
-    emitPointerValidation(jit, GPRInfo::nonArgGPR0);
-    jit.call(GPRInfo::nonArgGPR0);
+    jit.move(CCallHelpers::TrustedImmPtr(tagCFunctionPtr<OperationPtrTag>(slowPathFunction)), GPRInfo::nonArgGPR0);
+    emitPointerValidation(jit, GPRInfo::nonArgGPR0, OperationPtrTag);
+    jit.call(GPRInfo::nonArgGPR0, OperationPtrTag);
     jit.loadPtr(CCallHelpers::Address(GPRInfo::returnValueGPR, 8), GPRInfo::returnValueGPR2);
     jit.loadPtr(CCallHelpers::Address(GPRInfo::returnValueGPR), GPRInfo::returnValueGPR);
     jit.addPtr(CCallHelpers::TrustedImm32(maxFrameExtentForSlowPathCall), CCallHelpers::stackPointerRegister);
 #else
     if (maxFrameExtentForSlowPathCall)
         jit.addPtr(CCallHelpers::TrustedImm32(-maxFrameExtentForSlowPathCall), CCallHelpers::stackPointerRegister);
-    jit.setupArgumentsWithExecState(GPRInfo::regT2);
-    jit.move(CCallHelpers::TrustedImmPtr(bitwise_cast<void*>(slowPathFunction)), GPRInfo::nonArgGPR0);
-    emitPointerValidation(jit, GPRInfo::nonArgGPR0);
-    jit.call(GPRInfo::nonArgGPR0);
+    jit.setupArguments<decltype(slowPathFunction)>(GPRInfo::regT2);
+    jit.move(CCallHelpers::TrustedImmPtr(tagCFunctionPtr<OperationPtrTag>(slowPathFunction)), GPRInfo::nonArgGPR0);
+    emitPointerValidation(jit, GPRInfo::nonArgGPR0, OperationPtrTag);
+    jit.call(GPRInfo::nonArgGPR0, OperationPtrTag);
     if (maxFrameExtentForSlowPathCall)
         jit.addPtr(CCallHelpers::TrustedImm32(maxFrameExtentForSlowPathCall), CCallHelpers::stackPointerRegister);
 #endif
@@ -114,8 +117,9 @@ static void slowPathFor(
     // 3) The function to call.
     // The second return value GPR will hold a non-zero value for tail calls.
 
-    emitPointerValidation(jit, GPRInfo::returnValueGPR);
+    emitPointerValidation(jit, GPRInfo::returnValueGPR, JSEntryPtrTag);
     jit.emitFunctionEpilogue();
+    jit.untagReturnAddress();
 
     RELEASE_ASSERT(reinterpret_cast<void*>(KeepTheFrame) == reinterpret_cast<void*>(0));
     CCallHelpers::Jump doNotTrash = jit.branchTestPtr(CCallHelpers::Zero, GPRInfo::returnValueGPR2);
@@ -124,48 +128,48 @@ static void slowPathFor(
     jit.prepareForTailCallSlow(GPRInfo::returnValueGPR);
 
     doNotTrash.link(&jit);
-    jit.jump(GPRInfo::returnValueGPR);
+    jit.jump(GPRInfo::returnValueGPR, JSEntryPtrTag);
 }
 
-MacroAssemblerCodeRef linkCallThunkGenerator(VM* vm)
+MacroAssemblerCodeRef<JITThunkPtrTag> linkCallThunkGenerator(VM* vm)
 {
     // The return address is on the stack or in the link register. We will hence
     // save the return address to the call frame while we make a C++ function call
     // to perform linking and lazy compilation if necessary. We expect the callee
     // to be in regT0/regT1 (payload/tag), the CallFrame to have already
     // been adjusted, and all other registers to be available for use.
-    CCallHelpers jit(vm);
-    
+    CCallHelpers jit;
+
     slowPathFor(jit, vm, operationLinkCall);
-    
-    LinkBuffer patchBuffer(*vm, jit, GLOBAL_THUNK_ID);
-    return FINALIZE_CODE(patchBuffer, ("Link call slow path thunk"));
+
+    LinkBuffer patchBuffer(jit, GLOBAL_THUNK_ID);
+    return FINALIZE_CODE(patchBuffer, JITThunkPtrTag, "Link call slow path thunk");
 }
 
 // For closure optimizations, we only include calls, since if you're using closures for
 // object construction then you're going to lose big time anyway.
-MacroAssemblerCodeRef linkPolymorphicCallThunkGenerator(VM* vm)
+MacroAssemblerCodeRef<JITThunkPtrTag> linkPolymorphicCallThunkGenerator(VM* vm)
 {
-    CCallHelpers jit(vm);
-    
+    CCallHelpers jit;
+
     slowPathFor(jit, vm, operationLinkPolymorphicCall);
-    
-    LinkBuffer patchBuffer(*vm, jit, GLOBAL_THUNK_ID);
-    return FINALIZE_CODE(patchBuffer, ("Link polymorphic call slow path thunk"));
+
+    LinkBuffer patchBuffer(jit, GLOBAL_THUNK_ID);
+    return FINALIZE_CODE(patchBuffer, JITThunkPtrTag, "Link polymorphic call slow path thunk");
 }
 
 // FIXME: We should distinguish between a megamorphic virtual call vs. a slow
 // path virtual call so that we can enable fast tail calls for megamorphic
 // virtual calls by using the shuffler.
 // https://bugs.webkit.org/show_bug.cgi?id=148831
-MacroAssemblerCodeRef virtualThunkFor(VM* vm, CallLinkInfo& callLinkInfo)
+MacroAssemblerCodeRef<JITStubRoutinePtrTag> virtualThunkFor(VM* vm, CallLinkInfo& callLinkInfo)
 {
     // The callee is in regT0 (for JSVALUE32_64, the tag is in regT1).
     // The return address is on the stack, or in the link register. We will hence
     // jump to the callee, or save the return address to the call frame while we
     // make a C++ function call to the appropriate JIT operation.
 
-    CCallHelpers jit(vm);
+    CCallHelpers jit;
     
     CCallHelpers::JumpList slowCase;
     
@@ -179,22 +183,30 @@ MacroAssemblerCodeRef virtualThunkFor(VM* vm, CallLinkInfo& callLinkInfo)
     // the DFG knows that the value is definitely a cell, or definitely a function.
     
 #if USE(JSVALUE64)
+    GPRReg tagMaskRegister = GPRInfo::tagMaskRegister;
+    if (callLinkInfo.isTailCall()) {
+        // Tail calls could have clobbered the GPRInfo::tagMaskRegister because they
+        // restore callee saved registers before getthing here. So, let's materialize
+        // the TagMask in a temp register and use the temp instead.
+        tagMaskRegister = GPRInfo::regT4;
+        jit.move(CCallHelpers::TrustedImm64(TagMask), tagMaskRegister);
+    }
     slowCase.append(
-        jit.branchTest64(
-            CCallHelpers::NonZero, GPRInfo::regT0, GPRInfo::tagMaskRegister));
+        jit.branchTest64(CCallHelpers::NonZero, GPRInfo::regT0, tagMaskRegister));
 #else
     slowCase.append(
         jit.branch32(
             CCallHelpers::NotEqual, GPRInfo::regT1,
             CCallHelpers::TrustedImm32(JSValue::CellTag)));
 #endif
-    slowCase.append(jit.branchIfNotType(GPRInfo::regT0, JSFunctionType));
+    auto notJSFunction = jit.branchIfNotType(GPRInfo::regT0, JSFunctionType);
     
     // Now we know we have a JSFunction.
-    
+
     jit.loadPtr(
         CCallHelpers::Address(GPRInfo::regT0, JSFunction::offsetOfExecutable()),
         GPRInfo::regT4);
+    jit.xorPtr(CCallHelpers::TrustedImmPtr(JSFunctionPoison::key()), GPRInfo::regT4);
     jit.loadPtr(
         CCallHelpers::Address(
             GPRInfo::regT4, ExecutableBase::offsetOfJITCodeWithArityCheckFor(
@@ -204,31 +216,42 @@ MacroAssemblerCodeRef virtualThunkFor(VM* vm, CallLinkInfo& callLinkInfo)
     
     // Now we know that we have a CodeBlock, and we're committed to making a fast
     // call.
-    
+#if USE(JSVALUE64)
+    jit.move(CCallHelpers::TrustedImm64(JITCodePoison::key()), GPRInfo::regT1);
+    jit.xor64(GPRInfo::regT1, GPRInfo::regT4);
+#endif
+
     // Make a tail call. This will return back to JIT code.
-    emitPointerValidation(jit, GPRInfo::regT4);
+    JSInterfaceJIT::Label callCode(jit.label());
+    emitPointerValidation(jit, GPRInfo::regT4, JSEntryPtrTag);
     if (callLinkInfo.isTailCall()) {
         jit.preserveReturnAddressAfterCall(GPRInfo::regT0);
         jit.prepareForTailCallSlow(GPRInfo::regT4);
     }
-    jit.jump(GPRInfo::regT4);
+    jit.jump(GPRInfo::regT4, JSEntryPtrTag);
+
+    notJSFunction.link(&jit);
+    slowCase.append(jit.branchIfNotType(GPRInfo::regT0, InternalFunctionType));
+    void* executableAddress = vm->getCTIInternalFunctionTrampolineFor(callLinkInfo.specializationKind()).executableAddress();
+    jit.move(CCallHelpers::TrustedImmPtr(executableAddress), GPRInfo::regT4);
+    jit.jump().linkTo(callCode, &jit);
 
     slowCase.link(&jit);
     
     // Here we don't know anything, so revert to the full slow path.
-    
     slowPathFor(jit, vm, operationVirtualCall);
-    
-    LinkBuffer patchBuffer(*vm, jit, GLOBAL_THUNK_ID);
+
+    LinkBuffer patchBuffer(jit, GLOBAL_THUNK_ID);
     return FINALIZE_CODE(
-        patchBuffer,
-        ("Virtual %s slow path thunk",
-        callLinkInfo.callMode() == CallMode::Regular ? "call" : callLinkInfo.callMode() == CallMode::Tail ? "tail call" : "construct"));
+        patchBuffer, JITStubRoutinePtrTag,
+        "Virtual %s slow path thunk",
+        callLinkInfo.callMode() == CallMode::Regular ? "call" : callLinkInfo.callMode() == CallMode::Tail ? "tail call" : "construct");
 }
 
 enum ThunkEntryType { EnterViaCall, EnterViaJumpWithSavedTags, EnterViaJumpWithoutSavedTags };
+enum class ThunkFunctionType { JSFunction, InternalFunction };
 
-static MacroAssemblerCodeRef nativeForGenerator(VM* vm, CodeSpecializationKind kind, ThunkEntryType entryType = EnterViaCall)
+static MacroAssemblerCodeRef<JITThunkPtrTag> nativeForGenerator(VM* vm, ThunkFunctionType thunkFunctionType, CodeSpecializationKind kind, ThunkEntryType entryType = EnterViaCall)
 {
     // FIXME: This should be able to log ShadowChicken prologue packets.
     // https://bugs.webkit.org/show_bug.cgi?id=155689
@@ -270,8 +293,12 @@ static MacroAssemblerCodeRef nativeForGenerator(VM* vm, CodeSpecializationKind k
 
     // call the function
     jit.emitGetFromCallFrameHeaderPtr(CallFrameSlot::callee, JSInterfaceJIT::regT1);
-    jit.loadPtr(JSInterfaceJIT::Address(JSInterfaceJIT::regT1, JSFunction::offsetOfExecutable()), JSInterfaceJIT::regT1);
-    jit.call(JSInterfaceJIT::Address(JSInterfaceJIT::regT1, executableOffsetToFunction));
+    if (thunkFunctionType == ThunkFunctionType::JSFunction) {
+        jit.loadPtr(JSInterfaceJIT::Address(JSInterfaceJIT::regT1, JSFunction::offsetOfExecutable()), JSInterfaceJIT::regT1);
+        jit.xorPtr(JSInterfaceJIT::TrustedImmPtr(JSFunctionPoison::key()), JSInterfaceJIT::regT1);
+        jit.call(JSInterfaceJIT::Address(JSInterfaceJIT::regT1, executableOffsetToFunction), JSEntryPtrTag);
+    } else
+        jit.call(JSInterfaceJIT::Address(JSInterfaceJIT::regT1, InternalFunction::offsetOfNativeFunctionFor(kind)), JSEntryPtrTag);
 
     jit.addPtr(JSInterfaceJIT::TrustedImm32(8), JSInterfaceJIT::stackPointerRegister);
 
@@ -282,8 +309,15 @@ static MacroAssemblerCodeRef nativeForGenerator(VM* vm, CodeSpecializationKind k
     jit.move(JSInterfaceJIT::callFrameRegister, X86Registers::edi);
 
     jit.emitGetFromCallFrameHeaderPtr(CallFrameSlot::callee, X86Registers::esi);
-    jit.loadPtr(JSInterfaceJIT::Address(X86Registers::esi, JSFunction::offsetOfExecutable()), X86Registers::r9);
-    jit.call(JSInterfaceJIT::Address(X86Registers::r9, executableOffsetToFunction));
+    if (thunkFunctionType == ThunkFunctionType::JSFunction) {
+        jit.loadPtr(JSInterfaceJIT::Address(X86Registers::esi, JSFunction::offsetOfExecutable()), X86Registers::r9);
+        jit.xorPtr(JSInterfaceJIT::TrustedImmPtr(JSFunctionPoison::key()), X86Registers::r9);
+        jit.loadPtr(JSInterfaceJIT::Address(X86Registers::r9, executableOffsetToFunction), X86Registers::r9);
+    } else
+        jit.loadPtr(JSInterfaceJIT::Address(X86Registers::esi, InternalFunction::offsetOfNativeFunctionFor(kind)), X86Registers::r9);
+    jit.move(JSInterfaceJIT::TrustedImm64(NativeCodePoison::key()), X86Registers::esi);
+    jit.xor64(X86Registers::esi, X86Registers::r9);
+    jit.call(X86Registers::r9, JSEntryPtrTag);
 
 #else
     // Calling convention:      f(ecx, edx, r8, r9, ...);
@@ -295,8 +329,12 @@ static MacroAssemblerCodeRef nativeForGenerator(VM* vm, CodeSpecializationKind k
     jit.subPtr(JSInterfaceJIT::TrustedImm32(4 * sizeof(int64_t)), JSInterfaceJIT::stackPointerRegister);
 
     jit.emitGetFromCallFrameHeaderPtr(CallFrameSlot::callee, X86Registers::edx);
-    jit.loadPtr(JSInterfaceJIT::Address(X86Registers::edx, JSFunction::offsetOfExecutable()), X86Registers::r9);
-    jit.call(JSInterfaceJIT::Address(X86Registers::r9, executableOffsetToFunction));
+    if (thunkFunctionType == ThunkFunctionType::JSFunction) {
+        jit.loadPtr(JSInterfaceJIT::Address(X86Registers::edx, JSFunction::offsetOfExecutable()), X86Registers::r9);
+        jit.xorPtr(JSInterfaceJIT::TrustedImmPtr(JSFunctionPoison::key()), X86Registers::r9);
+        jit.call(JSInterfaceJIT::Address(X86Registers::r9, executableOffsetToFunction), JSEntryPtrTag);
+    } else
+        jit.call(JSInterfaceJIT::Address(X86Registers::edx, InternalFunction::offsetOfNativeFunctionFor(kind)), JSEntryPtrTag);
 
     jit.addPtr(JSInterfaceJIT::TrustedImm32(4 * sizeof(int64_t)), JSInterfaceJIT::stackPointerRegister);
 #endif
@@ -310,9 +348,17 @@ static MacroAssemblerCodeRef nativeForGenerator(VM* vm, CodeSpecializationKind k
     jit.move(JSInterfaceJIT::callFrameRegister, ARM64Registers::x0);
 
     jit.emitGetFromCallFrameHeaderPtr(CallFrameSlot::callee, ARM64Registers::x1);
-    jit.loadPtr(JSInterfaceJIT::Address(ARM64Registers::x1, JSFunction::offsetOfExecutable()), ARM64Registers::x2);
-    jit.call(JSInterfaceJIT::Address(ARM64Registers::x2, executableOffsetToFunction));
-#elif CPU(ARM) || CPU(SH4) || CPU(MIPS)
+    if (thunkFunctionType == ThunkFunctionType::JSFunction) {
+        jit.loadPtr(JSInterfaceJIT::Address(ARM64Registers::x1, JSFunction::offsetOfExecutable()), ARM64Registers::x2);
+        jit.xorPtr(JSInterfaceJIT::TrustedImmPtr(JSFunctionPoison::key()), ARM64Registers::x2);
+        jit.loadPtr(JSInterfaceJIT::Address(ARM64Registers::x2, executableOffsetToFunction), ARM64Registers::x2);
+    } else
+        jit.loadPtr(JSInterfaceJIT::Address(ARM64Registers::x1, InternalFunction::offsetOfNativeFunctionFor(kind)), ARM64Registers::x2);
+    jit.move(JSInterfaceJIT::TrustedImm64(NativeCodePoison::key()), ARM64Registers::x1);
+    jit.xor64(ARM64Registers::x1, ARM64Registers::x2);
+    jit.call(ARM64Registers::x2, JSEntryPtrTag);
+
+#elif CPU(ARM) || CPU(MIPS)
 #if CPU(MIPS)
     // Allocate stack space for (unused) 16 bytes (8-byte aligned) for 4 arguments.
     jit.subPtr(JSInterfaceJIT::TrustedImm32(16), JSInterfaceJIT::stackPointerRegister);
@@ -323,8 +369,12 @@ static MacroAssemblerCodeRef nativeForGenerator(VM* vm, CodeSpecializationKind k
     jit.move(JSInterfaceJIT::callFrameRegister, JSInterfaceJIT::argumentGPR0);
 
     jit.emitGetFromCallFrameHeaderPtr(CallFrameSlot::callee, JSInterfaceJIT::argumentGPR1);
-    jit.loadPtr(JSInterfaceJIT::Address(JSInterfaceJIT::argumentGPR1, JSFunction::offsetOfExecutable()), JSInterfaceJIT::regT2);
-    jit.call(JSInterfaceJIT::Address(JSInterfaceJIT::regT2, executableOffsetToFunction));
+    if (thunkFunctionType == ThunkFunctionType::JSFunction) {
+        jit.loadPtr(JSInterfaceJIT::Address(JSInterfaceJIT::argumentGPR1, JSFunction::offsetOfExecutable()), JSInterfaceJIT::regT2);
+        jit.xorPtr(JSInterfaceJIT::TrustedImmPtr(JSFunctionPoison::key()), JSInterfaceJIT::regT2);
+        jit.call(JSInterfaceJIT::Address(JSInterfaceJIT::regT2, executableOffsetToFunction), JSEntryPtrTag);
+    } else
+        jit.call(JSInterfaceJIT::Address(JSInterfaceJIT::argumentGPR1, InternalFunction::offsetOfNativeFunctionFor(kind)), JSEntryPtrTag);
 
 #if CPU(MIPS)
     // Restore stack space
@@ -354,11 +404,11 @@ static MacroAssemblerCodeRef nativeForGenerator(VM* vm, CodeSpecializationKind k
     // Handle an exception
     exceptionHandler.link(&jit);
 
-    jit.copyCalleeSavesToVMEntryFrameCalleeSavesBuffer();
+    jit.copyCalleeSavesToEntryFrameCalleeSavesBuffer(vm->topEntryFrame);
     jit.storePtr(JSInterfaceJIT::callFrameRegister, &vm->topCallFrame);
 
 #if CPU(X86) && USE(JSVALUE32_64)
-    jit.addPtr(JSInterfaceJIT::TrustedImm32(-12), JSInterfaceJIT::stackPointerRegister);
+    jit.subPtr(JSInterfaceJIT::TrustedImm32(4), JSInterfaceJIT::stackPointerRegister);
     jit.move(JSInterfaceJIT::callFrameRegister, JSInterfaceJIT::regT0);
     jit.push(JSInterfaceJIT::regT0);
 #else
@@ -368,41 +418,51 @@ static MacroAssemblerCodeRef nativeForGenerator(VM* vm, CodeSpecializationKind k
 #endif
     jit.move(JSInterfaceJIT::callFrameRegister, JSInterfaceJIT::argumentGPR0);
 #endif
-    jit.move(JSInterfaceJIT::TrustedImmPtr(FunctionPtr(operationVMHandleException).value()), JSInterfaceJIT::regT3);
-    jit.call(JSInterfaceJIT::regT3);
+    jit.move(JSInterfaceJIT::TrustedImmPtr(tagCFunctionPtr<OperationPtrTag>(operationVMHandleException)), JSInterfaceJIT::regT3);
+    jit.call(JSInterfaceJIT::regT3, OperationPtrTag);
 #if CPU(X86) && USE(JSVALUE32_64)
-    jit.addPtr(JSInterfaceJIT::TrustedImm32(16), JSInterfaceJIT::stackPointerRegister);
+    jit.addPtr(JSInterfaceJIT::TrustedImm32(8), JSInterfaceJIT::stackPointerRegister);
 #elif OS(WINDOWS)
     jit.addPtr(JSInterfaceJIT::TrustedImm32(4 * sizeof(int64_t)), JSInterfaceJIT::stackPointerRegister);
 #endif
 
-    jit.jumpToExceptionHandler();
+    jit.jumpToExceptionHandler(*vm);
 
-    LinkBuffer patchBuffer(*vm, jit, GLOBAL_THUNK_ID);
-    return FINALIZE_CODE(patchBuffer, ("native %s%s trampoline", entryType == EnterViaJumpWithSavedTags ? "Tail With Saved Tags " : entryType == EnterViaJumpWithoutSavedTags ? "Tail Without Saved Tags " : "", toCString(kind).data()));
+    LinkBuffer patchBuffer(jit, GLOBAL_THUNK_ID);
+    return FINALIZE_CODE(patchBuffer, JITThunkPtrTag, "%s %s%s trampoline", thunkFunctionType == ThunkFunctionType::JSFunction ? "native" : "internal", entryType == EnterViaJumpWithSavedTags ? "Tail With Saved Tags " : entryType == EnterViaJumpWithoutSavedTags ? "Tail Without Saved Tags " : "", toCString(kind).data());
 }
 
-MacroAssemblerCodeRef nativeCallGenerator(VM* vm)
+MacroAssemblerCodeRef<JITThunkPtrTag> nativeCallGenerator(VM* vm)
 {
-    return nativeForGenerator(vm, CodeForCall);
+    return nativeForGenerator(vm, ThunkFunctionType::JSFunction, CodeForCall);
 }
 
-MacroAssemblerCodeRef nativeTailCallGenerator(VM* vm)
+MacroAssemblerCodeRef<JITThunkPtrTag> nativeTailCallGenerator(VM* vm)
 {
-    return nativeForGenerator(vm, CodeForCall, EnterViaJumpWithSavedTags);
+    return nativeForGenerator(vm, ThunkFunctionType::JSFunction, CodeForCall, EnterViaJumpWithSavedTags);
 }
 
-MacroAssemblerCodeRef nativeTailCallWithoutSavedTagsGenerator(VM* vm)
+MacroAssemblerCodeRef<JITThunkPtrTag> nativeTailCallWithoutSavedTagsGenerator(VM* vm)
 {
-    return nativeForGenerator(vm, CodeForCall, EnterViaJumpWithoutSavedTags);
+    return nativeForGenerator(vm, ThunkFunctionType::JSFunction, CodeForCall, EnterViaJumpWithoutSavedTags);
 }
 
-MacroAssemblerCodeRef nativeConstructGenerator(VM* vm)
+MacroAssemblerCodeRef<JITThunkPtrTag> nativeConstructGenerator(VM* vm)
 {
-    return nativeForGenerator(vm, CodeForConstruct);
+    return nativeForGenerator(vm, ThunkFunctionType::JSFunction, CodeForConstruct);
 }
 
-MacroAssemblerCodeRef arityFixupGenerator(VM* vm)
+MacroAssemblerCodeRef<JITThunkPtrTag> internalFunctionCallGenerator(VM* vm)
+{
+    return nativeForGenerator(vm, ThunkFunctionType::InternalFunction, CodeForCall);
+}
+
+MacroAssemblerCodeRef<JITThunkPtrTag> internalFunctionConstructGenerator(VM* vm)
+{
+    return nativeForGenerator(vm, ThunkFunctionType::InternalFunction, CodeForConstruct);
+}
+
+MacroAssemblerCodeRef<JITThunkPtrTag> arityFixupGenerator(VM* vm)
 {
     JSInterfaceJIT jit(vm);
 
@@ -417,6 +477,16 @@ MacroAssemblerCodeRef arityFixupGenerator(VM* vm)
 #  if CPU(X86_64)
     jit.pop(JSInterfaceJIT::regT4);
 #  endif
+    jit.tagReturnAddress();
+#if CPU(ARM64) && USE(POINTER_PROFILING)
+    jit.loadPtr(JSInterfaceJIT::Address(GPRInfo::callFrameRegister, CallFrame::returnPCOffset()), GPRInfo::regT3);
+    jit.addPtr(JSInterfaceJIT::TrustedImm32(sizeof(CallerFrameAndPC)), GPRInfo::callFrameRegister, extraTemp);
+    jit.untagPtr(GPRInfo::regT3, extraTemp);
+    PtrTag tempReturnPCTag = static_cast<PtrTag>(random());
+    jit.move(JSInterfaceJIT::TrustedImmPtr(tempReturnPCTag), extraTemp);
+    jit.tagPtr(GPRInfo::regT3, extraTemp);
+    jit.storePtr(GPRInfo::regT3, JSInterfaceJIT::Address(GPRInfo::callFrameRegister, CallFrame::returnPCOffset()));
+#endif
     jit.move(JSInterfaceJIT::callFrameRegister, JSInterfaceJIT::regT3);
     jit.load32(JSInterfaceJIT::Address(JSInterfaceJIT::callFrameRegister, CallFrameSlot::argumentCount * sizeof(Register)), JSInterfaceJIT::argumentGPR2);
     jit.add32(JSInterfaceJIT::TrustedImm32(CallFrame::headerSizeInRegisters), JSInterfaceJIT::argumentGPR2);
@@ -436,6 +506,17 @@ MacroAssemblerCodeRef arityFixupGenerator(VM* vm)
 
     jit.neg64(JSInterfaceJIT::argumentGPR0);
 
+    // Adjust call frame register and stack pointer to account for missing args.
+    // We need to change the stack pointer first before performing copy/fill loops.
+    // This stack space below the stack pointer is considered unsed by OS. Therefore,
+    // OS may corrupt this space when constructing a signal stack.
+    jit.move(JSInterfaceJIT::argumentGPR0, extraTemp);
+    jit.lshift64(JSInterfaceJIT::TrustedImm32(3), extraTemp);
+    jit.addPtr(extraTemp, JSInterfaceJIT::callFrameRegister);
+    jit.untagReturnAddress();
+    jit.addPtr(extraTemp, JSInterfaceJIT::stackPointerRegister);
+    jit.tagReturnAddress();
+
     // Move current frame down argumentGPR0 number of slots
     JSInterfaceJIT::Label copyLoop(jit.label());
     jit.load64(JSInterfaceJIT::regT3, extraTemp);
@@ -451,19 +532,22 @@ MacroAssemblerCodeRef arityFixupGenerator(VM* vm)
     jit.addPtr(JSInterfaceJIT::TrustedImm32(8), JSInterfaceJIT::regT3);
     jit.branchAdd32(MacroAssembler::NonZero, JSInterfaceJIT::TrustedImm32(1), JSInterfaceJIT::argumentGPR2).linkTo(fillUndefinedLoop, &jit);
     
-    // Adjust call frame register and stack pointer to account for missing args
-    jit.move(JSInterfaceJIT::argumentGPR0, extraTemp);
-    jit.lshift64(JSInterfaceJIT::TrustedImm32(3), extraTemp);
-    jit.addPtr(extraTemp, JSInterfaceJIT::callFrameRegister);
-    jit.addPtr(extraTemp, JSInterfaceJIT::stackPointerRegister);
-
     done.link(&jit);
+
+#if CPU(ARM64) && USE(POINTER_PROFILING)
+    jit.loadPtr(JSInterfaceJIT::Address(GPRInfo::callFrameRegister, CallFrame::returnPCOffset()), GPRInfo::regT3);
+    jit.move(JSInterfaceJIT::TrustedImmPtr(tempReturnPCTag), extraTemp);
+    jit.untagPtr(GPRInfo::regT3, extraTemp);
+    jit.addPtr(JSInterfaceJIT::TrustedImm32(sizeof(CallerFrameAndPC)), GPRInfo::callFrameRegister, extraTemp);
+    jit.tagPtr(GPRInfo::regT3, extraTemp);
+    jit.storePtr(GPRInfo::regT3, JSInterfaceJIT::Address(GPRInfo::callFrameRegister, CallFrame::returnPCOffset()));
+#endif
 
 #  if CPU(X86_64)
     jit.push(JSInterfaceJIT::regT4);
 #  endif
     jit.ret();
-#else
+#else // USE(JSVALUE64) section above, USE(JSVALUE32_64) section below.
 #  if CPU(X86)
     jit.pop(JSInterfaceJIT::regT4);
 #  endif
@@ -520,20 +604,20 @@ MacroAssemblerCodeRef arityFixupGenerator(VM* vm)
     jit.push(JSInterfaceJIT::regT4);
 #  endif
     jit.ret();
-#endif
+#endif // End of USE(JSVALUE32_64) section.
 
-    LinkBuffer patchBuffer(*vm, jit, GLOBAL_THUNK_ID);
-    return FINALIZE_CODE(patchBuffer, ("fixup arity"));
+    LinkBuffer patchBuffer(jit, GLOBAL_THUNK_ID);
+    return FINALIZE_CODE(patchBuffer, JITThunkPtrTag, "fixup arity");
 }
 
-MacroAssemblerCodeRef unreachableGenerator(VM* vm)
+MacroAssemblerCodeRef<JITThunkPtrTag> unreachableGenerator(VM* vm)
 {
     JSInterfaceJIT jit(vm);
 
     jit.breakpoint();
 
-    LinkBuffer patchBuffer(*vm, jit, GLOBAL_THUNK_ID);
-    return FINALIZE_CODE(patchBuffer, ("unreachable thunk"));
+    LinkBuffer patchBuffer(jit, GLOBAL_THUNK_ID);
+    return FINALIZE_CODE(patchBuffer, JITThunkPtrTag, "unreachable thunk");
 }
 
 static void stringCharLoad(SpecializedThunkJIT& jit, VM* vm)
@@ -574,7 +658,7 @@ static void charToString(SpecializedThunkJIT& jit, VM* vm, MacroAssembler::Regis
     jit.appendFailure(jit.branchTestPtr(MacroAssembler::Zero, dst));
 }
 
-MacroAssemblerCodeRef charCodeAtThunkGenerator(VM* vm)
+MacroAssemblerCodeRef<JITThunkPtrTag> charCodeAtThunkGenerator(VM* vm)
 {
     SpecializedThunkJIT jit(vm, 1);
     stringCharLoad(jit, vm);
@@ -582,7 +666,7 @@ MacroAssemblerCodeRef charCodeAtThunkGenerator(VM* vm)
     return jit.finalize(vm->jitStubs->ctiNativeTailCall(vm), "charCodeAt");
 }
 
-MacroAssemblerCodeRef charAtThunkGenerator(VM* vm)
+MacroAssemblerCodeRef<JITThunkPtrTag> charAtThunkGenerator(VM* vm)
 {
     SpecializedThunkJIT jit(vm, 1);
     stringCharLoad(jit, vm);
@@ -591,7 +675,7 @@ MacroAssemblerCodeRef charAtThunkGenerator(VM* vm)
     return jit.finalize(vm->jitStubs->ctiNativeTailCall(vm), "charAt");
 }
 
-MacroAssemblerCodeRef fromCharCodeThunkGenerator(VM* vm)
+MacroAssemblerCodeRef<JITThunkPtrTag> fromCharCodeThunkGenerator(VM* vm)
 {
     SpecializedThunkJIT jit(vm, 1);
     // load char code
@@ -601,7 +685,7 @@ MacroAssemblerCodeRef fromCharCodeThunkGenerator(VM* vm)
     return jit.finalize(vm->jitStubs->ctiNativeTailCall(vm), "fromCharCode");
 }
 
-MacroAssemblerCodeRef clz32ThunkGenerator(VM* vm)
+MacroAssemblerCodeRef<JITThunkPtrTag> clz32ThunkGenerator(VM* vm)
 {
     SpecializedThunkJIT jit(vm, 1);
     MacroAssembler::Jump nonIntArgJump;
@@ -622,11 +706,11 @@ MacroAssemblerCodeRef clz32ThunkGenerator(VM* vm)
     return jit.finalize(vm->jitStubs->ctiNativeTailCall(vm), "clz32");
 }
 
-MacroAssemblerCodeRef sqrtThunkGenerator(VM* vm)
+MacroAssemblerCodeRef<JITThunkPtrTag> sqrtThunkGenerator(VM* vm)
 {
     SpecializedThunkJIT jit(vm, 1);
     if (!jit.supportsFloatingPointSqrt())
-        return MacroAssemblerCodeRef::createSelfManagedCodeRef(vm->jitStubs->ctiNativeCall(vm));
+        return MacroAssemblerCodeRef<JITThunkPtrTag>::createSelfManagedCodeRef(vm->jitStubs->ctiNativeCall(vm));
 
     jit.loadDoubleArgument(0, SpecializedThunkJIT::fpRegT0, SpecializedThunkJIT::regT0);
     jit.sqrtDouble(SpecializedThunkJIT::fpRegT0, SpecializedThunkJIT::fpRegT0);
@@ -782,12 +866,12 @@ defineUnaryDoubleOpWrapper(trunc);
 
 static const double halfConstant = 0.5;
     
-MacroAssemblerCodeRef floorThunkGenerator(VM* vm)
+MacroAssemblerCodeRef<JITThunkPtrTag> floorThunkGenerator(VM* vm)
 {
     SpecializedThunkJIT jit(vm, 1);
     MacroAssembler::Jump nonIntJump;
     if (!UnaryDoubleOpWrapper(floor) || !jit.supportsFloatingPoint())
-        return MacroAssemblerCodeRef::createSelfManagedCodeRef(vm->jitStubs->ctiNativeCall(vm));
+        return MacroAssemblerCodeRef<JITThunkPtrTag>::createSelfManagedCodeRef(vm->jitStubs->ctiNativeCall(vm));
     jit.loadInt32Argument(0, SpecializedThunkJIT::regT0, nonIntJump);
     jit.returnInt32(SpecializedThunkJIT::regT0);
     nonIntJump.link(&jit);
@@ -825,11 +909,11 @@ MacroAssemblerCodeRef floorThunkGenerator(VM* vm)
     return jit.finalize(vm->jitStubs->ctiNativeTailCall(vm), "floor");
 }
 
-MacroAssemblerCodeRef ceilThunkGenerator(VM* vm)
+MacroAssemblerCodeRef<JITThunkPtrTag> ceilThunkGenerator(VM* vm)
 {
     SpecializedThunkJIT jit(vm, 1);
     if (!UnaryDoubleOpWrapper(ceil) || !jit.supportsFloatingPoint())
-        return MacroAssemblerCodeRef::createSelfManagedCodeRef(vm->jitStubs->ctiNativeCall(vm));
+        return MacroAssemblerCodeRef<JITThunkPtrTag>::createSelfManagedCodeRef(vm->jitStubs->ctiNativeCall(vm));
     MacroAssembler::Jump nonIntJump;
     jit.loadInt32Argument(0, SpecializedThunkJIT::regT0, nonIntJump);
     jit.returnInt32(SpecializedThunkJIT::regT0);
@@ -848,11 +932,11 @@ MacroAssemblerCodeRef ceilThunkGenerator(VM* vm)
     return jit.finalize(vm->jitStubs->ctiNativeTailCall(vm), "ceil");
 }
 
-MacroAssemblerCodeRef truncThunkGenerator(VM* vm)
+MacroAssemblerCodeRef<JITThunkPtrTag> truncThunkGenerator(VM* vm)
 {
     SpecializedThunkJIT jit(vm, 1);
     if (!UnaryDoubleOpWrapper(trunc) || !jit.supportsFloatingPoint())
-        return MacroAssemblerCodeRef::createSelfManagedCodeRef(vm->jitStubs->ctiNativeCall(vm));
+        return MacroAssemblerCodeRef<JITThunkPtrTag>::createSelfManagedCodeRef(vm->jitStubs->ctiNativeCall(vm));
     MacroAssembler::Jump nonIntJump;
     jit.loadInt32Argument(0, SpecializedThunkJIT::regT0, nonIntJump);
     jit.returnInt32(SpecializedThunkJIT::regT0);
@@ -871,11 +955,11 @@ MacroAssemblerCodeRef truncThunkGenerator(VM* vm)
     return jit.finalize(vm->jitStubs->ctiNativeTailCall(vm), "trunc");
 }
 
-MacroAssemblerCodeRef roundThunkGenerator(VM* vm)
+MacroAssemblerCodeRef<JITThunkPtrTag> roundThunkGenerator(VM* vm)
 {
     SpecializedThunkJIT jit(vm, 1);
     if (!UnaryDoubleOpWrapper(jsRound) || !jit.supportsFloatingPoint())
-        return MacroAssemblerCodeRef::createSelfManagedCodeRef(vm->jitStubs->ctiNativeCall(vm));
+        return MacroAssemblerCodeRef<JITThunkPtrTag>::createSelfManagedCodeRef(vm->jitStubs->ctiNativeCall(vm));
     MacroAssembler::Jump nonIntJump;
     jit.loadInt32Argument(0, SpecializedThunkJIT::regT0, nonIntJump);
     jit.returnInt32(SpecializedThunkJIT::regT0);
@@ -905,37 +989,37 @@ MacroAssemblerCodeRef roundThunkGenerator(VM* vm)
     return jit.finalize(vm->jitStubs->ctiNativeTailCall(vm), "round");
 }
 
-MacroAssemblerCodeRef expThunkGenerator(VM* vm)
+MacroAssemblerCodeRef<JITThunkPtrTag> expThunkGenerator(VM* vm)
 {
     if (!UnaryDoubleOpWrapper(exp))
-        return MacroAssemblerCodeRef::createSelfManagedCodeRef(vm->jitStubs->ctiNativeCall(vm));
+        return MacroAssemblerCodeRef<JITThunkPtrTag>::createSelfManagedCodeRef(vm->jitStubs->ctiNativeCall(vm));
     SpecializedThunkJIT jit(vm, 1);
     if (!jit.supportsFloatingPoint())
-        return MacroAssemblerCodeRef::createSelfManagedCodeRef(vm->jitStubs->ctiNativeCall(vm));
+        return MacroAssemblerCodeRef<JITThunkPtrTag>::createSelfManagedCodeRef(vm->jitStubs->ctiNativeCall(vm));
     jit.loadDoubleArgument(0, SpecializedThunkJIT::fpRegT0, SpecializedThunkJIT::regT0);
     jit.callDoubleToDoublePreservingReturn(UnaryDoubleOpWrapper(exp));
     jit.returnDouble(SpecializedThunkJIT::fpRegT0);
     return jit.finalize(vm->jitStubs->ctiNativeTailCall(vm), "exp");
 }
 
-MacroAssemblerCodeRef logThunkGenerator(VM* vm)
+MacroAssemblerCodeRef<JITThunkPtrTag> logThunkGenerator(VM* vm)
 {
     if (!UnaryDoubleOpWrapper(log))
-        return MacroAssemblerCodeRef::createSelfManagedCodeRef(vm->jitStubs->ctiNativeCall(vm));
+        return MacroAssemblerCodeRef<JITThunkPtrTag>::createSelfManagedCodeRef(vm->jitStubs->ctiNativeCall(vm));
     SpecializedThunkJIT jit(vm, 1);
     if (!jit.supportsFloatingPoint())
-        return MacroAssemblerCodeRef::createSelfManagedCodeRef(vm->jitStubs->ctiNativeCall(vm));
+        return MacroAssemblerCodeRef<JITThunkPtrTag>::createSelfManagedCodeRef(vm->jitStubs->ctiNativeCall(vm));
     jit.loadDoubleArgument(0, SpecializedThunkJIT::fpRegT0, SpecializedThunkJIT::regT0);
     jit.callDoubleToDoublePreservingReturn(UnaryDoubleOpWrapper(log));
     jit.returnDouble(SpecializedThunkJIT::fpRegT0);
     return jit.finalize(vm->jitStubs->ctiNativeTailCall(vm), "log");
 }
 
-MacroAssemblerCodeRef absThunkGenerator(VM* vm)
+MacroAssemblerCodeRef<JITThunkPtrTag> absThunkGenerator(VM* vm)
 {
     SpecializedThunkJIT jit(vm, 1);
     if (!jit.supportsFloatingPointAbs())
-        return MacroAssemblerCodeRef::createSelfManagedCodeRef(vm->jitStubs->ctiNativeCall(vm));
+        return MacroAssemblerCodeRef<JITThunkPtrTag>::createSelfManagedCodeRef(vm->jitStubs->ctiNativeCall(vm));
 
 #if USE(JSVALUE64)
     unsigned virtualRegisterIndex = CallFrame::argumentOffset(0);
@@ -988,7 +1072,7 @@ MacroAssemblerCodeRef absThunkGenerator(VM* vm)
     return jit.finalize(vm->jitStubs->ctiNativeTailCall(vm), "abs");
 }
 
-MacroAssemblerCodeRef imulThunkGenerator(VM* vm)
+MacroAssemblerCodeRef<JITThunkPtrTag> imulThunkGenerator(VM* vm)
 {
     SpecializedThunkJIT jit(vm, 2);
     MacroAssembler::Jump nonIntArg0Jump;
@@ -1019,25 +1103,25 @@ MacroAssemblerCodeRef imulThunkGenerator(VM* vm)
     return jit.finalize(vm->jitStubs->ctiNativeTailCall(vm), "imul");
 }
 
-MacroAssemblerCodeRef randomThunkGenerator(VM* vm)
+MacroAssemblerCodeRef<JITThunkPtrTag> randomThunkGenerator(VM* vm)
 {
     SpecializedThunkJIT jit(vm, 0);
     if (!jit.supportsFloatingPoint())
-        return MacroAssemblerCodeRef::createSelfManagedCodeRef(vm->jitStubs->ctiNativeCall(vm));
+        return MacroAssemblerCodeRef<JITThunkPtrTag>::createSelfManagedCodeRef(vm->jitStubs->ctiNativeCall(vm));
 
 #if USE(JSVALUE64)
-    jit.emitRandomThunk(SpecializedThunkJIT::regT0, SpecializedThunkJIT::regT1, SpecializedThunkJIT::regT2, SpecializedThunkJIT::regT3, SpecializedThunkJIT::fpRegT0);
+    jit.emitRandomThunk(*vm, SpecializedThunkJIT::regT0, SpecializedThunkJIT::regT1, SpecializedThunkJIT::regT2, SpecializedThunkJIT::regT3, SpecializedThunkJIT::fpRegT0);
     jit.returnDouble(SpecializedThunkJIT::fpRegT0);
 
     return jit.finalize(vm->jitStubs->ctiNativeTailCall(vm), "random");
 #else
-    return MacroAssemblerCodeRef::createSelfManagedCodeRef(vm->jitStubs->ctiNativeCall(vm));
+    return MacroAssemblerCodeRef<JITThunkPtrTag>::createSelfManagedCodeRef(vm->jitStubs->ctiNativeCall(vm));
 #endif
 }
 
-MacroAssemblerCodeRef boundThisNoArgsFunctionCallGenerator(VM* vm)
+MacroAssemblerCodeRef<JITThunkPtrTag> boundThisNoArgsFunctionCallGenerator(VM* vm)
 {
-    CCallHelpers jit(vm);
+    CCallHelpers jit;
     
     jit.emitFunctionPrologue();
     
@@ -1108,22 +1192,27 @@ MacroAssemblerCodeRef boundThisNoArgsFunctionCallGenerator(VM* vm)
     jit.loadPtr(
         CCallHelpers::Address(GPRInfo::regT3, JSFunction::offsetOfExecutable()),
         GPRInfo::regT0);
+    jit.xorPtr(CCallHelpers::TrustedImmPtr(JSFunctionPoison::key()), GPRInfo::regT0);
     jit.loadPtr(
         CCallHelpers::Address(
             GPRInfo::regT0, ExecutableBase::offsetOfJITCodeWithArityCheckFor(CodeForCall)),
         GPRInfo::regT0);
     CCallHelpers::Jump noCode = jit.branchTestPtr(CCallHelpers::Zero, GPRInfo::regT0);
     
-    emitPointerValidation(jit, GPRInfo::regT0);
-    jit.call(GPRInfo::regT0);
-    
+#if USE(JSVALUE64)
+    jit.move(CCallHelpers::TrustedImm64(JITCodePoison::key()), GPRInfo::regT1);
+    jit.xor64(GPRInfo::regT1, GPRInfo::regT0);
+#endif
+    emitPointerValidation(jit, GPRInfo::regT0, JSEntryPtrTag);
+    jit.call(GPRInfo::regT0, JSEntryPtrTag);
+
     jit.emitFunctionEpilogue();
     jit.ret();
     
-    LinkBuffer linkBuffer(*vm, jit, GLOBAL_THUNK_ID);
-    linkBuffer.link(noCode, CodeLocationLabel(vm->jitStubs->ctiNativeTailCallWithoutSavedTags(vm)));
+    LinkBuffer linkBuffer(jit, GLOBAL_THUNK_ID);
+    linkBuffer.link(noCode, CodeLocationLabel<JITThunkPtrTag>(vm->jitStubs->ctiNativeTailCallWithoutSavedTags(vm)));
     return FINALIZE_CODE(
-        linkBuffer, ("Specialized thunk for bound function calls with no arguments"));
+        linkBuffer, JITThunkPtrTag, "Specialized thunk for bound function calls with no arguments");
 }
 
 } // namespace JSC

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -65,12 +65,16 @@ public:
         // As an input representation, this means that B3 should pick some register. It could be a
         // register that this claims to clobber!
         SomeRegister,
+        
+        // As an input representation, this means that B3 should pick some register but that this
+        // register is then cobbered with garbage. This only works for patchpoints.
+        SomeRegisterWithClobber,
 
         // As an input representation, this tells us that B3 should pick some register, but implies
         // that the def happens before any of the effects of the stackmap. This is only valid for
         // the result constraint of a Patchpoint.
         SomeEarlyRegister,
-
+        
         // As an input representation, this forces a particular register. As an output
         // representation, this tells us what register B3 picked.
         Register,
@@ -78,7 +82,7 @@ public:
         // As an input representation, this forces a particular register and states that
         // the register is used late. This means that the register is used after the result
         // is defined (i.e, the result will interfere with this as an input).
-        // It's not valid for this to be used as a result kind.
+        // It's not a valid output representation.
         LateRegister,
 
         // As an output representation, this tells us what stack slot B3 picked. It's not a valid
@@ -107,7 +111,7 @@ public:
     ValueRep(Kind kind)
         : m_kind(kind)
     {
-        ASSERT(kind == WarmAny || kind == ColdAny || kind == LateColdAny || kind == SomeRegister || kind == SomeEarlyRegister);
+        ASSERT(kind == WarmAny || kind == ColdAny || kind == LateColdAny || kind == SomeRegister || kind == SomeRegisterWithClobber || kind == SomeEarlyRegister);
     }
 
     static ValueRep reg(Reg reg)

@@ -23,16 +23,16 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef MockPageOverlayClient_h
-#define MockPageOverlayClient_h
+#pragma once
 
+#include "Frame.h"
 #include "MockPageOverlay.h"
 #include "PageOverlay.h"
 #include <wtf/HashSet.h>
 
 namespace WebCore {
 
-class MainFrame;
+class Page;
 
 class MockPageOverlayClient final : public PageOverlay::Client {
     friend class NeverDestroyed<MockPageOverlayClient>;
@@ -41,12 +41,12 @@ public:
 
     explicit MockPageOverlayClient();
 
-    Ref<MockPageOverlay> installOverlay(MainFrame&, PageOverlay::OverlayType);
+    Ref<MockPageOverlay> installOverlay(Page&, PageOverlay::OverlayType);
     void uninstallAllOverlays();
 
-    String layerTreeAsText(MainFrame&);
+    String layerTreeAsText(Page&, LayerTreeFlags);
 
-    virtual ~MockPageOverlayClient() { }
+    virtual ~MockPageOverlayClient() = default;
 
 private:
     void willMoveToPage(PageOverlay&, Page*) override;
@@ -62,6 +62,4 @@ private:
     HashSet<RefPtr<MockPageOverlay>> m_overlays;
 };
 
-}
-
-#endif // MockPageOverlayClient_h
+} // namespace WebCore

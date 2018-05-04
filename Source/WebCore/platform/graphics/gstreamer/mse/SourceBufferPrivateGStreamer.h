@@ -2,8 +2,8 @@
  * Copyright (C) 2013 Google Inc. All rights reserved.
  * Copyright (C) 2013 Orange
  * Copyright (C) 2014 Sebastian Dröge <sebastian@centricular.com>
- * Copyright (C) 2015, 2016 Metrological Group B.V.
- * Copyright (C) 2015, 2016 Igalia, S.L
+ * Copyright (C) 2015, 2016, 2017 Metrological Group B.V.
+ * Copyright (C) 2015, 2016, 2017 Igalia, S.L
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -54,27 +54,30 @@ public:
 
     void clearMediaSource() { m_mediaSource = nullptr; }
 
-    void setClient(SourceBufferPrivateClient*) override;
-    void append(const unsigned char*, unsigned) override;
-    void abort() override;
-    void resetParserState() override;
-    void removedFromMediaSource() override;
-    MediaPlayer::ReadyState readyState() const override;
-    void setReadyState(MediaPlayer::ReadyState) override;
+    void setClient(SourceBufferPrivateClient*) final;
+    void append(Vector<unsigned char>&&) final;
+    void abort() final;
+    void resetParserState() final;
+    void removedFromMediaSource() final;
+    MediaPlayer::ReadyState readyState() const final;
+    void setReadyState(MediaPlayer::ReadyState) final;
 
-    void flush(AtomicString) override;
-    void enqueueSample(PassRefPtr<MediaSample>, AtomicString) override;
-    bool isReadyForMoreSamples(AtomicString) override;
-    void setActive(bool) override;
-    void stopAskingForMoreSamples(AtomicString) override;
-    void notifyClientWhenReadyForMoreSamples(AtomicString) override;
+    void flush(const AtomicString&) final;
+    void enqueueSample(Ref<MediaSample>&&, const AtomicString&) final;
+    void allSamplesInTrackEnqueued(const AtomicString&) final;
+    bool isReadyForMoreSamples(const AtomicString&) final;
+    void setActive(bool) final;
+    void stopAskingForMoreSamples(const AtomicString&) final;
+    void notifyClientWhenReadyForMoreSamples(const AtomicString&) final;
 
     void setReadyForMoreSamples(bool);
     void notifyReadyForMoreSamples();
 
     void didReceiveInitializationSegment(const SourceBufferPrivateClient::InitializationSegment&);
-    void didReceiveSample(PassRefPtr<MediaSample>);
+    void didReceiveSample(MediaSample&);
     void didReceiveAllPendingSamples();
+
+    ContentType type() const { return m_type; }
 
 private:
     SourceBufferPrivateGStreamer(MediaSourceGStreamer*, Ref<MediaSourceClientGStreamerMSE>, const ContentType&);

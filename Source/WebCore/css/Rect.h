@@ -47,16 +47,8 @@ public:
     }
 
 protected:
-    RectBase() { }
-    RectBase(const RectBase& cloneFrom)
-        : m_top(cloneFrom.m_top ? RefPtr<CSSPrimitiveValue>(cloneFrom.m_top->cloneForCSSOM()) : nullptr)
-        , m_right(cloneFrom.m_right ? RefPtr<CSSPrimitiveValue>(cloneFrom.m_right->cloneForCSSOM()) : nullptr)
-        , m_bottom(cloneFrom.m_bottom ? RefPtr<CSSPrimitiveValue>(cloneFrom.m_bottom->cloneForCSSOM()) : nullptr)
-        , m_left(cloneFrom.m_left ? RefPtr<CSSPrimitiveValue>(cloneFrom.m_left->cloneForCSSOM()) : nullptr)
-    {
-    }
-
-    ~RectBase() { }
+    RectBase() = default;
+    ~RectBase() = default;
 
 private:
     RefPtr<CSSPrimitiveValue> m_top;
@@ -68,8 +60,6 @@ private:
 class Rect final : public RectBase, public RefCounted<Rect> {
 public:
     static Ref<Rect> create() { return adoptRef(*new Rect); }
-    
-    Ref<Rect> cloneForCSSOM() const { return adoptRef(*new Rect(*this)); }
 
     String cssText() const
     {
@@ -77,8 +67,7 @@ public:
     }
 
 private:
-    Rect() { }
-    Rect(const Rect& cloneFrom) : RectBase(cloneFrom), RefCounted<Rect>() { }
+    Rect() = default;
     static String generateCSSString(const String& top, const String& right, const String& bottom, const String& left)
     {
         return "rect(" + top + ", " + right + ", " + bottom + ", " + left + ')';
@@ -88,8 +77,6 @@ private:
 class Quad final : public RectBase, public RefCounted<Quad> {
 public:
     static Ref<Quad> create() { return adoptRef(*new Quad); }
-    
-    Ref<Quad> cloneForCSSOM() const { return adoptRef(*new Quad(*this)); }
 
     String cssText() const
     {
@@ -97,8 +84,7 @@ public:
     }
 
 private:
-    Quad() { }
-    Quad(const Quad& cloneFrom) : RectBase(cloneFrom), RefCounted<Quad>() { }
+    Quad() = default;
     static String generateCSSString(const String& top, const String& right, const String& bottom, const String& left)
     {
         StringBuilder result;

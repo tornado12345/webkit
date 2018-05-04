@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003, 2006, 2007, 2013 Apple Inc.  All rights reserved.
+ * Copyright (C) 2003-2017 Apple Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -39,6 +39,8 @@
    having any effect.
 */
 
+#undef __STDC_FORMAT_MACROS
+#define __STDC_FORMAT_MACROS
 #include <inttypes.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -47,6 +49,18 @@
 
 #if USE(OS_LOG)
 #include <os/log.h>
+#endif
+
+#ifdef __cplusplus
+#include <type_traits>
+
+#if OS(WINDOWS)
+#if !COMPILER(GCC_OR_CLANG)
+extern "C" void _ReadWriteBarrier(void);
+#pragma intrinsic(_ReadWriteBarrier)
+#endif
+#include <intrin.h>
+#endif
 #endif
 
 #ifdef NDEBUG
@@ -134,10 +148,12 @@ extern "C" {
 #endif
 
 typedef enum { WTFLogChannelOff, WTFLogChannelOn, WTFLogChannelOnWithAccumulation } WTFLogChannelState;
+typedef enum { WTFLogLevelAlways, WTFLogLevelError, WTFLogLevelWarning, WTFLogLevelInfo, WTFLogLevelDebug } WTFLogLevel;
 
 typedef struct {
     WTFLogChannelState state;
     const char* name;
+    WTFLogLevel level;
 #if !RELEASE_LOG_DISABLED
     const char* subsystem;
     __unsafe_unretained os_log_t osLogChannel;
@@ -157,10 +173,10 @@ typedef struct {
 #if !defined(DEFINE_LOG_CHANNEL)
 #if RELEASE_LOG_DISABLED
 #define DEFINE_LOG_CHANNEL(name, subsystem) \
-    WTFLogChannel LOG_CHANNEL(name) = { WTFLogChannelOff, #name };
+    WTFLogChannel LOG_CHANNEL(name) = { WTFLogChannelOff, #name, WTFLogLevelError };
 #else
 #define DEFINE_LOG_CHANNEL(name, subsystem) \
-    WTFLogChannel LOG_CHANNEL(name) = { WTFLogChannelOff, #name, subsystem, OS_LOG_DEFAULT };
+    WTFLogChannel LOG_CHANNEL(name) = { WTFLogChannelOff, #name, WTFLogLevelError, subsystem, OS_LOG_DEFAULT };
 #endif
 #endif
 
@@ -176,30 +192,33 @@ WTF_EXPORT_PRIVATE void WTFLogAlways(const char* format, ...) WTF_ATTRIBUTE_PRIN
 WTF_EXPORT_PRIVATE NO_RETURN_DUE_TO_CRASH void WTFLogAlwaysAndCrash(const char* format, ...) WTF_ATTRIBUTE_PRINTF(1, 2);
 WTF_EXPORT_PRIVATE WTFLogChannel* WTFLogChannelByName(WTFLogChannel*[], size_t count, const char*);
 WTF_EXPORT_PRIVATE void WTFInitializeLogChannelStatesFromString(WTFLogChannel*[], size_t count, const char*);
+WTF_EXPORT_PRIVATE void WTFLogWithLevel(WTFLogChannel*, WTFLogLevel, const char* format, ...) WTF_ATTRIBUTE_PRINTF(3, 4);
+WTF_EXPORT_PRIVATE void WTFSetLogChannelLevel(WTFLogChannel*, WTFLogLevel);
+WTF_EXPORT_PRIVATE bool WTFWillLogWithLevel(WTFLogChannel*, WTFLogLevel);
 
 WTF_EXPORT_PRIVATE void WTFGetBacktrace(void** stack, int* size);
-WTF_EXPORT_PRIVATE void WTFReportBacktrace();
+WTF_EXPORT_PRIVATE void WTFReportBacktrace(void);
 WTF_EXPORT_PRIVATE void WTFPrintBacktrace(void** stack, int size);
 
-typedef void (*WTFCrashHookFunction)();
-WTF_EXPORT_PRIVATE void WTFSetCrashHook(WTFCrashHookFunction);
-WTF_EXPORT_PRIVATE void WTFInstallReportBacktraceOnCrashHook();
+WTF_EXPORT_PRIVATE bool WTFIsDebuggerAttached(void);
 
-WTF_EXPORT_PRIVATE bool WTFIsDebuggerAttached();
+#if COMPILER(MSVC)
+#define WTFBreakpointTrap()  __debugbreak()
+#elif ASAN_ENABLED
+#define WTFBreakpointTrap()  __builtin_trap()
+#elif CPU(X86_64) || CPU(X86)
+#define WTFBreakpointTrap()  asm volatile ("int3")
+#elif CPU(ARM_THUMB2)
+#define WTFBreakpointTrap()  asm volatile ("bkpt #0")
+#elif CPU(ARM64)
+#define WTFBreakpointTrap()  asm volatile ("brk #0")
+#else
+#define WTFBreakpointTrap() WTFCrash() // Not implemented.
+#endif
 
 #ifndef CRASH
 
 #if defined(NDEBUG) && OS(DARWIN)
-#if CPU(X86_64) || CPU(X86)
-#define WTFBreakpointTrap()  __asm__ volatile ("int3")
-#elif CPU(ARM_THUMB2)
-#define WTFBreakpointTrap()  __asm__ volatile ("bkpt #0")
-#elif CPU(ARM64)
-#define WTFBreakpointTrap()  __asm__ volatile ("brk #0")
-#else
-#error "Unsupported CPU".
-#endif
-
 // Crash with a SIGTRAP i.e EXC_BREAKPOINT.
 // We are not using __builtin_trap because it is only guaranteed to abort, but not necessarily
 // trigger a SIGTRAP. Instead, we use inline asm to ensure that we trigger the SIGTRAP.
@@ -211,15 +230,15 @@ WTF_EXPORT_PRIVATE bool WTFIsDebuggerAttached();
 #define CRASH() WTFCrash()
 #endif
 
-#endif // CRASH
+#endif // !defined(CRASH)
 
-WTF_EXPORT_PRIVATE NO_RETURN_DUE_TO_CRASH void WTFCrash();
+WTF_EXPORT_PRIVATE NO_RETURN_DUE_TO_CRASH void WTFCrash(void);
 
 #ifndef CRASH_WITH_SECURITY_IMPLICATION
 #define CRASH_WITH_SECURITY_IMPLICATION() WTFCrashWithSecurityImplication()
 #endif
 
-WTF_EXPORT_PRIVATE NO_RETURN_DUE_TO_CRASH void WTFCrashWithSecurityImplication();
+WTF_EXPORT_PRIVATE NO_RETURN_DUE_TO_CRASH void WTFCrashWithSecurityImplication(void);
 
 #ifdef __cplusplus
 }
@@ -258,6 +277,7 @@ WTF_EXPORT_PRIVATE NO_RETURN_DUE_TO_CRASH void WTFCrashWithSecurityImplication()
 #define ASSERT(assertion) ((void)0)
 #define ASSERT_AT(assertion, file, line, function) ((void)0)
 #define ASSERT_NOT_REACHED() ((void)0)
+#define ASSERT_IMPLIES(condition, assertion) ((void)0)
 #define NO_RETURN_DUE_TO_ASSERT
 
 #define ASSERT_UNUSED(variable, assertion) ((void)variable)
@@ -294,6 +314,13 @@ WTF_EXPORT_PRIVATE NO_RETURN_DUE_TO_CRASH void WTFCrashWithSecurityImplication()
 #define ASSERT_NOT_REACHED() do { \
     WTFReportAssertionFailure(__FILE__, __LINE__, WTF_PRETTY_FUNCTION, 0); \
     CRASH(); \
+} while (0)
+
+#define ASSERT_IMPLIES(condition, assertion) do { \
+    if ((condition) && !(assertion)) { \
+        WTFReportAssertionFailure(__FILE__, __LINE__, WTF_PRETTY_FUNCTION, #condition " => " #assertion); \
+        CRASH(); \
+    } \
 } while (0)
 
 #define ASSERT_UNUSED(variable, assertion) ASSERT(assertion)
@@ -405,20 +432,45 @@ WTF_EXPORT_PRIVATE NO_RETURN_DUE_TO_CRASH void WTFCrashWithSecurityImplication()
 #define LOG_VERBOSE(channel, ...) WTFLogVerbose(__FILE__, __LINE__, WTF_PRETTY_FUNCTION, &LOG_CHANNEL(channel), __VA_ARGS__)
 #endif
 
+/* LOG_WITH_LEVEL */
+
+#if LOG_DISABLED
+#define LOG_WITH_LEVEL(channel, level, ...) ((void)0)
+#else
+#define LOG_WITH_LEVEL(channel, level, ...) WTFLogWithLevel(&LOG_CHANNEL(channel), level, __VA_ARGS__)
+#endif
+
 /* RELEASE_LOG */
 
 #if RELEASE_LOG_DISABLED
-#define RELEASE_LOG(      channel, format, ...) ((void)0)
-#define RELEASE_LOG_ERROR(channel, format, ...) LOG_ERROR(format, ##__VA_ARGS__)
+#define RELEASE_LOG(channel, ...) ((void)0)
+#define RELEASE_LOG_ERROR(channel, ...) LOG_ERROR(__VA_ARGS__)
+#define RELEASE_LOG_FAULT(channel, ...) LOG_ERROR(__VA_ARGS__)
 
-#define RELEASE_LOG_IF(      isAllowed, channel, format, ...) ((void)0)
-#define RELEASE_LOG_ERROR_IF(isAllowed, channel, format, ...) do { if (isAllowed) RELEASE_LOG_ERROR(channel, format, ##__VA_ARGS__); } while (0)
+#define RELEASE_LOG_IF(isAllowed, channel, ...) ((void)0)
+#define RELEASE_LOG_ERROR_IF(isAllowed, channel, ...) do { if (isAllowed) RELEASE_LOG_ERROR(channel, __VA_ARGS__); } while (0)
+
+#define RELEASE_LOG_WITH_LEVEL(channel, level, ...) ((void)0)
+#define RELEASE_LOG_WITH_LEVEL_IF(isAllowed, channel, level, ...) do { if (isAllowed) RELEASE_LOG_WITH_LEVEL(channel, level, __VA_ARGS__); } while (0)
 #else
-#define RELEASE_LOG(      channel, format, ...) os_log(      LOG_CHANNEL(channel).osLogChannel, format, ##__VA_ARGS__)
-#define RELEASE_LOG_ERROR(channel, format, ...) os_log_error(LOG_CHANNEL(channel).osLogChannel, format, ##__VA_ARGS__)
+#define RELEASE_LOG(channel, ...) os_log(LOG_CHANNEL(channel).osLogChannel, __VA_ARGS__)
+#define RELEASE_LOG_ERROR(channel, ...) os_log_error(LOG_CHANNEL(channel).osLogChannel, __VA_ARGS__)
+#define RELEASE_LOG_FAULT(channel, ...) os_log_fault(LOG_CHANNEL(channel).osLogChannel, __VA_ARGS__)
+#define RELEASE_LOG_INFO(channel, ...) os_log_info(LOG_CHANNEL(channel).osLogChannel, __VA_ARGS__)
 
-#define RELEASE_LOG_IF(      isAllowed, channel, format, ...) do { if (isAllowed) RELEASE_LOG(      channel, format, ##__VA_ARGS__); } while (0)
-#define RELEASE_LOG_ERROR_IF(isAllowed, channel, format, ...) do { if (isAllowed) RELEASE_LOG_ERROR(channel, format, ##__VA_ARGS__); } while (0)
+#define RELEASE_LOG_IF(isAllowed, channel, ...) do { if (isAllowed) RELEASE_LOG(      channel, __VA_ARGS__); } while (0)
+#define RELEASE_LOG_ERROR_IF(isAllowed, channel, ...) do { if (isAllowed) RELEASE_LOG_ERROR(channel, __VA_ARGS__); } while (0)
+#define RELEASE_LOG_INFO_IF(isAllowed, channel, ...) do { if (isAllowed) RELEASE_LOG_INFO(channel, __VA_ARGS__); } while (0)
+
+#define RELEASE_LOG_WITH_LEVEL(channel, logLevel, ...) do { \
+    if (LOG_CHANNEL(channel).level >= (logLevel)) \
+        os_log(LOG_CHANNEL(channel).osLogChannel, __VA_ARGS__); \
+} while (0)
+
+#define RELEASE_LOG_WITH_LEVEL_IF(isAllowed, channel, logLevel, ...) do { \
+    if ((isAllowed) && LOG_CHANNEL(channel).level >= (logLevel)) \
+        os_log(LOG_CHANNEL(channel).osLogChannel, __VA_ARGS__); \
+} while (0)
 #endif
 
 
@@ -430,10 +482,12 @@ WTF_EXPORT_PRIVATE NO_RETURN_DUE_TO_CRASH void WTFCrashWithSecurityImplication()
         CRASH(); \
 } while (0)
 #define RELEASE_ASSERT_WITH_MESSAGE(assertion, ...) RELEASE_ASSERT(assertion)
+#define RELEASE_ASSERT_WITH_SECURITY_IMPLICATION(assertion) RELEASE_ASSERT(assertion)
 #define RELEASE_ASSERT_NOT_REACHED() CRASH()
 #else
 #define RELEASE_ASSERT(assertion) ASSERT(assertion)
 #define RELEASE_ASSERT_WITH_MESSAGE(assertion, ...) ASSERT_WITH_MESSAGE(assertion, __VA_ARGS__)
+#define RELEASE_ASSERT_WITH_SECURITY_IMPLICATION(assertion) ASSERT_WITH_SECURITY_IMPLICATION(assertion)
 #define RELEASE_ASSERT_NOT_REACHED() ASSERT_NOT_REACHED()
 #endif
 
@@ -446,6 +500,8 @@ WTF_EXPORT_PRIVATE NO_RETURN_DUE_TO_CRASH void WTFCrashWithSecurityImplication()
 #pragma clang diagnostic ignored "-Wmissing-noreturn"
 static inline void UNREACHABLE_FOR_PLATFORM()
 {
+    // This *MUST* be a release assert. We use it in places where it's better to crash than to keep
+    // going.
     RELEASE_ASSERT_NOT_REACHED();
 }
 #pragma clang diagnostic pop
@@ -453,5 +509,56 @@ static inline void UNREACHABLE_FOR_PLATFORM()
 #define UNREACHABLE_FOR_PLATFORM() RELEASE_ASSERT_NOT_REACHED()
 #endif
 
+#ifdef __cplusplus
+
+// The combination of line, file, function, and counter should be a unique number per call to this crash. This tricks the compiler into not coalescing calls to WTFCrashWithInfo.
+// The easiest way to fill these values per translation unit is to pass __LINE__, __FILE__, WTF_PRETTY_FUNCTION, and __COUNTER__.
+WTF_EXPORT_PRIVATE NO_RETURN_DUE_TO_CRASH NOT_TAIL_CALLED void WTFCrashWithInfo(int line, const char* file, const char* function, int counter, uint64_t reason, uint64_t misc1, uint64_t misc2, uint64_t misc3, uint64_t misc4);
+WTF_EXPORT_PRIVATE NO_RETURN_DUE_TO_CRASH NOT_TAIL_CALLED void WTFCrashWithInfo(int line, const char* file, const char* function, int counter, uint64_t reason, uint64_t misc1, uint64_t misc2, uint64_t misc3);
+WTF_EXPORT_PRIVATE NO_RETURN_DUE_TO_CRASH NOT_TAIL_CALLED void WTFCrashWithInfo(int line, const char* file, const char* function, int counter, uint64_t reason, uint64_t misc1, uint64_t misc2);
+WTF_EXPORT_PRIVATE NO_RETURN_DUE_TO_CRASH NOT_TAIL_CALLED void WTFCrashWithInfo(int line, const char* file, const char* function, int counter, uint64_t reason, uint64_t misc1);
+WTF_EXPORT_PRIVATE NO_RETURN_DUE_TO_CRASH NOT_TAIL_CALLED void WTFCrashWithInfo(int line, const char* file, const char* function, int counter, uint64_t reason);
+WTF_EXPORT_PRIVATE NO_RETURN_DUE_TO_CRASH NOT_TAIL_CALLED void WTFCrashWithInfo(int line, const char* file, const char* function, int counter);
+
+
+namespace WTF {
+inline void isIntegralType() { }
+
+template<typename T, typename... Types>
+void isIntegralType(T, Types... types)
+{
+    static_assert(std::is_integral<T>::value || std::is_enum<T>::value, "All types need to be integral bitwise_cast to integral type for logging");
+    isIntegralType(types...);
+}
+}
+
+inline void compilerFenceForCrash()
+{
+#if OS(WINDOWS) && !COMPILER(GCC_OR_CLANG)
+    _ReadWriteBarrier();
+#else
+    asm volatile("" ::: "memory");
+#endif
+}
+
+#ifndef CRASH_WITH_INFO
+// This is useful if you are going to stuff data into registers before crashing. Like the crashWithInfo functions below...
+// GCC doesn't like the ##__VA_ARGS__ here since this macro is called from another macro so we just CRASH instead there.
+#if COMPILER(CLANG) || COMPILER(MSVC)
+#define CRASH_WITH_INFO(...) do { \
+        WTF::isIntegralType(__VA_ARGS__); \
+        compilerFenceForCrash(); \
+        WTFCrashWithInfo(__LINE__, __FILE__, WTF_PRETTY_FUNCTION, __COUNTER__, ##__VA_ARGS__); \
+    } while (false)
+#else
+#define CRASH_WITH_INFO(...) CRASH()
+#endif
+#endif // CRASH_WITH_INFO
+
+#ifndef CRASH_WITH_SECURITY_IMPLICATION_AND_INFO
+#define CRASH_WITH_SECURITY_IMPLICATION_AND_INFO CRASH_WITH_INFO
+#endif // CRASH_WITH_SECURITY_IMPLICATION_AND_INFO
+
+#endif // __cplusplus
 
 #endif /* WTF_Assertions_h */

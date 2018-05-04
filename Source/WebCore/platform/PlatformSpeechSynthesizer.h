@@ -36,12 +36,6 @@
 OBJC_CLASS WebSpeechSynthesisWrapper;
 #endif
 
-#if PLATFORM(EFL)
-namespace WebCore {
-class PlatformSpeechSynthesisProviderEfl;
-}
-#endif
-
 namespace WebCore {
 
 enum SpeechBoundary {
@@ -61,7 +55,7 @@ public:
     virtual void boundaryEventOccurred(PlatformSpeechSynthesisUtterance&, SpeechBoundary, unsigned charIndex) = 0;
     virtual void voicesDidChange() = 0;
 protected:
-    virtual ~PlatformSpeechSynthesizerClient() { }
+    virtual ~PlatformSpeechSynthesizerClient() = default;
 };
 
 class WEBCORE_EXPORT PlatformSpeechSynthesizer {
@@ -91,9 +85,6 @@ private:
 
 #if PLATFORM(COCOA)
     RetainPtr<WebSpeechSynthesisWrapper> m_platformSpeechWrapper;
-#endif
-#if PLATFORM(EFL)
-    std::unique_ptr<PlatformSpeechSynthesisProviderEfl> m_platformSpeechWrapper;
 #endif
 };
 

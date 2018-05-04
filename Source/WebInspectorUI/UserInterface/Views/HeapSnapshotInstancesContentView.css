@@ -49,12 +49,26 @@
     text-decoration: underline;
 }
 
+.heap-snapshot > .data-grid:focus tr.selected > td .sub-retained {
+    color: var(--selected-secondary-text-color);
+}
+
+.heap-snapshot > .data-grid:focus tr.selected .object-id,
+.heap-snapshot > .data-grid:focus tr.selected .object-preview > .size {
+    color: var(--selected-secondary-text-color);
+}
+
+.heap-snapshot > .data-grid:focus tr.selected .formatted-string,
+.heap-snapshot > .data-grid:focus tr.selected .object-preview span {
+    color: var(--selected-foreground-color);
+}
+
 .heap-snapshot > .data-grid td .location {
     margin-left: 1ex;
     color: hsl(0, 0%, 60%);
 }
 
-.heap-snapshot > .data-grid:matches(:focus, .force-focus) tr.selected td .location {
+.heap-snapshot > .data-grid:focus tr.selected td .location {
     color: hsl(0, 0%, 85%);
 }
 
@@ -124,7 +138,7 @@
 }
 
 .heap-snapshot-instance-popover-content > .title {
-    font-family: -apple-system, sans-serif;
+    font-family: -webkit-system-font, sans-serif;
     text-align: center;
     border-bottom: 1px solid var(--border-color);
     padding: 0 5px 2px 5px;

@@ -1,4 +1,4 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl
 
 # Copyright (C) 2011 Apple Inc. All rights reserved.
 #
@@ -24,6 +24,7 @@
 # THE POSSIBILITY OF SUCH DAMAGE.
 
 use strict;
+use warnings;
 use FindBin;
 use File::Temp qw(tempfile);
 use lib $FindBin::Bin;
@@ -66,7 +67,7 @@ my $prettyPatchTool = sourceDir() . "/Websites/bugs.webkit.org/PrettyPatch/prett
 my $pathToPrettify = "ruby -I " . sourceDir() . "/Websites/bugs.webkit.org/PrettyPatch/ " . sourceDir() . "/Websites/bugs.webkit.org/PrettyPatch/prettify.rb";
 system "$pathToPrettify " . quotemeta($inputPath) . " > $prettydiffPath";
 
-if (isAppleMacWebKit()) {
+if (isAppleCocoaWebKit()) {
     system "open", $prettydiffPath;
 } elsif (isCygwin()) {
     system "cygstart",$prettydiffPath;

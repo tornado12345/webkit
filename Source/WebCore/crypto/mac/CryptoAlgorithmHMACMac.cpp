@@ -28,38 +28,31 @@
 
 #if ENABLE(SUBTLE_CRYPTO)
 
-#include "CryptoAlgorithmHmacParamsDeprecated.h"
 #include "CryptoKeyHMAC.h"
-#include "ExceptionCode.h"
 #include <CommonCrypto/CommonHMAC.h>
 #include <wtf/CryptographicUtilities.h>
 
 namespace WebCore {
 
-static bool getCommonCryptoHMACAlgorithm(CryptoAlgorithmIdentifier hashFunction, CCHmacAlgorithm& algorithm)
+static std::optional<CCHmacAlgorithm> commonCryptoHMACAlgorithm(CryptoAlgorithmIdentifier hashFunction)
 {
     switch (hashFunction) {
     case CryptoAlgorithmIdentifier::SHA_1:
-        algorithm = kCCHmacAlgSHA1;
-        return true;
+        return kCCHmacAlgSHA1;
     case CryptoAlgorithmIdentifier::SHA_224:
-        algorithm = kCCHmacAlgSHA224;
-        return true;
+        return kCCHmacAlgSHA224;
     case CryptoAlgorithmIdentifier::SHA_256:
-        algorithm = kCCHmacAlgSHA256;
-        return true;
+        return kCCHmacAlgSHA256;
     case CryptoAlgorithmIdentifier::SHA_384:
-        algorithm = kCCHmacAlgSHA384;
-        return true;
+        return kCCHmacAlgSHA384;
     case CryptoAlgorithmIdentifier::SHA_512:
-        algorithm = kCCHmacAlgSHA512;
-        return true;
+        return kCCHmacAlgSHA512;
     default:
-        return false;
+        return std::nullopt;
     }
 }
 
-static Vector<uint8_t> calculateSignature(CCHmacAlgorithm algorithm, const Vector<uint8_t>& key, const CryptoOperationData& data)
+static Vector<uint8_t> calculateSignature(CCHmacAlgorithm algorithm, const Vector<uint8_t>& key, const Vector<uint8_t>& data)
 {
     size_t digestLength;
     switch (algorithm) {
@@ -84,38 +77,28 @@ static Vector<uint8_t> calculateSignature(CCHmacAlgorithm algorithm, const Vecto
     }
 
     Vector<uint8_t> result(digestLength);
-    const void* keyData = key.data() ? key.data() : reinterpret_cast<const uint8_t*>(""); // <rdar://problem/15467425> HMAC crashes when key pointer is null.
-    CCHmac(algorithm, keyData, key.size(), data.first, data.second, result.data());
+    CCHmac(algorithm, key.data(), key.size(), data.data(), data.size(), result.data());
     return result;
 }
 
-void CryptoAlgorithmHMAC::platformSign(const CryptoAlgorithmHmacParamsDeprecated& parameters, const CryptoKeyHMAC& key, const CryptoOperationData& data, VectorCallback&& callback, VoidCallback&&, ExceptionCode& ec)
+ExceptionOr<Vector<uint8_t>> CryptoAlgorithmHMAC::platformSign(const CryptoKeyHMAC& key, const Vector<uint8_t>& data)
 {
-    CCHmacAlgorithm algorithm;
-    if (!getCommonCryptoHMACAlgorithm(parameters.hash, algorithm)) {
-        ec = NOT_SUPPORTED_ERR;
-        return;
-    }
+    auto algorithm = commonCryptoHMACAlgorithm(key.hashAlgorithmIdentifier());
+    if (!algorithm)
+        return Exception { OperationError };
 
-    Vector<uint8_t> signature = calculateSignature(algorithm, key.key(), data);
-
-    callback(signature);
+    return calculateSignature(*algorithm, key.key(), data);
 }
 
-void CryptoAlgorithmHMAC::platformVerify(const CryptoAlgorithmHmacParamsDeprecated& parameters, const CryptoKeyHMAC& key, const CryptoOperationData& expectedSignature, const CryptoOperationData& data, BoolCallback&& callback, VoidCallback&&, ExceptionCode& ec)
+ExceptionOr<bool> CryptoAlgorithmHMAC::platformVerify(const CryptoKeyHMAC& key, const Vector<uint8_t>& signature, const Vector<uint8_t>& data)
 {
-    CCHmacAlgorithm algorithm;
-    if (!getCommonCryptoHMACAlgorithm(parameters.hash, algorithm)) {
-        ec = NOT_SUPPORTED_ERR;
-        return;
-    }
+    auto algorithm = commonCryptoHMACAlgorithm(key.hashAlgorithmIdentifier());
+    if (!algorithm)
+        return Exception { OperationError };
 
-    Vector<uint8_t> signature = calculateSignature(algorithm, key.key(), data);
-
+    auto expectedSignature = calculateSignature(*algorithm, key.key(), data);
     // Using a constant time comparison to prevent timing attacks.
-    bool result = signature.size() == expectedSignature.second && !constantTimeMemcmp(signature.data(), expectedSignature.first, signature.size());
-
-    callback(result);
+    return signature.size() == expectedSignature.size() && !constantTimeMemcmp(expectedSignature.data(), signature.data(), expectedSignature.size());
 }
 
 }

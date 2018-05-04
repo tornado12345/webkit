@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2008, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2006-2018 Apple Inc. All rights reserved.
  * Copyright (C) 2007 Eric Seidel <eric@webkit.org>
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,9 +27,11 @@
 #ifndef JSCallbackObject_h
 #define JSCallbackObject_h
 
+#include "JSCPoison.h"
 #include "JSObjectRef.h"
 #include "JSValueRef.h"
 #include "JSObject.h"
+#include <wtf/PoisonedUniquePtr.h>
 
 namespace JSC {
 
@@ -71,9 +73,10 @@ public:
 
     void visitChildren(SlotVisitor& visitor)
     {
-        if (!m_privateProperties)
+        JSPrivatePropertyMap* properties = m_privateProperties.get();
+        if (!properties)
             return;
-        m_privateProperties->visitChildren(visitor);
+        properties->visitChildren(visitor);
     }
 
     void* privateData;
@@ -91,33 +94,37 @@ public:
         
         void setPrivateProperty(VM& vm, JSCell* owner, const Identifier& propertyName, JSValue value)
         {
+            LockHolder locker(m_lock);
             WriteBarrier<Unknown> empty;
             m_propertyMap.add(propertyName.impl(), empty).iterator->value.set(vm, owner, value);
         }
         
         void deletePrivateProperty(const Identifier& propertyName)
         {
+            LockHolder locker(m_lock);
             m_propertyMap.remove(propertyName.impl());
         }
 
         void visitChildren(SlotVisitor& visitor)
         {
-            for (PrivatePropertyMap::iterator ptr = m_propertyMap.begin(); ptr != m_propertyMap.end(); ++ptr) {
-                if (ptr->value)
-                    visitor.append(&ptr->value);
+            LockHolder locker(m_lock);
+            for (auto& pair : m_propertyMap) {
+                if (pair.value)
+                    visitor.append(pair.value);
             }
         }
 
     private:
         typedef HashMap<RefPtr<UniquedStringImpl>, WriteBarrier<Unknown>, IdentifierRepHash> PrivatePropertyMap;
         PrivatePropertyMap m_propertyMap;
+        Lock m_lock;
     };
     std::unique_ptr<JSPrivatePropertyMap> m_privateProperties;
 };
 
     
 template <class Parent>
-class JSCallbackObject : public Parent {
+class JSCallbackObject final : public Parent {
 protected:
     JSCallbackObject(ExecState*, Structure*, JSClassRef, void* data);
     JSCallbackObject(VM&, JSClassRef, Structure*);
@@ -133,8 +140,9 @@ public:
 
     static JSCallbackObject* create(ExecState* exec, JSGlobalObject* globalObject, Structure* structure, JSClassRef classRef, void* data)
     {
+        VM& vm = exec->vm();
         ASSERT_UNUSED(globalObject, !structure->globalObject() || structure->globalObject() == globalObject);
-        JSCallbackObject* callbackObject = new (NotNull, allocateCell<JSCallbackObject>(*exec->heap())) JSCallbackObject(exec, structure, classRef, data);
+        JSCallbackObject* callbackObject = new (NotNull, allocateCell<JSCallbackObject>(vm.heap)) JSCallbackObject(exec, structure, classRef, data);
         callbackObject->finishCreation(exec);
         return callbackObject;
     }
@@ -226,7 +234,8 @@ private:
     static EncodedJSValue staticFunctionGetter(ExecState*, EncodedJSValue, PropertyName);
     static EncodedJSValue callbackGetter(ExecState*, EncodedJSValue, PropertyName);
 
-    std::unique_ptr<JSCallbackObjectData> m_callbackObjectData;
+    WTF::PoisonedUniquePtr<JSCallbackObjectPoison, JSCallbackObjectData> m_callbackObjectData;
+    PoisonedClassInfoPtr m_classInfo;
 };
 
 } // namespace JSC

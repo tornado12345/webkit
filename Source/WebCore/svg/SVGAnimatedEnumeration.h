@@ -17,8 +17,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGAnimatedEnumeration_h
-#define SVGAnimatedEnumeration_h
+#pragma once
 
 #include "SVGAnimatedEnumerationPropertyTearOff.h"
 #include "SVGAnimatedPropertyMacros.h"
@@ -33,7 +32,7 @@ typedef SVGAnimatedStaticPropertyTearOff<unsigned> SVGAnimatedEnumeration;
 DECLARE_ANIMATED_PROPERTY(SVGAnimatedEnumerationPropertyTearOff<EnumType>, EnumType, UpperProperty, LowerProperty, )
 
 #define DEFINE_ANIMATED_ENUMERATION(OwnerType, DOMAttribute, UpperProperty, LowerProperty, EnumType) \
-DEFINE_ANIMATED_PROPERTY(AnimatedEnumeration, OwnerType, DOMAttribute, DOMAttribute.localName(), UpperProperty, LowerProperty)
+DEFINE_ANIMATED_PROPERTY(AnimatedEnumeration, OwnerType, DOMAttribute, DOMAttribute->localName(), UpperProperty, LowerProperty)
 
 class SVGAnimatedEnumerationAnimator final : public SVGAnimatedTypeAnimator {
 public:
@@ -52,5 +51,3 @@ public:
 };
 
 } // namespace WebCore
-
-#endif

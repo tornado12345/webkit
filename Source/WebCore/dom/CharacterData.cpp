@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2003-2018 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -22,9 +22,9 @@
 #include "config.h"
 #include "CharacterData.h"
 
+#include "Attr.h"
 #include "ElementTraversal.h"
 #include "EventNames.h"
-#include "ExceptionCode.h"
 #include "FrameSelection.h"
 #include "InspectorInstrumentation.h"
 #include "MutationEvent.h"
@@ -33,10 +33,13 @@
 #include "ProcessingInstruction.h"
 #include "RenderText.h"
 #include "StyleInheritedData.h"
+#include <unicode/ubrk.h>
+#include <wtf/IsoMallocInlines.h>
 #include <wtf/Ref.h>
-#include <wtf/text/TextBreakIterator.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(CharacterData);
 
 static bool canUseSetDataOptimization(const CharacterData& node)
 {
@@ -66,7 +69,7 @@ void CharacterData::setData(const String& data)
 ExceptionOr<String> CharacterData::substringData(unsigned offset, unsigned count)
 {
     if (offset > length())
-        return Exception { INDEX_SIZE_ERR };
+        return Exception { IndexSizeError };
 
     return m_data.substring(offset, count);
 }
@@ -86,8 +89,8 @@ unsigned CharacterData::parserAppendData(const String& string, unsigned offset, 
     // We need at least two characters look-ahead to account for UTF-16 surrogates.
     if (characterLengthLimit < characterLength) {
         NonSharedCharacterBreakIterator it(StringView(string).substring(offset, (characterLengthLimit + 2 > characterLength) ? characterLength : characterLengthLimit + 2));
-        if (!isTextBreak(it, characterLengthLimit))
-            characterLengthLimit = textBreakPreceding(it, characterLengthLimit);
+        if (!ubrk_isBoundary(it, characterLengthLimit))
+            characterLengthLimit = ubrk_preceding(it, characterLengthLimit);
     }
 
     if (!characterLengthLimit)
@@ -102,7 +105,7 @@ unsigned CharacterData::parserAppendData(const String& string, unsigned offset, 
     if (is<Text>(*this) && parentNode())
         downcast<Text>(*this).updateRendererAfterContentChange(oldLength, 0);
 
-    notifyParentAfterChange(ContainerNode::ChildChangeSourceParser);
+    notifyParentAfterChange(ContainerNode::ChildChangeSource::Parser);
 
     return characterLengthLimit;
 }
@@ -120,7 +123,7 @@ void CharacterData::appendData(const String& data)
 ExceptionOr<void> CharacterData::insertData(unsigned offset, const String& data)
 {
     if (offset > length())
-        return Exception { INDEX_SIZE_ERR };
+        return Exception { IndexSizeError };
 
     String newStr = m_data;
     newStr.insert(data, offset);
@@ -135,7 +138,7 @@ ExceptionOr<void> CharacterData::insertData(unsigned offset, const String& data)
 ExceptionOr<void> CharacterData::deleteData(unsigned offset, unsigned count)
 {
     if (offset > length())
-        return Exception { INDEX_SIZE_ERR };
+        return Exception { IndexSizeError };
 
     count = std::min(count, length() - offset);
 
@@ -152,7 +155,7 @@ ExceptionOr<void> CharacterData::deleteData(unsigned offset, unsigned count)
 ExceptionOr<void> CharacterData::replaceData(unsigned offset, unsigned count, const String& data)
 {
     if (offset > length())
-        return Exception { INDEX_SIZE_ERR };
+        return Exception { IndexSizeError };
 
     count = std::min(count, length() - offset);
 
@@ -172,11 +175,6 @@ ExceptionOr<void> CharacterData::replaceData(unsigned offset, unsigned count, co
 String CharacterData::nodeValue() const
 {
     return m_data;
-}
-
-bool CharacterData::containsOnlyWhitespace() const
-{
-    return m_data.containsOnlyWhitespace();
 }
 
 ExceptionOr<void> CharacterData::setNodeValue(const String& nodeValue)
@@ -200,7 +198,7 @@ void CharacterData::setDataAndUpdate(const String& newData, unsigned offsetOfRep
     if (document().frame())
         document().frame()->selection().textWasReplaced(this, offsetOfReplacedData, oldLength, newLength);
 
-    notifyParentAfterChange(ContainerNode::ChildChangeSourceAPI);
+    notifyParentAfterChange(ContainerNode::ChildChangeSource::API);
 
     dispatchModifiedEvent(oldData);
 }
@@ -218,12 +216,13 @@ void CharacterData::notifyParentAfterChange(ContainerNode::ChildChangeSource sou
         ElementTraversal::nextSibling(*this),
         source
     };
+
     parentNode()->childrenChanged(change);
 }
 
 void CharacterData::dispatchModifiedEvent(const String& oldData)
 {
-    if (std::unique_ptr<MutationObserverInterestGroup> mutationRecipients = MutationObserverInterestGroup::createForCharacterDataMutation(*this))
+    if (auto mutationRecipients = MutationObserverInterestGroup::createForCharacterDataMutation(*this))
         mutationRecipients->enqueueMutationRecord(MutationRecord::createCharacterData(*this, oldData));
 
     if (!isInShadowTree()) {

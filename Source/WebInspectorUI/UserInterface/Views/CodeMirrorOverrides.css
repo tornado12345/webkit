@@ -76,7 +76,7 @@
 
     color: hsl(0, 0%, 57%);
 
-    font: 8px/13px -apple-system, Menlo, Monaco, monospace;
+    font: 8px/13px -webkit-system-font, Menlo, Monaco, monospace;
     font-variant-numeric: tabular-nums;
     text-align: right;
 }
@@ -86,13 +86,17 @@
 }
 
 .CodeMirror .CodeMirror-placeholder {
-    font-family: -apple-system, sans-serif;
+    font-family: -webkit-system-font, sans-serif;
     color: hsl(0, 0%, 65%);
     text-indent: 0;
 }
 
 .CodeMirror .cm-tab {
     position: relative;
+}
+
+.CodeMirror .cm-invalidchar {
+    display: none;
 }
 
 .show-whitespace-characters .CodeMirror .cm-tab::before {
@@ -175,5 +179,5 @@
 }
 
 .show-invalid-characters .CodeMirror .cm-invalidchar {
-    display: none;
+    display: initial;
 }

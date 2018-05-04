@@ -23,11 +23,9 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef WillChangeData_h
-#define WillChangeData_h
+#pragma once
 
 #include "CSSPropertyNames.h"
-#include "RenderStyleConstants.h"
 #include <wtf/RefCounted.h>
 #include <wtf/Vector.h>
 
@@ -128,7 +126,4 @@ private:
     bool m_canTriggerCompositingOnInline { false };
 };
 
-
 } // namespace WebCore
-
-#endif // WillChangeData_h

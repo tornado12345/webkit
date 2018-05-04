@@ -28,14 +28,14 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef RenderRubyText_h
-#define RenderRubyText_h
+#pragma once
 
 #include "RenderBlockFlow.h"
 
 namespace WebCore {
 
 class RenderRubyText final : public RenderBlockFlow {
+    WTF_MAKE_ISO_ALLOCATED(RenderRubyText);
 public:
     RenderRubyText(Element&, RenderStyle&&);
     virtual ~RenderRubyText();
@@ -61,5 +61,3 @@ private:
 } // namespace WebCore
 
 SPECIALIZE_TYPE_TRAITS_RENDER_OBJECT(RenderRubyText, isRubyText())
-
-#endif // RenderRubyText_h

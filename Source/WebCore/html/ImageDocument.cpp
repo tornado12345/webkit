@@ -28,27 +28,31 @@
 #include "CachedImage.h"
 #include "Chrome.h"
 #include "ChromeClient.h"
+#include "DOMWindow.h"
 #include "DocumentLoader.h"
 #include "EventListener.h"
 #include "EventNames.h"
-#include "ExceptionCodePlaceholder.h"
+#include "Frame.h"
 #include "FrameLoader.h"
 #include "FrameLoaderClient.h"
 #include "FrameView.h"
 #include "HTMLBodyElement.h"
+#include "HTMLHeadElement.h"
 #include "HTMLHtmlElement.h"
 #include "HTMLImageElement.h"
 #include "HTMLNames.h"
 #include "LocalizedStrings.h"
 #include "MIMETypeRegistry.h"
-#include "MainFrame.h"
 #include "MouseEvent.h"
 #include "Page.h"
 #include "RawDataDocumentParser.h"
 #include "RenderElement.h"
 #include "Settings.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(ImageDocument);
 
 using namespace HTMLNames;
 
@@ -65,7 +69,7 @@ private:
     }
 
     bool operator==(const EventListener&) const override;
-    void handleEvent(ScriptExecutionContext*, Event*) override;
+    void handleEvent(ScriptExecutionContext&, Event&) override;
 
     ImageDocument& m_document;
 };
@@ -91,6 +95,7 @@ private:
 };
 
 class ImageDocumentElement final : public HTMLImageElement {
+    WTF_MAKE_ISO_ALLOCATED_INLINE(ImageDocumentElement);
 public:
     static Ref<ImageDocumentElement> create(ImageDocument&);
 
@@ -102,7 +107,7 @@ private:
     }
 
     virtual ~ImageDocumentElement();
-    void didMoveToNewDocument(Document* oldDocument) override;
+    void didMoveToNewDocument(Document& oldDocument, Document& newDocument) override;
 
     ImageDocument* m_imageDocument;
 };
@@ -128,14 +133,14 @@ LayoutSize ImageDocument::imageSize()
 
 void ImageDocument::updateDuringParsing()
 {
-    if (!frame()->settings().areImagesEnabled())
+    if (!settings().areImagesEnabled())
         return;
 
     if (!m_imageElement)
         createDocumentStructure();
 
     if (RefPtr<SharedBuffer> buffer = loader()->mainResourceData())
-        m_imageElement->cachedImage()->addDataBuffer(*buffer);
+        m_imageElement->cachedImage()->updateBuffer(*buffer);
 
     imageUpdated();
 }
@@ -210,16 +215,20 @@ Ref<DocumentParser> ImageDocument::createParser()
 
 void ImageDocument::createDocumentStructure()
 {
-    auto rootElement = Document::createElement(htmlTag, false);
+    auto rootElement = HTMLHtmlElement::create(*this);
     appendChild(rootElement);
-    downcast<HTMLHtmlElement>(rootElement.get()).insertedByParser();
+    rootElement->insertedByParser();
 
     frame()->injectUserScripts(InjectAtDocumentStart);
 
-    auto body = Document::createElement(bodyTag, false);
+    // We need a <head> so that the call to setTitle() later on actually has an <head> to append to <title> to.
+    auto head = HTMLHeadElement::create(*this);
+    rootElement->appendChild(head);
+
+    auto body = HTMLBodyElement::create(*this);
     body->setAttribute(styleAttr, "margin: 0px");
     if (MIMETypeRegistry::isPDFMIMEType(document().loader()->responseMIMEType()))
-        downcast<HTMLBodyElement>(body.get()).setInlineStyleProperty(CSSPropertyBackgroundColor, "white", CSSPrimitiveValue::CSS_IDENT);
+        body->setInlineStyleProperty(CSSPropertyBackgroundColor, "white");
     rootElement->appendChild(body);
     
     auto imageElement = ImageDocumentElement::create(*this);
@@ -238,7 +247,7 @@ void ImageDocument::createDocumentStructure()
         processViewport(ASCIILiteral("width=device-width"), ViewportArguments::ImageDocument);
 #else
         auto listener = ImageEventListener::create(*this);
-        if (DOMWindow* window = this->domWindow())
+        if (RefPtr<DOMWindow> window = this->domWindow())
             window->addEventListener("resize", listener.copyRef(), false);
         imageElement->addEventListener("click", WTFMove(listener), false);
 #endif
@@ -280,7 +289,7 @@ float ImageDocument::scale()
     if (!m_imageElement)
         return 1;
 
-    FrameView* view = this->view();
+    RefPtr<FrameView> view = this->view();
     if (!view)
         return 1;
 
@@ -329,7 +338,7 @@ bool ImageDocument::imageFitsInWindow()
     if (!m_imageElement)
         return true;
 
-    FrameView* view = this->view();
+    RefPtr<FrameView> view = this->view();
     if (!view)
         return true;
 
@@ -397,12 +406,12 @@ void ImageDocument::imageClicked(int x, int y)
     }
 }
 
-void ImageEventListener::handleEvent(ScriptExecutionContext*, Event* event)
+void ImageEventListener::handleEvent(ScriptExecutionContext&, Event& event)
 {
-    if (event->type() == eventNames().resizeEvent)
+    if (event.type() == eventNames().resizeEvent)
         m_document.windowSizeChanged();
-    else if (event->type() == eventNames().clickEvent && is<MouseEvent>(*event)) {
-        MouseEvent& mouseEvent = downcast<MouseEvent>(*event);
+    else if (event.type() == eventNames().clickEvent && is<MouseEvent>(event)) {
+        MouseEvent& mouseEvent = downcast<MouseEvent>(event);
         m_document.imageClicked(mouseEvent.offsetX(), mouseEvent.offsetY());
     }
 }
@@ -422,13 +431,13 @@ ImageDocumentElement::~ImageDocumentElement()
         m_imageDocument->disconnectImageElement();
 }
 
-void ImageDocumentElement::didMoveToNewDocument(Document* oldDocument)
+void ImageDocumentElement::didMoveToNewDocument(Document& oldDocument, Document& newDocument)
 {
     if (m_imageDocument) {
         m_imageDocument->disconnectImageElement();
         m_imageDocument = nullptr;
     }
-    HTMLImageElement::didMoveToNewDocument(oldDocument);
+    HTMLImageElement::didMoveToNewDocument(oldDocument, newDocument);
 }
 
 }

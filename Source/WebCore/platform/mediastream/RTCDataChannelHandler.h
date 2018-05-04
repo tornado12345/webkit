@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2012 Google Inc. All rights reserved.
+ * Copyright (C) 2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -22,39 +23,39 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef RTCDataChannelHandler_h
-#define RTCDataChannelHandler_h
+#pragma once
 
 #if ENABLE(WEB_RTC)
 
+#include <wtf/Optional.h>
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
+
+struct RTCDataChannelInit {
+    std::optional<bool> ordered;
+    std::optional<unsigned short> maxPacketLifeTime;
+    std::optional<unsigned short> maxRetransmits;
+    String protocol;
+    std::optional<bool> negotiated;
+    std::optional<unsigned short> id;
+};
 
 class RTCDataChannelHandlerClient;
 
 class RTCDataChannelHandler {
 public:
-    virtual ~RTCDataChannelHandler() { }
+    virtual ~RTCDataChannelHandler() = default;
 
-    virtual void setClient(RTCDataChannelHandlerClient*) = 0;
-
-    virtual String label() = 0;
-    virtual bool ordered() = 0;
-    virtual unsigned short maxRetransmitTime() = 0;
-    virtual unsigned short maxRetransmits() = 0;
-    virtual String protocol() = 0;
-    virtual bool negotiated() = 0;
-    virtual unsigned short id() = 0;
-    virtual unsigned long bufferedAmount() = 0;
+    virtual void setClient(RTCDataChannelHandlerClient&) = 0;
 
     virtual bool sendStringData(const String&) = 0;
     virtual bool sendRawData(const char*, size_t) = 0;
     virtual void close() = 0;
+
+    virtual size_t bufferedAmount() const = 0;
 };
 
 } // namespace WebCore
 
 #endif // ENABLE(WEB_RTC)
-
-#endif // RTCDataChannelHandler_h

@@ -28,13 +28,12 @@
 
 #if ENABLE(DATE_AND_TIME_INPUT_TYPES)
 
-#include "Chrome.h"
 #include "HTMLDivElement.h"
 #include "HTMLInputElement.h"
 #include "Page.h"
 #include "RenderElement.h"
-#include "ScriptController.h"
 #include "ShadowRoot.h"
+#include "UserGestureIndicator.h"
 #include <wtf/NeverDestroyed.h>
 
 namespace WebCore {
@@ -46,7 +45,7 @@ BaseChooserOnlyDateAndTimeInputType::~BaseChooserOnlyDateAndTimeInputType()
 
 void BaseChooserOnlyDateAndTimeInputType::handleDOMActivateEvent(Event&)
 {
-    if (element().isDisabledOrReadOnly() || !element().renderer() || !ScriptController::processingUserGesture())
+    if (element().isDisabledOrReadOnly() || !element().renderer() || !UserGestureIndicator::processingUserGesture())
         return;
 
     if (m_dateTimeChooser)
@@ -70,7 +69,7 @@ void BaseChooserOnlyDateAndTimeInputType::createShadowSubtree()
 
 void BaseChooserOnlyDateAndTimeInputType::updateAppearance()
 {
-    Node* node = element().userAgentShadowRoot()->firstChild();
+    RefPtr<Node> node = element().userAgentShadowRoot()->firstChild();
     if (!is<HTMLElement>(node))
         return;
     String displayValue = visibleValue();

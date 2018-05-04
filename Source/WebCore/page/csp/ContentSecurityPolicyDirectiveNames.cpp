@@ -38,6 +38,9 @@ const char* const fontSrc = "font-src";
 const char* const formAction = "form-action";
 const char* const frameAncestors = "frame-ancestors";
 const char* const frameSrc = "frame-src";
+#if ENABLE(APPLICATION_MANIFEST)
+const char* const manifestSrc = "manifest-src";
+#endif
 const char* const imgSrc = "img-src";
 const char* const mediaSrc = "media-src";
 const char* const objectSrc = "object-src";
@@ -47,6 +50,7 @@ const char* const sandbox = "sandbox";
 const char* const scriptSrc = "script-src";
 const char* const styleSrc = "style-src";
 const char* const upgradeInsecureRequests = "upgrade-insecure-requests";
+const char* const blockAllMixedContent = "block-all-mixed-content";
     
 } // namespace ContentSecurityPolicyDirectiveNames
 

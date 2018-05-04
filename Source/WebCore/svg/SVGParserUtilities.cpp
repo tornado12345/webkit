@@ -2,7 +2,7 @@
  * Copyright (C) 2002, 2003 The Karbon Developers
  * Copyright (C) 2006 Alexander Kellett <lypanov@kde.org>
  * Copyright (C) 2006, 2007 Rob Buis <buis@kde.org>
- * Copyright (C) 2007, 2009, 2013 Apple Inc. All rights reserved.
+ * Copyright (C) 2007-2018 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -25,7 +25,7 @@
 
 #include "Document.h"
 #include "FloatRect.h"
-#include "SVGPointList.h"
+#include "SVGPointListValues.h"
 #include <limits>
 #include <wtf/ASCIICType.h>
 #include <wtf/text/StringView.h>
@@ -62,13 +62,12 @@ template <typename CharacterType, typename FloatType> static bool genericParseNu
         sign = -1;
     } 
     
-    if (ptr == end || ((*ptr < '0' || *ptr > '9') && *ptr != '.'))
-        // The first character of a number must be one of [0-9+-.]
+    if (ptr == end || (!isASCIIDigit(*ptr) && *ptr != '.'))
         return false;
 
     // read the integer part, build right-to-left
     const CharacterType* ptrStartIntPart = ptr;
-    while (ptr < end && *ptr >= '0' && *ptr <= '9')
+    while (ptr < end && isASCIIDigit(*ptr))
         ++ptr; // Advance to first non-digit.
 
     if (ptr != ptrStartIntPart) {
@@ -87,10 +86,10 @@ template <typename CharacterType, typename FloatType> static bool genericParseNu
         ptr++;
         
         // There must be a least one digit following the .
-        if (ptr >= end || *ptr < '0' || *ptr > '9')
+        if (ptr >= end || !isASCIIDigit(*ptr))
             return false;
         
-        while (ptr < end && *ptr >= '0' && *ptr <= '9')
+        while (ptr < end && isASCIIDigit(*ptr))
             decimal += (*(ptr++) - '0') * (frac *= static_cast<FloatType>(0.1));
     }
 
@@ -108,10 +107,10 @@ template <typename CharacterType, typename FloatType> static bool genericParseNu
         }
         
         // There must be an exponent
-        if (ptr >= end || *ptr < '0' || *ptr > '9')
+        if (ptr >= end || !isASCIIDigit(*ptr))
             return false;
 
-        while (ptr < end && *ptr >= '0' && *ptr <= '9') {
+        while (ptr < end && isASCIIDigit(*ptr)) {
             exponent *= static_cast<FloatType>(10);
             exponent += *ptr - '0';
             ptr++;
@@ -220,6 +219,31 @@ bool parseNumberOptionalNumber(const String& s, float& x, float& y)
     return cur == end;
 }
 
+bool parsePoint(const String& s, FloatPoint& point)
+{
+    if (s.isEmpty())
+        return false;
+    auto upconvertedCharacters = StringView(s).upconvertedCharacters();
+    const UChar* cur = upconvertedCharacters;
+    const UChar* end = cur + s.length();
+
+    if (!skipOptionalSVGSpaces(cur, end))
+        return false;
+
+    float x = 0;
+    if (!parseNumber(cur, end, x))
+        return false;
+
+    float y = 0;
+    if (!parseNumber(cur, end, y))
+        return false;
+
+    point = FloatPoint(x, y);
+
+    // Disallow anything except spaces at the end.
+    return !skipOptionalSVGSpaces(cur, end);
+}
+
 bool parseRect(const String& string, FloatRect& rect)
 {
     auto upconvertedCharacters = StringView(string).upconvertedCharacters();
@@ -236,7 +260,7 @@ bool parseRect(const String& string, FloatRect& rect)
     return valid;
 }
 
-bool pointsListFromSVGData(SVGPointList& pointsList, const String& points)
+bool pointsListFromSVGData(SVGPointListValues& pointsList, const String& points)
 {
     if (points.isEmpty())
         return true;

@@ -22,8 +22,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGRenderingContext_h
-#define SVGRenderingContext_h
+#pragma once
 
 #include "ImageBuffer.h"
 #include "PaintInfo.h"
@@ -31,9 +30,9 @@
 namespace WebCore {
 
 class AffineTransform;
+class FloatRect;
 class RenderElement;
 class RenderObject;
-class FloatRect;
 class RenderSVGResourceFilter;
 
 // SVGRenderingContext 
@@ -46,20 +45,10 @@ public:
 
     // Does not start rendering.
     SVGRenderingContext()
-        : m_renderingFlags(0)
-        , m_renderer(nullptr)
-        , m_paintInfo(nullptr)
-        , m_savedContext(nullptr)
-        , m_filter(nullptr)
     {
     }
 
     SVGRenderingContext(RenderElement& object, PaintInfo& paintinfo, NeedsGraphicsContextSave needsGraphicsContextSave = DontSaveGraphicsContext)
-        : m_renderingFlags(0)
-        , m_renderer(nullptr)
-        , m_paintInfo(nullptr)
-        , m_savedContext(nullptr)
-        , m_filter(nullptr)
     {
         prepareToRenderSVGContent(object, paintinfo, needsGraphicsContextSave);
     }
@@ -103,14 +92,12 @@ private:
     // List of those flags which require actions during the destructor.
     const static int ActionsNeeded = RestoreGraphicsContext | EndOpacityLayer | EndShadowLayer | EndFilterLayer;
 
-    int m_renderingFlags;
-    RenderElement* m_renderer;
-    PaintInfo* m_paintInfo;
-    GraphicsContext* m_savedContext;
+    RenderElement* m_renderer { nullptr };
+    PaintInfo* m_paintInfo { nullptr };
+    GraphicsContext* m_savedContext  { nullptr };
+    RenderSVGResourceFilter* m_filter  { nullptr };
     LayoutRect m_savedPaintRect;
-    RenderSVGResourceFilter* m_filter;
+    int m_renderingFlags { 0 };
 };
 
 } // namespace WebCore
-
-#endif // SVGRenderingContext_h

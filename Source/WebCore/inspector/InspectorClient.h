@@ -41,7 +41,7 @@ class Page;
 
 class InspectorClient {
 public:
-    virtual ~InspectorClient() { }
+    virtual ~InspectorClient() = default;
 
     virtual void inspectedPageDestroyed() = 0;
 
@@ -60,8 +60,6 @@ public:
     virtual void showPaintRect(const FloatRect&) { }
     virtual void didSetSearchingForNode(bool) { }
     virtual void elementSelectionChanged(bool) { }
-
-    virtual bool handleJavaScriptDialog(bool, const String*) { return false; }
 
     WEBCORE_EXPORT static void doDispatchMessageOnFrontendPage(Page* frontendPage, const String& message);
 };

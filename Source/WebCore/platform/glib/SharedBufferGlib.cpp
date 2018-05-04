@@ -25,26 +25,35 @@
 
 #include <glib.h>
 
-
 namespace WebCore {
+
+SharedBuffer::SharedBuffer(GBytes* bytes)
+{
+    ASSERT(bytes);
+    m_size = g_bytes_get_size(bytes);
+    m_segments.append({ 0, DataSegment::create(GRefPtr<GBytes>(bytes)) });
+}
+
+Ref<SharedBuffer> SharedBuffer::create(GBytes* bytes)
+{
+    return adoptRef(*new SharedBuffer(bytes));
+}
 
 RefPtr<SharedBuffer> SharedBuffer::createFromReadingFile(const String& filePath)
 {
     if (filePath.isEmpty())
-        return 0;
+        return nullptr;
 
-    CString filename = fileSystemRepresentation(filePath);
+    CString filename = FileSystem::fileSystemRepresentation(filePath);
     GUniqueOutPtr<gchar> contents;
     gsize size;
     GUniqueOutPtr<GError> error;
     if (!g_file_get_contents(filename.data(), &contents.outPtr(), &size, &error.outPtr())) {
-        LOG_ERROR("Failed to fully read contents of file %s - %s", filenameForDisplay(filePath).utf8().data(), error->message);
-        return 0;
+        LOG_ERROR("Failed to fully read contents of file %s - %s", FileSystem::filenameForDisplay(filePath).utf8().data(), error->message);
+        return nullptr;
     }
 
-    RefPtr<SharedBuffer> result = SharedBuffer::create(contents.get(), size);
-
-    return result.release();
+    return SharedBuffer::create(contents.get(), size);
 }
 
 } // namespace WebCore

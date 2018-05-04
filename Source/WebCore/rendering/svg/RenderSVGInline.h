@@ -18,8 +18,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef RenderSVGInline_h
-#define RenderSVGInline_h
+#pragma once
 
 #include "RenderInline.h"
 #include "SVGGraphicsElement.h"
@@ -27,6 +26,7 @@
 namespace WebCore {
 
 class RenderSVGInline : public RenderInline {
+    WTF_MAKE_ISO_ALLOCATED(RenderSVGInline);
 public:
     RenderSVGInline(SVGGraphicsElement&, RenderStyle&&);
 
@@ -60,13 +60,8 @@ private:
 
     void willBeDestroyed() final;
     void styleDidChange(StyleDifference, const RenderStyle* oldStyle) final;
-
-    void addChild(RenderObject* child, RenderObject* beforeChild = nullptr) final;
-    void removeChild(RenderObject&) final;
 };
 
 } // namespace WebCore
 
 SPECIALIZE_TYPE_TRAITS_RENDER_OBJECT(RenderSVGInline, isSVGInline())
-
-#endif // !RenderSVGTSpan_H

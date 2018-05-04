@@ -18,8 +18,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGCircleElement_h
-#define SVGCircleElement_h
+#pragma once
 
 #include "SVGAnimatedBoolean.h"
 #include "SVGAnimatedLength.h"
@@ -28,8 +27,8 @@
 
 namespace WebCore {
 
-class SVGCircleElement final : public SVGGraphicsElement,
-                               public SVGExternalResourcesRequired {
+class SVGCircleElement final : public SVGGraphicsElement, public SVGExternalResourcesRequired {
+    WTF_MAKE_ISO_ALLOCATED(SVGCircleElement);
 public:
     static Ref<SVGCircleElement> create(const QualifiedName&, Document&);
 
@@ -54,5 +53,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif // SVGCircleElement_h

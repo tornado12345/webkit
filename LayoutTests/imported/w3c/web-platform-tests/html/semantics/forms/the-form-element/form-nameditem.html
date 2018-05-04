@@ -4,9 +4,8 @@
 <script src="/resources/testharness.js"></script>
 <script src="/resources/testharnessreport.js"></script>
 <div id=log></div>
-<!--  XXX Nothing tests id attributes yet.  -->
-<!--  XXX Keygen.  -->
-<!--  XXX We also need tests for moving inputs and forms in the DOM.  -->
+<!-- XXX Nothing tests id attributes yet. -->
+<!-- XXX We also need tests for moving inputs and forms in the DOM. -->
 <form>
 <input type=button name=button>
 <input type=radio name=radio value=x>
@@ -49,27 +48,27 @@
 </form>
 
 <form>
-<!--  EventTarget  -->
+<!-- EventTarget -->
 <input type=radio name=addEventListener>
 <input type=radio name=removeEventListener>
 <input type=radio name=dispatchEvent>
 
-<!--  Node  -->
+<!-- Node -->
 <input type=radio name=nodeType>
 <input type=radio name=nodeName>
 <input type=radio name=ownerDocument>
 
-<!--  Element  -->
+<!-- Element -->
 <input type=radio name=namespaceURI>
 <input type=radio name=prefix>
 <input type=radio name=localName>
 
-<!--  HTMLElement  -->
+<!-- HTMLElement -->
 <input type=radio name=title>
 <input type=radio name=lang>
 <input type=radio name=dir>
 
-<!--  HTMLFormElement  -->
+<!-- HTMLFormElement -->
 <input type=radio name=acceptCharset>
 <input type=radio name=action>
 <input type=radio name=autocomplete>
@@ -87,9 +86,9 @@
 </form>
 
 <img name=x>
-<form></form><!--  no child nodes  -->
+<form></form><!-- no child nodes -->
 <img name=y>
-<form><!--  a child node  --></form>
+<form><!-- a child node --></form>
 <img name=z>
 
 <input form=a name=b>
@@ -327,4 +326,93 @@ test(function() {
   assert_equals(form["new-name2"], 5);
 }, 'Trying to set a non-configurable expando that shadows a named property that gets added later');
 
+test(function() {
+  var form = document.getElementsByTagName("form")[1];
+
+  var i1 = document.createElement("input");
+  i1.name = "past-name1";
+  i1.id = "past-id1"
+
+  assert_equals(form["past-name1"], undefined);
+  assert_equals(form["past-id1"], undefined);
+  form.appendChild(i1);
+  assert_equals(form["past-name1"], i1);
+  assert_equals(form["past-id1"], i1);
+
+  i1.name = "twiddled-name1";
+  i1.id = "twiddled-id1";
+  assert_equals(form["past-name1"], i1);
+  assert_equals(form["twiddled-name1"], i1);
+  assert_equals(form["past-id1"], i1);
+  assert_equals(form["twiddled-id1"], i1);
+
+  i1.name = "twiddled-name2";
+  i1.id = "twiddled-id2";
+  assert_equals(form["past-name1"], i1);
+  assert_equals(form["twiddled-name1"], i1);
+  assert_equals(form["twiddled-name2"], i1);
+  assert_equals(form["past-id1"], i1);
+  assert_equals(form["twiddled-id1"], i1);
+  assert_equals(form["twiddled-id2"], i1);
+
+  i1.removeAttribute("id");
+  i1.removeAttribute("name");
+  assert_equals(form["past-name1"], i1);
+  assert_equals(form["twiddled-name1"], i1);
+  assert_equals(form["twiddled-name2"], i1);
+  assert_equals(form["past-id1"], i1);
+  assert_equals(form["twiddled-id1"], i1);
+  assert_equals(form["twiddled-id2"], i1);
+
+  i1.remove();
+  assert_equals(form["past-name1"], undefined);
+  assert_equals(form["twiddled-name1"], undefined);
+  assert_equals(form["twiddled-name2"], undefined);
+  assert_equals(form["past-id1"], undefined);
+  assert_equals(form["twiddled-id1"], undefined);
+  assert_equals(form["twiddled-id2"], undefined);
+
+  var i2 = document.createElement("input");
+  i2.name = "past-name2";
+  i2.id = "past-id2";
+
+  assert_equals(form["past-name2"], undefined);
+  assert_equals(form["past-id2"], undefined);
+  form.appendChild(i2);
+  assert_equals(form["past-name2"], i2);
+  assert_equals(form["past-id2"], i2);
+
+  i2.name = "twiddled-name3";
+  i2.id = "twiddled-id3";
+  assert_equals(form["past-name2"], i2);
+  assert_equals(form["twiddled-name3"], i2);
+  assert_equals(form["past-id2"], i2);
+  assert_equals(form["twiddled-id3"], i2);
+
+  i2.name = "twiddled-name4";
+  i2.id = "twiddled-id4";
+  assert_equals(form["past-name2"], i2);
+  assert_equals(form["twiddled-name3"], i2);
+  assert_equals(form["twiddled-name4"], i2);
+  assert_equals(form["past-id2"], i2);
+  assert_equals(form["twiddled-id3"], i2);
+  assert_equals(form["twiddled-id4"], i2);
+
+  i2.removeAttribute("id");
+  i2.removeAttribute("name");
+  assert_equals(form["past-name2"], i2);
+  assert_equals(form["twiddled-name3"], i2);
+  assert_equals(form["twiddled-name4"], i2);
+  assert_equals(form["past-id2"], i2);
+  assert_equals(form["twiddled-id3"], i2);
+  assert_equals(form["twiddled-id4"], i2);
+
+  i2.setAttribute("form", "c");
+  assert_equals(form["past-name2"], undefined);
+  assert_equals(form["twiddled-name3"], undefined);
+  assert_equals(form["twiddled-name4"], undefined);
+  assert_equals(form["past-id2"], undefined);
+  assert_equals(form["twiddled-id3"], undefined);
+  assert_equals(form["twiddled-id4"], undefined);
+}, "Past names map should work correctly");
 </script>

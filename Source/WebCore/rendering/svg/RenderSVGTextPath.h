@@ -18,14 +18,14 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef RenderSVGTextPath_h
-#define RenderSVGTextPath_h
+#pragma once
 
 #include "RenderSVGInline.h"
 
 namespace WebCore {
 
 class RenderSVGTextPath final : public RenderSVGInline {
+    WTF_MAKE_ISO_ALLOCATED(RenderSVGTextPath);
 public:
     RenderSVGTextPath(SVGTextPathElement&, RenderStyle&&);
 
@@ -48,5 +48,3 @@ private:
 } // namespace WebCore
 
 SPECIALIZE_TYPE_TRAITS_RENDER_OBJECT(RenderSVGTextPath, isSVGTextPath())
-
-#endif // RenderSVGTextPath_h

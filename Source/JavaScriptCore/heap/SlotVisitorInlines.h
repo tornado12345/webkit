@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012, 2013, 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2012-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,87 +31,139 @@
 
 namespace JSC {
 
-template<typename T>
-inline void SlotVisitor::appendUnbarrieredPointer(T** slot)
+ALWAYS_INLINE void SlotVisitor::appendUnbarriered(JSValue* slot, size_t count)
 {
-    ASSERT(slot);
-    append(*slot);
+    for (size_t i = count; i--;)
+        appendUnbarriered(slot[i]);
+}
+
+ALWAYS_INLINE void SlotVisitor::appendUnbarriered(JSCell* cell)
+{
+    // This needs to be written in a very specific way to ensure that it gets inlined
+    // properly. In particular, it appears that using templates here breaks ALWAYS_INLINE.
+    
+    if (!cell)
+        return;
+    
+    Dependency dependency;
+    if (UNLIKELY(cell->isLargeAllocation())) {
+        if (LIKELY(cell->largeAllocation().isMarked())) {
+            if (LIKELY(!m_heapSnapshotBuilder))
+                return;
+        }
+    } else {
+        MarkedBlock& block = cell->markedBlock();
+        dependency = block.aboutToMark(m_markingVersion);
+        if (LIKELY(block.isMarked(cell, dependency))) {
+            if (LIKELY(!m_heapSnapshotBuilder))
+                return;
+        }
+    }
+    
+    appendSlow(cell, dependency);
+}
+
+ALWAYS_INLINE void SlotVisitor::appendUnbarriered(JSValue value)
+{
+    if (value.isCell())
+        appendUnbarriered(value.asCell());
+}
+
+ALWAYS_INLINE void SlotVisitor::appendHiddenUnbarriered(JSValue value)
+{
+    if (value.isCell())
+        appendHiddenUnbarriered(value.asCell());
+}
+
+ALWAYS_INLINE void SlotVisitor::appendHiddenUnbarriered(JSCell* cell)
+{
+    // This needs to be written in a very specific way to ensure that it gets inlined
+    // properly. In particular, it appears that using templates here breaks ALWAYS_INLINE.
+    
+    if (!cell)
+        return;
+    
+    Dependency dependency;
+    if (UNLIKELY(cell->isLargeAllocation())) {
+        if (LIKELY(cell->largeAllocation().isMarked()))
+            return;
+    } else {
+        MarkedBlock& block = cell->markedBlock();
+        dependency = block.aboutToMark(m_markingVersion);
+        if (LIKELY(block.isMarked(cell, dependency)))
+            return;
+    }
+    
+    appendHiddenSlow(cell, dependency);
 }
 
 template<typename T>
-inline void SlotVisitor::appendUnbarrieredReadOnlyPointer(T* cell)
+ALWAYS_INLINE void SlotVisitor::append(const Weak<T>& weak)
 {
-    append(cell);
+    appendUnbarriered(weak.get());
 }
 
-inline void SlotVisitor::appendUnbarrieredValue(JSValue* slot)
+template<typename T, typename Traits>
+ALWAYS_INLINE void SlotVisitor::append(const WriteBarrierBase<T, Traits>& slot)
 {
-    ASSERT(slot);
-    append(*slot);
+    appendUnbarriered(slot.get());
 }
 
-inline void SlotVisitor::appendUnbarrieredReadOnlyValue(JSValue value)
+template<typename T, typename Traits>
+ALWAYS_INLINE void SlotVisitor::appendHidden(const WriteBarrierBase<T, Traits>& slot)
 {
-    append(value);
-}
-
-template<typename T>
-inline void SlotVisitor::appendUnbarrieredWeak(Weak<T>* weak)
-{
-    ASSERT(weak);
-    append(weak->get());
-}
-
-template<typename T>
-inline void SlotVisitor::append(WriteBarrierBase<T>* slot)
-{
-    append(slot->get());
-}
-
-template<typename T>
-inline void SlotVisitor::appendHidden(WriteBarrierBase<T>* slot)
-{
-    appendHidden(slot->get());
+    appendHiddenUnbarriered(slot.get());
 }
 
 template<typename Iterator>
-inline void SlotVisitor::append(Iterator begin, Iterator end)
+ALWAYS_INLINE void SlotVisitor::append(Iterator begin, Iterator end)
 {
     for (auto it = begin; it != end; ++it)
-        append(&*it);
+        append(*it);
 }
 
-inline void SlotVisitor::appendValues(WriteBarrierBase<Unknown>* barriers, size_t count)
+ALWAYS_INLINE void SlotVisitor::appendValues(const WriteBarrierBase<Unknown>* barriers, size_t count)
 {
     for (size_t i = 0; i < count; ++i)
-        append(&barriers[i]);
+        append(barriers[i]);
 }
 
-inline void SlotVisitor::appendValuesHidden(WriteBarrierBase<Unknown>* barriers, size_t count)
+ALWAYS_INLINE void SlotVisitor::appendValuesHidden(const WriteBarrierBase<Unknown>* barriers, size_t count)
 {
     for (size_t i = 0; i < count; ++i)
-        appendHidden(&barriers[i]);
+        appendHidden(barriers[i]);
 }
 
-inline void SlotVisitor::addWeakReferenceHarvester(WeakReferenceHarvester* weakReferenceHarvester)
+inline bool SlotVisitor::addOpaqueRoot(void* ptr)
 {
-    m_heap.m_weakReferenceHarvesters.addThreadSafe(weakReferenceHarvester);
+    if (!ptr)
+        return false;
+    if (m_ignoreNewOpaqueRoots)
+        return false;
+    if (!heap()->m_opaqueRoots.add(ptr))
+        return false;
+    m_visitCount++;
+    return true;
 }
 
-inline void SlotVisitor::addUnconditionalFinalizer(UnconditionalFinalizer* unconditionalFinalizer)
+inline bool SlotVisitor::containsOpaqueRoot(void* ptr) const
 {
-    m_heap.m_unconditionalFinalizers.addThreadSafe(unconditionalFinalizer);
+    return heap()->m_opaqueRoots.contains(ptr);
 }
 
 inline void SlotVisitor::reportExtraMemoryVisited(size_t size)
 {
-    heap()->reportExtraMemoryVisited(m_oldCellState, size);
+    if (m_isFirstVisit) {
+        heap()->reportExtraMemoryVisited(size);
+        m_nonCellVisitCount += size;
+    }
 }
 
 #if ENABLE(RESOURCE_USAGE)
 inline void SlotVisitor::reportExternalMemoryVisited(size_t size)
 {
-    heap()->reportExternalMemoryVisited(m_oldCellState, size);
+    if (m_isFirstVisit)
+        heap()->reportExternalMemoryVisited(size);
 }
 #endif
 
@@ -122,12 +174,22 @@ inline Heap* SlotVisitor::heap() const
 
 inline VM& SlotVisitor::vm()
 {
-    return *m_heap.m_vm;
+    return *m_heap.vm();
 }
 
 inline const VM& SlotVisitor::vm() const
 {
-    return *m_heap.m_vm;
+    return *m_heap.vm();
+}
+
+template<typename Func>
+IterationStatus SlotVisitor::forEachMarkStack(const Func& func)
+{
+    if (func(m_collectorStack) == IterationStatus::Done)
+        return IterationStatus::Done;
+    if (func(m_mutatorStack) == IterationStatus::Done)
+        return IterationStatus::Done;
+    return IterationStatus::Continue;
 }
 
 } // namespace JSC

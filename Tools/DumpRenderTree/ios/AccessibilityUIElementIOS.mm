@@ -99,6 +99,10 @@ AccessibilityUIElement::~AccessibilityUIElement()
 - (NSString *)accessibilityExpandedTextValue;
 - (NSString *)accessibilitySortDirection;
 - (BOOL)accessibilityIsExpanded;
+- (NSUInteger)accessibilityBlockquoteLevel;
+- (NSArray *)accessibilityFindMatchingObjects:(NSDictionary *)parameters;
+- (NSArray *)accessibilitySpeechHint;
+- (BOOL)_accessibilityIsStrongPasswordField;
 
 // TextMarker related
 - (NSArray *)textMarkerRange;
@@ -111,6 +115,7 @@ AccessibilityUIElement::~AccessibilityUIElement()
 - (id)accessibilityObjectForTextMarker:(id)marker;
 - (id)lineStartMarkerForMarker:(id)marker;
 - (id)lineEndMarkerForMarker:(id)marker;
+- (NSArray *)textMarkerRangeFromMarkers:(NSArray *)markers withText:(NSString *)text;
 @end
 
 @interface NSObject (WebAccessibilityObjectWrapperPrivate)
@@ -354,6 +359,11 @@ void AccessibilityUIElement::decreaseTextSelection()
     [m_element accessibilityModifySelection:WebCore::CharacterGranularity increase:NO];    
 }
 
+JSStringRef AccessibilityUIElement::speakAs()
+{
+    return [[[m_element accessibilitySpeechHint] componentsJoinedByString:@", "] createJSStringRef];
+}
+
 JSStringRef AccessibilityUIElement::stringForSelection() 
 { 
     NSString *stringForRange = [m_element selectionRangeString];
@@ -533,6 +543,16 @@ JSStringRef AccessibilityUIElement::stringForTextMarkerRange(AccessibilityTextMa
     return [[m_element stringForTextMarkers:textMarkers] createJSStringRef];
 }
 
+JSStringRef AccessibilityUIElement::attributedStringForTextMarkerRange(AccessibilityTextMarkerRange*)
+{
+    return nullptr;
+}
+
+JSStringRef AccessibilityUIElement::attributedStringForTextMarkerRangeWithOptions(AccessibilityTextMarkerRange*, bool)
+{
+    return nullptr;
+}
+
 bool AccessibilityUIElement::attributedStringForTextMarkerRangeContainsAttribute(JSStringRef, AccessibilityTextMarkerRange*)
 {
     return false;
@@ -618,6 +638,16 @@ AccessibilityTextMarker AccessibilityUIElement::nextSentenceEndTextMarkerForText
     return nullptr;
 }
 
+AccessibilityTextMarkerRange AccessibilityUIElement::textMarkerRangeMatchesTextNearMarkers(JSStringRef text, AccessibilityTextMarker* startMarker, AccessibilityTextMarker* endMarker)
+{
+    NSArray *textMarkers = nil;
+    if (startMarker->platformTextMarker() && endMarker->platformTextMarker())
+        textMarkers = [NSArray arrayWithObjects:(id)startMarker->platformTextMarker(), (id)endMarker->platformTextMarker(), nil];
+    id textMarkerRange = [m_element textMarkerRangeFromMarkers:textMarkers withText:[NSString stringWithJSStringRef:text]];
+    return AccessibilityTextMarkerRange(textMarkerRange);
+}
+
+
 #endif // SUPPORTS_AX_TEXTMARKERS && PLATFORM(IOS)
 
 #pragma mark Unused
@@ -686,6 +716,8 @@ bool AccessibilityUIElement::boolAttributeValue(JSStringRef attribute)
 {
     if (JSStringIsEqualToUTF8CString(attribute, "AXHasTouchEventListener"))
         return [m_element _accessibilityHasTouchEventListener];
+    if (JSStringIsEqualToUTF8CString(attribute, "AXIsStrongPasswordField"))
+        return [m_element _accessibilityIsStrongPasswordField];
     return false;
 }
 
@@ -1075,6 +1107,18 @@ bool AccessibilityUIElement::isIgnored() const
     return ![m_element isAccessibilityElement];
 }
 
+bool AccessibilityUIElement::isSingleLine() const
+{
+    // FIXME: implement
+    return false;
+}
+
+bool AccessibilityUIElement::isMultiLine() const
+{
+    // FIXME: implement
+    return false;
+}
+
 bool AccessibilityUIElement::hasPopup() const
 {
     // FIXME: implement
@@ -1107,10 +1151,17 @@ unsigned AccessibilityUIElement::uiElementCountForSearchPredicate(JSContextRef c
     return 0;
 }
 
-AccessibilityUIElement AccessibilityUIElement::uiElementForSearchPredicate(JSContextRef context, AccessibilityUIElement* startElement, bool isDirectionNext, JSValueRef searchKey, JSStringRef searchText, bool visibleOnly, bool immediateDescendantsOnly)
+AccessibilityUIElement AccessibilityUIElement::uiElementForSearchPredicate(JSContextRef context, AccessibilityUIElement *startElement, bool isDirectionNext, JSValueRef searchKey, JSStringRef searchText, bool visibleOnly, bool immediateDescendantsOnly)
 {
-    // FIXME: implement
-    return 0;
+    NSDictionary *parameterizedAttribute = searchPredicateParameterizedAttributeForSearchCriteria(context, startElement, isDirectionNext, 5, searchKey, searchText, visibleOnly, immediateDescendantsOnly);
+    id value = [m_element accessibilityFindMatchingObjects:parameterizedAttribute];
+    if (![value isKindOfClass:[NSArray class]])
+        return nullptr;
+    for (id element in value) {
+        if ([element isAccessibilityElement])
+            return AccessibilityUIElement(element);
+    }
+    return AccessibilityUIElement([value firstObject]);
 }
 
 JSStringRef AccessibilityUIElement::selectTextWithCriteria(JSContextRef context, JSStringRef ambiguityResolution, JSValueRef searchStrings, JSStringRef replacementString, JSStringRef activity)
@@ -1130,6 +1181,8 @@ double AccessibilityUIElement::numberAttributeValue(JSStringRef attribute)
         return [m_element accessibilityARIAColumnIndex];
     if (JSStringIsEqualToUTF8CString(attribute, "AXARIARowIndex"))
         return [m_element accessibilityARIARowIndex];
+    if (JSStringIsEqualToUTF8CString(attribute, "AXBlockquoteLevel"))
+        return [m_element accessibilityBlockquoteLevel];
     
     return 0;
 }

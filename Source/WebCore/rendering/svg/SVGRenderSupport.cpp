@@ -370,7 +370,7 @@ void SVGRenderSupport::intersectRepaintRectWithShadows(const RenderElement& rend
     if (localToRootTransform.isIdentity())
         return;
 
-    AffineTransform rootToLocalTransform = localToRootTransform.inverse().valueOr(AffineTransform());
+    AffineTransform rootToLocalTransform = localToRootTransform.inverse().value_or(AffineTransform());
     repaintRect = rootToLocalTransform.mapRect(repaintRect);
 }
 
@@ -427,13 +427,13 @@ void SVGRenderSupport::applyStrokeStyleToContext(GraphicsContext* context, const
     const SVGRenderStyle& svgStyle = style.svgStyle();
 
     SVGLengthContext lengthContext(downcast<SVGElement>(renderer.element()));
-    context->setStrokeThickness(lengthContext.valueForLength(svgStyle.strokeWidth()));
-    context->setLineCap(svgStyle.capStyle());
-    context->setLineJoin(svgStyle.joinStyle());
-    if (svgStyle.joinStyle() == MiterJoin)
-        context->setMiterLimit(svgStyle.strokeMiterLimit());
+    context->setStrokeThickness(lengthContext.valueForLength(style.strokeWidth()));
+    context->setLineCap(style.capStyle());
+    context->setLineJoin(style.joinStyle());
+    if (style.joinStyle() == MiterJoin)
+        context->setMiterLimit(style.strokeMiterLimit());
 
-    const Vector<SVGLength>& dashes = svgStyle.strokeDashArray();
+    const Vector<SVGLengthValue>& dashes = svgStyle.strokeDashArray();
     if (dashes.isEmpty())
         context->setStrokeStyle(SolidStroke);
     else {
@@ -485,7 +485,11 @@ void SVGRenderSupport::updateMaskedAncestorShouldIsolateBlending(const RenderEle
 
     bool maskedAncestorShouldIsolateBlending = renderer.style().hasBlendMode();
     for (auto* ancestor = renderer.element()->parentElement(); ancestor && ancestor->isSVGElement(); ancestor = ancestor->parentElement()) {
-        if (!downcast<SVGElement>(*ancestor).isSVGGraphicsElement() || !isolatesBlending(*ancestor->computedStyle()))
+        if (!downcast<SVGElement>(*ancestor).isSVGGraphicsElement())
+            continue;
+
+        const auto* style = ancestor->computedStyle();
+        if (!style || !isolatesBlending(*style))
             continue;
 
         if (ancestor->computedStyle()->svgStyle().hasMasker())

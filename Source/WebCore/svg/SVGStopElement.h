@@ -18,8 +18,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGStopElement_h
-#define SVGStopElement_h
+#pragma once
 
 #include "SVGAnimatedNumber.h"
 #include "SVGElement.h"
@@ -27,6 +26,7 @@
 namespace WebCore {
 
 class SVGStopElement final : public SVGElement {
+    WTF_MAKE_ISO_ALLOCATED(SVGStopElement);
 public:
     static Ref<SVGStopElement> create(const QualifiedName&, Document&);
 
@@ -49,5 +49,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif

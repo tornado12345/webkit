@@ -33,9 +33,13 @@
 #include "HTMLSrcsetParser.h"
 #include "HTMLTokenizer.h"
 #include "InputTypeNames.h"
+#include "LinkLoader.h"
 #include "LinkRelAttribute.h"
+#include "Logging.h"
+#include "MIMETypeRegistry.h"
 #include "MediaList.h"
 #include "MediaQueryEvaluator.h"
+#include "MediaQueryParser.h"
 #include "RenderView.h"
 #include "SizesAttributeParser.h"
 #include <wtf/MainThread.h>
@@ -100,6 +104,7 @@ public:
     explicit StartTagScanner(TagId tagId, float deviceScaleFactor = 1.0)
         : m_tagId(tagId)
         , m_linkIsStyleSheet(false)
+        , m_linkIsPreload(false)
         , m_metaIsViewport(false)
         , m_inputIsImage(false)
         , m_deviceScaleFactor(deviceScaleFactor)
@@ -118,7 +123,7 @@ public:
             processAttribute(attributeName, attributeValue, document, pictureState);
         }
         
-        if (m_tagId == TagId::Source && !pictureState.isEmpty() && !pictureState.last() && m_mediaMatched && !m_srcSetAttribute.isEmpty()) {
+        if (m_tagId == TagId::Source && !pictureState.isEmpty() && !pictureState.last() && m_mediaMatched && m_typeMatched && !m_srcSetAttribute.isEmpty()) {
             
             auto sourceSize = SizesAttributeParser(m_sizesAttribute, document).length();
             ImageCandidate imageCandidate = bestFitSourceForImageAttributes(m_deviceScaleFactor, m_urlToLoad, m_srcSetAttribute, sourceSize);
@@ -144,8 +149,20 @@ public:
         if (!shouldPreload())
             return nullptr;
 
-        auto request = std::make_unique<PreloadRequest>(initiatorFor(m_tagId), m_urlToLoad, predictedBaseURL, resourceType(), m_mediaAttribute);
+        auto type = resourceType();
+        if (!type)
+            return nullptr;
+
+        if (!LinkLoader::isSupportedType(type.value(), m_typeAttribute))
+            return nullptr;
+
+        auto request = std::make_unique<PreloadRequest>(initiatorFor(m_tagId), m_urlToLoad, predictedBaseURL, type.value(), m_mediaAttribute, m_moduleScript);
         request->setCrossOriginMode(m_crossOriginMode);
+        request->setNonce(m_nonceAttribute);
+
+        // According to the spec, the module tag ignores the "charset" attribute as the same to the worker's
+        // importScript. But WebKit supports the "charset" for importScript intentionally. So to be consistent,
+        // even for the module tags, we handle the "charset" attribute.
         request->setCharset(charset());
         return request;
     }
@@ -199,25 +216,44 @@ private:
             }
             if (match(attributeName, mediaAttr) && m_mediaAttribute.isNull()) {
                 m_mediaAttribute = attributeValue;
-                auto mediaSet = MediaQuerySet::createAllowingDescriptionSyntax(attributeValue);
-                auto* documentElement = document.documentElement();
+                auto mediaSet = MediaQuerySet::create(attributeValue, MediaQueryParserContext(document));
+                auto documentElement = makeRefPtr(document.documentElement());
+                LOG(MediaQueries, "HTMLPreloadScanner %p processAttribute evaluating media queries", this);
                 m_mediaMatched = MediaQueryEvaluator { document.printing() ? "print" : "screen", document, documentElement ? documentElement->computedStyle() : nullptr }.evaluate(mediaSet.get());
+            }
+            if (match(attributeName, typeAttr) && m_typeAttribute.isNull()) {
+                // when multiple type attributes present: first value wins, ignore subsequent (to match ImageElement parser and Blink behaviours)
+                m_typeAttribute = attributeValue;
+                m_typeMatched &= MIMETypeRegistry::isSupportedImageVideoOrSVGMIMEType(m_typeAttribute);
             }
             break;
         case TagId::Script:
+            if (match(attributeName, typeAttr)) {
+                m_moduleScript = equalLettersIgnoringASCIICase(attributeValue, "module") ? PreloadRequest::ModuleScript::Yes : PreloadRequest::ModuleScript::No;
+                break;
+            } else if (match(attributeName, nonceAttr))
+                m_nonceAttribute = attributeValue;
             processImageAndScriptAttribute(attributeName, attributeValue);
             break;
         case TagId::Link:
             if (match(attributeName, hrefAttr))
                 setUrlToLoad(attributeValue);
-            else if (match(attributeName, relAttr))
-                m_linkIsStyleSheet = relAttributeIsStyleSheet(attributeValue);
-            else if (match(attributeName, mediaAttr))
+            else if (match(attributeName, relAttr)) {
+                LinkRelAttribute parsedAttribute { document, attributeValue };
+                m_linkIsStyleSheet = relAttributeIsStyleSheet(parsedAttribute);
+                m_linkIsPreload = parsedAttribute.isLinkPreload;
+            } else if (match(attributeName, mediaAttr))
                 m_mediaAttribute = attributeValue;
             else if (match(attributeName, charsetAttr))
                 m_charset = attributeValue;
             else if (match(attributeName, crossoriginAttr))
                 m_crossOriginMode = stripLeadingAndTrailingHTMLSpaces(attributeValue);
+            else if (match(attributeName, nonceAttr))
+                m_nonceAttribute = attributeValue;
+            else if (match(attributeName, asAttr))
+                m_asAttribute = attributeValue;
+            else if (match(attributeName, typeAttr))
+                m_typeAttribute = attributeValue;
             break;
         case TagId::Input:
             if (match(attributeName, srcAttr))
@@ -240,9 +276,8 @@ private:
         }
     }
 
-    static bool relAttributeIsStyleSheet(const String& attributeValue)
+    static bool relAttributeIsStyleSheet(const LinkRelAttribute& parsedAttribute)
     {
-        LinkRelAttribute parsedAttribute { attributeValue };
         return parsedAttribute.isStyleSheet && !parsedAttribute.isAlternate && !parsedAttribute.iconType && !parsedAttribute.isDNSPrefetch;
     }
 
@@ -263,7 +298,7 @@ private:
         return m_charset;
     }
 
-    CachedResource::Type resourceType() const
+    std::optional<CachedResource::Type> resourceType() const
     {
         switch (m_tagId) {
         case TagId::Script:
@@ -274,8 +309,11 @@ private:
             ASSERT(m_tagId != TagId::Input || m_inputIsImage);
             return CachedResource::ImageResource;
         case TagId::Link:
-            ASSERT(m_linkIsStyleSheet);
-            return CachedResource::CSSStyleSheet;
+            if (m_linkIsStyleSheet)
+                return CachedResource::CSSStyleSheet;
+            if (m_linkIsPreload)
+                return LinkLoader::resourceTypeFromAsAttribute(m_asAttribute);
+            break;
         case TagId::Meta:
         case TagId::Unknown:
         case TagId::Style:
@@ -296,7 +334,7 @@ private:
         if (protocolIs(m_urlToLoad, "data") || protocolIs(m_urlToLoad, "about"))
             return false;
 
-        if (m_tagId == TagId::Link && !m_linkIsStyleSheet)
+        if (m_tagId == TagId::Link && !m_linkIsStyleSheet && !m_linkIsPreload)
             return false;
 
         if (m_tagId == TagId::Input && !m_inputIsImage)
@@ -310,14 +348,20 @@ private:
     String m_srcSetAttribute;
     String m_sizesAttribute;
     bool m_mediaMatched { true };
+    bool m_typeMatched { true };
     String m_charset;
     String m_crossOriginMode;
     bool m_linkIsStyleSheet;
+    bool m_linkIsPreload;
     String m_mediaAttribute;
+    String m_nonceAttribute;
     String m_metaContent;
+    String m_asAttribute;
+    String m_typeAttribute;
     bool m_metaIsViewport;
     bool m_inputIsImage;
     float m_deviceScaleFactor;
+    PreloadRequest::ModuleScript m_moduleScript { PreloadRequest::ModuleScript::No };
 };
 
 TokenPreloadScanner::TokenPreloadScanner(const URL& documentURL, float deviceScaleFactor)
@@ -391,7 +435,7 @@ void TokenPreloadScanner::scan(const HTMLToken& token, Vector<std::unique_ptr<Pr
 void TokenPreloadScanner::updatePredictedBaseURL(const HTMLToken& token)
 {
     ASSERT(m_predictedBaseElementURL.isEmpty());
-    if (auto* hrefAttribute = findAttribute(token.attributes(), hrefAttr.localName().string()))
+    if (auto* hrefAttribute = findAttribute(token.attributes(), hrefAttr->localName().string()))
         m_predictedBaseElementURL = URL(m_documentURL, stripLeadingAndTrailingHTMLSpaces(StringImpl::create8BitIfPossible(hrefAttribute->value))).isolatedCopy();
 }
 

@@ -31,7 +31,7 @@ namespace Inspector {
 
 class InjectedScriptHost;
 
-class JSInjectedScriptHost : public JSC::JSDestructibleObject {
+class JSInjectedScriptHost final : public JSC::JSDestructibleObject {
 public:
     typedef JSC::JSDestructibleObject Base;
     static const unsigned StructureFlags = Base::StructureFlags;
@@ -53,7 +53,7 @@ public:
     static JSC::JSObject* createPrototype(JSC::VM&, JSC::JSGlobalObject*);
     static void destroy(JSC::JSCell*);
 
-    InjectedScriptHost& impl() const { return const_cast<InjectedScriptHost&>(m_wrapped.get()); }
+    InjectedScriptHost& impl() const { return m_wrapped; }
 
     // Attributes.
     JSC::JSValue evaluate(JSC::ExecState*) const;

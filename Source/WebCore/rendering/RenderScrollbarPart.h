@@ -23,8 +23,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef RenderScrollbarPart_h
-#define RenderScrollbarPart_h
+#pragma once
 
 #include "RenderBlock.h"
 #include "ScrollTypes.h"
@@ -34,6 +33,7 @@ namespace WebCore {
 class RenderScrollbar;
 
 class RenderScrollbarPart final : public RenderBlock {
+    WTF_MAKE_ISO_ALLOCATED(RenderScrollbarPart);
 public:
     RenderScrollbarPart(Document&, RenderStyle&&, RenderScrollbar* = nullptr, ScrollbarPart = NoPart);
     
@@ -76,5 +76,3 @@ private:
 } // namespace WebCore
 
 SPECIALIZE_TYPE_TRAITS_RENDER_OBJECT(RenderScrollbarPart, isRenderScrollbarPart())
-
-#endif // RenderScrollbarPart_h

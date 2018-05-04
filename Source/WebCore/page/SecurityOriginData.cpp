@@ -27,47 +27,37 @@
 #include "SecurityOriginData.h"
 
 #include "Document.h"
+#include "FileSystem.h"
 #include "Frame.h"
 #include "SecurityOrigin.h"
 #include <wtf/text/CString.h>
 #include <wtf/text/StringBuilder.h>
+#include <wtf/text/StringConcatenateNumbers.h>
 
 using namespace WebCore;
 
 namespace WebCore {
 
-SecurityOriginData SecurityOriginData::fromSecurityOrigin(const SecurityOrigin& securityOrigin)
+String SecurityOriginData::toString() const
 {
-    SecurityOriginData securityOriginData;
+    if (protocol == "file")
+        return ASCIILiteral("file://");
 
-    securityOriginData.protocol = securityOrigin.protocol();
-    securityOriginData.host = securityOrigin.host();
-    securityOriginData.port = securityOrigin.port();
-
-    return securityOriginData;
+    if (!port)
+        return makeString(protocol, "://", host);
+    return makeString(protocol, "://", host, ':', static_cast<uint32_t>(*port));
 }
-
-#if !LOG_DISABLED
-String SecurityOriginData::debugString() const
-{
-    return makeString(protocol, "://", host, ":", String::number(port.valueOr(0)));
-}
-#endif
 
 SecurityOriginData SecurityOriginData::fromFrame(Frame* frame)
 {
     if (!frame)
-        return SecurityOriginData();
+        return SecurityOriginData { };
     
-    Document* document = frame->document();
+    auto* document = frame->document();
     if (!document)
-        return SecurityOriginData();
+        return SecurityOriginData { };
 
-    SecurityOrigin* origin = document->securityOrigin();
-    if (!origin)
-        return SecurityOriginData();
-    
-    return SecurityOriginData::fromSecurityOrigin(*origin);
+    return document->securityOrigin().data();
 }
 
 Ref<SecurityOrigin> SecurityOriginData::securityOrigin() const
@@ -90,11 +80,41 @@ String SecurityOriginData::databaseIdentifier() const
     StringBuilder stringBuilder;
     stringBuilder.append(protocol);
     stringBuilder.append(separatorCharacter);
-    stringBuilder.append(encodeForFileName(host));
+    stringBuilder.append(FileSystem::encodeForFileName(host));
     stringBuilder.append(separatorCharacter);
-    stringBuilder.appendNumber(port.valueOr(0));
+    stringBuilder.appendNumber(port.value_or(0));
     
     return stringBuilder.toString();
+}
+
+std::optional<SecurityOriginData> SecurityOriginData::fromDatabaseIdentifier(const String& databaseIdentifier)
+{
+    // Make sure there's a first separator
+    size_t separator1 = databaseIdentifier.find(separatorCharacter);
+    if (separator1 == notFound)
+        return std::nullopt;
+    
+    // Make sure there's a second separator
+    size_t separator2 = databaseIdentifier.reverseFind(separatorCharacter);
+    if (separator2 == notFound)
+        return std::nullopt;
+    
+    // Ensure there were at least 2 separator characters. Some hostnames on intranets have
+    // underscores in them, so we'll assume that any additional underscores are part of the host.
+    if (separator1 == separator2)
+        return std::nullopt;
+    
+    // Make sure the port section is a valid port number or doesn't exist
+    bool portOkay;
+    int port = databaseIdentifier.right(databaseIdentifier.length() - separator2 - 1).toInt(&portOkay);
+    bool portAbsent = (separator2 == databaseIdentifier.length() - 1);
+    if (!(portOkay || portAbsent))
+        return std::nullopt;
+    
+    if (port < 0 || port > std::numeric_limits<uint16_t>::max())
+        return std::nullopt;
+    
+    return SecurityOriginData {databaseIdentifier.substring(0, separator1), databaseIdentifier.substring(separator1 + 1, separator2 - separator1 - 1), static_cast<uint16_t>(port)};
 }
 
 SecurityOriginData SecurityOriginData::isolatedCopy() const

@@ -22,7 +22,6 @@
 
 #include "InternalFunction.h"
 #include "ProxyObject.h"
-#include "ThrowScope.h"
 
 namespace JSC {
 
@@ -31,7 +30,7 @@ class ArrayPrototype;
 class JSArray;
 class GetterSetter;
 
-class ArrayConstructor : public InternalFunction {
+class ArrayConstructor final : public InternalFunction {
 public:
     typedef InternalFunction Base;
     static const unsigned StructureFlags = HasStaticPropertyTable | InternalFunction::StructureFlags;
@@ -47,7 +46,7 @@ public:
 
     static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype)
     {
-        return Structure::create(vm, globalObject, prototype, TypeInfo(ObjectType, StructureFlags), info());
+        return Structure::create(vm, globalObject, prototype, TypeInfo(InternalFunctionType, StructureFlags), info());
     }
 
 protected:
@@ -55,9 +54,6 @@ protected:
 
 private:
     ArrayConstructor(VM&, Structure*);
-
-    static ConstructType getConstructData(JSCell*, ConstructData&);
-    static CallType getCallData(JSCell*, CallData&);
 };
 
 JSValue constructArrayWithSizeQuirk(ExecState*, ArrayAllocationProfile*, JSGlobalObject*, JSValue length, JSValue prototype = JSValue());
@@ -80,14 +76,6 @@ inline bool isArray(ExecState* exec, JSValue argumentValue)
     if (argument->type() != ProxyObjectType)
         return false;
     return isArraySlow(exec, jsCast<ProxyObject*>(argument));
-}
-
-inline bool isArrayConstructor(JSValue argumentValue)
-{
-    if (!argumentValue.isObject())
-        return false;
-
-    return jsCast<JSObject*>(argumentValue)->classInfo() == ArrayConstructor::info();
 }
 
 } // namespace JSC

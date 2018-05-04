@@ -1,7 +1,5 @@
 /*
- * This file is part of the theme implementation for form controls in WebCore.
- *
- * Copyright (C) 2005-2010, 2012, 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2005-2017 Apple Inc. All rights reserved.
  * Copyright (C) 2014 Google Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
@@ -59,7 +57,9 @@
 #include "HTMLParserIdioms.h"
 #endif
 
-// The methods in this file are shared by all themes on every platform.
+#if USE(NEW_THEME)
+#include "Theme.h"
+#endif
 
 namespace WebCore {
 
@@ -72,9 +72,6 @@ static Color& customFocusRingColor()
 }
 
 RenderTheme::RenderTheme()
-#if USE(NEW_THEME)
-    : m_theme(platformTheme())
-#endif
 {
 }
 
@@ -91,11 +88,18 @@ void RenderTheme::adjustStyle(StyleResolver& styleResolver, RenderStyle& style, 
         style.setDisplay(BLOCK);
 
     if (UAHasAppearance && isControlStyled(style, border, background, backgroundColor)) {
-        if (part == MenulistPart) {
+        switch (part) {
+        case MenulistPart:
             style.setAppearance(MenulistButtonPart);
             part = MenulistButtonPart;
-        } else
+            break;
+        case TextFieldPart:
+            adjustTextFieldStyle(styleResolver, style, element);
+            FALLTHROUGH;
+        default:
             style.setAppearance(NoControlPart);
+            break;
+        }
     }
 
     if (!style.hasAppearance())
@@ -115,7 +119,7 @@ void RenderTheme::adjustStyle(StyleResolver& styleResolver, RenderStyle& style, 
     case ButtonPart: {
         // Border
         LengthBox borderBox(style.borderTopWidth(), style.borderRightWidth(), style.borderBottomWidth(), style.borderLeftWidth());
-        borderBox = m_theme->controlBorder(part, style.fontCascade(), borderBox, style.effectiveZoom());
+        borderBox = Theme::singleton().controlBorder(part, style.fontCascade(), borderBox, style.effectiveZoom());
         if (borderBox.top().value() != static_cast<int>(style.borderTopWidth())) {
             if (borderBox.top().value())
                 style.setBorderTopWidth(borderBox.top().value());
@@ -144,32 +148,32 @@ void RenderTheme::adjustStyle(StyleResolver& styleResolver, RenderStyle& style, 
         }
 
         // Padding
-        LengthBox paddingBox = m_theme->controlPadding(part, style.fontCascade(), style.paddingBox(), style.effectiveZoom());
+        LengthBox paddingBox = Theme::singleton().controlPadding(part, style.fontCascade(), style.paddingBox(), style.effectiveZoom());
         if (paddingBox != style.paddingBox())
-            style.setPaddingBox(paddingBox);
+            style.setPaddingBox(WTFMove(paddingBox));
 
         // Whitespace
-        if (m_theme->controlRequiresPreWhiteSpace(part))
+        if (Theme::singleton().controlRequiresPreWhiteSpace(part))
             style.setWhiteSpace(PRE);
-            
+
         // Width / Height
         // The width and height here are affected by the zoom.
         // FIXME: Check is flawed, since it doesn't take min-width/max-width into account.
-        LengthSize controlSize = m_theme->controlSize(part, style.fontCascade(), LengthSize(style.width(), style.height()), style.effectiveZoom());
-        if (controlSize.width() != style.width())
-            style.setWidth(controlSize.width());
-        if (controlSize.height() != style.height())
-            style.setHeight(controlSize.height());
-                
+        LengthSize controlSize = Theme::singleton().controlSize(part, style.fontCascade(), { style.width(), style.height() }, style.effectiveZoom());
+        if (controlSize.width != style.width())
+            style.setWidth(WTFMove(controlSize.width));
+        if (controlSize.height != style.height())
+            style.setHeight(WTFMove(controlSize.height));
+
         // Min-Width / Min-Height
-        LengthSize minControlSize = m_theme->minimumControlSize(part, style.fontCascade(), style.effectiveZoom());
-        if (minControlSize.width() != style.minWidth())
-            style.setMinWidth(minControlSize.width());
-        if (minControlSize.height() != style.minHeight())
-            style.setMinHeight(minControlSize.height());
-                
+        LengthSize minControlSize = Theme::singleton().minimumControlSize(part, style.fontCascade(), style.effectiveZoom());
+        if (minControlSize.width != style.minWidth())
+            style.setMinWidth(WTFMove(minControlSize.width));
+        if (minControlSize.height != style.minHeight())
+            style.setMinHeight(WTFMove(minControlSize.height));
+
         // Font
-        if (auto themeFont = m_theme->controlFont(part, style.fontCascade(), style.effectiveZoom())) {
+        if (auto themeFont = Theme::singleton().controlFont(part, style.fontCascade(), style.effectiveZoom())) {
             // If overriding the specified font with the theme font, also override the line height with the standard line height.
             style.setLineHeight(RenderStyle::initialLineHeight());
             if (style.setFontDescription(themeFont.value()))
@@ -258,6 +262,7 @@ void RenderTheme::adjustStyle(StyleResolver& styleResolver, RenderStyle& style, 
 #endif
 #if ENABLE(ATTACHMENT_ELEMENT)
     case AttachmentPart:
+    case BorderlessAttachmentPart:
         return adjustAttachmentStyle(styleResolver, style, element);
 #endif
     default:
@@ -278,17 +283,17 @@ bool RenderTheme::paint(const RenderBox& box, ControlStates& controlStates, cons
     if (paintInfo.context().paintingDisabled())
         return false;
 
-    if (UNLIKELY(paintInfo.context().isRecording()))
+    if (UNLIKELY(!paintInfo.context().hasPlatformContext()))
         return false;
 
     ControlPart part = box.style().appearance();
     IntRect integralSnappedRect = snappedIntRect(rect);
     float deviceScaleFactor = box.document().deviceScaleFactor();
     FloatRect devicePixelSnappedRect = snapRectToDevicePixels(rect, deviceScaleFactor);
-
-#if USE(NEW_THEME)
-    float pageScaleFactor = box.document().page() ? box.document().page()->pageScaleFactor() : 1.0f;
     
+#if USE(NEW_THEME)
+    float pageScaleFactor = box.page().pageScaleFactor();
+
     switch (part) {
     case CheckboxPart:
     case RadioPart:
@@ -298,7 +303,7 @@ bool RenderTheme::paint(const RenderBox& box, ControlStates& controlStates, cons
     case ButtonPart:
     case InnerSpinButtonPart:
         updateControlStatesForRenderer(box, controlStates);
-        m_theme->paint(part, controlStates, paintInfo.context(), devicePixelSnappedRect, box.style().effectiveZoom(), &box.view().frameView(), deviceScaleFactor, pageScaleFactor);
+        Theme::singleton().paint(part, controlStates, paintInfo.context(), devicePixelSnappedRect, box.style().effectiveZoom(), &box.view().frameView(), deviceScaleFactor, pageScaleFactor, box.page().useSystemAppearance());
         return false;
     default:
         break;
@@ -410,6 +415,7 @@ bool RenderTheme::paint(const RenderBox& box, ControlStates& controlStates, cons
 #endif
 #if ENABLE(ATTACHMENT_ELEMENT)
     case AttachmentPart:
+    case BorderlessAttachmentPart:
         return paintAttachment(box, paintInfo, integralSnappedRect);
 #endif
     default:
@@ -608,10 +614,10 @@ Color RenderTheme::activeListBoxSelectionBackgroundColor() const
     return m_activeListBoxSelectionBackgroundColor;
 }
 
-Color RenderTheme::inactiveListBoxSelectionBackgroundColor() const
+Color RenderTheme::inactiveListBoxSelectionBackgroundColor(bool useSystemAppearance) const
 {
     if (!m_inactiveListBoxSelectionBackgroundColor.isValid())
-        m_inactiveListBoxSelectionBackgroundColor = platformInactiveListBoxSelectionBackgroundColor();
+        m_inactiveListBoxSelectionBackgroundColor = platformInactiveListBoxSelectionBackgroundColor(useSystemAppearance);
     return m_inactiveListBoxSelectionBackgroundColor;
 }
 
@@ -664,7 +670,7 @@ Color RenderTheme::platformActiveListBoxSelectionForegroundColor() const
     return platformActiveSelectionForegroundColor();
 }
 
-Color RenderTheme::platformInactiveListBoxSelectionBackgroundColor() const
+Color RenderTheme::platformInactiveListBoxSelectionBackgroundColor(bool) const
 {
     return platformInactiveSelectionBackgroundColor();
 }
@@ -677,7 +683,7 @@ Color RenderTheme::platformInactiveListBoxSelectionForegroundColor() const
 int RenderTheme::baselinePosition(const RenderBox& box) const
 {
 #if USE(NEW_THEME)
-    return box.height() + box.marginTop() + m_theme->baselinePositionAdjustment(box.style().appearance()) * box.style().effectiveZoom();
+    return box.height() + box.marginTop() + Theme::singleton().baselinePositionAdjustment(box.style().appearance()) * box.style().effectiveZoom();
 #else
     return box.height() + box.marginTop();
 #endif
@@ -709,9 +715,9 @@ bool RenderTheme::isControlStyled(const RenderStyle& style, const BorderData& bo
     case TextFieldPart:
     case TextAreaPart:
         // Test the style to see if the UA border and background match.
-        return (style.border() != border
-            || *style.backgroundLayers() != background
-            || !style.backgroundColorEqualsToColorIgnoringVisited(backgroundColor));
+        return style.border() != border
+            || style.backgroundLayers() != background
+            || !style.backgroundColorEqualsToColorIgnoringVisited(backgroundColor);
     default:
         return false;
     }
@@ -721,7 +727,7 @@ void RenderTheme::adjustRepaintRect(const RenderObject& renderer, FloatRect& rec
 {
 #if USE(NEW_THEME)
     ControlStates states(extractControlStatesForRenderer(renderer));
-    m_theme->inflateControlPaintRect(renderer.style().appearance(), states, rect, renderer.style().effectiveZoom());
+    Theme::singleton().inflateControlPaintRect(renderer.style().appearance(), states, rect, renderer.style().effectiveZoom());
 #else
     UNUSED_PARAM(renderer);
     UNUSED_PARAM(rect);
@@ -753,7 +759,7 @@ void RenderTheme::updateControlStatesForRenderer(const RenderBox& box, ControlSt
     ControlStates newStates = extractControlStatesForRenderer(box);
     controlStates.setStates(newStates.states());
     if (isFocused(box))
-        controlStates.setTimeSinceControlWasFocused(box.document().page()->focusController().timeSinceFocusWasSet());
+        controlStates.setTimeSinceControlWasFocused(box.page().focusController().timeSinceFocusWasSet());
 }
 
 ControlStates::States RenderTheme::extractControlStatesForRenderer(const RenderObject& o) const
@@ -784,13 +790,9 @@ ControlStates::States RenderTheme::extractControlStatesForRenderer(const RenderO
     return states;
 }
 
-bool RenderTheme::isActive(const RenderObject& o) const
+bool RenderTheme::isActive(const RenderObject& renderer) const
 {
-    Page* page = o.document().page();
-    if (!page)
-        return false;
-
-    return page->focusController().isActive();
+    return renderer.page().focusController().isActive();
 }
 
 bool RenderTheme::isChecked(const RenderObject& o) const
@@ -817,7 +819,7 @@ bool RenderTheme::isFocused(const RenderObject& renderer) const
     if (!is<Element>(node))
         return false;
 
-    Element* focusDelegate = downcast<Element>(*node).focusDelegate();
+    auto focusDelegate = downcast<Element>(*node).focusDelegate();
     Document& document = focusDelegate->document();
     Frame* frame = document.frame();
     return focusDelegate == document.focusedElement() && frame && frame->selection().isFocusedAndActive();
@@ -940,6 +942,7 @@ void RenderTheme::adjustMenuListStyle(StyleResolver&, RenderStyle&, const Elemen
 }
 
 #if ENABLE(METER_ELEMENT)
+
 void RenderTheme::adjustMeterStyle(StyleResolver&, RenderStyle& style, const Element*) const
 {
     style.setBoxShadow(nullptr);
@@ -959,7 +962,8 @@ bool RenderTheme::paintMeter(const RenderObject&, const PaintInfo&, const IntRec
 {
     return true;
 }
-#endif
+
+#endif // METER_ELEMENT
 
 void RenderTheme::adjustCapsLockIndicatorStyle(StyleResolver&, RenderStyle&, const Element*) const
 {
@@ -971,6 +975,7 @@ bool RenderTheme::paintCapsLockIndicator(const RenderObject&, const PaintInfo&, 
 }
 
 #if ENABLE(ATTACHMENT_ELEMENT)
+
 void RenderTheme::adjustAttachmentStyle(StyleResolver&, RenderStyle&, const Element*) const
 {
 }
@@ -979,9 +984,11 @@ bool RenderTheme::paintAttachment(const RenderObject&, const PaintInfo&, const I
 {
     return false;
 }
+
 #endif
 
 #if ENABLE(DATALIST_ELEMENT)
+
 LayoutUnit RenderTheme::sliderTickSnappingThreshold() const
 {
     return 0;
@@ -1046,7 +1053,7 @@ void RenderTheme::paintSliderTicks(const RenderObject& o, const PaintInfo& paint
     }
     Ref<HTMLCollection> options = dataList->options();
     GraphicsContextStateSaver stateSaver(paintInfo.context());
-    paintInfo.context().setFillColor(o.style().visitedDependentColor(CSSPropertyColor));
+    paintInfo.context().setFillColor(o.style().visitedDependentColorWithColorFilter(CSSPropertyColor));
     for (unsigned i = 0; Node* node = options->item(i); i++) {
         ASSERT(is<HTMLOptionElement>(*node));
         HTMLOptionElement& optionElement = downcast<HTMLOptionElement>(*node);
@@ -1064,16 +1071,17 @@ void RenderTheme::paintSliderTicks(const RenderObject& o, const PaintInfo& paint
         paintInfo.context().fillRect(tickRect);
     }
 }
+
 #endif
 
-double RenderTheme::animationRepeatIntervalForProgressBar(RenderProgress&) const
+Seconds RenderTheme::animationRepeatIntervalForProgressBar(RenderProgress&) const
 {
-    return 0;
+    return 0_s;
 }
 
-double RenderTheme::animationDurationForProgressBar(RenderProgress&) const
+Seconds RenderTheme::animationDurationForProgressBar(RenderProgress&) const
 {
-    return 0;
+    return 0_s;
 }
 
 void RenderTheme::adjustProgressBarStyle(StyleResolver&, RenderStyle&, const Element*) const
@@ -1200,9 +1208,13 @@ void RenderTheme::systemFont(CSSValueID systemFontID, FontCascadeDescription& fo
     updateCachedSystemFontDescription(systemFontID, fontDescription);
 }
 
-Color RenderTheme::systemColor(CSSValueID cssValueId) const
+Color RenderTheme::systemColor(CSSValueID cssValueId, OptionSet<StyleColor::Options> options) const
 {
     switch (cssValueId) {
+    case CSSValueWebkitLink:
+        return options.contains(StyleColor::Options::ForVisitedLink) ? 0xFF551A8B : 0xFF0000EE;
+    case CSSValueWebkitActivelink:
+        return 0xFFFF0000;
     case CSSValueActiveborder:
         return 0xFFFFFFFF;
     case CSSValueActivebuttontext:
@@ -1280,10 +1292,12 @@ Color RenderTheme::platformInactiveTextSearchHighlightColor() const
 }
 
 #if ENABLE(TOUCH_EVENTS)
+
 Color RenderTheme::tapHighlightColor()
 {
-    return defaultTheme()->platformTapHighlightColor();
+    return singleton().platformTapHighlightColor();
 }
+
 #endif
 
 // Value chosen by observation. This can be tweaked.
@@ -1303,21 +1317,21 @@ Color RenderTheme::disabledTextColor(const Color& textColor, const Color& backgr
     
     // If there's not very much contrast between the disabled color and the background color,
     // just leave the text color alone. We don't want to change a good contrast color scheme so that it has really bad contrast.
-    // If the the contrast was already poor, then it doesn't do any good to change it to a different poor contrast color scheme.
+    // If the contrast was already poor, then it doesn't do any good to change it to a different poor contrast color scheme.
     if (differenceSquared(disabledColor, backgroundColor) < minColorContrastValue)
         return textColor;
     
     return disabledColor;
 }
 
-void RenderTheme::setCustomFocusRingColor(const Color& c)
+void RenderTheme::setCustomFocusRingColor(const Color& color)
 {
-    customFocusRingColor() = c;
+    customFocusRingColor() = color;
 }
 
-Color RenderTheme::focusRingColor()
+Color RenderTheme::focusRingColor(OptionSet<StyleColor::Options> options)
 {
-    return customFocusRingColor().isValid() ? customFocusRingColor() : defaultTheme()->platformFocusRingColor();
+    return customFocusRingColor().isValid() ? customFocusRingColor() : RenderTheme::singleton().platformFocusRingColor(options);
 }
 
 String RenderTheme::fileListDefaultLabel(bool multipleFilesAllowed) const
@@ -1343,14 +1357,36 @@ String RenderTheme::fileListNameForWidth(const FileList* fileList, const FontCas
     return StringTruncator::centerTruncate(string, width, font);
 }
 
+#if USE(SYSTEM_PREVIEW)
+void RenderTheme::paintSystemPreviewBadge(Image& image, const PaintInfo& paintInfo, const FloatRect& rect)
+{
+    // The default implementation paints a small marker
+    // in the upper right corner, as long as the image is big enough.
+
+    UNUSED_PARAM(image);
+    auto& context = paintInfo.context();
+
+    GraphicsContextStateSaver stateSaver { context };
+
+    if (rect.width() < 32 || rect.height() < 32)
+        return;
+
+    auto markerRect = FloatRect {rect.x() + rect.width() - 24, rect.y() + 8, 16, 16 };
+    auto roundedMarkerRect = FloatRoundedRect { markerRect, FloatRoundedRect::Radii { 8 } };
+    auto color = Color { 255, 0, 0 };
+    context.fillRoundedRect(roundedMarkerRect, color);
+}
+#endif
+
 #if ENABLE(TOUCH_EVENTS)
+
 Color RenderTheme::platformTapHighlightColor() const
 {
     // This color is expected to be drawn on a semi-transparent overlay,
     // making it more transparent than its alpha value indicates.
-    static NeverDestroyed<const Color> defaultTapHighlightColor = Color(0, 0, 0, 102);
-    return defaultTapHighlightColor;
+    return Color(0, 0, 0, 102);
 }
+
 #endif
 
 } // namespace WebCore

@@ -24,51 +24,17 @@
 
 #include "JSTestStandaloneDictionary.h"
 
-#include <runtime/JSString.h>
+#include "JSDOMConvertBoolean.h"
+#include "JSDOMConvertStrings.h"
+#include <JavaScriptCore/JSCInlines.h>
+#include <JavaScriptCore/JSString.h>
 #include <wtf/NeverDestroyed.h>
 
-using namespace JSC;
 
 namespace WebCore {
+using namespace JSC;
 
-template<> JSString* convertEnumerationToJS(ExecState& state, TestStandaloneDictionary::EnumInStandaloneDictionaryFile enumerationValue)
-{
-    static NeverDestroyed<const String> values[] = {
-        ASCIILiteral("enumValue1"),
-        ASCIILiteral("enumValue2"),
-    };
-    static_assert(static_cast<size_t>(TestStandaloneDictionary::EnumInStandaloneDictionaryFile::EnumValue1) == 0, "TestStandaloneDictionary::EnumInStandaloneDictionaryFile::EnumValue1 is not 0 as expected");
-    static_assert(static_cast<size_t>(TestStandaloneDictionary::EnumInStandaloneDictionaryFile::EnumValue2) == 1, "TestStandaloneDictionary::EnumInStandaloneDictionaryFile::EnumValue2 is not 1 as expected");
-    ASSERT(static_cast<size_t>(enumerationValue) < WTF_ARRAY_LENGTH(values));
-    return jsStringWithCache(&state, values[static_cast<size_t>(enumerationValue)]);
-}
-
-template<> Optional<TestStandaloneDictionary::EnumInStandaloneDictionaryFile> parseEnumeration<TestStandaloneDictionary::EnumInStandaloneDictionaryFile>(ExecState& state, JSValue value)
-{
-    auto stringValue = value.toWTFString(&state);
-    if (stringValue == "enumValue1")
-        return TestStandaloneDictionary::EnumInStandaloneDictionaryFile::EnumValue1;
-    if (stringValue == "enumValue2")
-        return TestStandaloneDictionary::EnumInStandaloneDictionaryFile::EnumValue2;
-    return Nullopt;
-}
-
-template<> TestStandaloneDictionary::EnumInStandaloneDictionaryFile convertEnumeration<TestStandaloneDictionary::EnumInStandaloneDictionaryFile>(ExecState& state, JSValue value)
-{
-    VM& vm = state.vm();
-    auto throwScope = DECLARE_THROW_SCOPE(vm);
-    auto result = parseEnumeration<TestStandaloneDictionary::EnumInStandaloneDictionaryFile>(state, value);
-    if (UNLIKELY(!result)) {
-        throwTypeError(&state, throwScope);
-        return { };
-    }
-    return result.value();
-}
-
-template<> const char* expectedEnumerationValues<TestStandaloneDictionary::EnumInStandaloneDictionaryFile>()
-{
-    return "\"enumValue1\", \"enumValue2\"";
-}
+#if ENABLE(Condition1)
 
 template<> DictionaryImplName convertDictionary<DictionaryImplName>(ExecState& state, JSValue value)
 {
@@ -80,27 +46,75 @@ template<> DictionaryImplName convertDictionary<DictionaryImplName>(ExecState& s
         throwTypeError(&state, throwScope);
         return { };
     }
-    if (UNLIKELY(object && object->type() == RegExpObjectType)) {
-        throwTypeError(&state, throwScope);
-        return { };
-    }
     DictionaryImplName result;
-    JSValue boolMemberValue = isNullOrUndefined ? jsUndefined() : object->get(&state, Identifier::fromString(&state, "boolMember"));
+    JSValue boolMemberValue;
+    if (isNullOrUndefined)
+        boolMemberValue = jsUndefined();
+    else {
+        boolMemberValue = object->get(&state, Identifier::fromString(&state, "boolMember"));
+        RETURN_IF_EXCEPTION(throwScope, { });
+    }
     if (!boolMemberValue.isUndefined()) {
         result.boolMember = convert<IDLBoolean>(state, boolMemberValue);
         RETURN_IF_EXCEPTION(throwScope, { });
     }
-    JSValue enumMemberValue = isNullOrUndefined ? jsUndefined() : object->get(&state, Identifier::fromString(&state, "enumMember"));
-    if (!enumMemberValue.isUndefined()) {
-        result.enumMember = convert<IDLEnumeration<TestEnumInStandaloneDictionaryFile>>(state, enumMemberValue);
+    JSValue enumMemberValue;
+    if (isNullOrUndefined)
+        enumMemberValue = jsUndefined();
+    else {
+        enumMemberValue = object->get(&state, Identifier::fromString(&state, "enumMember"));
         RETURN_IF_EXCEPTION(throwScope, { });
     }
-    JSValue stringMemberValue = isNullOrUndefined ? jsUndefined() : object->get(&state, Identifier::fromString(&state, "stringMember"));
+    if (!enumMemberValue.isUndefined()) {
+        result.enumMember = convert<IDLEnumeration<TestStandaloneDictionary::EnumInStandaloneDictionaryFile>>(state, enumMemberValue);
+        RETURN_IF_EXCEPTION(throwScope, { });
+    }
+    JSValue stringMemberValue;
+    if (isNullOrUndefined)
+        stringMemberValue = jsUndefined();
+    else {
+        stringMemberValue = object->get(&state, Identifier::fromString(&state, "stringMember"));
+        RETURN_IF_EXCEPTION(throwScope, { });
+    }
     if (!stringMemberValue.isUndefined()) {
         result.stringMember = convert<IDLDOMString>(state, stringMemberValue);
         RETURN_IF_EXCEPTION(throwScope, { });
     }
     return result;
+}
+
+#endif
+
+String convertEnumerationToString(TestStandaloneDictionary::EnumInStandaloneDictionaryFile enumerationValue)
+{
+    static const NeverDestroyed<String> values[] = {
+        MAKE_STATIC_STRING_IMPL("enumValue1"),
+        MAKE_STATIC_STRING_IMPL("enumValue2"),
+    };
+    static_assert(static_cast<size_t>(TestStandaloneDictionary::EnumInStandaloneDictionaryFile::EnumValue1) == 0, "TestStandaloneDictionary::EnumInStandaloneDictionaryFile::EnumValue1 is not 0 as expected");
+    static_assert(static_cast<size_t>(TestStandaloneDictionary::EnumInStandaloneDictionaryFile::EnumValue2) == 1, "TestStandaloneDictionary::EnumInStandaloneDictionaryFile::EnumValue2 is not 1 as expected");
+    ASSERT(static_cast<size_t>(enumerationValue) < WTF_ARRAY_LENGTH(values));
+    return values[static_cast<size_t>(enumerationValue)];
+}
+
+template<> JSString* convertEnumerationToJS(ExecState& state, TestStandaloneDictionary::EnumInStandaloneDictionaryFile enumerationValue)
+{
+    return jsStringWithCache(&state, convertEnumerationToString(enumerationValue));
+}
+
+template<> std::optional<TestStandaloneDictionary::EnumInStandaloneDictionaryFile> parseEnumeration<TestStandaloneDictionary::EnumInStandaloneDictionaryFile>(ExecState& state, JSValue value)
+{
+    auto stringValue = value.toWTFString(&state);
+    if (stringValue == "enumValue1")
+        return TestStandaloneDictionary::EnumInStandaloneDictionaryFile::EnumValue1;
+    if (stringValue == "enumValue2")
+        return TestStandaloneDictionary::EnumInStandaloneDictionaryFile::EnumValue2;
+    return std::nullopt;
+}
+
+template<> const char* expectedEnumerationValues<TestStandaloneDictionary::EnumInStandaloneDictionaryFile>()
+{
+    return "\"enumValue1\", \"enumValue2\"";
 }
 
 } // namespace WebCore

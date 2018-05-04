@@ -50,7 +50,7 @@ struct PropertyMapHashTableStats {
     std::atomic<unsigned> numReinserts;
 };
 
-JS_EXPORTDATA extern PropertyMapHashTableStats* propertyMapHashTableStats;
+JS_EXPORT_PRIVATE extern PropertyMapHashTableStats* propertyMapHashTableStats;
 
 #endif
 
@@ -120,6 +120,12 @@ class PropertyTable final : public JSCell {
 public:
     typedef JSCell Base;
     static const unsigned StructureFlags = Base::StructureFlags | StructureIsImmortal;
+
+    template<typename CellType>
+    static IsoSubspace* subspaceFor(VM& vm)
+    {
+        return &vm.propertyTableSpace;
+    }
 
     static const bool needsDestruction = true;
     static void destroy(JSCell*);

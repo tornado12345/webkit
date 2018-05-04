@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008, 2015-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2008-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,17 +29,19 @@
 #include "config.h"
 #include "InitializeThreading.h"
 
+#include "DisallowVMReentry.h"
 #include "ExecutableAllocator.h"
 #include "Heap.h"
-#include "HeapStatistics.h"
-#include "Options.h"
 #include "Identifier.h"
 #include "JSDateMath.h"
 #include "JSGlobalObject.h"
 #include "JSLock.h"
 #include "LLIntData.h"
+#include "MacroAssemblerCodeRef.h"
+#include "Options.h"
 #include "StructureIDTable.h"
 #include "SuperSampler.h"
+#include "WasmThunks.h"
 #include "WriteBarrier.h"
 #include <mutex>
 #include <wtf/MainThread.h>
@@ -51,17 +53,16 @@ using namespace WTF;
 
 namespace JSC {
 
+static_assert(sizeof(bool) == 1, "LLInt and JIT assume sizeof(bool) is always 1 when touching it directly from assembly code.");
+
 void initializeThreading()
 {
     static std::once_flag initializeThreadingOnceFlag;
 
     std::call_once(initializeThreadingOnceFlag, []{
-        WTF::double_conversion::initialize();
         WTF::initializeThreading();
-        WTF::initializeGCThreads();
         Options::initialize();
-        if (Options::recordGCPauseTimes())
-            HeapStatistics::initialize();
+        initializePoison();
 #if ENABLE(WRITE_BARRIER_PROFILING)
         WriteBarrierCounters::initialize();
 #endif
@@ -71,10 +72,15 @@ void initializeThreading()
         LLInt::initialize();
 #ifndef NDEBUG
         DisallowGC::initialize();
+        DisallowVMReentry::initialize();
 #endif
         initializeSuperSampler();
-        WTFThreadData& threadData = wtfThreadData();
-        threadData.setSavedLastStackTop(threadData.stack().origin());
+        Thread& thread = Thread::current();
+        thread.setSavedLastStackTop(thread.stack().origin());
+
+#if ENABLE(WEBASSEMBLY)
+        Wasm::Thunks::initialize();
+#endif
     });
 }
 

@@ -29,6 +29,11 @@
 #include <wtf/Assertions.h>
 #include <wtf/FastMalloc.h>
 #include <wtf/Forward.h>
+#include <wtf/UniqueArray.h>
+
+namespace WTF {
+class TextStream;
+}
 
 namespace WebCore {
 
@@ -46,7 +51,6 @@ enum ValueRange {
 };
 
 class CalculationValue;
-class TextStream;
 
 struct Length {
     WTF_MAKE_FAST_ALLOCATED;
@@ -135,8 +139,8 @@ private:
 // Blend two lengths to produce a new length that is in between them. Used for animation.
 Length blend(const Length& from, const Length& to, double progress);
 
-std::unique_ptr<Length[]> newCoordsArray(const String&, int& length);
-std::unique_ptr<Length[]> newLengthArray(const String&, int& length);
+UniqueArray<Length> newCoordsArray(const String&, int& length);
+UniqueArray<Length> newLengthArray(const String&, int& length);
 
 inline Length::Length(LengthType type)
     : m_intValue(0), m_hasQuirk(false), m_type(type), m_isFloat(false)
@@ -415,7 +419,9 @@ inline bool Length::isFitContent() const
     return type() == FitContent;
 }
 
-TextStream& operator<<(TextStream&, Length);
+Length convertTo100PercentMinusLength(const Length&);
+
+WTF::TextStream& operator<<(WTF::TextStream&, Length);
 
 } // namespace WebCore
 

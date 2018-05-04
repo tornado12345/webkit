@@ -60,7 +60,7 @@ private:
     String inputEventData() const final;
     RefPtr<DataTransfer> inputEventDataTransfer() const final;
     bool willApplyCommand() final;
-    virtual void doApply();
+    void doApply() override;
 
     class InsertedNodes {
     public:
@@ -69,15 +69,17 @@ private:
         void willRemoveNode(Node*);
         void didReplaceNode(Node*, Node* newNode);
 
+        bool isEmpty() { return !m_firstNodeInserted; }
         Node* firstNodeInserted() const { return m_firstNodeInserted.get(); }
-        Node* lastLeafInserted() const { return m_lastNodeInserted->lastDescendant(); }
+        Node* lastLeafInserted() const
+        {
+            ASSERT(m_lastNodeInserted);
+            return m_lastNodeInserted->lastDescendant();
+        }
         Node* pastLastLeaf() const
         {
-            if (m_lastNodeInserted) {
-                ASSERT(lastLeafInserted());
-                return NodeTraversal::next(*lastLeafInserted());
-            }
-            return nullptr;
+            ASSERT(m_lastNodeInserted);
+            return NodeTraversal::next(*lastLeafInserted());
         }
 
     private:
@@ -85,7 +87,7 @@ private:
         RefPtr<Node> m_lastNodeInserted;
     };
 
-    Node* insertAsListItems(PassRefPtr<HTMLElement> listElement, Node* insertionNode, const Position&, InsertedNodes&);
+    Node* insertAsListItems(HTMLElement& listElement, Node* insertionNode, const Position&, InsertedNodes&);
 
     void updateNodesInserted(Node*);
     bool shouldRemoveEndBR(Node*, const VisiblePosition&);
@@ -100,7 +102,7 @@ private:
     
     void removeRedundantStylesAndKeepStyleSpanInline(InsertedNodes&);
     void makeInsertedContentRoundTrippableWithHTMLTreeBuilder(InsertedNodes&);
-    void moveNodeOutOfAncestor(PassRefPtr<Node>, PassRefPtr<Node> ancestor, InsertedNodes&);
+    void moveNodeOutOfAncestor(Node&, Node& ancestor, InsertedNodes&);
     void handleStyleSpans(InsertedNodes&);
     void handlePasteAsQuotationNode();
     

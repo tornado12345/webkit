@@ -23,8 +23,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef SVGAnimateElement_h
-#define SVGAnimateElement_h
+#pragma once
 
 #include "SVGAnimateElementBase.h"
 
@@ -33,6 +32,7 @@ namespace WebCore {
 class SVGAnimatedProperty;
 
 class SVGAnimateElement final : public SVGAnimateElementBase {
+    WTF_MAKE_ISO_ALLOCATED(SVGAnimateElement);
 public:
     static Ref<SVGAnimateElement> create(const QualifiedName&, Document&);
 
@@ -41,5 +41,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif // SVGAnimateElement_h

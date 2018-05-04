@@ -30,6 +30,7 @@
 
 #include "MediaPlayer.h"
 #include "PlatformTimeRanges.h"
+#include <wtf/Function.h>
 #include <wtf/Forward.h>
 
 namespace WebCore {
@@ -42,8 +43,8 @@ class PlatformTextTrack;
 class MediaPlayerPrivateInterface {
     WTF_MAKE_NONCOPYABLE(MediaPlayerPrivateInterface); WTF_MAKE_FAST_ALLOCATED;
 public:
-    MediaPlayerPrivateInterface() { }
-    virtual ~MediaPlayerPrivateInterface() { }
+    MediaPlayerPrivateInterface() = default;
+    virtual ~MediaPlayerPrivateInterface() = default;
 
     virtual void load(const String& url) = 0;
 #if ENABLE(MEDIA_SOURCE)
@@ -59,7 +60,8 @@ public:
     virtual PlatformLayer* platformLayer() const { return 0; }
 
 #if PLATFORM(IOS) || (PLATFORM(MAC) && ENABLE(VIDEO_PRESENTATION_MODE))
-    virtual void setVideoFullscreenLayer(PlatformLayer*, std::function<void()> completionHandler) { completionHandler(); }
+    virtual void setVideoFullscreenLayer(PlatformLayer*, WTF::Function<void()>&& completionHandler) { completionHandler(); }
+    virtual void updateVideoFullscreenInlineImage() { }
     virtual void setVideoFullscreenFrame(FloatRect) { }
     virtual void setVideoFullscreenGravity(MediaPlayer::VideoGravity) { }
     virtual void setVideoFullscreenMode(MediaPlayer::VideoFullscreenMode) { }
@@ -76,6 +78,7 @@ public:
     virtual void pause() = 0;    
     virtual void setShouldBufferData(bool) { }
 
+    virtual bool supportsPictureInPicture() const { return false; }
     virtual bool supportsFullscreen() const { return false; }
     virtual bool supportsScanning() const { return false; }
     virtual bool requiresImmediateCompositing() const { return false; }
@@ -119,7 +122,7 @@ public:
 
     virtual void setVolume(float) { }
     virtual void setVolumeDouble(double volume) { return setVolume(volume); }
-#if PLATFORM(IOS)
+#if PLATFORM(IOS) || USE(GSTREAMER)
     virtual float volume() const { return 1; }
 #endif
 
@@ -141,6 +144,8 @@ public:
     virtual double minTimeSeekable() const { return 0; }
     virtual MediaTime minMediaTimeSeekable() const { return MediaTime::createWithDouble(minTimeSeekable()); }
     virtual std::unique_ptr<PlatformTimeRanges> buffered() const = 0;
+    virtual double seekableTimeRangesLastModifiedTime() const { return 0; }
+    virtual double liveUpdateInterval() const { return 0; }
 
     virtual unsigned long long totalBytes() const { return 0; }
     virtual bool didLoadingProgress() const = 0;
@@ -215,7 +220,7 @@ public:
     virtual unsigned videoDecodedByteCount() const { return 0; }
 
     HashSet<RefPtr<SecurityOrigin>> originsInMediaCache(const String&) { return { }; }
-    void clearMediaCache(const String&, std::chrono::system_clock::time_point) { }
+    void clearMediaCache(const String&, WallTime) { }
     void clearMediaCacheForOrigins(const String&, const HashSet<RefPtr<SecurityOrigin>>&) { }
 
     virtual void setPrivateBrowsingMode(bool) { }
@@ -227,9 +232,15 @@ public:
 #endif
 
 #if ENABLE(LEGACY_ENCRYPTED_MEDIA)
-    virtual std::unique_ptr<CDMSession> createSession(const String&, CDMSessionClient*) { return nullptr; }
-    virtual void setCDMSession(CDMSession*) { }
+    virtual std::unique_ptr<LegacyCDMSession> createSession(const String&, LegacyCDMSessionClient*) { return nullptr; }
+    virtual void setCDMSession(LegacyCDMSession*) { }
     virtual void keyAdded() { }
+#endif
+
+#if ENABLE(ENCRYPTED_MEDIA)
+    virtual void cdmInstanceAttached(CDMInstance&) { }
+    virtual void cdmInstanceDetached(CDMInstance&) { }
+    virtual void attemptToDecryptWithInstance(CDMInstance&) { }
 #endif
 
 #if ENABLE(VIDEO_TRACK)
@@ -242,6 +253,9 @@ public:
 #if USE(GSTREAMER)
     virtual void simulateAudioInterruption() { }
 #endif
+
+    virtual void beginSimulatedHDCPError() { }
+    virtual void endSimulatedHDCPError() { }
 
     virtual String languageOfPrimaryAudioTrack() const { return emptyString(); }
 
@@ -260,10 +274,7 @@ public:
     virtual bool ended() const { return false; }
 
 #if ENABLE(MEDIA_SOURCE)
-    virtual unsigned long totalVideoFrames() { return 0; }
-    virtual unsigned long droppedVideoFrames() { return 0; }
-    virtual unsigned long corruptedVideoFrames() { return 0; }
-    virtual MediaTime totalFrameDelay() { return MediaTime::zeroTime(); }
+    virtual std::optional<PlatformVideoPlaybackQualityMetrics> videoPlaybackQualityMetrics() { return std::nullopt; }
 #endif
 
 #if ENABLE(AVF_CAPTIONS)
@@ -273,6 +284,9 @@ public:
     virtual void notifyActiveSourceBuffersChanged() { }
 
     virtual void setShouldDisableSleep(bool) { }
+
+    virtual void applicationWillResignActive() { }
+    virtual void applicationDidBecomeActive() { }
 };
 
 }

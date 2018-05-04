@@ -18,8 +18,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGTextPositioningElement_h
-#define SVGTextPositioningElement_h
+#pragma once
 
 #include "SVGAnimatedLengthList.h"
 #include "SVGAnimatedNumberList.h"
@@ -28,6 +27,7 @@
 namespace WebCore {
 
 class SVGTextPositioningElement : public SVGTextContentElement {
+    WTF_MAKE_ISO_ALLOCATED(SVGTextPositioningElement);
 public:
     static SVGTextPositioningElement* elementFromRenderer(RenderBoxModelObject&);
 
@@ -51,5 +51,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif

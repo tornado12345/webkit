@@ -21,14 +21,15 @@
 #include "config.h"
 #include "DOMWrapperWorld.h"
 
+#include "CommonVM.h"
 #include "JSDOMWindow.h"
-#include "ScriptController.h"
 #include "WebCoreJSClientData.h"
+#include "WindowProxy.h"
 #include <wtf/MainThread.h>
 
-using namespace JSC;
 
 namespace WebCore {
+using namespace JSC;
 
 DOMWrapperWorld::DOMWrapperWorld(JSC::VM& vm, bool isNormal)
     : m_vm(vm)
@@ -46,8 +47,8 @@ DOMWrapperWorld::~DOMWrapperWorld()
     static_cast<JSVMClientData*>(clientData)->forgetWorld(*this);
 
     // These items are created lazily.
-    while (!m_scriptControllersWithWindowShells.isEmpty())
-        (*m_scriptControllersWithWindowShells.begin())->destroyWindowShell(*this);
+    while (!m_jsWindowProxies.isEmpty())
+        (*m_jsWindowProxies.begin())->destroyJSWindowProxy(*this);
 }
 
 void DOMWrapperWorld::clearWrappers()
@@ -55,8 +56,8 @@ void DOMWrapperWorld::clearWrappers()
     m_wrappers.clear();
 
     // These items are created lazily.
-    while (!m_scriptControllersWithWindowShells.isEmpty())
-        (*m_scriptControllersWithWindowShells.begin())->destroyWindowShell(*this);
+    while (!m_jsWindowProxies.isEmpty())
+        (*m_jsWindowProxies.begin())->destroyJSWindowProxy(*this);
 }
 
 DOMWrapperWorld& normalWorld(JSC::VM& vm)
@@ -69,7 +70,7 @@ DOMWrapperWorld& normalWorld(JSC::VM& vm)
 DOMWrapperWorld& mainThreadNormalWorld()
 {
     ASSERT(isMainThread());
-    static DOMWrapperWorld& cachedNormalWorld = normalWorld(JSDOMWindow::commonVM());
+    static DOMWrapperWorld& cachedNormalWorld = normalWorld(commonVM());
     return cachedNormalWorld;
 }
 

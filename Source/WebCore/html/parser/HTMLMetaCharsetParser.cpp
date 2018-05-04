@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2010 Google Inc. All Rights Reserved.
- * Copyright (C) 2015 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2015-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,6 +29,7 @@
 
 #include "HTMLNames.h"
 #include "HTMLParserIdioms.h"
+#include "TextCodec.h"
 #include "TextEncodingRegistry.h"
 
 namespace WebCore {
@@ -44,7 +45,7 @@ static StringView extractCharset(const String& value)
 {
     unsigned length = value.length();
     for (size_t pos = 0; pos < length; ) {
-        pos = value.find("charset", pos, false);
+        pos = value.findIgnoringASCIICase("charset", pos);
         if (pos == notFound)
             break;
 
@@ -151,9 +152,10 @@ bool HTMLMetaCharsetParser::checkForMetaCharset(const char* data, size_t length)
     // that are disallowed in <head>, we don't bail out until we've checked at
     // least bytesToCheckUnconditionally bytes of input.
 
-    static const int bytesToCheckUnconditionally = 1024;
+    constexpr int bytesToCheckUnconditionally = 1024;
 
-    m_input.append(SegmentedString(m_codec->decode(data, length)));
+    bool ignoredSawErrorFlag;
+    m_input.append(m_codec->decode(data, length, false, false, ignoredSawErrorFlag));
 
     while (auto token = m_tokenizer.nextToken(m_input)) {
         bool isEnd = token->type() == HTMLToken::EndTag;

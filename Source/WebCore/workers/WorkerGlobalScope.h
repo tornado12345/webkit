@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2008-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,18 +27,24 @@
 #pragma once
 
 #include "Base64Utilities.h"
+#include "CacheStorageConnection.h"
 #include "EventTarget.h"
+#include "ImageBitmap.h"
 #include "ScriptExecutionContext.h"
+#include "Supplementable.h"
 #include "URL.h"
+#include "WorkerCacheStorageConnection.h"
 #include "WorkerEventQueue.h"
 #include "WorkerScriptController.h"
-#include <inspector/ConsoleMessage.h>
+#include <JavaScriptCore/ConsoleMessage.h>
 #include <memory>
+#include <pal/SessionID.h>
 
 namespace WebCore {
 
 class ContentSecurityPolicyResponseHeaders;
 class Crypto;
+class Performance;
 class ScheduledAction;
 class WorkerInspectorController;
 class WorkerLocation;
@@ -54,13 +60,18 @@ public:
     virtual ~WorkerGlobalScope();
 
     virtual bool isDedicatedWorkerGlobalScope() const { return false; }
+    virtual bool isServiceWorkerGlobalScope() const { return false; }
 
     const URL& url() const final { return m_url; }
+    String origin() const final;
+    const String& identifier() const { return m_identifier; }
 
 #if ENABLE(INDEXED_DATABASE)
     IDBClient::IDBConnectionProxy* idbConnectionProxy() final;
     void stopIndexedDatabase();
 #endif
+
+    WorkerCacheStorageConnection& cacheStorageConnection();
 
     WorkerScriptController* script() { return m_script.get(); }
     void clearScript() { m_script = nullptr; }
@@ -78,14 +89,17 @@ public:
     void close();
 
     virtual ExceptionOr<void> importScripts(const Vector<String>& urls);
-    WorkerNavigator& navigator() const;
+    WorkerNavigator& navigator();
 
-    int setTimeout(std::unique_ptr<ScheduledAction>, int timeout);
+    void setIsOnline(bool);
+
+    ExceptionOr<int> setTimeout(JSC::ExecState&, std::unique_ptr<ScheduledAction>, int timeout, Vector<JSC::Strong<JSC::Unknown>>&& arguments);
     void clearTimeout(int timeoutId);
-    int setInterval(std::unique_ptr<ScheduledAction>, int timeout);
+    ExceptionOr<int> setInterval(JSC::ExecState&, std::unique_ptr<ScheduledAction>, int timeout, Vector<JSC::Strong<JSC::Unknown>>&& arguments);
     void clearInterval(int timeoutId);
 
     bool isContextThread() const final;
+    bool isSecureContext() const final;
 
     WorkerNavigator* optionalNavigator() const { return m_navigator.get(); }
     WorkerLocation* optionalLocation() const { return m_location.get(); }
@@ -95,12 +109,20 @@ public:
 
     bool isClosing() { return m_closing; }
 
-    void addConsoleMessage(std::unique_ptr<Inspector::ConsoleMessage>&&);
+    void addConsoleMessage(std::unique_ptr<Inspector::ConsoleMessage>&&) final;
 
     Crypto& crypto();
+    Performance& performance() const;
+
+    void removeAllEventListeners() final;
+
+    void createImageBitmap(ImageBitmap::Source&&, ImageBitmapOptions&&, ImageBitmap::Promise&&);
+    void createImageBitmap(ImageBitmap::Source&&, int sx, int sy, int sw, int sh, ImageBitmapOptions&&, ImageBitmap::Promise&&);
+
+    unsigned long createUniqueIdentifier() { return m_uniqueIdentifier++; }
 
 protected:
-    WorkerGlobalScope(const URL&, const String& identifier, const String& userAgent, WorkerThread&, bool shouldBypassMainWorldContentSecurityPolicy, RefPtr<SecurityOrigin>&& topOrigin, IDBClient::IDBConnectionProxy*, SocketProvider*);
+    WorkerGlobalScope(const URL&, Ref<SecurityOrigin>&&, const String& identifier, const String& userAgent, bool isOnline, WorkerThread&, bool shouldBypassMainWorldContentSecurityPolicy, Ref<SecurityOrigin>&& topOrigin, MonotonicTime timeOrigin, IDBClient::IDBConnectionProxy*, SocketProvider*, PAL::SessionID);
 
     void applyContentSecurityPolicyResponseHeaders(const ContentSecurityPolicyResponseHeaders&);
 
@@ -112,6 +134,9 @@ private:
     void derefEventTarget() final { deref(); }
 
     void logExceptionToConsole(const String& errorMessage, const String& sourceURL, int lineNumber, int columnNumber, RefPtr<Inspector::ScriptCallStack>&&) final;
+
+    // The following addMessage and addConsoleMessage functions are deprecated.
+    // Callers should try to create the ConsoleMessage themselves.
     void addMessage(MessageSource, MessageLevel, const String& message, const String& sourceURL, unsigned lineNumber, unsigned columnNumber, RefPtr<Inspector::ScriptCallStack>&&, JSC::ExecState*, unsigned long requestIdentifier) final;
     void addConsoleMessage(MessageSource, MessageLevel, const String& message, unsigned long requestIdentifier) final;
 
@@ -119,19 +144,18 @@ private:
 
     ScriptExecutionContext* scriptExecutionContext() const final { return const_cast<WorkerGlobalScope*>(this); }
     URL completeURL(const String&) const final;
+    PAL::SessionID sessionID() const final { return m_sessionID; }
     String userAgent(const URL&) const final;
     void disableEval(const String& errorMessage) final;
+    void disableWebAssembly(const String& errorMessage) final;
     EventTarget* errorEventTarget() final;
     WorkerEventQueue& eventQueue() const final;
     String resourceRequestIdentifier() const final { return m_identifier; }
-
-#if ENABLE(WEB_SOCKETS)
     SocketProvider* socketProvider() final;
-#endif
 
     bool shouldBypassMainWorldContentSecurityPolicy() const final { return m_shouldBypassMainWorldContentSecurityPolicy; }
     bool isJSExecutionForbidden() const final;
-    SecurityOrigin* topOrigin() const final { return m_topOrigin.get(); }
+    SecurityOrigin& topOrigin() const final { return m_topOrigin.get(); }
 
 #if ENABLE(SUBTLE_CRYPTO)
     // The following two functions are side effects of providing extra protection to serialized
@@ -157,21 +181,26 @@ private:
     std::unique_ptr<WorkerInspectorController> m_inspectorController;
 
     bool m_closing { false };
+    bool m_isOnline;
     bool m_shouldBypassMainWorldContentSecurityPolicy;
 
     mutable WorkerEventQueue m_eventQueue;
 
-    RefPtr<SecurityOrigin> m_topOrigin;
+    Ref<SecurityOrigin> m_topOrigin;
 
 #if ENABLE(INDEXED_DATABASE)
     RefPtr<IDBClient::IDBConnectionProxy> m_connectionProxy;
 #endif
 
-#if ENABLE(WEB_SOCKETS)
     RefPtr<SocketProvider> m_socketProvider;
-#endif
 
+    RefPtr<Performance> m_performance;
     mutable RefPtr<Crypto> m_crypto;
+
+    PAL::SessionID m_sessionID;
+    RefPtr<WorkerCacheStorageConnection> m_cacheStorageConnection;
+
+    unsigned long m_uniqueIdentifier { 1 };
 };
 
 } // namespace WebCore

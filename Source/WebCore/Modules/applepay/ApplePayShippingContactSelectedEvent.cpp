@@ -28,17 +28,17 @@
 
 #if ENABLE(APPLE_PAY)
 
+#include "PaymentContact.h"
+
 namespace WebCore {
 
-ApplePayShippingContactSelectedEvent::ApplePayShippingContactSelectedEvent(const AtomicString& type, const PaymentContact& shippingContact)
+ApplePayShippingContactSelectedEvent::ApplePayShippingContactSelectedEvent(const AtomicString& type, unsigned version, const PaymentContact& shippingContact)
     : Event(type, false, false)
-    , m_shippingContact(shippingContact)
+    , m_shippingContact(shippingContact.toApplePayPaymentContact(version))
 {
 }
 
-ApplePayShippingContactSelectedEvent::~ApplePayShippingContactSelectedEvent()
-{
-}
+ApplePayShippingContactSelectedEvent::~ApplePayShippingContactSelectedEvent() = default;
 
 EventInterface ApplePayShippingContactSelectedEvent::eventInterface() const
 {

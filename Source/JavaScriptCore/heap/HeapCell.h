@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,8 +33,11 @@ class CellContainer;
 class Heap;
 class LargeAllocation;
 class MarkedBlock;
+class Subspace;
 class VM;
-struct AllocatorAttributes;
+struct CellAttributes;
+
+static constexpr unsigned minimumDistanceBetweenCellsFromDifferentOrigins = sizeof(void*) == 8 ? 304 : 288;
 
 class HeapCell {
 public:
@@ -47,7 +50,9 @@ public:
     
     void zap() { *reinterpret_cast_ptr<uintptr_t**>(this) = 0; }
     bool isZapped() const { return !*reinterpret_cast_ptr<uintptr_t* const*>(this); }
-    
+
+    bool isLive();
+
     bool isLargeAllocation() const;
     CellContainer cellContainer() const;
     MarkedBlock& markedBlock() const;
@@ -63,9 +68,22 @@ public:
     VM* vm() const;
     
     size_t cellSize() const;
-    AllocatorAttributes allocatorAttributes() const;
+    CellAttributes cellAttributes() const;
     DestructionMode destructionMode() const;
     Kind cellKind() const;
+    Subspace* subspace() const;
+    
+    // Call use() after the last point where you need `this` pointer to be kept alive. You usually don't
+    // need to use this, but it might be necessary if you're otherwise referring to an object's innards
+    // but not the object itself.
+#if COMPILER(GCC_OR_CLANG)
+    void use() const
+    {
+        asm volatile ("" : : "r"(this) : "memory");
+    }
+#else
+    void use() const;
+#endif
 };
 
 } // namespace JSC

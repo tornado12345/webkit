@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,47 +32,76 @@
 #include "MockRealtimeAudioSource.h"
 
 #if ENABLE(MEDIA_STREAM)
+#include "CaptureDevice.h"
 #include "Logging.h"
 #include "MediaConstraints.h"
+#include "MockRealtimeMediaSourceCenter.h"
 #include "NotImplemented.h"
 #include "RealtimeMediaSourceSettings.h"
-#include "UUID.h"
+#include <wtf/UUID.h>
 
 namespace WebCore {
 
-RefPtr<MockRealtimeAudioSource> MockRealtimeAudioSource::create(const String& name, const MediaConstraints* constraints)
+class MockRealtimeAudioSourceFactory : public RealtimeMediaSource::AudioCaptureFactory
 {
-    auto source = adoptRef(new MockRealtimeAudioSource(name));
+public:
+    CaptureSourceOrError createAudioCaptureSource(const CaptureDevice& device, const MediaConstraints* constraints) final
+    {
+        for (auto& mockDevice : MockRealtimeMediaSource::audioDevices()) {
+            if (mockDevice.persistentId() == device.persistentId())
+                return MockRealtimeAudioSource::create(mockDevice.persistentId(), mockDevice.label(), constraints);
+        }
+        return { };
+    }
+};
+
+#if !PLATFORM(MAC) && !PLATFORM(IOS)
+CaptureSourceOrError MockRealtimeAudioSource::create(const String& deviceID, const String& name, const MediaConstraints* constraints)
+{
+    auto source = adoptRef(*new MockRealtimeAudioSource(deviceID, name));
     if (constraints && source->applyConstraints(*constraints))
-        source = nullptr;
+        return { };
 
-    return source;
+    return CaptureSourceOrError(WTFMove(source));
+}
+#endif
+
+static MockRealtimeAudioSourceFactory& mockAudioCaptureSourceFactory()
+{
+    static NeverDestroyed<MockRealtimeAudioSourceFactory> factory;
+    return factory.get();
 }
 
-RefPtr<MockRealtimeAudioSource> MockRealtimeAudioSource::createMuted(const String& name)
+RealtimeMediaSource::AudioCaptureFactory& MockRealtimeAudioSource::factory()
 {
-    auto source = adoptRef(new MockRealtimeAudioSource(name));
-    source->m_muted = true;
-    return source;
+    return mockAudioCaptureSourceFactory();
 }
 
-MockRealtimeAudioSource::MockRealtimeAudioSource(const String& name)
-    : MockRealtimeMediaSource(createCanonicalUUIDString(), RealtimeMediaSource::Audio, name)
+MockRealtimeAudioSource::MockRealtimeAudioSource(const String& deviceID, const String& name)
+    : MockRealtimeMediaSource(deviceID, RealtimeMediaSource::Type::Audio, name)
+    , m_timer(RunLoop::current(), this, &MockRealtimeAudioSource::tick)
 {
+}
+
+MockRealtimeAudioSource::~MockRealtimeAudioSource()
+{
+#if PLATFORM(IOS)
+    MockRealtimeMediaSourceCenter::audioCaptureSourceFactory().unsetActiveSource(*this);
+#endif
 }
 
 void MockRealtimeAudioSource::updateSettings(RealtimeMediaSourceSettings& settings)
 {
     settings.setVolume(volume());
     settings.setEchoCancellation(echoCancellation());
-    settings.setSampleRate(44100);
+    settings.setSampleRate(sampleRate());
 }
 
 void MockRealtimeAudioSource::initializeCapabilities(RealtimeMediaSourceCapabilities& capabilities)
 {
     capabilities.setVolume(CapabilityValueOrRange(0.0, 1.0));
     capabilities.setEchoCancellation(RealtimeMediaSourceCapabilities::EchoCancellation::ReadWrite);
-    capabilities.setSampleRate(CapabilityValueOrRange(44100, 44100));
+    capabilities.setSampleRate(CapabilityValueOrRange(44100, 48000));
 }
 
 void MockRealtimeAudioSource::initializeSupportedConstraints(RealtimeMediaSourceSupportedConstraints& supportedConstraints)
@@ -80,6 +109,57 @@ void MockRealtimeAudioSource::initializeSupportedConstraints(RealtimeMediaSource
     supportedConstraints.setSupportsVolume(true);
     supportedConstraints.setSupportsEchoCancellation(true);
     supportedConstraints.setSupportsSampleRate(true);
+}
+
+void MockRealtimeAudioSource::startProducingData()
+{
+#if PLATFORM(IOS)
+    MockRealtimeMediaSourceCenter::audioCaptureSourceFactory().setActiveSource(*this);
+#endif
+
+    if (!sampleRate())
+        setSampleRate(device() == MockRealtimeMediaSource::MockDevice::Microphone1 ? 44100 : 48000);
+
+    m_startTime = MonotonicTime::now();
+    m_timer.startRepeating(renderInterval());
+}
+
+void MockRealtimeAudioSource::stopProducingData()
+{
+    m_timer.stop();
+    m_elapsedTime += MonotonicTime::now() - m_startTime;
+    m_startTime = MonotonicTime::nan();
+}
+
+Seconds MockRealtimeAudioSource::elapsedTime()
+{
+    if (std::isnan(m_startTime))
+        return m_elapsedTime;
+
+    return m_elapsedTime + (MonotonicTime::now() - m_startTime);
+}
+
+void MockRealtimeAudioSource::tick()
+{
+    if (std::isnan(m_lastRenderTime))
+        m_lastRenderTime = MonotonicTime::now();
+
+    MonotonicTime now = MonotonicTime::now();
+
+    if (m_delayUntil) {
+        if (m_delayUntil < now)
+            return;
+        m_delayUntil = MonotonicTime();
+    }
+
+    Seconds delta = now - m_lastRenderTime;
+    m_lastRenderTime = now;
+    render(delta);
+}
+
+void MockRealtimeAudioSource::delaySamples(Seconds delta)
+{
+    m_delayUntil = MonotonicTime::now() + delta;
 }
 
 } // namespace WebCore

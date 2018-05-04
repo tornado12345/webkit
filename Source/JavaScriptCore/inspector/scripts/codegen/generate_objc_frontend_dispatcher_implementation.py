@@ -38,19 +38,19 @@ log = logging.getLogger('global')
 
 
 class ObjCFrontendDispatcherImplementationGenerator(ObjCGenerator):
-    def __init__(self, model, input_filepath):
-        ObjCGenerator.__init__(self, model, input_filepath)
+    def __init__(self, *args, **kwargs):
+        ObjCGenerator.__init__(self, *args, **kwargs)
 
     def output_filename(self):
         return '%sEventDispatchers.mm' % self.protocol_name()
 
     def domains_to_generate(self):
-        return filter(ObjCGenerator.should_generate_domain_event_dispatcher_filter(self.model()), Generator.domains_to_generate(self))
+        return filter(self.should_generate_events_for_domain, Generator.domains_to_generate(self))
 
     def generate_output(self):
         secondary_headers = [
             '"%sTypeConversions.h"' % self.protocol_name(),
-            '<JavaScriptCore/InspectorValues.h>',
+            '<wtf/JSONValues.h>',
         ]
 
         header_args = {
@@ -67,7 +67,7 @@ class ObjCFrontendDispatcherImplementationGenerator(ObjCGenerator):
         return '\n\n'.join(sections)
 
     def _generate_event_dispatcher_implementations(self, domain):
-        if not domain.events:
+        if not self.should_generate_events_for_domain(domain):
             return ''
 
         lines = []
@@ -87,7 +87,7 @@ class ObjCFrontendDispatcherImplementationGenerator(ObjCGenerator):
         lines.append('    return self;')
         lines.append('}')
         lines.append('')
-        for event in domain.events:
+        for event in self.events_for_domain(domain):
             lines.append(self._generate_event(domain, event))
             lines.append('')
         lines.append('@end')
@@ -119,7 +119,7 @@ class ObjCFrontendDispatcherImplementationGenerator(ObjCGenerator):
         if required_pointer_parameters or optional_pointer_parameters:
             lines.append('')
 
-        lines.append('    Ref<InspectorObject> jsonMessage = InspectorObject::create();')
+        lines.append('    Ref<JSON::Object> jsonMessage = JSON::Object::create();')
         lines.append('    jsonMessage->setString(ASCIILiteral("method"), ASCIILiteral("%s.%s"));' % (domain.domain_name, event.event_name))
         if event.event_parameters:
             lines.extend(self._generate_event_out_parameters(domain, event))
@@ -139,7 +139,7 @@ class ObjCFrontendDispatcherImplementationGenerator(ObjCGenerator):
 
     def _generate_event_out_parameters(self, domain, event):
         lines = []
-        lines.append('    Ref<InspectorObject> paramsObject = InspectorObject::create();')
+        lines.append('    Ref<JSON::Object> paramsObject = JSON::Object::create();')
         for parameter in event.event_parameters:
             keyed_set_method = CppGenerator.cpp_setter_method_for_type(parameter.type)
             var_name = parameter.parameter_name

@@ -42,24 +42,12 @@ OBJC_CLASS WebCoreAVCaptureDeviceManagerObserver;
 
 namespace WebCore {
 
-class AVCaptureSessionInfo : public CaptureSessionInfo {
-public:
-    AVCaptureSessionInfo(AVCaptureSession*);
-    bool supportsVideoSize(const String&) const final;
-    String bestSessionPresetForVideoDimensions(int width, int height) const final;
-
-private:
-    AVCaptureSession *m_platformSession;
-};
-
 class AVCaptureDeviceManager final : public CaptureDeviceManager {
     friend class NeverDestroyed<AVCaptureDeviceManager>;
 public:
-    Vector<CaptureDeviceInfo>& captureDeviceList() final;
+    const Vector<CaptureDevice>& captureDevices() final;
 
     static AVCaptureDeviceManager& singleton();
-
-    Vector<CaptureDevice> getSourcesInfo() final;
 
     void deviceConnected();
     void deviceDisconnected(AVCaptureDevice*);
@@ -70,12 +58,13 @@ protected:
     AVCaptureDeviceManager();
     ~AVCaptureDeviceManager() final;
 
-    RefPtr<RealtimeMediaSource> createMediaSourceForCaptureDeviceWithConstraints(const CaptureDeviceInfo&, const MediaConstraints*, String&) final;
-    void refreshCaptureDeviceList() final;
+    void refreshCaptureDevices() final;
     void registerForDeviceNotifications();
+    void refreshAVCaptureDevicesOfType(CaptureDevice::DeviceType);
+    Vector<CaptureDevice>& captureDevicesInternal();
 
     RetainPtr<WebCoreAVCaptureDeviceManagerObserver> m_objcObserver;
-    Vector<CaptureDeviceInfo> m_devices;
+    Vector<CaptureDevice> m_devices;
 };
 
 } // namespace WebCore

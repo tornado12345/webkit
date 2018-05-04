@@ -24,6 +24,8 @@
 #include "ExceptionOr.h"
 #include "ScriptWrappable.h"
 #include <wtf/Forward.h>
+#include <wtf/Optional.h>
+#include <wtf/Variant.h>
 
 namespace WebCore {
 
@@ -31,6 +33,7 @@ class CSSProperty;
 class CSSRule;
 class CSSStyleSheet;
 class CSSValue;
+class DeprecatedCSSOMValue;
 class MutableStyleProperties;
 class StyleProperties;
 class StyledElement;
@@ -38,7 +41,7 @@ class StyledElement;
 class CSSStyleDeclaration : public ScriptWrappable {
     WTF_MAKE_NONCOPYABLE(CSSStyleDeclaration); WTF_MAKE_FAST_ALLOCATED;
 public:
-    virtual ~CSSStyleDeclaration() { }
+    virtual ~CSSStyleDeclaration() = default;
 
     virtual void ref() = 0;
     virtual void deref() = 0;
@@ -49,13 +52,16 @@ public:
     virtual ExceptionOr<void> setCssText(const String&) = 0;
     virtual unsigned length() const = 0;
     virtual String item(unsigned index) const = 0;
-    virtual RefPtr<CSSValue> getPropertyCSSValue(const String& propertyName) = 0;
+    virtual RefPtr<DeprecatedCSSOMValue> getPropertyCSSValue(const String& propertyName) = 0;
     virtual String getPropertyValue(const String& propertyName) = 0;
     virtual String getPropertyPriority(const String& propertyName) = 0;
     virtual String getPropertyShorthand(const String& propertyName) = 0;
     virtual bool isPropertyImplicit(const String& propertyName) = 0;
     virtual ExceptionOr<void> setProperty(const String& propertyName, const String& value, const String& priority) = 0;
     virtual ExceptionOr<String> removeProperty(const String& propertyName) = 0;
+
+    String cssFloat();
+    ExceptionOr<void> setCssFloat(const String&);
 
     // CSSPropertyID versions of the CSSOM functions to support bindings and editing.
     // Use the non-virtual methods in the concrete subclasses when possible.
@@ -68,8 +74,14 @@ public:
 
     virtual CSSStyleSheet* parentStyleSheet() const { return nullptr; }
 
+    // Bindings support.
+    std::optional<Variant<String, double>> namedItem(const AtomicString&);
+    ExceptionOr<void> setNamedItem(const AtomicString& name, String value, bool& propertySupported);
+    Vector<AtomicString> supportedPropertyNames() const;
+
+    static CSSPropertyID getCSSPropertyIDFromJavaScriptPropertyName(const AtomicString&);
 protected:
-    CSSStyleDeclaration() { }
+    CSSStyleDeclaration() = default;
 };
 
 } // namespace WebCore

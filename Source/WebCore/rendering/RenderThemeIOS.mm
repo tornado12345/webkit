@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005, 2006, 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2005-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,6 +24,7 @@
  */
 
 #import "config.h"
+#import "RenderThemeIOS.h"
 
 #if PLATFORM(IOS)
 
@@ -31,7 +32,6 @@
 #import "CSSPrimitiveValue.h"
 #import "CSSToLengthConversionData.h"
 #import "CSSValueKeywords.h"
-#import "CoreTextSPI.h"
 #import "DateComponents.h"
 #import "Document.h"
 #import "File.h"
@@ -60,19 +60,25 @@
 #import "RenderObject.h"
 #import "RenderProgress.h"
 #import "RenderStyle.h"
-#import "RenderThemeIOS.h"
 #import "RenderView.h"
-#import "SoftLinking.h"
-#import "UIKitSPI.h"
+#import "RuntimeEnabledFeatures.h"
 #import "UTIUtilities.h"
 #import "UserAgentScripts.h"
 #import "UserAgentStyleSheets.h"
 #import "WebCoreThreadRun.h"
 #import <CoreGraphics/CoreGraphics.h>
+#import <CoreImage/CoreImage.h>
 #import <objc/runtime.h>
+#import <pal/spi/cocoa/CoreTextSPI.h>
+#import <pal/spi/ios/UIKitSPI.h>
 #import <wtf/NeverDestroyed.h>
 #import <wtf/RefPtr.h>
+#import <wtf/SoftLinking.h>
 #import <wtf/StdLibExtras.h>
+
+#if USE(SYSTEM_PREVIEW) && USE(APPLE_INTERNAL_SDK)
+#import <WebKitAdditions/SystemPreviewArtwork.cpp>
+#endif
 
 SOFT_LINK_FRAMEWORK(UIKit)
 SOFT_LINK_CLASS(UIKit, UIApplication)
@@ -294,15 +300,10 @@ RenderThemeIOS::RenderThemeIOS()
     CFNotificationCenterAddObserver(CFNotificationCenterGetLocalCenter(), this, contentSizeCategoryDidChange, UIContentSizeCategoryDidChangeNotification, 0, CFNotificationSuspensionBehaviorDeliverImmediately);
 }
 
-Ref<RenderTheme> RenderTheme::themeForPage(Page*)
+RenderTheme& RenderTheme::singleton()
 {
-    static RenderTheme& renderTheme = RenderThemeIOS::create().leakRef();
-    return renderTheme;
-}
-
-Ref<RenderTheme> RenderThemeIOS::create()
-{
-    return adoptRef(*new RenderThemeIOS);
+    static NeverDestroyed<RenderThemeIOS> theme;
+    return theme;
 }
 
 static String& _contentSizeCategory()
@@ -356,10 +357,9 @@ void RenderThemeIOS::adjustCheckboxStyle(StyleResolver&, RenderStyle& style, con
     if (!style.width().isIntrinsicOrAuto() && !style.height().isAuto())
         return;
 
-    Length length = Length(static_cast<int>(ceilf(std::max(style.fontSize(), 10))), Fixed);
-    
-    style.setWidth(length);
-    style.setHeight(length);
+    int size = std::max(style.computedFontPixelSize(), 10U);
+    style.setWidth({ size, Fixed });
+    style.setHeight({ size, Fixed });
 }
 
 static CGPoint shortened(CGPoint start, CGPoint end, float width)
@@ -447,10 +447,10 @@ bool RenderThemeIOS::isControlStyled(const RenderStyle& style, const BorderData&
 {
     // Buttons and MenulistButtons are styled if they contain a background image.
     if (style.appearance() == PushButtonPart || style.appearance() == MenulistButtonPart)
-        return !style.visitedDependentColor(CSSPropertyBackgroundColor).alpha() || style.backgroundLayers()->hasImage();
+        return !style.visitedDependentColor(CSSPropertyBackgroundColor).isVisible() || style.backgroundLayers().hasImage();
 
     if (style.appearance() == TextFieldPart || style.appearance() == TextAreaPart)
-        return *style.backgroundLayers() != background;
+        return style.backgroundLayers() != background;
 
     return RenderTheme::isControlStyled(style, border, background, backgroundColor);
 }
@@ -460,10 +460,10 @@ void RenderThemeIOS::adjustRadioStyle(StyleResolver&, RenderStyle& style, const 
     if (!style.width().isIntrinsicOrAuto() && !style.height().isAuto())
         return;
 
-    Length length = Length(static_cast<int>(ceilf(std::max(style.fontSize(), 10))), Fixed);
-    style.setWidth(length);
-    style.setHeight(length);
-    style.setBorderRadius(IntSize(length.value() / 2.0f, length.value() / 2.0f));
+    int size = std::max(style.computedFontPixelSize(), 10U);
+    style.setWidth({ size, Fixed });
+    style.setHeight({ size, Fixed });
+    style.setBorderRadius({ size / 2, size / 2 });
 }
 
 bool RenderThemeIOS::paintRadioDecorations(const RenderObject& box, const PaintInfo& paintInfo, const IntRect& rect)
@@ -537,13 +537,11 @@ LengthBox RenderThemeIOS::popupInternalPaddingBox(const RenderStyle& style) cons
 
 void RenderThemeIOS::adjustRoundBorderRadius(RenderStyle& style, RenderBox& box)
 {
-    if (style.appearance() == NoControlPart || style.backgroundLayers()->hasImage())
+    if (style.appearance() == NoControlPart || style.backgroundLayers().hasImage())
         return;
 
-    // FIXME: We should not be relying on border radius for the appearance of our controls <rdar://problem/7675493>
-    Length radiusWidth(static_cast<int>(std::min(box.width(), box.height()) / 2.0), Fixed);
-    Length radiusHeight(static_cast<int>(box.height() / 2.0), Fixed);
-    style.setBorderRadius(LengthSize(radiusWidth, radiusHeight));
+    // FIXME: We should not be relying on border radius for the appearance of our controls <rdar://problem/7675493>.
+    style.setBorderRadius({ { std::min(box.width(), box.height()) / 2, Fixed }, { box.height() / 2, Fixed } });
 }
 
 static void applyCommonButtonPaddingToStyle(RenderStyle& style, const Element& element)
@@ -654,11 +652,11 @@ bool RenderThemeIOS::paintMenuListButtonDecorations(const RenderBox& box, const 
         FloatSize bottomRightRadius;
 
         if (isRTL) {
-            topRightRadius = FloatSize(valueForLength(style.borderTopRightRadius().width(), rect.width()) - style.borderRightWidth(), valueForLength(style.borderTopRightRadius().height(), rect.height()) - style.borderTopWidth());
-            bottomRightRadius = FloatSize(valueForLength(style.borderBottomRightRadius().width(), rect.width()) - style.borderRightWidth(), valueForLength(style.borderBottomRightRadius().height(), rect.height()) - style.borderBottomWidth());
+            topRightRadius = FloatSize(valueForLength(style.borderTopRightRadius().width, rect.width()) - style.borderRightWidth(), valueForLength(style.borderTopRightRadius().height, rect.height()) - style.borderTopWidth());
+            bottomRightRadius = FloatSize(valueForLength(style.borderBottomRightRadius().width, rect.width()) - style.borderRightWidth(), valueForLength(style.borderBottomRightRadius().height, rect.height()) - style.borderBottomWidth());
         } else {
-            topLeftRadius = FloatSize(valueForLength(style.borderTopLeftRadius().width(), rect.width()) - style.borderLeftWidth(), valueForLength(style.borderTopLeftRadius().height(), rect.height()) - style.borderTopWidth());
-            bottomLeftRadius = FloatSize(valueForLength(style.borderBottomLeftRadius().width(), rect.width()) - style.borderLeftWidth(), valueForLength(style.borderBottomLeftRadius().height(), rect.height()) - style.borderBottomWidth());
+            topLeftRadius = FloatSize(valueForLength(style.borderTopLeftRadius().width, rect.width()) - style.borderLeftWidth(), valueForLength(style.borderTopLeftRadius().height, rect.height()) - style.borderTopWidth());
+            bottomLeftRadius = FloatSize(valueForLength(style.borderBottomLeftRadius().width, rect.width()) - style.borderLeftWidth(), valueForLength(style.borderBottomLeftRadius().height, rect.height()) - style.borderBottomWidth());
         }
 
         paintInfo.context().clipRoundedRect(FloatRoundedRect(titleClip,
@@ -691,11 +689,11 @@ bool RenderThemeIOS::paintMenuListButtonDecorations(const RenderBox& box, const 
         FloatSize bottomRightRadius;
 
         if (isRTL) {
-            topLeftRadius = FloatSize(valueForLength(style.borderTopLeftRadius().width(), rect.width()) - style.borderLeftWidth(), valueForLength(style.borderTopLeftRadius().height(), rect.height()) - style.borderTopWidth());
-            bottomLeftRadius = FloatSize(valueForLength(style.borderBottomLeftRadius().width(), rect.width()) - style.borderLeftWidth(), valueForLength(style.borderBottomLeftRadius().height(), rect.height()) - style.borderBottomWidth());
+            topLeftRadius = FloatSize(valueForLength(style.borderTopLeftRadius().width, rect.width()) - style.borderLeftWidth(), valueForLength(style.borderTopLeftRadius().height, rect.height()) - style.borderTopWidth());
+            bottomLeftRadius = FloatSize(valueForLength(style.borderBottomLeftRadius().width, rect.width()) - style.borderLeftWidth(), valueForLength(style.borderBottomLeftRadius().height, rect.height()) - style.borderBottomWidth());
         } else {
-            topRightRadius = FloatSize(valueForLength(style.borderTopRightRadius().width(), rect.width()) - style.borderRightWidth(), valueForLength(style.borderTopRightRadius().height(), rect.height()) - style.borderTopWidth());
-            bottomRightRadius = FloatSize(valueForLength(style.borderBottomRightRadius().width(), rect.width()) - style.borderRightWidth(), valueForLength(style.borderBottomRightRadius().height(), rect.height()) - style.borderBottomWidth());
+            topRightRadius = FloatSize(valueForLength(style.borderTopRightRadius().width, rect.width()) - style.borderRightWidth(), valueForLength(style.borderTopRightRadius().height, rect.height()) - style.borderTopWidth());
+            bottomRightRadius = FloatSize(valueForLength(style.borderBottomRightRadius().width, rect.width()) - style.borderRightWidth(), valueForLength(style.borderBottomRightRadius().height, rect.height()) - style.borderBottomWidth());
         }
 
         paintInfo.context().clipRoundedRect(FloatRoundedRect(buttonClip,
@@ -757,10 +755,9 @@ void RenderThemeIOS::adjustSliderTrackStyle(StyleResolver& selector, RenderStyle
 {
     RenderTheme::adjustSliderTrackStyle(selector, style, element);
 
-    // FIXME: We should not be relying on border radius for the appearance of our controls <rdar://problem/7675493>
-    Length radiusWidth(static_cast<int>(kTrackRadius), Fixed);
-    Length radiusHeight(static_cast<int>(kTrackRadius), Fixed);
-    style.setBorderRadius(LengthSize(radiusWidth, radiusHeight));
+    // FIXME: We should not be relying on border radius for the appearance of our controls <rdar://problem/7675493>.
+    int radius = static_cast<int>(kTrackRadius);
+    style.setBorderRadius({ { radius, Fixed }, { radius, Fixed } });
 }
 
 bool RenderThemeIOS::paintSliderTrack(const RenderObject& box, const PaintInfo& paintInfo, const IntRect& rect)
@@ -847,14 +844,12 @@ void RenderThemeIOS::adjustSliderThumbSize(RenderStyle& style, const Element*) c
         return;
 
     // Enforce "border-radius: 50%".
-    Length length(50.0f, Percent);
-    style.setBorderRadius(LengthSize(length, length));
+    style.setBorderRadius({ { 50, Percent }, { 50, Percent } });
 
     // Enforce a 16x16 size if no size is provided.
     if (style.width().isIntrinsicOrAuto() || style.height().isAuto()) {
-        Length length = Length(kDefaultSliderThumbSize, Fixed);
-        style.setWidth(length);
-        style.setHeight(length);
+        style.setWidth({ kDefaultSliderThumbSize, Fixed });
+        style.setHeight({ kDefaultSliderThumbSize, Fixed });
     }
 }
 
@@ -875,14 +870,14 @@ bool RenderThemeIOS::paintSliderThumbDecorations(const RenderObject& box, const 
     return false;
 }
 
-double RenderThemeIOS::animationRepeatIntervalForProgressBar(RenderProgress&) const
+Seconds RenderThemeIOS::animationRepeatIntervalForProgressBar(RenderProgress&) const
 {
-    return 0;
+    return 0_s;
 }
 
-double RenderThemeIOS::animationDurationForProgressBar(RenderProgress&) const
+Seconds RenderThemeIOS::animationDurationForProgressBar(RenderProgress&) const
 {
-    return 0;
+    return 0_s;
 }
 
 bool RenderThemeIOS::paintProgressBar(const RenderObject& renderer, const PaintInfo& paintInfo, const IntRect& rect)
@@ -907,7 +902,7 @@ bool RenderThemeIOS::paintProgressBar(const RenderObject& renderer, const PaintI
     context.setStrokeStyle(SolidStroke);
 
     const float verticalRenderingPosition = rect.y() + verticalOffset;
-    RefPtr<Gradient> strokeGradient = Gradient::create(FloatPoint(rect.x(), verticalRenderingPosition), FloatPoint(rect.x(), verticalRenderingPosition + progressBarHeight - 1));
+    RefPtr<Gradient> strokeGradient = Gradient::create(Gradient::LinearData { FloatPoint(rect.x(), verticalRenderingPosition), FloatPoint(rect.x(), verticalRenderingPosition + progressBarHeight - 1) });
     strokeGradient->addColorStop(0.0, Color(0x8d, 0x8d, 0x8d));
     strokeGradient->addColorStop(0.45, Color(0xee, 0xee, 0xee));
     strokeGradient->addColorStop(0.55, Color(0xee, 0xee, 0xee));
@@ -927,7 +922,7 @@ bool RenderThemeIOS::paintProgressBar(const RenderObject& renderer, const PaintI
     paintInfo.context().clipRoundedRect(FloatRoundedRect(border, roundedCornerRadius, roundedCornerRadius, roundedCornerRadius, roundedCornerRadius));
 
     float upperGradientHeight = progressBarHeight / 2.;
-    RefPtr<Gradient> upperGradient = Gradient::create(FloatPoint(rect.x(), verticalRenderingPosition + 0.5), FloatPoint(rect.x(), verticalRenderingPosition + upperGradientHeight - 1.5));
+    RefPtr<Gradient> upperGradient = Gradient::create(Gradient::LinearData { FloatPoint(rect.x(), verticalRenderingPosition + 0.5), FloatPoint(rect.x(), verticalRenderingPosition + upperGradientHeight - 1.5) });
     upperGradient->addColorStop(0.0, Color(133, 133, 133, 188));
     upperGradient->addColorStop(1.0, Color(18, 18, 18, 51));
     context.setFillGradient(upperGradient.releaseNonNull());
@@ -939,7 +934,7 @@ bool RenderThemeIOS::paintProgressBar(const RenderObject& renderer, const PaintI
         // 2) Draw the progress bar.
         double position = clampTo(renderProgress.position(), 0.0, 1.0);
         double barWidth = position * rect.width();
-        RefPtr<Gradient> barGradient = Gradient::create(FloatPoint(rect.x(), verticalRenderingPosition + 0.5), FloatPoint(rect.x(), verticalRenderingPosition + progressBarHeight - 1));
+        RefPtr<Gradient> barGradient = Gradient::create(Gradient::LinearData { FloatPoint(rect.x(), verticalRenderingPosition + 0.5), FloatPoint(rect.x(), verticalRenderingPosition + progressBarHeight - 1) });
         barGradient->addColorStop(0.0, Color(195, 217, 247));
         barGradient->addColorStop(0.45, Color(118, 164, 228));
         barGradient->addColorStop(0.49, Color(118, 164, 228));
@@ -948,7 +943,7 @@ bool RenderThemeIOS::paintProgressBar(const RenderObject& renderer, const PaintI
         barGradient->addColorStop(1.0, Color(57, 142, 244));
         context.setFillGradient(barGradient.releaseNonNull());
 
-        RefPtr<Gradient> barStrokeGradient = Gradient::create(FloatPoint(rect.x(), verticalRenderingPosition), FloatPoint(rect.x(), verticalRenderingPosition + progressBarHeight - 1));
+        RefPtr<Gradient> barStrokeGradient = Gradient::create(Gradient::LinearData { FloatPoint(rect.x(), verticalRenderingPosition), FloatPoint(rect.x(), verticalRenderingPosition + progressBarHeight - 1) });
         barStrokeGradient->addColorStop(0.0, Color(95, 107, 183));
         barStrokeGradient->addColorStop(0.5, Color(66, 106, 174, 240));
         barStrokeGradient->addColorStop(1.0, Color(38, 104, 166));
@@ -1140,9 +1135,15 @@ FontCascadeDescription& RenderThemeIOS::cachedSystemFontDescription(CSSValueID v
     static NeverDestroyed<FontCascadeDescription> shortFootnoteFont;
     static NeverDestroyed<FontCascadeDescription> shortCaption1Font;
     static NeverDestroyed<FontCascadeDescription> tallBodyFont;
+#if __IPHONE_OS_VERSION_MIN_REQUIRED >= 110000
+    static NeverDestroyed<FontCascadeDescription> title0Font;
+#endif
     static NeverDestroyed<FontCascadeDescription> title1Font;
     static NeverDestroyed<FontCascadeDescription> title2Font;
     static NeverDestroyed<FontCascadeDescription> title3Font;
+#if __IPHONE_OS_VERSION_MIN_REQUIRED >= 110000
+    static NeverDestroyed<FontCascadeDescription> title4Font;
+#endif
 
     static CFStringRef userTextSize = contentSizeCategory();
 
@@ -1168,12 +1169,20 @@ FontCascadeDescription& RenderThemeIOS::cachedSystemFontDescription(CSSValueID v
         return headlineFont;
     case CSSValueAppleSystemBody:
         return bodyFont;
+#if __IPHONE_OS_VERSION_MIN_REQUIRED >= 110000
+    case CSSValueAppleSystemTitle0:
+        return title0Font;
+#endif
     case CSSValueAppleSystemTitle1:
         return title1Font;
     case CSSValueAppleSystemTitle2:
         return title2Font;
     case CSSValueAppleSystemTitle3:
         return title3Font;
+#if __IPHONE_OS_VERSION_MIN_REQUIRED >= 110000
+    case CSSValueAppleSystemTitle4:
+        return title4Font;
+#endif
     case CSSValueAppleSystemSubheadline:
         return subheadlineFont;
     case CSSValueAppleSystemFootnote:
@@ -1201,6 +1210,21 @@ FontCascadeDescription& RenderThemeIOS::cachedSystemFontDescription(CSSValueID v
     }
 }
 
+static inline FontSelectionValue cssWeightOfSystemFont(CTFontRef font)
+{
+    RetainPtr<CFDictionaryRef> traits = adoptCF(CTFontCopyTraits(font));
+    CFNumberRef resultRef = (CFNumberRef)CFDictionaryGetValue(traits.get(), kCTFontWeightTrait);
+    float result = 0;
+    CFNumberGetValue(resultRef, kCFNumberFloatType, &result);
+    // These numbers were experimentally gathered from weights of the system font.
+    static float weightThresholds[] = { -0.6, -0.365, -0.115, 0.130, 0.235, 0.350, 0.5, 0.7 };
+    for (unsigned i = 0; i < WTF_ARRAY_LENGTH(weightThresholds); ++i) {
+        if (result < weightThresholds[i])
+            return FontSelectionValue((static_cast<int>(i) + 1) * 100);
+    }
+    return FontSelectionValue(900);
+}
+
 void RenderThemeIOS::updateCachedSystemFontDescription(CSSValueID valueID, FontCascadeDescription& fontDescription) const
 {
     RetainPtr<CTFontDescriptorRef> fontDescriptor;
@@ -1208,67 +1232,79 @@ void RenderThemeIOS::updateCachedSystemFontDescription(CSSValueID valueID, FontC
     switch (valueID) {
     case CSSValueAppleSystemHeadline:
         textStyle = kCTUIFontTextStyleHeadline;
-        fontDescriptor = adoptCF(CTFontDescriptorCreateWithTextStyle(textStyle, contentSizeCategory(), 0));
+        fontDescriptor = adoptCF(CTFontDescriptorCreateWithTextStyle(textStyle, contentSizeCategory(), nullptr));
         break;
     case CSSValueAppleSystemBody:
         textStyle = kCTUIFontTextStyleBody;
-        fontDescriptor = adoptCF(CTFontDescriptorCreateWithTextStyle(textStyle, contentSizeCategory(), 0));
+        fontDescriptor = adoptCF(CTFontDescriptorCreateWithTextStyle(textStyle, contentSizeCategory(), nullptr));
         break;
+#if __IPHONE_OS_VERSION_MIN_REQUIRED >= 110000
+    case CSSValueAppleSystemTitle0:
+        textStyle = kCTUIFontTextStyleTitle0;
+        fontDescriptor = adoptCF(CTFontDescriptorCreateWithTextStyle(textStyle, contentSizeCategory(), nullptr));
+        break;
+#endif
     case CSSValueAppleSystemTitle1:
         textStyle = kCTUIFontTextStyleTitle1;
-        fontDescriptor = adoptCF(CTFontDescriptorCreateWithTextStyle(textStyle, contentSizeCategory(), 0));
+        fontDescriptor = adoptCF(CTFontDescriptorCreateWithTextStyle(textStyle, contentSizeCategory(), nullptr));
         break;
     case CSSValueAppleSystemTitle2:
         textStyle = kCTUIFontTextStyleTitle2;
-        fontDescriptor = adoptCF(CTFontDescriptorCreateWithTextStyle(textStyle, contentSizeCategory(), 0));
+        fontDescriptor = adoptCF(CTFontDescriptorCreateWithTextStyle(textStyle, contentSizeCategory(), nullptr));
         break;
     case CSSValueAppleSystemTitle3:
         textStyle = kCTUIFontTextStyleTitle3;
-        fontDescriptor = adoptCF(CTFontDescriptorCreateWithTextStyle(textStyle, contentSizeCategory(), 0));
+        fontDescriptor = adoptCF(CTFontDescriptorCreateWithTextStyle(textStyle, contentSizeCategory(), nullptr));
         break;
+#if __IPHONE_OS_VERSION_MIN_REQUIRED >= 110000
+    case CSSValueAppleSystemTitle4:
+        textStyle = kCTUIFontTextStyleTitle4;
+        fontDescriptor = adoptCF(CTFontDescriptorCreateWithTextStyle(textStyle, contentSizeCategory(), nullptr));
+        break;
+#endif
     case CSSValueAppleSystemSubheadline:
         textStyle = kCTUIFontTextStyleSubhead;
-        fontDescriptor = adoptCF(CTFontDescriptorCreateWithTextStyle(textStyle, contentSizeCategory(), 0));
+        fontDescriptor = adoptCF(CTFontDescriptorCreateWithTextStyle(textStyle, contentSizeCategory(), nullptr));
         break;
     case CSSValueAppleSystemFootnote:
         textStyle = kCTUIFontTextStyleFootnote;
-        fontDescriptor = adoptCF(CTFontDescriptorCreateWithTextStyle(textStyle, contentSizeCategory(), 0));
+        fontDescriptor = adoptCF(CTFontDescriptorCreateWithTextStyle(textStyle, contentSizeCategory(), nullptr));
         break;
     case CSSValueAppleSystemCaption1:
         textStyle = kCTUIFontTextStyleCaption1;
-        fontDescriptor = adoptCF(CTFontDescriptorCreateWithTextStyle(textStyle, contentSizeCategory(), 0));
+        fontDescriptor = adoptCF(CTFontDescriptorCreateWithTextStyle(textStyle, contentSizeCategory(), nullptr));
         break;
     case CSSValueAppleSystemCaption2:
         textStyle = kCTUIFontTextStyleCaption2;
-        fontDescriptor = adoptCF(CTFontDescriptorCreateWithTextStyle(textStyle, contentSizeCategory(), 0));
+        fontDescriptor = adoptCF(CTFontDescriptorCreateWithTextStyle(textStyle, contentSizeCategory(), nullptr));
         break;
 
     // Short version.
     case CSSValueAppleSystemShortHeadline:
         textStyle = kCTUIFontTextStyleShortHeadline;
-        fontDescriptor = adoptCF(CTFontDescriptorCreateWithTextStyle(textStyle, contentSizeCategory(), 0));
+        fontDescriptor = adoptCF(CTFontDescriptorCreateWithTextStyle(textStyle, contentSizeCategory(), nullptr));
         break;
     case CSSValueAppleSystemShortBody:
         textStyle = kCTUIFontTextStyleShortBody;
-        fontDescriptor = adoptCF(CTFontDescriptorCreateWithTextStyle(textStyle, contentSizeCategory(), 0));
+        fontDescriptor = adoptCF(CTFontDescriptorCreateWithTextStyle(textStyle, contentSizeCategory(), nullptr));
         break;
     case CSSValueAppleSystemShortSubheadline:
         textStyle = kCTUIFontTextStyleShortSubhead;
-        fontDescriptor = adoptCF(CTFontDescriptorCreateWithTextStyle(textStyle, contentSizeCategory(), 0));
+        fontDescriptor = adoptCF(CTFontDescriptorCreateWithTextStyle(textStyle, contentSizeCategory(), nullptr));
         break;
     case CSSValueAppleSystemShortFootnote:
         textStyle = kCTUIFontTextStyleShortFootnote;
-        fontDescriptor = adoptCF(CTFontDescriptorCreateWithTextStyle(textStyle, contentSizeCategory(), 0));
+        fontDescriptor = adoptCF(CTFontDescriptorCreateWithTextStyle(textStyle, contentSizeCategory(), nullptr));
         break;
     case CSSValueAppleSystemShortCaption1:
         textStyle = kCTUIFontTextStyleShortCaption1;
-        fontDescriptor = adoptCF(CTFontDescriptorCreateWithTextStyle(textStyle, contentSizeCategory(), 0));
+        fontDescriptor = adoptCF(CTFontDescriptorCreateWithTextStyle(textStyle, contentSizeCategory(), nullptr));
         break;
 
     // Tall version.
     case CSSValueAppleSystemTallBody:
         textStyle = kCTUIFontTextStyleTallBody;
-        fontDescriptor = adoptCF(CTFontDescriptorCreateWithTextStyle(textStyle, contentSizeCategory(), 0));
+        fontDescriptor = adoptCF(CTFontDescriptorCreateWithTextStyle(textStyle, contentSizeCategory(), nullptr));
         break;
 
     default:
@@ -1278,46 +1314,106 @@ void RenderThemeIOS::updateCachedSystemFontDescription(CSSValueID valueID, FontC
 
     ASSERT(fontDescriptor);
     RetainPtr<CTFontRef> font = adoptCF(CTFontCreateWithFontDescriptor(fontDescriptor.get(), 0, nullptr));
-    font = preparePlatformFont(font.get(), fontDescription.textRenderingMode(), nullptr, nullptr, fontDescription.featureSettings(), fontDescription.variantSettings(), fontDescription.variationSettings());
     fontDescription.setIsAbsoluteSize(true);
     fontDescription.setOneFamily(textStyle);
     fontDescription.setSpecifiedSize(CTFontGetSize(font.get()));
-    fontDescription.setWeight(fontWeightFromCoreText(FontCache::weightOfCTFont(font.get())));
-    fontDescription.setItalic(FontItalicOff);
+    fontDescription.setWeight(cssWeightOfSystemFont(font.get()));
+    fontDescription.setItalic(normalItalicValue());
 }
 
 #if ENABLE(VIDEO)
 String RenderThemeIOS::mediaControlsStyleSheet()
 {
 #if ENABLE(MEDIA_CONTROLS_SCRIPT)
-    if (m_mediaControlsStyleSheet.isEmpty())
-        m_mediaControlsStyleSheet = [NSString stringWithContentsOfFile:[[NSBundle bundleForClass:[WebCoreRenderThemeBundle class]] pathForResource:@"mediaControlsiOS" ofType:@"css"] encoding:NSUTF8StringEncoding error:nil];
-    return m_mediaControlsStyleSheet;
+    if (m_legacyMediaControlsStyleSheet.isEmpty())
+        m_legacyMediaControlsStyleSheet = [NSString stringWithContentsOfFile:[[NSBundle bundleForClass:[WebCoreRenderThemeBundle class]] pathForResource:@"mediaControlsiOS" ofType:@"css"] encoding:NSUTF8StringEncoding error:nil];
+    return m_legacyMediaControlsStyleSheet;
 #else
     return emptyString();
 #endif
+}
+
+String RenderThemeIOS::modernMediaControlsStyleSheet()
+{
+#if ENABLE(MEDIA_CONTROLS_SCRIPT)
+    if (RuntimeEnabledFeatures::sharedFeatures().modernMediaControlsEnabled()) {
+        if (m_mediaControlsStyleSheet.isEmpty())
+            m_mediaControlsStyleSheet = [NSString stringWithContentsOfFile:[[NSBundle bundleForClass:[WebCoreRenderThemeBundle class]] pathForResource:@"modern-media-controls" ofType:@"css" inDirectory:@"modern-media-controls"] encoding:NSUTF8StringEncoding error:nil];
+        return m_mediaControlsStyleSheet;
+    }
+    return emptyString();
+#else
+    return emptyString();
+#endif
+}
+
+void RenderThemeIOS::purgeCaches()
+{
+    m_legacyMediaControlsScript.clearImplIfNotShared();
+    m_mediaControlsScript.clearImplIfNotShared();
+    m_legacyMediaControlsStyleSheet.clearImplIfNotShared();
+    m_mediaControlsStyleSheet.clearImplIfNotShared();
 }
 
 String RenderThemeIOS::mediaControlsScript()
 {
 #if ENABLE(MEDIA_CONTROLS_SCRIPT)
-    if (m_mediaControlsScript.isEmpty()) {
+    if (RuntimeEnabledFeatures::sharedFeatures().modernMediaControlsEnabled()) {
+        if (m_mediaControlsScript.isEmpty()) {
+            NSBundle *bundle = [NSBundle bundleForClass:[WebCoreRenderThemeBundle class]];
+
+            StringBuilder scriptBuilder;
+            scriptBuilder.append([NSString stringWithContentsOfFile:[bundle pathForResource:@"modern-media-controls-localized-strings" ofType:@"js"] encoding:NSUTF8StringEncoding error:nil]);
+            scriptBuilder.append([NSString stringWithContentsOfFile:[bundle pathForResource:@"modern-media-controls" ofType:@"js" inDirectory:@"modern-media-controls"] encoding:NSUTF8StringEncoding error:nil]);
+            m_mediaControlsScript = scriptBuilder.toString();
+        }
+        return m_mediaControlsScript;
+    }
+
+    if (m_legacyMediaControlsScript.isEmpty()) {
+        NSBundle *bundle = [NSBundle bundleForClass:[WebCoreRenderThemeBundle class]];
+
         StringBuilder scriptBuilder;
-        NSBundle* bundle = [NSBundle bundleForClass:[WebCoreRenderThemeBundle class]];
         scriptBuilder.append([NSString stringWithContentsOfFile:[bundle pathForResource:@"mediaControlsLocalizedStrings" ofType:@"js"] encoding:NSUTF8StringEncoding error:nil]);
         scriptBuilder.append([NSString stringWithContentsOfFile:[bundle pathForResource:@"mediaControlsApple" ofType:@"js"] encoding:NSUTF8StringEncoding error:nil]);
         scriptBuilder.append([NSString stringWithContentsOfFile:[bundle pathForResource:@"mediaControlsiOS" ofType:@"js"] encoding:NSUTF8StringEncoding error:nil]);
-        m_mediaControlsScript = scriptBuilder.toString();
+
+        m_legacyMediaControlsScript = scriptBuilder.toString();
     }
-    return m_mediaControlsScript;
+    return m_legacyMediaControlsScript;
 #else
     return emptyString();
 #endif
 }
+
+String RenderThemeIOS::mediaControlsBase64StringForIconNameAndType(const String& iconName, const String& iconType)
+{
+#if ENABLE(MEDIA_CONTROLS_SCRIPT)
+    if (!RuntimeEnabledFeatures::sharedFeatures().modernMediaControlsEnabled())
+        return emptyString();
+
+    String directory = "modern-media-controls/images";
+    NSBundle *bundle = [NSBundle bundleForClass:[WebCoreRenderThemeBundle class]];
+    return [[NSData dataWithContentsOfFile:[bundle pathForResource:iconName ofType:iconType inDirectory:directory]] base64EncodedStringWithOptions:0];
+#else
+    return emptyString();
+#endif
+}
+
 #endif // ENABLE(VIDEO)
 
-Color RenderThemeIOS::systemColor(CSSValueID cssValueID) const
+Color RenderThemeIOS::systemColor(CSSValueID cssValueID, OptionSet<StyleColor::Options> options) const
 {
+    const bool forVisitedLink = options.contains(StyleColor::Options::ForVisitedLink);
+
+    // The system color cache below can't handle visited links. The only color value
+    // that cares about visited links is CSSValueWebkitLink, so handle it here by
+    // calling through to RenderTheme's base implementation.
+    if (forVisitedLink && cssValueID == CSSValueWebkitLink)
+        return RenderTheme::systemColor(cssValueID, options);
+
+    ASSERT(!forVisitedLink);
+
     auto addResult = m_systemColorCache.add(cssValueID, Color());
     if (!addResult.isNewEntry)
         return addResult.iterator->value;
@@ -1353,7 +1449,7 @@ Color RenderThemeIOS::systemColor(CSSValueID cssValueID) const
     }
 
     if (!color.isValid())
-        color = RenderTheme::systemColor(cssValueID);
+        color = RenderTheme::systemColor(cssValueID, options);
 
     addResult.iterator->value = color;
 
@@ -1404,8 +1500,8 @@ static UIColor *attachmentTitleColor() { return [getUIColorClass() systemGrayCol
 static RetainPtr<CTFontRef> attachmentSubtitleFont() { return attachmentTitleFont(); }
 static UIColor *attachmentSubtitleColor() { return [getUIColorClass() systemGrayColor]; }
 
-struct AttachmentInfo {
-    explicit AttachmentInfo(const RenderAttachment&);
+struct RenderAttachmentInfo {
+    explicit RenderAttachmentInfo(const RenderAttachment&);
 
     FloatRect iconRect;
     FloatRect attachmentRect;
@@ -1433,7 +1529,7 @@ private:
     void addLine(CTLineRef);
 };
 
-void AttachmentInfo::addLine(CTLineRef line)
+void RenderAttachmentInfo::addLine(CTLineRef line)
 {
     CGRect lineBounds = CTLineGetBoundsWithOptions(line, kCTLineBoundsExcludeTypographicLeading);
     CGFloat trailingWhitespaceWidth = CTLineGetTrailingWhitespaceWidth(line);
@@ -1448,7 +1544,7 @@ void AttachmentInfo::addLine(CTLineRef line)
     lines.append(labelLine);
 }
 
-void AttachmentInfo::buildWrappedLines(const String& text, CTFontRef font, UIColor *color, unsigned maximumLineCount)
+void RenderAttachmentInfo::buildWrappedLines(const String& text, CTFontRef font, UIColor *color, unsigned maximumLineCount)
 {
     if (text.isEmpty())
         return;
@@ -1497,7 +1593,7 @@ void AttachmentInfo::buildWrappedLines(const String& text, CTFontRef font, UICol
     addLine(truncatedLine.get());
 }
 
-void AttachmentInfo::buildSingleLine(const String& text, CTFontRef font, UIColor *color)
+void RenderAttachmentInfo::buildSingleLine(const String& text, CTFontRef font, UIColor *color)
 {
     if (text.isEmpty())
         return;
@@ -1513,7 +1609,7 @@ void AttachmentInfo::buildSingleLine(const String& text, CTFontRef font, UIColor
 
 static BOOL getAttachmentProgress(const RenderAttachment& attachment, float& progress)
 {
-    String progressString = attachment.attachmentElement().attributeWithoutSynchronization(progressAttr);
+    auto& progressString = attachment.attachmentElement().attributeWithoutSynchronization(progressAttr);
     if (progressString.isEmpty())
         return NO;
     bool validProgress;
@@ -1523,7 +1619,7 @@ static BOOL getAttachmentProgress(const RenderAttachment& attachment, float& pro
 
 static RetainPtr<UIImage> iconForAttachment(const RenderAttachment& attachment, FloatSize& size)
 {
-    auto documentInteractionController = adoptNS([[getUIDocumentInteractionControllerClass() alloc] init]);
+    auto documentInteractionController = adoptNS([allocUIDocumentInteractionControllerInstance() init]);
 
     String fileName;
     if (File* file = attachment.attachmentElement().file())
@@ -1535,14 +1631,13 @@ static RetainPtr<UIImage> iconForAttachment(const RenderAttachment& attachment, 
 
     String attachmentType = attachment.attachmentElement().attachmentType();
     if (!attachmentType.isEmpty()) {
-        auto attachmentTypeCF = attachmentType.createCFString();
-        RetainPtr<CFStringRef> UTI;
-        if (isDeclaredUTI(attachmentTypeCF.get()))
-            UTI = attachmentTypeCF;
+        String UTI;
+        if (isDeclaredUTI(attachmentType))
+            UTI = attachmentType;
         else
-            UTI = UTIFromMIMEType(attachmentTypeCF.get());
+            UTI = UTIFromMIMEType(attachmentType);
 
-        [documentInteractionController setUTI:static_cast<NSString *>(UTI.get())];
+        [documentInteractionController setUTI:static_cast<NSString *>(UTI)];
     }
 
     NSArray *icons = [documentInteractionController icons];
@@ -1573,9 +1668,9 @@ static RetainPtr<UIImage> iconForAttachment(const RenderAttachment& attachment, 
     return result;
 }
 
-AttachmentInfo::AttachmentInfo(const RenderAttachment& attachment)
+RenderAttachmentInfo::RenderAttachmentInfo(const RenderAttachment& attachment)
 {
-    attachmentRect = FloatRect(0, 0, attachmentSize.width, attachmentSize.height);
+    attachmentRect = FloatRect(0, 0, attachment.width().toFloat(), attachment.height().toFloat());
 
     hasProgress = getAttachmentProgress(attachment, progress);
 
@@ -1623,11 +1718,11 @@ LayoutSize RenderThemeIOS::attachmentIntrinsicSize(const RenderAttachment&) cons
 
 int RenderThemeIOS::attachmentBaseline(const RenderAttachment& attachment) const
 {
-    AttachmentInfo info(attachment);
+    RenderAttachmentInfo info(attachment);
     return info.baseline;
 }
 
-static void paintAttachmentIcon(GraphicsContext& context, AttachmentInfo& info)
+static void paintAttachmentIcon(GraphicsContext& context, RenderAttachmentInfo& info)
 {
     if (!info.icon)
         return;
@@ -1639,7 +1734,7 @@ static void paintAttachmentIcon(GraphicsContext& context, AttachmentInfo& info)
     context.drawImage(*iconImage, info.iconRect);
 }
 
-static void paintAttachmentText(GraphicsContext& context, AttachmentInfo& info)
+static void paintAttachmentText(GraphicsContext& context, RenderAttachmentInfo& info)
 {
     for (const auto& line : info.lines) {
         GraphicsContextStateSaver saver(context);
@@ -1652,7 +1747,7 @@ static void paintAttachmentText(GraphicsContext& context, AttachmentInfo& info)
     }
 }
 
-static void paintAttachmentProgress(GraphicsContext& context, AttachmentInfo& info)
+static void paintAttachmentProgress(GraphicsContext& context, RenderAttachmentInfo& info)
 {
     GraphicsContextStateSaver saver(context);
 
@@ -1671,7 +1766,7 @@ static void paintAttachmentProgress(GraphicsContext& context, AttachmentInfo& in
     context.fillPath(progressPath);
 }
 
-static Path attachmentBorderPath(AttachmentInfo& info)
+static Path attachmentBorderPath(RenderAttachmentInfo& info)
 {
     Path borderPath;
     borderPath.addRoundedRect(info.attachmentRect, FloatSize(attachmentBorderRadius, attachmentBorderRadius));
@@ -1692,16 +1787,18 @@ bool RenderThemeIOS::paintAttachment(const RenderObject& renderer, const PaintIn
 
     const RenderAttachment& attachment = downcast<RenderAttachment>(renderer);
 
-    AttachmentInfo info(attachment);
+    RenderAttachmentInfo info(attachment);
 
     GraphicsContext& context = paintInfo.context();
     GraphicsContextStateSaver saver(context);
 
     context.translate(toFloatSize(paintRect.location()));
 
-    Path borderPath = attachmentBorderPath(info);
-    paintAttachmentBorder(context, borderPath);
-    context.clipPath(borderPath);
+    if (attachment.shouldDrawBorder()) {
+        auto borderPath = attachmentBorderPath(info);
+        paintAttachmentBorder(context, borderPath);
+        context.clipPath(borderPath);
+    }
 
     context.translate(FloatSize(0, info.contentYOrigin));
 
@@ -1716,6 +1813,109 @@ bool RenderThemeIOS::paintAttachment(const RenderObject& renderer, const PaintIn
 }
 
 #endif // ENABLE(ATTACHMENT_ELEMENT)
+
+#if ENABLE(EXTRA_ZOOM_MODE)
+
+String RenderThemeIOS::extraDefaultStyleSheet()
+{
+    return ASCIILiteral("* { -webkit-text-size-adjust: auto; -webkit-hyphens: auto !important; }");
+}
+
+#endif
+
+#if USE(SYSTEM_PREVIEW)
+void RenderThemeIOS::paintSystemPreviewBadge(Image& image, const PaintInfo& paintInfo, const FloatRect& rect)
+{
+    static const float largeBadgeDimension = 70;
+    static const float largeBadgeOffset = 20;
+
+    static const float smallBadgeDimension = 35;
+    static const float smallBadgeOffset = 8;
+
+    static const float minimumSizeForLargeBadge = 240;
+
+    bool useSmallBadge = rect.width() < minimumSizeForLargeBadge || rect.height() < minimumSizeForLargeBadge;
+    float badgeOffset = useSmallBadge ? smallBadgeOffset : largeBadgeOffset;
+    float badgeDimension = useSmallBadge ? smallBadgeDimension : largeBadgeDimension;
+
+    float minimumDimension = badgeDimension + 2 * badgeOffset;
+    if (rect.width() < minimumDimension || rect.height() < minimumDimension)
+        return;
+
+    CIImage *inputImage = [CIImage imageWithCGImage:image.nativeImage().get()];
+
+    // Scale from intrinsic size to render size.
+    CGAffineTransform transform = CGAffineTransformIdentity;
+    transform = CGAffineTransformScale(transform, rect.width() / image.width(), rect.height() / image.height());
+    CIImage *scaledImage = [inputImage imageByApplyingTransform:transform];
+
+    CGRect absoluteBadgeRect = CGRectMake(rect.x() + rect.width() - badgeDimension - badgeOffset, rect.y() + badgeOffset, badgeDimension, badgeDimension);
+    CGRect insetBadgeRect = CGRectMake(rect.width() - badgeDimension - badgeOffset, badgeOffset, badgeDimension, badgeDimension);
+    CGRect badgeRect = CGRectMake(0, 0, badgeDimension, badgeDimension);
+
+    // CI coordinates are y-up, so we need to flip the badge rectangle within the image frame.
+    CGRect flippedInsetBadgeRect = CGRectMake(insetBadgeRect.origin.x, rect.height() - insetBadgeRect.origin.y - insetBadgeRect.size.height, badgeDimension, badgeDimension);
+
+    // Create a cropped region with pixel values extending outwards.
+    CIImage *clampedImage = [scaledImage imageByClampingToRect:flippedInsetBadgeRect];
+
+    // Blur.
+    CIFilter *blurFilter = [CIFilter filterWithName:@"CIGaussianBlur"];
+    [blurFilter setDefaults];
+    [blurFilter setValue:@(10) forKey:kCIInputRadiusKey];
+    [blurFilter setValue:clampedImage forKey:kCIInputImageKey];
+
+    // Saturate.
+    CIFilter *saturationFilter = [CIFilter filterWithName:@"CIColorControls"];
+    [saturationFilter setValue:blurFilter.outputImage forKey:kCIInputImageKey];
+    [saturationFilter setValue:@1.8 forKey:kCIInputSaturationKey];
+
+    // Tint.
+    CIFilter *tintFilter1 = [CIFilter filterWithName:@"CIConstantColorGenerator"];
+    CIColor *tintColor1 = [CIColor colorWithRed:1 green:1 blue:1 alpha:0.18];
+    [tintFilter1 setValue:tintColor1 forKey:kCIInputColorKey];
+
+    // Blend the tint with the saturated output.
+    CIFilter *sourceOverFilter = [CIFilter filterWithName:@"CISourceOverCompositing"];
+    [sourceOverFilter setValue:tintFilter1.outputImage forKey:kCIInputImageKey];
+    [sourceOverFilter setValue:saturationFilter.outputImage forKey:kCIInputBackgroundImageKey];
+
+    // Before we render the result, we should clip to a circle around the badge rectangle.
+    CGContextRef ctx = paintInfo.context().platformContext();
+    CGContextSaveGState(ctx);
+    CGContextBeginPath(ctx);
+    CGPathRef circle = CGPathCreateWithRoundedRect(absoluteBadgeRect, badgeDimension / 2, badgeDimension / 2, nil);
+    CGContextAddPath(ctx, circle);
+    CGContextClosePath(ctx);
+    CGContextClip(ctx);
+    CGPathRelease(circle);
+
+    if (!m_ciContext)
+        m_ciContext = [CIContext context];
+    RetainPtr<CGImageRef> cgImage = adoptCF([m_ciContext.get() createCGImage:sourceOverFilter.outputImage fromRect:flippedInsetBadgeRect]);
+
+    CGContextSaveGState(ctx);
+    CGContextTranslateCTM(ctx, absoluteBadgeRect.origin.x, absoluteBadgeRect.origin.y);
+    CGContextTranslateCTM(ctx, 0, badgeDimension);
+    CGContextScaleCTM(ctx, 1, -1);
+    CGContextDrawImage(ctx, badgeRect, cgImage.get());
+    CGContextRestoreGState(ctx);
+
+#if USE(APPLE_INTERNAL_SDK)
+    if (auto logo = systemPreviewLogo()) {
+        // FIXME: Do we need to flip here too?
+        CGContextTranslateCTM(ctx, absoluteBadgeRect.origin.x, absoluteBadgeRect.origin.y);
+        CGSize pdfSize = CGPDFPageGetBoxRect(logo, kCGPDFMediaBox).size;
+        CGFloat scaleX = badgeDimension / pdfSize.width;
+        CGFloat scaleY = badgeDimension / pdfSize.height;
+        CGContextScaleCTM(ctx, scaleX, scaleY);
+        CGContextDrawPDFPage(ctx, logo);
+    }
+#endif
+
+    CGContextRestoreGState(ctx);
+}
+#endif
 
 } // namespace WebCore
 

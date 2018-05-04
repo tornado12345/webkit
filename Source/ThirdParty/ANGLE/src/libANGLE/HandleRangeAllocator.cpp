@@ -27,6 +27,10 @@ HandleRangeAllocator::HandleRangeAllocator()
     mUsed.insert(std::make_pair(0u, 0u));
 }
 
+HandleRangeAllocator::~HandleRangeAllocator()
+{
+}
+
 GLuint HandleRangeAllocator::allocate()
 {
     return allocateRange(1u);
@@ -49,7 +53,6 @@ GLuint HandleRangeAllocator::allocateAtOrAbove(GLuint wanted)
     }
 
     GLuint firstId = current->first;
-    UNUSED_ASSERTION_VARIABLE(firstId);
     GLuint lastId = current->second;
     ASSERT(wanted >= firstId);
 

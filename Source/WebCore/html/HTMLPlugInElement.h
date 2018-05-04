@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2004, 2006, 2007, 2008, 2009, 2012 Apple Inc. All rights reserved.
+ * Copyright (C) 2004-2017 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -24,6 +24,7 @@
 
 #include "HTMLFrameOwnerElement.h"
 #include "Image.h"
+#include "RenderEmbeddedObject.h"
 
 namespace JSC {
 namespace Bindings {
@@ -34,17 +35,17 @@ class Instance;
 namespace WebCore {
 
 class PluginReplacement;
-class RenderEmbeddedObject;
 class RenderWidget;
 class Widget;
 
 class HTMLPlugInElement : public HTMLFrameOwnerElement {
+    WTF_MAKE_ISO_ALLOCATED(HTMLPlugInElement);
 public:
     virtual ~HTMLPlugInElement();
 
     void resetInstance();
 
-    PassRefPtr<JSC::Bindings::Instance> getInstance();
+    JSC::Bindings::Instance* bindingsInstance();
 
     enum class PluginLoadingPolicy { DoNotLoad, Load };
     WEBCORE_EXPORT Widget* pluginWidget(PluginLoadingPolicy = PluginLoadingPolicy::Load) const;
@@ -60,7 +61,7 @@ public:
     };
     DisplayState displayState() const { return m_displayState; }
     virtual void setDisplayState(DisplayState);
-    virtual void updateSnapshot(PassRefPtr<Image>) { }
+    virtual void updateSnapshot(Image*) { }
     virtual void dispatchPendingMouseClick() { }
     virtual bool isRestartedPlugin() const { return false; }
 
@@ -81,7 +82,12 @@ public:
     virtual bool isPlugInImageElement() const { return false; }
 
     bool isUserObservable() const;
-    
+
+    // Return whether or not the replacement content for blocked plugins is accessible to the user.
+    WEBCORE_EXPORT bool setReplacement(RenderEmbeddedObject::PluginUnavailabilityReason, const String& unavailabilityDescription);
+
+    WEBCORE_EXPORT bool isReplacementObscured();
+
 protected:
     HTMLPlugInElement(const QualifiedName& tagName, Document&);
 
@@ -95,7 +101,7 @@ protected:
 
     virtual bool requestObject(const String& url, const String& mimeType, const Vector<String>& paramNames, const Vector<String>& paramValues);
     RenderPtr<RenderElement> createElementRenderer(RenderStyle&&, const RenderTreePosition&) override;
-    void didAddUserAgentShadowRoot(ShadowRoot*) override;
+    void didAddUserAgentShadowRoot(ShadowRoot&) override;
 
     // Subclasses should use guardedDispatchBeforeLoadEvent instead of calling dispatchBeforeLoadEvent directly.
     bool guardedDispatchBeforeLoadEvent(const String& sourceURL);
@@ -106,14 +112,14 @@ private:
     void swapRendererTimerFired();
     bool shouldOverridePlugin(const String& url, const String& mimeType);
 
-    bool dispatchBeforeLoadEvent(const String& sourceURL); // Not implemented, generates a compile error if subclasses call this by mistake.
+    bool dispatchBeforeLoadEvent(const String& sourceURL) = delete; // Generate a compile error if someone calls this by mistake.
 
     // This will load the plugin if necessary.
     virtual RenderWidget* renderWidgetLoadingPlugin() const = 0;
 
     bool supportsFocus() const override;
 
-    bool isKeyboardFocusable(KeyboardEvent&) const override;
+    bool isKeyboardFocusable(KeyboardEvent*) const override;
     bool isPluginElement() const final;
 
     RefPtr<JSC::Bindings::Instance> m_instance;

@@ -18,8 +18,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGGElement_h
-#define SVGGElement_h
+#pragma once
 
 #include "SVGAnimatedBoolean.h"
 #include "SVGExternalResourcesRequired.h"
@@ -27,8 +26,8 @@
 
 namespace WebCore {
 
-class SVGGElement final : public SVGGraphicsElement,
-                          public SVGExternalResourcesRequired {
+class SVGGElement final : public SVGGraphicsElement, public SVGExternalResourcesRequired {
+    WTF_MAKE_ISO_ALLOCATED(SVGGElement);
 public:
     static Ref<SVGGElement> create(const QualifiedName&, Document&);
     static Ref<SVGGElement> create(Document&);
@@ -52,5 +51,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif

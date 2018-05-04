@@ -28,32 +28,10 @@
 
 namespace WebCore {
 
-Optional<double> Coordinates::altitude() const
+Coordinates::Coordinates(GeolocationPosition&& position)
+    : m_position(WTFMove(position))
 {
-    if (!m_canProvideAltitude)
-        return Nullopt;
-    return m_altitude;
+    ASSERT(m_position.isValid());
 }
 
-Optional<double> Coordinates::altitudeAccuracy() const
-{
-    if (!m_canProvideAltitudeAccuracy)
-        return Nullopt;
-    return m_altitudeAccuracy;
-}
-
-Optional<double> Coordinates::heading() const
-{
-    if (!m_canProvideHeading)
-        return Nullopt;
-    return m_heading;
-}
-
-Optional<double> Coordinates::speed() const
-{
-    if (!m_canProvideSpeed)
-        return Nullopt;
-    return m_speed;
-}
-    
 } // namespace WebCore

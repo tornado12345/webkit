@@ -55,7 +55,9 @@ ResourceType toResourceType(CachedResource::Type type)
 #endif
         return ResourceType::Font;
 
+    case CachedResource::Beacon:
     case CachedResource::MediaResource:
+    case CachedResource::Icon:
     case CachedResource::RawResource:
         return ResourceType::Raw;
 
@@ -63,12 +65,15 @@ ResourceType toResourceType(CachedResource::Type type)
     case CachedResource::TextTrackResource:
         return ResourceType::Media;
 #endif
-#if ENABLE(LINK_PREFETCH)
     case CachedResource::LinkPrefetch:
-    case CachedResource::LinkSubresource:
         ASSERT_NOT_REACHED();
+        break;
+#if ENABLE(APPLICATION_MANIFEST)
+    case CachedResource::ApplicationManifest:
+        return ResourceType::Raw;
 #endif
     };
+    return ResourceType::Raw;
 }
 
 uint16_t readResourceType(const String& name)
@@ -108,7 +113,7 @@ bool ResourceLoadInfo::isThirdParty() const
     Ref<SecurityOrigin> mainDocumentSecurityOrigin = SecurityOrigin::create(mainDocumentURL);
     Ref<SecurityOrigin> resourceSecurityOrigin = SecurityOrigin::create(resourceURL);
 
-    return !mainDocumentSecurityOrigin->canAccess(&resourceSecurityOrigin.get());
+    return !mainDocumentSecurityOrigin->canAccess(resourceSecurityOrigin.get());
 }
     
 ResourceFlags ResourceLoadInfo::getResourceFlags() const

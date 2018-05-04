@@ -2,7 +2,7 @@
 // This code is governed by the BSD license found in the LICENSE file.
 /*---
 esid: sec-regular-expressions-patterns
-es6id: B1.4
+es6id: B.1.4
 description: Quantifiable assertions disallowed with `u` flag
 info: |
     The `u` flag precludes quantifiable assertions (even when Annex B is
@@ -10,7 +10,11 @@ info: |
 
     Term[U] ::
          [~U] QuantifiableAssertion Quantifier
-negative: SyntaxError
+negative:
+  phase: parse
+  type: SyntaxError
 ---*/
+
+throw "Test262: This statement should not be evaluated.";
 
 /.(?=.)?/u;

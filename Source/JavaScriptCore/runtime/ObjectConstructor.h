@@ -1,6 +1,6 @@
 /*
  *  Copyright (C) 1999-2000 Harri Porten (porten@kde.org)
- *  Copyright (C) 2008, 2016 Apple Inc. All rights reserved.
+ *  Copyright (C) 2008, 2016-2017 Apple Inc. All rights reserved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -29,12 +29,12 @@ namespace JSC {
 EncodedJSValue JSC_HOST_CALL objectConstructorGetOwnPropertyDescriptor(ExecState*);
 EncodedJSValue JSC_HOST_CALL objectConstructorGetOwnPropertyDescriptors(ExecState*);
 EncodedJSValue JSC_HOST_CALL objectConstructorGetOwnPropertySymbols(ExecState*);
+EncodedJSValue JSC_HOST_CALL objectConstructorGetOwnPropertyNames(ExecState*);
 EncodedJSValue JSC_HOST_CALL objectConstructorKeys(ExecState*);
-EncodedJSValue JSC_HOST_CALL ownEnumerablePropertyKeys(ExecState*);
 
 class ObjectPrototype;
 
-class ObjectConstructor : public InternalFunction {
+class ObjectConstructor final : public InternalFunction {
 public:
     typedef InternalFunction Base;
     static const unsigned StructureFlags = Base::StructureFlags | HasStaticPropertyTable;
@@ -50,7 +50,7 @@ public:
 
     static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype)
     {
-        return Structure::create(vm, globalObject, prototype, TypeInfo(ObjectType, StructureFlags), info());
+        return Structure::create(vm, globalObject, prototype, TypeInfo(InternalFunctionType, StructureFlags), info());
     }
 
 protected:
@@ -58,8 +58,6 @@ protected:
 
 private:
     ObjectConstructor(VM&, Structure*);
-    static ConstructType getConstructData(JSCell*, ConstructData&);
-    static CallType getCallData(JSCell*, CallData&);
 };
 
 inline JSObject* constructEmptyObject(ExecState* exec, Structure* structure)
@@ -70,9 +68,8 @@ inline JSObject* constructEmptyObject(ExecState* exec, Structure* structure)
 inline JSObject* constructEmptyObject(ExecState* exec, JSObject* prototype, unsigned inlineCapacity)
 {
     JSGlobalObject* globalObject = exec->lexicalGlobalObject();
-    PrototypeMap& prototypeMap = globalObject->vm().prototypeMap;
-    Structure* structure = prototypeMap.emptyObjectStructureForPrototype(
-        prototype, inlineCapacity);
+    StructureCache& structureCache = globalObject->vm().structureCache;
+    Structure* structure = structureCache.emptyObjectStructureForPrototype(globalObject, prototype, inlineCapacity);
     return constructEmptyObject(exec, structure);
 }
 

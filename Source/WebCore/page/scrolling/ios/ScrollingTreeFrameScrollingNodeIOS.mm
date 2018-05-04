@@ -26,27 +26,25 @@
 #import "config.h"
 #import "ScrollingTreeFrameScrollingNodeIOS.h"
 
-#if ENABLE(ASYNC_SCROLLING)
+#if ENABLE(ASYNC_SCROLLING) && PLATFORM(IOS)
 
 #import "FrameView.h"
 #import "ScrollingCoordinator.h"
 #import "ScrollingTree.h"
 #import "ScrollingStateTree.h"
-#import "Settings.h"
 #import "TileController.h"
 #import "WebLayer.h"
-
 #import <QuartzCore/QuartzCore.h>
 
 namespace WebCore {
 
-Ref<ScrollingTreeFrameScrollingNodeIOS> ScrollingTreeFrameScrollingNodeIOS::create(ScrollingTree& scrollingTree, ScrollingNodeID nodeID)
+Ref<ScrollingTreeFrameScrollingNodeIOS> ScrollingTreeFrameScrollingNodeIOS::create(ScrollingTree& scrollingTree, ScrollingNodeType nodeType, ScrollingNodeID nodeID)
 {
-    return adoptRef(*new ScrollingTreeFrameScrollingNodeIOS(scrollingTree, nodeID));
+    return adoptRef(*new ScrollingTreeFrameScrollingNodeIOS(scrollingTree, nodeType, nodeID));
 }
 
-ScrollingTreeFrameScrollingNodeIOS::ScrollingTreeFrameScrollingNodeIOS(ScrollingTree& scrollingTree, ScrollingNodeID nodeID)
-    : ScrollingTreeFrameScrollingNode(scrollingTree, nodeID)
+ScrollingTreeFrameScrollingNodeIOS::ScrollingTreeFrameScrollingNodeIOS(ScrollingTree& scrollingTree, ScrollingNodeType nodeType, ScrollingNodeID nodeID)
+    : ScrollingTreeFrameScrollingNode(scrollingTree, nodeType, nodeID)
 {
 }
 
@@ -109,13 +107,13 @@ void ScrollingTreeFrameScrollingNodeIOS::setScrollPositionWithoutContentEdgeCons
 {
     if (shouldUpdateScrollLayerPositionSynchronously()) {
         m_probableMainThreadScrollPosition = scrollPosition;
-        scrollingTree().scrollingTreeNodeDidScroll(scrollingNodeID(), scrollPosition, Nullopt, SetScrollingLayerPosition);
+        scrollingTree().scrollingTreeNodeDidScroll(scrollingNodeID(), scrollPosition, std::nullopt, ScrollingLayerPositionAction::Set);
         return;
     }
 
     FloatRect layoutViewport; // FIXME: implement for iOS WK1.
     setScrollLayerPosition(scrollPosition, layoutViewport);
-    scrollingTree().scrollingTreeNodeDidScroll(scrollingNodeID(), scrollPosition, Nullopt);
+    scrollingTree().scrollingTreeNodeDidScroll(scrollingNodeID(), scrollPosition, std::nullopt);
 }
 
 void ScrollingTreeFrameScrollingNodeIOS::setScrollLayerPosition(const FloatPoint& scrollPosition, const FloatRect&)
@@ -203,4 +201,4 @@ FloatPoint ScrollingTreeFrameScrollingNodeIOS::maximumScrollPosition() const
 
 } // namespace WebCore
 
-#endif // ENABLE(ASYNC_SCROLLING)
+#endif // ENABLE(ASYNC_SCROLLING) && PLATFORM(IOS)

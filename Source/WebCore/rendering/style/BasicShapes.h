@@ -27,12 +27,10 @@
  * SUCH DAMAGE.
  */
 
-#ifndef BasicShapes_h
-#define BasicShapes_h
+#pragma once
 
 #include "Length.h"
 #include "LengthSize.h"
-#include "RenderStyleConstants.h"
 #include "WindRule.h"
 #include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
@@ -48,7 +46,7 @@ class SVGPathByteStream;
 
 class BasicShape : public RefCounted<BasicShape> {
 public:
-    virtual ~BasicShape() { }
+    virtual ~BasicShape() = default;
 
     enum Type {
         BasicShapePolygonType,
@@ -353,5 +351,3 @@ SPECIALIZE_TYPE_TRAITS_BASIC_SHAPE(BasicShapeEllipse, BasicShape::BasicShapeElli
 SPECIALIZE_TYPE_TRAITS_BASIC_SHAPE(BasicShapePolygon, BasicShape::BasicShapePolygonType)
 SPECIALIZE_TYPE_TRAITS_BASIC_SHAPE(BasicShapePath, BasicShape::BasicShapePathType)
 SPECIALIZE_TYPE_TRAITS_BASIC_SHAPE(BasicShapeInset, BasicShape::BasicShapeInsetType)
-
-#endif // BasicShapes_h

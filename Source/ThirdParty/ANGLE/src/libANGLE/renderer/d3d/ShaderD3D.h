@@ -13,19 +13,30 @@
 
 #include <map>
 
+namespace angle
+{
+struct CompilerWorkaroundsD3D;
+struct WorkaroundsD3D;
+}
+
+namespace gl
+{
+struct Extensions;
+}
+
 namespace rx
 {
 class DynamicHLSL;
 class RendererD3D;
-struct D3DCompilerWorkarounds;
 struct D3DUniform;
-struct WorkaroundsD3D;
 
 class ShaderD3D : public ShaderImpl
 {
   public:
-    ShaderD3D(const gl::ShaderState &data, const WorkaroundsD3D &workarounds);
-    virtual ~ShaderD3D();
+    ShaderD3D(const gl::ShaderState &data,
+              const angle::WorkaroundsD3D &workarounds,
+              const gl::Extensions &extensions);
+    ~ShaderD3D() override;
 
     // ShaderImpl implementation
     ShCompileOptions prepareSourceAndReturnOptions(std::stringstream *sourceStream,
@@ -36,16 +47,16 @@ class ShaderD3D : public ShaderImpl
     // D3D-specific methods
     void uncompile();
 
-    bool hasUniform(const D3DUniform *d3dUniform) const;
+    bool hasUniform(const std::string &name) const;
 
     // Query regular uniforms with their name. Query sampler fields of structs with field selection
     // using dot (.) operator.
     unsigned int getUniformRegister(const std::string &uniformName) const;
 
-    unsigned int getInterfaceBlockRegister(const std::string &blockName) const;
+    unsigned int getUniformBlockRegister(const std::string &blockName) const;
     void appendDebugInfo(const std::string &info) const { mDebugInfo += info; }
 
-    void generateWorkarounds(D3DCompilerWorkarounds *workarounds) const;
+    void generateWorkarounds(angle::CompilerWorkaroundsD3D *workarounds) const;
 
     bool usesMultipleRenderTargets() const { return mUsesMultipleRenderTargets; }
     bool usesFragColor() const { return mUsesFragColor; }
@@ -56,6 +67,8 @@ class ShaderD3D : public ShaderImpl
     bool usesPointCoord() const { return mUsesPointCoord; }
     bool usesDepthRange() const { return mUsesDepthRange; }
     bool usesFragDepth() const { return mUsesFragDepth; }
+    bool usesViewID() const { return mUsesViewID; }
+    bool hasANGLEMultiviewEnabled() const { return mHasANGLEMultiviewEnabled; }
 
     ShShaderOutput getCompilerOutputType() const;
 
@@ -69,6 +82,8 @@ class ShaderD3D : public ShaderImpl
     bool mUsesPointCoord;
     bool mUsesDepthRange;
     bool mUsesFragDepth;
+    bool mHasANGLEMultiviewEnabled;
+    bool mUsesViewID;
     bool mUsesDiscardRewriting;
     bool mUsesNestedBreak;
     bool mRequiresIEEEStrictCompiling;
@@ -76,7 +91,7 @@ class ShaderD3D : public ShaderImpl
     ShShaderOutput mCompilerOutputType;
     mutable std::string mDebugInfo;
     std::map<std::string, unsigned int> mUniformRegisterMap;
-    std::map<std::string, unsigned int> mInterfaceBlockRegisterMap;
+    std::map<std::string, unsigned int> mUniformBlockRegisterMap;
     ShCompileOptions mAdditionalOptions;
 };
 }  // namespace rx

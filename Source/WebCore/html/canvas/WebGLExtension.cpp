@@ -31,14 +31,12 @@
 
 namespace WebCore {
 
-WebGLExtension::WebGLExtension(WebGLRenderingContextBase* context)
+WebGLExtension::WebGLExtension(WebGLRenderingContextBase& context)
     : m_context(context)
 {
 }
 
-WebGLExtension::~WebGLExtension()
-{
-}
+WebGLExtension::~WebGLExtension() = default;
 
 } // namespace WebCore
 

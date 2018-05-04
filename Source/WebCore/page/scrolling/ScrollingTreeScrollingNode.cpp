@@ -30,6 +30,7 @@
 
 #include "ScrollingStateTree.h"
 #include "ScrollingTree.h"
+#include <wtf/text/TextStream.h>
 
 namespace WebCore {
 
@@ -38,9 +39,7 @@ ScrollingTreeScrollingNode::ScrollingTreeScrollingNode(ScrollingTree& scrollingT
 {
 }
 
-ScrollingTreeScrollingNode::~ScrollingTreeScrollingNode()
-{
-}
+ScrollingTreeScrollingNode::~ScrollingTreeScrollingNode() = default;
 
 void ScrollingTreeScrollingNode::commitStateBeforeChildren(const ScrollingStateNode& stateNode)
 {
@@ -69,10 +68,16 @@ void ScrollingTreeScrollingNode::commitStateBeforeChildren(const ScrollingStateN
 
 #if ENABLE(CSS_SCROLL_SNAP)
     if (state.hasChangedProperty(ScrollingStateScrollingNode::HorizontalSnapOffsets))
-        m_horizontalSnapOffsets = state.horizontalSnapOffsets();
+        m_snapOffsetsInfo.horizontalSnapOffsets = state.horizontalSnapOffsets();
 
     if (state.hasChangedProperty(ScrollingStateScrollingNode::VerticalSnapOffsets))
-        m_verticalSnapOffsets = state.verticalSnapOffsets();
+        m_snapOffsetsInfo.verticalSnapOffsets = state.verticalSnapOffsets();
+
+    if (state.hasChangedProperty(ScrollingStateScrollingNode::HorizontalSnapOffsetRanges))
+        m_snapOffsetsInfo.horizontalSnapOffsetRanges = state.horizontalSnapOffsetRanges();
+
+    if (state.hasChangedProperty(ScrollingStateScrollingNode::VerticalSnapOffsetRanges))
+        m_snapOffsetsInfo.verticalSnapOffsetRanges = state.verticalSnapOffsetRanges();
 
     if (state.hasChangedProperty(ScrollingStateScrollingNode::CurrentHorizontalSnapOffsetIndex))
         m_currentHorizontalSnapPointIndex = state.currentHorizontalSnapPointIndex();
@@ -110,7 +115,7 @@ void ScrollingTreeScrollingNode::setScrollPosition(const FloatPoint& scrollPosit
 void ScrollingTreeScrollingNode::setScrollPositionWithoutContentEdgeConstraints(const FloatPoint& scrollPosition)
 {
     setScrollLayerPosition(scrollPosition, { });
-    scrollingTree().scrollingTreeNodeDidScroll(scrollingNodeID(), scrollPosition, Nullopt);
+    scrollingTree().scrollingTreeNodeDidScroll(scrollingNodeID(), scrollPosition, std::nullopt);
 }
 
 FloatPoint ScrollingTreeScrollingNode::minimumScrollPosition() const
@@ -124,6 +129,36 @@ FloatPoint ScrollingTreeScrollingNode::maximumScrollPosition() const
     return FloatPoint(contentSizePoint - scrollableAreaSize()).expandedTo(FloatPoint());
 }
 
+void ScrollingTreeScrollingNode::dumpProperties(TextStream& ts, ScrollingStateTreeAsTextBehavior behavior) const
+{
+    ScrollingTreeNode::dumpProperties(ts, behavior);
+    ts.dumpProperty("scrollable area size", m_scrollableAreaSize);
+    ts.dumpProperty("total content size", m_totalContentsSize);
+    if (m_totalContentsSizeForRubberBand != m_totalContentsSize)
+        ts.dumpProperty("total content size for rubber band", m_totalContentsSizeForRubberBand);
+    if (m_reachableContentsSize != m_totalContentsSize)
+        ts.dumpProperty("reachable content size", m_reachableContentsSize);
+    ts.dumpProperty("last committed scroll position", m_lastCommittedScrollPosition);
+    if (m_scrollOrigin != IntPoint())
+        ts.dumpProperty("scroll origin", m_scrollOrigin);
+
+#if ENABLE(CSS_SCROLL_SNAP)
+    if (m_snapOffsetsInfo.horizontalSnapOffsets.size())
+        ts.dumpProperty("horizontal snap offsets", m_snapOffsetsInfo.horizontalSnapOffsets);
+
+    if (m_snapOffsetsInfo.verticalSnapOffsets.size())
+        ts.dumpProperty("vertical snap offsets", m_snapOffsetsInfo.verticalSnapOffsets);
+
+    if (m_currentHorizontalSnapPointIndex)
+        ts.dumpProperty("current horizontal snap point index", m_currentHorizontalSnapPointIndex);
+
+    if (m_currentVerticalSnapPointIndex)
+        ts.dumpProperty("current vertical snap point index", m_currentVerticalSnapPointIndex);
+    
+#endif
+
+    ts.dumpProperty("scrollable area parameters", m_scrollableAreaParameters);
+}
 
 } // namespace WebCore
 

@@ -18,8 +18,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGTRefElement_h
-#define SVGTRefElement_h
+#pragma once
 
 #include "SVGTextPositioningElement.h"
 #include "SVGURIReference.h"
@@ -29,6 +28,7 @@ namespace WebCore {
 class SVGTRefTargetEventListener;
 
 class SVGTRefElement final : public SVGTextPositioningElement, public SVGURIReference {
+    WTF_MAKE_ISO_ALLOCATED(SVGTRefElement);
 public:
     static Ref<SVGTRefElement> create(const QualifiedName&, Document&);
 
@@ -45,9 +45,9 @@ private:
     bool childShouldCreateRenderer(const Node&) const override;
     bool rendererIsNeeded(const RenderStyle&) override;
 
-    InsertionNotificationRequest insertedInto(ContainerNode&) override;
-    void removedFrom(ContainerNode&) override;
-    void finishedInsertingSubtree() override;
+    InsertedIntoAncestorResult insertedIntoAncestor(InsertionType, ContainerNode&) override;
+    void removedFromAncestor(RemovalType, ContainerNode&) override;
+    void didFinishInsertingNode() override;
 
     void clearTarget() override;
 
@@ -65,5 +65,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif

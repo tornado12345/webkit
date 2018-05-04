@@ -23,8 +23,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef ClassChangeInvalidation_h
-#define ClassChangeInvalidation_h
+#pragma once
 
 #include "Element.h"
 #include <wtf/Vector.h>
@@ -34,6 +33,7 @@ namespace WebCore {
 class DocumentRuleSets;
 class RuleSet;
 class SpaceSplitString;
+struct InvalidationRuleSet;
 
 namespace Style {
 
@@ -43,13 +43,13 @@ public:
     ~ClassChangeInvalidation();
 
 private:
-    void invalidateStyle(const SpaceSplitString& oldClasses, const SpaceSplitString& newClasses);
-    void invalidateDescendantStyle();
+    void computeInvalidation(const SpaceSplitString& oldClasses, const SpaceSplitString& newClasses);
+    void invalidateStyleWithRuleSets();
 
     const bool m_isEnabled;
     Element& m_element;
 
-    Vector<const RuleSet*, 4> m_descendantInvalidationRuleSets;
+    Vector<const InvalidationRuleSet*, 4> m_invalidationRuleSets;
 };
 
 inline ClassChangeInvalidation::ClassChangeInvalidation(Element& element, const SpaceSplitString& oldClasses, const SpaceSplitString& newClasses)
@@ -59,19 +59,16 @@ inline ClassChangeInvalidation::ClassChangeInvalidation(Element& element, const 
 {
     if (!m_isEnabled)
         return;
-    invalidateStyle(oldClasses, newClasses);
-    invalidateDescendantStyle();
+    computeInvalidation(oldClasses, newClasses);
+    invalidateStyleWithRuleSets();
 }
 
 inline ClassChangeInvalidation::~ClassChangeInvalidation()
 {
     if (!m_isEnabled)
         return;
-    invalidateDescendantStyle();
+    invalidateStyleWithRuleSets();
 }
 
 }
 }
-
-#endif
-

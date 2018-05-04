@@ -42,9 +42,9 @@ class OutputCapture(object):
     def stream_wrapper(stream):
         return StringIO()
 
-    def __init__(self):
+    def __init__(self, log_level=logging.INFO):
         self.saved_outputs = dict()
-        self._log_level = logging.INFO
+        self._log_level = log_level
 
     def set_log_level(self, log_level):
         self._log_level = log_level
@@ -105,6 +105,19 @@ class OutputCapture(object):
             testassert(logs_string, expected_logs)
         # This is a little strange, but I don't know where else to return this information.
         return return_value
+
+
+class OutputCaptureScope(object):
+
+    def __init__(self, output_capture=OutputCapture()):
+        self._output_capture = output_capture
+        self.captured_output = (None, None, None)
+
+    def __enter__(self):
+        self._output_capture.capture_output()
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.captured_output = self._output_capture.restore_output()
 
 
 class OutputCaptureTestCaseBase(unittest.TestCase):

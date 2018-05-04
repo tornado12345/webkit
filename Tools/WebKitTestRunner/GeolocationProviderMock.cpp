@@ -29,7 +29,7 @@
 #include <WebKit/WKGeolocationManager.h>
 #include <string.h>
 #include <wtf/Assertions.h>
-#include <wtf/CurrentTime.h>
+#include <wtf/WallTime.h>
 
 namespace WTR {
 
@@ -46,11 +46,9 @@ static void stopUpdatingCallback(WKGeolocationManagerRef geolocationManager, con
 }
 
 GeolocationProviderMock::GeolocationProviderMock(WKContextRef context)
-    : m_isActive(false)
-    , m_hasError(false)
+    : m_context(context)
+    , m_geolocationManager(WKContextGetGeolocationManager(context))
 {
-    m_geolocationManager = WKContextGetGeolocationManager(context);
-
     WKGeolocationProviderV1 providerCallback;
     memset(&providerCallback, 0, sizeof(WKGeolocationProviderV1));
     providerCallback.base.version = 1;
@@ -65,9 +63,9 @@ GeolocationProviderMock::~GeolocationProviderMock()
     WKGeolocationManagerSetProvider(m_geolocationManager, 0);
 }
 
-void GeolocationProviderMock::setPosition(double latitude, double longitude, double accuracy, bool providesAltitude, double altitude, bool providesAltitudeAccuracy, double altitudeAccuracy, bool providesHeading, double heading, bool providesSpeed, double speed)
+void GeolocationProviderMock::setPosition(double latitude, double longitude, double accuracy, bool providesAltitude, double altitude, bool providesAltitudeAccuracy, double altitudeAccuracy, bool providesHeading, double heading, bool providesSpeed, double speed, bool providesFloorLevel, double floorLevel)
 {
-    m_position.adopt(WKGeolocationPositionCreate_b(currentTime(), latitude, longitude, accuracy, providesAltitude, altitude, providesAltitudeAccuracy, altitudeAccuracy, providesHeading, heading, providesSpeed, speed));
+    m_position.adopt(WKGeolocationPositionCreate_c(WallTime::now().secondsSinceEpoch().seconds(), latitude, longitude, accuracy, providesAltitude, altitude, providesAltitudeAccuracy, altitudeAccuracy, providesHeading, heading, providesSpeed, speed, providesFloorLevel, floorLevel));
 
     m_hasError = false;
     m_errorMessage.clear();

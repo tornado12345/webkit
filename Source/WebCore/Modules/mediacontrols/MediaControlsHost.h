@@ -27,7 +27,6 @@
 
 #if ENABLE(MEDIA_CONTROLS_SCRIPT)
 
-#include <bindings/ScriptObject.h>
 #include <wtf/RefCounted.h>
 #include <wtf/Variant.h>
 #include <wtf/Vector.h>
@@ -57,18 +56,20 @@ public:
     Vector<RefPtr<AudioTrack>> sortedTrackListForMenu(AudioTrackList&);
 
     using TextOrAudioTrack = WTF::Variant<RefPtr<TextTrack>, RefPtr<AudioTrack>>;
-    String displayNameForTrack(const Optional<TextOrAudioTrack>&);
+    String displayNameForTrack(const std::optional<TextOrAudioTrack>&);
 
     TextTrack* captionMenuOffItem();
     TextTrack* captionMenuAutomaticItem();
-    AtomicString captionDisplayMode();
+    AtomicString captionDisplayMode() const;
     void setSelectedTextTrack(TextTrack*);
     Element* textTrackContainer();
     void updateTextTrackContainer();
     bool allowsInlineMediaPlayback() const;
-    bool supportsFullscreen();
-    bool isVideoLayerInline();
+    bool supportsFullscreen() const;
+    bool isVideoLayerInline() const;
+    bool isInMediaDocument() const;
     bool userGestureRequired() const;
+    bool shouldForceControlsDisplay() const;
     void setPreparedToReturnVideoLayerToInline(bool);
 
     void updateCaptionDisplaySizes();
@@ -80,19 +81,24 @@ public:
     enum class DeviceType { None, Airplay, Tvout };
     DeviceType externalDeviceType() const;
 
+    bool compactMode() const;
+    void setSimulateCompactMode(bool value) { m_simulateCompactMode = value; }
+
     bool controlsDependOnPageScaleFactor() const;
     void setControlsDependOnPageScaleFactor(bool v);
 
     String generateUUID() const;
 
     String shadowRootCSSText() const;
-    String base64StringForIconAndPlatform(const String& iconName, const String& platform) const;
+    String base64StringForIconNameAndType(const String& iconName, const String& iconType) const;
+    String formattedStringForDuration(double) const;
 
 private:
     MediaControlsHost(HTMLMediaElement*);
 
     HTMLMediaElement* m_mediaElement;
     RefPtr<MediaControlTextTrackContainerElement> m_textTrackContainer;
+    bool m_simulateCompactMode { false };
 };
 
 }

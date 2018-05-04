@@ -26,8 +26,6 @@
 #include "config.h"
 #include "WebKitAnimationEvent.h"
 
-#include "EventNames.h"
-
 namespace WebCore {
 
 WebKitAnimationEvent::WebKitAnimationEvent(const AtomicString& type, const Init& initializer, IsTrusted isTrusted)
@@ -44,9 +42,7 @@ WebKitAnimationEvent::WebKitAnimationEvent(const AtomicString& type, const Strin
 {
 }
 
-WebKitAnimationEvent::~WebKitAnimationEvent()
-{
-}
+WebKitAnimationEvent::~WebKitAnimationEvent() = default;
 
 const String& WebKitAnimationEvent::animationName() const
 {

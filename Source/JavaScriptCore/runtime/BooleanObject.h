@@ -47,12 +47,4 @@ public:
     }
 };
 
-BooleanObject* asBooleanObject(JSValue);
-
-inline BooleanObject* asBooleanObject(JSValue value)
-{
-    ASSERT(asObject(value)->inherits(BooleanObject::info()));
-    return static_cast<BooleanObject*>(asObject(value));
-}
-
 } // namespace JSC

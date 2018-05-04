@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004, 2006, 2007, 2008, 2009, 2010, 2013 Apple Inc. All rights reserved.
+ * Copyright (C) 2004-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,6 +33,7 @@
 #include "ResourceHandleClient.h"
 #include "Timer.h"
 #include <algorithm>
+#include <wtf/CompletionHandler.h>
 #include <wtf/MainThread.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/text/AtomicStringHash.h>
@@ -72,8 +73,8 @@ void ResourceHandle::registerBuiltinSynchronousLoader(const AtomicString& protoc
     builtinResourceHandleSynchronousLoaderMap().add(protocol, loader);
 }
 
-ResourceHandle::ResourceHandle(NetworkingContext* context, const ResourceRequest& request, ResourceHandleClient* client, bool defersLoading, bool shouldContentSniff)
-    : d(std::make_unique<ResourceHandleInternal>(this, context, request, client, defersLoading, shouldContentSniff && shouldContentSniffURL(request.url())))
+ResourceHandle::ResourceHandle(NetworkingContext* context, const ResourceRequest& request, ResourceHandleClient* client, bool defersLoading, bool shouldContentSniff, bool shouldContentEncodingSniff)
+    : d(std::make_unique<ResourceHandleInternal>(this, context, request, client, defersLoading, shouldContentSniff && shouldContentSniffURL(request.url()), shouldContentEncodingSniff))
 {
     if (!request.url().isValid()) {
         scheduleFailure(InvalidURLFailure);
@@ -86,12 +87,12 @@ ResourceHandle::ResourceHandle(NetworkingContext* context, const ResourceRequest
     }
 }
 
-RefPtr<ResourceHandle> ResourceHandle::create(NetworkingContext* context, const ResourceRequest& request, ResourceHandleClient* client, bool defersLoading, bool shouldContentSniff)
+RefPtr<ResourceHandle> ResourceHandle::create(NetworkingContext* context, const ResourceRequest& request, ResourceHandleClient* client, bool defersLoading, bool shouldContentSniff, bool shouldContentEncodingSniff)
 {
     if (auto constructor = builtinResourceHandleConstructorMap().get(request.url().protocol().toStringWithoutCopying()))
         return constructor(request, client);
 
-    auto newHandle = adoptRef(*new ResourceHandle(context, request, client, defersLoading, shouldContentSniff));
+    auto newHandle = adoptRef(*new ResourceHandle(context, request, client, defersLoading, shouldContentSniff, shouldContentEncodingSniff));
 
     if (newHandle->d->m_scheduledFailureType != NoFailure)
         return WTFMove(newHandle);
@@ -105,7 +106,7 @@ RefPtr<ResourceHandle> ResourceHandle::create(NetworkingContext* context, const 
 void ResourceHandle::scheduleFailure(FailureType type)
 {
     d->m_scheduledFailureType = type;
-    d->m_failureTimer.startOneShot(0);
+    d->m_failureTimer.startOneShot(0_s);
 }
 
 void ResourceHandle::failureTimerFired()
@@ -130,14 +131,14 @@ void ResourceHandle::failureTimerFired()
     ASSERT_NOT_REACHED();
 }
 
-void ResourceHandle::loadResourceSynchronously(NetworkingContext* context, const ResourceRequest& request, StoredCredentials storedCredentials, ResourceError& error, ResourceResponse& response, Vector<char>& data)
+void ResourceHandle::loadResourceSynchronously(NetworkingContext* context, const ResourceRequest& request, StoredCredentialsPolicy storedCredentialsPolicy, ResourceError& error, ResourceResponse& response, Vector<char>& data)
 {
     if (auto constructor = builtinResourceHandleSynchronousLoaderMap().get(request.url().protocol().toStringWithoutCopying())) {
-        constructor(context, request, storedCredentials, error, response, data);
+        constructor(context, request, storedCredentialsPolicy, error, response, data);
         return;
     }
 
-    platformLoadResourceSynchronously(context, request, storedCredentials, error, response, data);
+    platformLoadResourceSynchronously(context, request, storedCredentialsPolicy, error, response, data);
 }
 
 ResourceHandleClient* ResourceHandle::client() const
@@ -150,24 +151,27 @@ void ResourceHandle::clearClient()
     d->m_client = nullptr;
 }
 
-#if !PLATFORM(COCOA) && !USE(CFURLCONNECTION) && !USE(SOUP)
-// ResourceHandle never uses async client calls on these platforms yet.
-void ResourceHandle::continueWillSendRequest(ResourceRequest&&)
+void ResourceHandle::didReceiveResponse(ResourceResponse&& response, CompletionHandler<void()>&& completionHandler)
 {
-    notImplemented();
+    if (response.isHTTP09()) {
+        auto url = response.url();
+        std::optional<uint16_t> port = url.port();
+        if (port && !isDefaultPortForProtocol(port.value(), url.protocol())) {
+            cancel();
+            String message = "Cancelled load from '" + url.stringCenterEllipsizedToLength() + "' because it is using HTTP/0.9.";
+            d->m_client->didFail(this, { String(), 0, url, message });
+            completionHandler();
+            return;
+        }
+    }
+    client()->didReceiveResponseAsync(this, WTFMove(response), WTFMove(completionHandler));
 }
 
-void ResourceHandle::continueDidReceiveResponse()
+#if !USE(SOUP) && !USE(CURL)
+void ResourceHandle::platformContinueSynchronousDidReceiveResponse()
 {
-    notImplemented();
+    // Do nothing.
 }
-
-#if USE(PROTECTION_SPACE_AUTH_CALLBACK)
-void ResourceHandle::continueCanAuthenticateAgainstProtectionSpace(bool)
-{
-    notImplemented();
-}
-#endif
 #endif
 
 ResourceRequest& ResourceHandle::firstRequest()
@@ -203,6 +207,11 @@ bool ResourceHandle::shouldContentSniff() const
     return d->m_shouldContentSniff;
 }
 
+bool ResourceHandle::shouldContentEncodingSniff() const
+{
+    return d->m_shouldContentEncodingSniff;
+}
+
 bool ResourceHandle::shouldContentSniffURL(const URL& url)
 {
 #if PLATFORM(COCOA)
@@ -231,15 +240,10 @@ void ResourceHandle::setDefersLoading(bool defers)
             d->m_failureTimer.stop();
     } else if (d->m_scheduledFailureType != NoFailure) {
         ASSERT(!d->m_failureTimer.isActive());
-        d->m_failureTimer.startOneShot(0);
+        d->m_failureTimer.startOneShot(0_s);
     }
 
     platformSetDefersLoading(defers);
-}
-
-bool ResourceHandle::usesAsyncCallbacks() const
-{
-    return d->m_usesAsyncCallbacks;
 }
 
 } // namespace WebCore

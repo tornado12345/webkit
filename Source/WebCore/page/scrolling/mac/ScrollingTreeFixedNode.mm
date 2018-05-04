@@ -23,14 +23,16 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
-#include "ScrollingTreeFixedNode.h"
+#import "config.h"
+#import "ScrollingTreeFixedNode.h"
 
 #if ENABLE(ASYNC_SCROLLING)
 
-#include "ScrollingStateFixedNode.h"
-#include "ScrollingTree.h"
-#include <QuartzCore/CALayer.h>
+#import "Logging.h"
+#import "ScrollingStateFixedNode.h"
+#import "ScrollingTree.h"
+#import <QuartzCore/CALayer.h>
+#import <wtf/text/TextStream.h>
 
 namespace WebCore {
 
@@ -61,20 +63,34 @@ void ScrollingTreeFixedNode::commitStateBeforeChildren(const ScrollingStateNode&
         m_constraints = fixedStateNode.viewportConstraints();
 }
 
+namespace ScrollingTreeFixedNodeInternal {
 static inline CGPoint operator*(CGPoint& a, const CGSize& b)
 {
     return CGPointMake(a.x * b.width, a.y * b.height);
 }
+}
 
 void ScrollingTreeFixedNode::updateLayersAfterAncestorChange(const ScrollingTreeNode& changedNode, const FloatRect& fixedPositionRect, const FloatSize& cumulativeDelta)
 {
+    using namespace ScrollingTreeFixedNodeInternal;
     FloatPoint layerPosition = m_constraints.layerPositionForViewportRect(fixedPositionRect);
+
+    LOG_WITH_STREAM(Scrolling, stream << "ScrollingTreeFixedNode " << scrollingNodeID() << " updateLayersAfterAncestorChange: new viewport " << fixedPositionRect << " viewportRectAtLastLayout " << m_constraints.viewportRectAtLastLayout() << " last layer pos " << m_constraints.layerPositionAtLastLayout() << " new offset from top " << (fixedPositionRect.y() - layerPosition.y()));
+
     layerPosition -= cumulativeDelta;
 
     CGRect layerBounds = [m_layer bounds];
     CGPoint anchorPoint = [m_layer anchorPoint];
     CGPoint newPosition = layerPosition - m_constraints.alignmentOffset() + anchorPoint * layerBounds.size;
-    
+
+    if (isnan(newPosition.x) || isnan(newPosition.y)) {
+        WTFLogAlways("Attempt to call [CALayer setPosition] with NaN: newPosition=(%f, %f) layerPosition=(%f, %f) alignmentOffset=(%f, %f)",
+            newPosition.x, newPosition.y, layerPosition.x(), layerPosition.y(),
+            m_constraints.alignmentOffset().width(), m_constraints.alignmentOffset().height());
+        ASSERT_NOT_REACHED();
+        return;
+    }
+
     [m_layer setPosition:newPosition];
 
     if (!m_children)
@@ -84,6 +100,21 @@ void ScrollingTreeFixedNode::updateLayersAfterAncestorChange(const ScrollingTree
 
     for (auto& child : *m_children)
         child->updateLayersAfterAncestorChange(changedNode, fixedPositionRect, newDelta);
+}
+
+void ScrollingTreeFixedNode::dumpProperties(TextStream& ts, ScrollingStateTreeAsTextBehavior behavior) const
+{
+    ts << "fixed node";
+    ScrollingTreeNode::dumpProperties(ts, behavior);
+    ts.dumpProperty("fixed constraints", m_constraints);
+    
+    if (behavior & ScrollingStateTreeAsTextBehaviorIncludeLayerPositions) {
+        FloatRect layerBounds = [m_layer bounds];
+        FloatPoint anchorPoint = [m_layer anchorPoint];
+        FloatPoint position = [m_layer position];
+        FloatPoint layerTopLeft = position - toFloatSize(anchorPoint) * layerBounds.size() + m_constraints.alignmentOffset();
+        ts.dumpProperty("layer top left", layerTopLeft);
+    }
 }
 
 } // namespace WebCore

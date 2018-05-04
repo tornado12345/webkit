@@ -29,8 +29,11 @@
 #include "RenderRuby.h"
 #include "RenderRubyText.h"
 #include "RenderTreePosition.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(RubyTextElement);
 
 using namespace HTMLNames;
 
@@ -43,6 +46,11 @@ RubyTextElement::RubyTextElement(const QualifiedName& tagName, Document& documen
 Ref<RubyTextElement> RubyTextElement::create(const QualifiedName& tagName, Document& document)
 {
     return adoptRef(*new RubyTextElement(tagName, document));
+}
+
+Ref<RubyTextElement> RubyTextElement::create(Document& document)
+{
+    return adoptRef(*new RubyTextElement(rtTag, document));
 }
 
 RenderPtr<RenderElement> RubyTextElement::createElementRenderer(RenderStyle&& style, const RenderTreePosition& insertionPosition)

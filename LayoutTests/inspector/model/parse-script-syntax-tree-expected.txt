@@ -20,6 +20,8 @@ passed FunctionExpression
 passed Identifier
 passed IfStatement
 passed Literal
+passed TemplateLiteral, TemplateElement
+passed TaggedTemplateExpression
 passed LabeledStatement
 passed LogicalExpression
 passed MemberExpression
@@ -41,8 +43,19 @@ passed WhileStatement
 passed WithStatement
 passed YieldExpression
 passed ClassStatement, Super, MetaProperty
+passed Import
+passed RestProperty
+passed SpreadProperty
 passed AssignmentPattern
 passed ArrowFunctionExpression
+passed Async Functions
+passed AwaitExpression
+passed ImportDeclaration, ImportSpecifier
+passed ImportDefaultSpecifier
+passed ImportNamespaceSpecifier
+passed ExportNamedDeclaration, ExportSpecifier
+passed ExportDefaultDeclaration
+passed ExportAllDeclaration
 passed computed method on object literal
 passed method on object literal
 passed computed method property on object literal

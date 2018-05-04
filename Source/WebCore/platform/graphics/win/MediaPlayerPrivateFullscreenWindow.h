@@ -44,7 +44,7 @@ class MediaPlayerPrivateFullscreenClient {
 public:
     virtual LRESULT fullscreenClientWndProc(HWND, UINT message, WPARAM, LPARAM) = 0;
 protected:
-    virtual ~MediaPlayerPrivateFullscreenClient() {} 
+    virtual ~MediaPlayerPrivateFullscreenClient() = default;
 };
 
 class MediaPlayerPrivateFullscreenWindow {
@@ -58,7 +58,7 @@ public:
 
 #if USE(CA)
     PlatformCALayer* rootChildLayer() const { return m_rootChild.get(); }
-    void setRootChildLayer(PassRefPtr<PlatformCALayer>);
+    void setRootChildLayer(Ref<PlatformCALayer>&&);
 #endif
 
 private:

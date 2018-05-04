@@ -35,7 +35,7 @@ public:
     GeolocationProviderMock(WKContextRef);
     ~GeolocationProviderMock();
 
-    void setPosition(double latitude, double longitude, double accuracy, bool providesAltitude, double altitude, bool providesAltitudeAccuracy, double altitudeAccuracy, bool providesHeading, double heading, bool providesSpeed, double speed);
+    void setPosition(double latitude, double longitude, double accuracy, bool providesAltitude, double altitude, bool providesAltitudeAccuracy, double altitudeAccuracy, bool providesHeading, double heading, bool providesSpeed, double speed, bool providesFloorLevel, double floorLevel);
     void setPositionUnavailableError(WKStringRef errorMessage);
 
     void startUpdating(WKGeolocationManagerRef);
@@ -47,12 +47,13 @@ private:
     void sendPositionIfNeeded();
     void sendErrorIfNeeded();
 
+    WKRetainPtr<WKContextRef> m_context;
     WKGeolocationManagerRef m_geolocationManager;
-    bool m_isActive;
+    bool m_isActive { false };
 
     WKRetainPtr<WKGeolocationPositionRef> m_position;
 
-    bool m_hasError;
+    bool m_hasError { false };
     WKRetainPtr<WKStringRef> m_errorMessage;
 };
 

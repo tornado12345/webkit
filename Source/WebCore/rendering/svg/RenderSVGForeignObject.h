@@ -18,8 +18,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef RenderSVGForeignObject_h
-#define RenderSVGForeignObject_h
+#pragma once
 
 #include "AffineTransform.h"
 #include "FloatPoint.h"
@@ -31,6 +30,7 @@ namespace WebCore {
 class SVGForeignObjectElement;
 
 class RenderSVGForeignObject final : public RenderSVGBlock {
+    WTF_MAKE_ISO_ALLOCATED(RenderSVGForeignObject);
 public:
     RenderSVGForeignObject(SVGForeignObjectElement&, RenderStyle&&);
     virtual ~RenderSVGForeignObject();
@@ -63,17 +63,15 @@ private:
     const char* renderName() const override { return "RenderSVGForeignObject"; }
 
     void updateLogicalWidth() override;
-    void computeLogicalHeight(LayoutUnit logicalHeight, LayoutUnit logicalTop, LogicalExtentComputedValues&) const override;
+    LogicalExtentComputedValues computeLogicalHeight(LayoutUnit logicalHeight, LayoutUnit logicalTop) const override;
 
     const AffineTransform& localToParentTransform() const override;
     AffineTransform localTransform() const override { return m_localTransform; }
 
-    bool m_needsTransformUpdate : 1;
-    FloatRect m_viewport;
     AffineTransform m_localTransform;
     mutable AffineTransform m_localToParentTransform;
+    FloatRect m_viewport;
+    bool m_needsTransformUpdate { true };
 };
 
-}
-
-#endif
+} // namespace WebCore

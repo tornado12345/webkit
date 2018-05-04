@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003, 2005, 2008, 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2003-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,15 +26,21 @@
 #import "config.h"
 #import "SSLKeyGenerator.h"
 
+#if PLATFORM(MAC)
+
 #import "LocalizedStrings.h"
 #import "URL.h"
 #import <Security/SecAsn1Coder.h>
 #import <Security/SecAsn1Templates.h>
 #import <Security/SecEncodeTransform.h>
+#import <wtf/ProcessPrivilege.h>
 #import <wtf/RetainPtr.h>
 #import <wtf/Scope.h>
+#import <wtf/cf/TypeCastsCF.h>
 #import <wtf/spi/cocoa/SecuritySPI.h>
 #import <wtf/text/Base64.h>
+
+WTF_DECLARE_CF_TYPE_TRAIT(SecACL);
 
 namespace WebCore {
 
@@ -124,22 +130,27 @@ static bool signPublicKeyAndChallenge(CSSM_CSP_HANDLE cspHandle, const CSSM_DATA
 
 static String signedPublicKeyAndChallengeString(unsigned keySize, const CString& challenge, const String& keyDescription)
 {
+    ASSERT(keySize >= 2048);
+
     SignedPublicKeyAndChallenge signedPublicKeyAndChallenge { };
 
-    RetainPtr<SecAccessRef> access;
-    if (SecAccessCreate(keyDescription.createCFString().get(), nullptr, &access) != noErr)
+    SecAccessRef accessRef { nullptr };
+    if (SecAccessCreate(keyDescription.createCFString().get(), nullptr, &accessRef) != noErr)
         return String();
+    RetainPtr<SecAccessRef> access = adoptCF(accessRef);
 
-    RetainPtr<CFArrayRef> acls;
-    if (SecAccessCopySelectedACLList(access.get(), CSSM_ACL_AUTHORIZATION_DECRYPT, &acls) != noErr)
+    CFArrayRef aclsRef { nullptr };
+    if (SecAccessCopySelectedACLList(access.get(), CSSM_ACL_AUTHORIZATION_DECRYPT, &aclsRef) != noErr)
         return String();
+    RetainPtr<CFArrayRef> acls = adoptCF(aclsRef);
 
-    SecACLRef acl = (SecACLRef)(CFArrayGetValueAtIndex(acls.get(), 0));
+    SecACLRef acl = checked_cf_cast<SecACLRef>(CFArrayGetValueAtIndex(acls.get(), 0));
 
     // Passing nullptr to SecTrustedApplicationCreateFromPath tells that function to assume the application bundle.
-    RetainPtr<SecTrustedApplicationRef> trustedApp;
-    if (SecTrustedApplicationCreateFromPath(nullptr, &trustedApp) != noErr)
+    SecTrustedApplicationRef trustedAppRef { nullptr };
+    if (SecTrustedApplicationCreateFromPath(nullptr, &trustedAppRef) != noErr)
         return String();
+    RetainPtr<SecTrustedApplicationRef> trustedApp = adoptCF(trustedAppRef);
 
     const CSSM_ACL_KEYCHAIN_PROMPT_SELECTOR defaultSelector = {
         CSSM_ACL_KEYCHAIN_PROMPT_CURRENT_VERSION, 0
@@ -147,10 +158,12 @@ static String signedPublicKeyAndChallengeString(unsigned keySize, const CString&
     if (SecACLSetSimpleContents(acl, (__bridge CFArrayRef)@[ (__bridge id)trustedApp.get() ], keyDescription.createCFString().get(), &defaultSelector) != noErr)
         return String();
 
-    RetainPtr<SecKeyRef> publicKey;
-    RetainPtr<SecKeyRef> privateKey;
-    if (SecKeyCreatePair(nullptr, CSSM_ALGID_RSA, keySize, 0, CSSM_KEYUSE_ANY, CSSM_KEYATTR_PERMANENT | CSSM_KEYATTR_EXTRACTABLE | CSSM_KEYATTR_RETURN_REF, CSSM_KEYUSE_ANY, CSSM_KEYATTR_SENSITIVE | CSSM_KEYATTR_RETURN_REF | CSSM_KEYATTR_PERMANENT | CSSM_KEYATTR_EXTRACTABLE, access.get(), &publicKey, &privateKey) != noErr)
+    SecKeyRef publicKeyRef { nullptr };
+    SecKeyRef privateKeyRef { nullptr };
+    if (SecKeyCreatePair(nullptr, CSSM_ALGID_RSA, keySize, 0, CSSM_KEYUSE_ANY, CSSM_KEYATTR_PERMANENT | CSSM_KEYATTR_EXTRACTABLE | CSSM_KEYATTR_RETURN_REF, CSSM_KEYUSE_ANY, CSSM_KEYATTR_SENSITIVE | CSSM_KEYATTR_RETURN_REF | CSSM_KEYATTR_PERMANENT | CSSM_KEYATTR_EXTRACTABLE, access.get(), &publicKeyRef, &privateKeyRef) != noErr)
         return String();
+    RetainPtr<SecKeyRef> publicKey = adoptCF(publicKeyRef);
+    RetainPtr<SecKeyRef> privateKey = adoptCF(privateKeyRef);
 
     CSSM_CSP_HANDLE cspHandle;
     if (SecKeyGetCSPHandle(privateKey.get(), &cspHandle) != noErr)
@@ -175,8 +188,9 @@ static String signedPublicKeyAndChallengeString(unsigned keySize, const CString&
 
     ASSERT(challenge.data());
 
-    signedPublicKeyAndChallenge.publicKeyAndChallenge.challenge.Length = challenge.length();
-    signedPublicKeyAndChallenge.publicKeyAndChallenge.challenge.Data = (uint8_t*)challenge.data();
+    // Length needs to account for the null terminator.
+    signedPublicKeyAndChallenge.publicKeyAndChallenge.challenge.Length = challenge.length() + 1;
+    signedPublicKeyAndChallenge.publicKeyAndChallenge.challenge.Data = reinterpret_cast<uint8_t*>(const_cast<char*>(challenge.data()));
 
     CSSM_DATA encodedPublicKeyAndChallenge { 0, nullptr };
     if (SecAsn1EncodeItem(coder, &signedPublicKeyAndChallenge.publicKeyAndChallenge, publicKeyAndChallengeTemplate, &encodedPublicKeyAndChallenge) != noErr)
@@ -215,32 +229,26 @@ void getSupportedKeySizes(Vector<String>& supportedKeySizes)
 {
     ASSERT(supportedKeySizes.isEmpty());
     supportedKeySizes.append(keygenMenuItem2048());
-    supportedKeySizes.append(keygenMenuItem1024());
-    supportedKeySizes.append(keygenMenuItem512());
 }
 
 String signedPublicKeyAndChallengeString(unsigned keySizeIndex, const String& challengeString, const URL& url)
-{   
+{
     // This switch statement must always be synced with the UI strings returned by getSupportedKeySizes.
     UInt32 keySize;
     switch (keySizeIndex) {
     case 0:
         keySize = 2048;
         break;
-    case 1:
-        keySize = 1024;
-        break;
-    case 2:
-        keySize = 512;
-        break;
     default:
         ASSERT_NOT_REACHED();
         return String();
     }
 
-    auto challenge = challengeString.containsOnlyASCII() ? challengeString.ascii() : "";
+    auto challenge = challengeString.isAllASCII() ? challengeString.ascii() : "";
 
     return signedPublicKeyAndChallengeString(keySize, challenge, keygenKeychainItemName(url.host()));
 }
 
 }
+
+#endif // PLATFORM(MAC)

@@ -20,8 +20,7 @@
  *
  */
 
-#ifndef RenderFrameSet_h
-#define RenderFrameSet_h
+#pragma once
 
 #include "RenderBox.h"
 
@@ -54,6 +53,7 @@ private:
 };
 
 class RenderFrameSet final : public RenderBox {
+    WTF_MAKE_ISO_ALLOCATED(RenderFrameSet);
 public:
     RenderFrameSet(HTMLFrameSetElement&, RenderStyle&&);
     virtual ~RenderFrameSet();
@@ -129,5 +129,3 @@ private:
 } // namespace WebCore
 
 SPECIALIZE_TYPE_TRAITS_RENDER_OBJECT(RenderFrameSet, isFrameSet())
-
-#endif // RenderFrameSet_h

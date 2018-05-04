@@ -17,8 +17,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef RenderSVGHiddenContainer_h
-#define RenderSVGHiddenContainer_h
+#pragma once
 
 #include "RenderSVGContainer.h"
 
@@ -29,6 +28,7 @@ class SVGElement;
 // This class is for containers which are never drawn, but do need to support style
 // <defs>, <linearGradient>, <radialGradient> are all good examples
 class RenderSVGHiddenContainer : public RenderSVGContainer {
+    WTF_MAKE_ISO_ALLOCATED(RenderSVGHiddenContainer);
 public:
     RenderSVGHiddenContainer(SVGElement&, RenderStyle&&);
 
@@ -46,6 +46,5 @@ private:
 
     bool nodeAtFloatPoint(const HitTestRequest&, HitTestResult&, const FloatPoint& pointInParent, HitTestAction) final;
 };
-}
 
-#endif // RenderSVGHiddenContainer_h
+} // namespace WebCore

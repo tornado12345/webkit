@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2010, 2011 Nokia Corporation and/or its subsidiary(-ies)
+ * Copyright (C) 2018 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -21,8 +22,6 @@
 #include "config.h"
 #include "HTMLDetailsElement.h"
 
-#if ENABLE(DETAILS_ELEMENT)
-
 #include "AXObjectCache.h"
 #include "ElementIterator.h"
 #include "EventNames.h"
@@ -35,9 +34,12 @@
 #include "ShadowRoot.h"
 #include "SlotAssignment.h"
 #include "Text.h"
+#include <wtf/IsoMallocInlines.h>
 #include <wtf/NeverDestroyed.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(HTMLDetailsElement);
 
 using namespace HTMLNames;
 
@@ -64,9 +66,9 @@ void DetailsSlotAssignment::hostChildElementDidChange(const Element& childElemen
     if (is<HTMLSummaryElement>(childElement)) {
         // Don't check whether this is the first summary element
         // since we don't know the answer when this function is called inside Element::removedFrom.
-        didChangeSlot(summarySlotName(), ChangeType::DirectChild, shadowRoot);
+        didChangeSlot(summarySlotName(), shadowRoot);
     } else
-        didChangeSlot(SlotAssignment::defaultSlotName(), ChangeType::DirectChild, shadowRoot);
+        didChangeSlot(SlotAssignment::defaultSlotName(), shadowRoot);
 }
 
 const AtomicString& DetailsSlotAssignment::slotNameForHostChild(const Node& child) const
@@ -106,7 +108,7 @@ RenderPtr<RenderElement> HTMLDetailsElement::createElementRenderer(RenderStyle&&
     return createRenderer<RenderBlockFlow>(*this, WTFMove(style));
 }
 
-void HTMLDetailsElement::didAddUserAgentShadowRoot(ShadowRoot* root)
+void HTMLDetailsElement::didAddUserAgentShadowRoot(ShadowRoot& root)
 {
     auto summarySlot = HTMLSlotElement::create(slotTag, document());
     summarySlot->setAttributeWithoutSynchronization(nameAttr, summarySlotName());
@@ -117,7 +119,7 @@ void HTMLDetailsElement::didAddUserAgentShadowRoot(ShadowRoot* root)
     m_defaultSummary = defaultSummary.ptr();
 
     summarySlot->appendChild(defaultSummary);
-    root->appendChild(summarySlot);
+    root.appendChild(summarySlot);
 
     m_defaultSlot = HTMLSlotElement::create(slotTag, document());
     ASSERT(!m_isOpen);
@@ -131,7 +133,7 @@ bool HTMLDetailsElement::isActiveSummary(const HTMLSummaryElement& summary) cons
     if (summary.parentNode() != this)
         return false;
 
-    auto* slot = shadowRoot()->findAssignedSlot(summary);
+    auto slot = makeRefPtr(shadowRoot()->findAssignedSlot(summary));
     if (!slot)
         return false;
     return slot == m_summarySlot;
@@ -149,7 +151,7 @@ void HTMLDetailsElement::parseAttribute(const QualifiedName& name, const AtomicS
         bool oldValue = m_isOpen;
         m_isOpen = !value.isNull();
         if (oldValue != m_isOpen) {
-            auto* root = shadowRoot();
+            auto root = makeRefPtr(shadowRoot());
             ASSERT(root);
             if (m_isOpen)
                 root->appendChild(*m_defaultSlot);
@@ -167,7 +169,7 @@ void HTMLDetailsElement::parseAttribute(const QualifiedName& name, const AtomicS
 
 void HTMLDetailsElement::toggleOpen()
 {
-    setAttributeWithoutSynchronization(openAttr, m_isOpen ? nullAtom : emptyAtom);
+    setAttributeWithoutSynchronization(openAttr, m_isOpen ? nullAtom() : emptyAtom());
 
     // We need to post to the document because toggling this element will delete it.
     if (AXObjectCache* cache = document().existingAXObjectCache())
@@ -175,5 +177,3 @@ void HTMLDetailsElement::toggleOpen()
 }
 
 }
-
-#endif

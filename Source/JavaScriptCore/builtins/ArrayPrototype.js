@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2017 Apple Inc. All rights reserved.
  * Copyright (C) 2015 Yusuke Suzuki <utatane.tea@gmail.com>.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -28,51 +28,41 @@
 @globalPrivate
 function createArrayIterator(iteratedObject, kind, iterationFunction)
 {
-    this.@iteratedObject = iteratedObject;
-    this.@arrayIteratorKind = kind;
-    this.@arrayIteratorNextIndex = 0;
-    this.@arrayIteratorNext = iterationFunction;
-    this.@arrayIteratorIsDone = false;
+    "use strict";
+
+    @putByIdDirectPrivate(this, "iteratedObject", iteratedObject);
+    @putByIdDirectPrivate(this, "arrayIteratorKind", kind);
+    @putByIdDirectPrivate(this, "arrayIteratorNextIndex", 0);
+    @putByIdDirectPrivate(this, "arrayIteratorNext", iterationFunction);
+    @putByIdDirectPrivate(this, "arrayIteratorIsDone", false);
 }
 
 function values()
 {
     "use strict";
 
-    if (this == null)
-        @throwTypeError("Array.prototype.values requires that |this| not be null or undefined");
-
-    return new @createArrayIterator(@Object(this), "value", @arrayIteratorValueNext);
+    return new @createArrayIterator(@toObject(this, "Array.prototype.values requires that |this| not be null or undefined"), "value", @arrayIteratorValueNext);
 }
 
 function keys()
 {
     "use strict";
 
-    if (this == null)
-        @throwTypeError("Array.prototype.keys requires that |this| not be null or undefined");
-
-    return new @createArrayIterator(@Object(this), "key", @arrayIteratorKeyNext);
+    return new @createArrayIterator(@toObject(this, "Array.prototype.keys requires that |this| not be null or undefined"), "key", @arrayIteratorKeyNext);
 }
 
 function entries()
 {
     "use strict";
 
-    if (this == null)
-        @throwTypeError("Array.prototype.entries requires that |this| not be null or undefined");
-
-    return new @createArrayIterator(@Object(this), "key+value", @arrayIteratorKeyValueNext);
+    return new @createArrayIterator(@toObject(this, "Array.prototype.entries requires that |this| not be null or undefined"), "key+value", @arrayIteratorKeyValueNext);
 }
 
 function reduce(callback /*, initialValue */)
 {
     "use strict";
 
-    if (this == null)
-        @throwTypeError("Array.prototype.reduce requires that |this| not be null or undefined");
-
-    var array = @Object(this);
+    var array = @toObject(this, "Array.prototype.reduce requires that |this| not be null or undefined");
     var length = @toLength(array.length);
 
     if (typeof callback !== "function")
@@ -105,10 +95,7 @@ function reduceRight(callback /*, initialValue */)
 {
     "use strict";
 
-    if (this == null)
-        @throwTypeError("Array.prototype.reduceRight requires that |this| not be null or undefined");
-
-    var array = @Object(this);
+    var array = @toObject(this, "Array.prototype.reduceRight requires that |this| not be null or undefined");
     var length = @toLength(array.length);
 
     if (typeof callback !== "function")
@@ -141,10 +128,7 @@ function every(callback /*, thisArg */)
 {
     "use strict";
 
-    if (this == null)
-        @throwTypeError("Array.prototype.every requires that |this| not be null or undefined");
-    
-    var array = @Object(this);
+    var array = @toObject(this, "Array.prototype.every requires that |this| not be null or undefined");
     var length = @toLength(array.length);
 
     if (typeof callback !== "function")
@@ -166,10 +150,7 @@ function forEach(callback /*, thisArg */)
 {
     "use strict";
 
-    if (this == null)
-        @throwTypeError("Array.prototype.forEach requires that |this| not be null or undefined");
-    
-    var array = @Object(this);
+    var array = @toObject(this, "Array.prototype.forEach requires that |this| not be null or undefined");
     var length = @toLength(array.length);
 
     if (typeof callback !== "function")
@@ -187,10 +168,7 @@ function filter(callback /*, thisArg */)
 {
     "use strict";
 
-    if (this == null)
-        @throwTypeError("Array.prototype.filter requires that |this| not be null or undefined");
-    
-    var array = @Object(this);
+    var array = @toObject(this, "Array.prototype.filter requires that |this| not be null or undefined");
     var length = @toLength(array.length);
 
     if (typeof callback !== "function")
@@ -206,7 +184,7 @@ function filter(callback /*, thisArg */)
         // We have this check so that if some array from a different global object
         // calls this map they don't get an array with the Array.prototype of the
         // other global object.
-        if (@isArrayConstructor(constructor) && @Array !== constructor)
+        if (@Array !== constructor && @isArrayConstructor(constructor))
             constructor = @undefined;
         if (@isObject(constructor)) {
             constructor = constructor.@speciesSymbol;
@@ -236,10 +214,7 @@ function map(callback /*, thisArg */)
 {
     "use strict";
 
-    if (this == null)
-        @throwTypeError("Array.prototype.map requires that |this| not be null or undefined");
-    
-    var array = @Object(this);
+    var array = @toObject(this, "Array.prototype.map requires that |this| not be null or undefined");
     var length = @toLength(array.length);
 
     if (typeof callback !== "function")
@@ -255,7 +230,7 @@ function map(callback /*, thisArg */)
         // We have this check so that if some array from a different global object
         // calls this map they don't get an array with the Array.prototype of the
         // other global object.
-        if (@isArrayConstructor(constructor) && @Array !== constructor)
+        if (@Array !== constructor && @isArrayConstructor(constructor))
             constructor = @undefined;
         if (@isObject(constructor)) {
             constructor = constructor.@speciesSymbol;
@@ -268,7 +243,6 @@ function map(callback /*, thisArg */)
     else
         result = new constructor(length);
 
-    var nextIndex = 0;
     for (var i = 0; i < length; i++) {
         if (!(i in array))
             continue;
@@ -282,10 +256,7 @@ function some(callback /*, thisArg */)
 {
     "use strict";
 
-    if (this == null)
-        @throwTypeError("Array.prototype.some requires that |this| not be null or undefined");
-    
-    var array = @Object(this);
+    var array = @toObject(this, "Array.prototype.some requires that |this| not be null or undefined");
     var length = @toLength(array.length);
 
     if (typeof callback !== "function")
@@ -305,10 +276,7 @@ function fill(value /* [, start [, end]] */)
 {
     "use strict";
 
-    if (this == null)
-        @throwTypeError("Array.prototype.fill requires that |this| not be null or undefined");
-
-    var array = @Object(this);
+    var array = @toObject(this, "Array.prototype.fill requires that |this| not be null or undefined");
     var length = @toLength(array.length);
 
     var relativeStart = @toInteger(@argument(1));
@@ -345,10 +313,7 @@ function find(callback /*, thisArg */)
 {
     "use strict";
 
-    if (this == null)
-        @throwTypeError("Array.prototype.find requires that |this| not be null or undefined");
-    
-    var array = @Object(this);
+    var array = @toObject(this, "Array.prototype.find requires that |this| not be null or undefined");
     var length = @toLength(array.length);
 
     if (typeof callback !== "function")
@@ -367,10 +332,7 @@ function findIndex(callback /*, thisArg */)
 {
     "use strict";
 
-    if (this == null)
-        @throwTypeError("Array.prototype.findIndex requires that |this| not be null or undefined");
-    
-    var array = @Object(this);
+    var array = @toObject(this, "Array.prototype.findIndex requires that |this| not be null or undefined");
     var length = @toLength(array.length);
 
     if (typeof callback !== "function")
@@ -388,10 +350,7 @@ function includes(searchElement /*, fromIndex*/)
 {
     "use strict";
 
-    if (this == null)
-        @throwTypeError("Array.prototype.includes requires that |this| not be null or undefined");
-
-    var array = @Object(this);
+    var array = @toObject(this, "Array.prototype.includes requires that |this| not be null or undefined");
     var length = @toLength(array.length);
 
     if (length === 0)
@@ -543,10 +502,17 @@ function sort(comparator)
 
         for (var dstIndex = left; dstIndex < rightEnd; ++dstIndex) {
             if (right < rightEnd) {
-                if (left >= leftEnd || comparator(src[right], src[left]) < 0) {
+                if (left >= leftEnd) {
                     dst[dstIndex] = src[right++];
                     continue;
                 }
+
+                let comparisonResult = comparator(src[right], src[left]);
+                if ((typeof comparisonResult === "boolean" && !comparisonResult) || comparisonResult < 0) {
+                    dst[dstIndex] = src[right++];
+                    continue;
+                }
+
             }
 
             dst[dstIndex] = src[left++];
@@ -625,10 +591,7 @@ function sort(comparator)
         bucketSort(array, 0, strings, 0);
     }
 
-    if (this == null)
-        @throwTypeError("Array.prototype.sort requires that |this| not be null or undefined");
-
-    var array = @Object(this);
+    var array = @toObject(this, "Array.prototype.sort requires that |this| not be null or undefined");
 
     var length = array.length >>> 0;
 
@@ -639,7 +602,7 @@ function sort(comparator)
 
     if (typeof comparator == "function")
         comparatorSort(array, length, comparator);
-    else if (comparator === @undefined)
+    else if (comparator === null || comparator === @undefined)
         stringSort(array, length);
     else
         @throwTypeError("Array.prototype.sort requires the comparsion function be a function or undefined");
@@ -647,14 +610,12 @@ function sort(comparator)
     return array;
 }
 
+@globalPrivate
 function concatSlowPath()
 {
     "use strict";
 
-    if (this == null)
-        @throwTypeError("Array.prototype.concat requires that |this| not be null or undefined");
-
-    var currentElement = @Object(this);
+    var currentElement = @toObject(this, "Array.prototype.concat requires that |this| not be null or undefined");
 
     var constructor;
     if (@isArray(currentElement)) {
@@ -662,7 +623,7 @@ function concatSlowPath()
         // We have this check so that if some array from a different global object
         // calls this map they don't get an array with the Array.prototype of the
         // other global object.
-        if (@isArrayConstructor(constructor) && @Array !== constructor)
+        if (@Array !== constructor && @isArrayConstructor(constructor))
             constructor = @undefined;
         else if (@isObject(constructor)) {
             constructor = constructor.@speciesSymbol;
@@ -686,12 +647,12 @@ function concatSlowPath()
         let spreadable = @isObject(currentElement) && currentElement.@isConcatSpreadableSymbol;
         if ((spreadable === @undefined && @isArray(currentElement)) || spreadable) {
             let length = @toLength(currentElement.length);
+            if (length + resultIndex > @MAX_ARRAY_INDEX)
+                @throwRangeError("Length exceeded the maximum array length");
             if (resultIsArray && @isJSArray(currentElement)) {
                 @appendMemcpy(result, currentElement, resultIndex);
                 resultIndex += length;
             } else {
-                if (length + resultIndex > @MAX_SAFE_INTEGER)
-                    @throwTypeError("length exceeded the maximum safe integer");
                 for (var i = 0; i < length; i++) {
                     if (i in currentElement)
                         @putByValDirect(result, resultIndex, currentElement[i]);
@@ -699,8 +660,8 @@ function concatSlowPath()
                 }
             }
         } else {
-            if (resultIndex >= @MAX_SAFE_INTEGER)
-                @throwTypeError("length exceeded the maximum safe integer");
+            if (resultIndex >= @MAX_ARRAY_INDEX)
+                @throwRangeError("Length exceeded the maximum array length");
             @putByValDirect(result, resultIndex++, currentElement);
         }
         currentElement = arguments[argIndex];
@@ -741,10 +702,7 @@ function copyWithin(target, start /*, end */)
         return (maybeNegativeZero < positive) ? maybeNegativeZero : positive;
     }
 
-    if (this == null)
-        @throwTypeError("Array.copyWithin requires that |this| not be null or undefined");
-
-    var array = @Object(this);
+    var array = @toObject(this, "Array.prototype.copyWithin requires that |this| not be null or undefined");
     var length = @toLength(array.length);
 
     var relativeTarget = @toInteger(target);
@@ -779,4 +737,108 @@ function copyWithin(target, start /*, end */)
     }
 
     return array;
+}
+
+@globalPrivate
+function arraySpeciesCreate(array, length)
+{
+    "use strict";
+
+    if (!@isArray(array))
+        return @newArrayWithSize(length);
+
+    var constructor = array.constructor;
+    var arrayConstructorInRealm = @Array;
+    // We have this check so that if some array from a different global object
+    // calls this map they don't get an array with the Array.prototype of the
+    // other global object.
+    if (arrayConstructorInRealm !== constructor && @isArrayConstructor(constructor))
+        return @newArrayWithSize(length);
+
+    if (@isObject(constructor)) {
+        constructor = constructor.@speciesSymbol;
+        if (constructor == null)
+            return @newArrayWithSize(length);
+    }
+
+    if (constructor === arrayConstructorInRealm || constructor === @undefined)
+        return @newArrayWithSize(length);
+    return new constructor(length);
+}
+
+@globalPrivate
+function flattenIntoArray(target, source, sourceLength, targetIndex, depth)
+{
+    "use strict";
+
+    for (var sourceIndex = 0; sourceIndex < sourceLength; ++sourceIndex) {
+        if (sourceIndex in source) {
+            var element = source[sourceIndex];
+            if (depth > 0 && @isArray(element))
+                targetIndex = @flattenIntoArray(target, element, @toLength(element.length), targetIndex, depth - 1);
+            else {
+                if (targetIndex >= @MAX_SAFE_INTEGER)
+                    @throwTypeError("flatten array exceeds 2**53 - 1");
+                @putByValDirect(target, targetIndex, element);
+                ++targetIndex;
+            }
+        }
+    }
+    return targetIndex;
+}
+
+function flatten()
+{
+    "use strict";
+
+    var array = @toObject(this, "Array.prototype.flatten requires that |this| not be null or undefined");
+    var length = @toLength(array.length);
+
+    var depthNum = 1;
+    var depth = @argument(0);
+    if (depth !== @undefined)
+        depthNum = @toInteger(depth);
+
+    var result = @arraySpeciesCreate(array, 0);
+
+    @flattenIntoArray(result, array, length, 0, depthNum);
+    return result;
+}
+
+@globalPrivate
+function flattenIntoArrayWithCallback(target, source, sourceLength, targetIndex, callback, thisArg)
+{
+    "use strict";
+
+    for (var sourceIndex = 0; sourceIndex < sourceLength; ++sourceIndex) {
+        if (sourceIndex in source) {
+            var element = callback.@call(thisArg, source[sourceIndex], sourceIndex, source);
+            if (@isArray(element))
+                targetIndex = @flattenIntoArray(target, element, @toLength(element.length), targetIndex, 0);
+            else {
+                if (targetIndex >= @MAX_SAFE_INTEGER)
+                    @throwTypeError("flatten array exceeds 2**53 - 1");
+                @putByValDirect(target, targetIndex, element);
+                ++targetIndex;
+            }
+        }
+    }
+    return target;
+}
+
+function flatMap(callback)
+{
+    "use strict";
+
+    var array = @toObject(this, "Array.prototype.flatMap requires that |this| not be null or undefined");
+    var length = @toLength(array.length);
+
+    if (typeof callback !== "function")
+        @throwTypeError("Array.prototype.flatMap callback must be a function");
+
+    var thisArg = @argument(1);
+
+    var result = @arraySpeciesCreate(array, 0);
+
+    return @flattenIntoArrayWithCallback(result, array, length, 0, callback, thisArg);
 }

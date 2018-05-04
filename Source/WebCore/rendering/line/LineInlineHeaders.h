@@ -22,8 +22,7 @@
  *
  */
 
-#ifndef LineInlineHeaders_h
-#define LineInlineHeaders_h
+#pragma once
 
 #include "RenderLayer.h"
 
@@ -35,11 +34,11 @@ inline bool hasInlineDirectionBordersPaddingOrMargin(const RenderInline& flow)
 {
     // Where an empty inline is split across anonymous blocks we should only give lineboxes to the 'sides' of the
     // inline that have borders, padding or margin.
-    bool shouldApplyStartBorderPaddingOrMargin = !flow.parent()->isAnonymousBlock() || !flow.isInlineElementContinuation();
+    bool shouldApplyStartBorderPaddingOrMargin = !flow.parent()->isAnonymousBlock() || !flow.isContinuation();
     if (shouldApplyStartBorderPaddingOrMargin && (flow.borderStart() || flow.marginStart() || flow.paddingStart()))
         return true;
 
-    bool shouldApplyEndBorderPaddingOrMargin = !flow.parent()->isAnonymousBlock() || flow.isInlineElementContinuation() || !flow.inlineElementContinuation();
+    bool shouldApplyEndBorderPaddingOrMargin = !flow.parent()->isAnonymousBlock() || flow.isContinuation() || !flow.inlineContinuation();
     return shouldApplyEndBorderPaddingOrMargin && (flow.borderEnd() || flow.marginEnd() || flow.paddingEnd());
 }
 
@@ -137,6 +136,4 @@ inline void setStaticPositions(RenderBlockFlow& block, RenderBox& child, IndentT
     child.layer()->setStaticBlockPosition(blockHeight);
 }
 
-}
-
-#endif
+} // namespace WebCore

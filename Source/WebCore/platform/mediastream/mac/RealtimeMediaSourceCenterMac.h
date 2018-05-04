@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-2016 Apple, Inc. All rights reserved.
+ * Copyright (C) 2013-2017 Apple, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,21 +35,34 @@
 
 #include "RealtimeMediaSource.h"
 #include "RealtimeMediaSourceCenter.h"
-#include <wtf/PassRefPtr.h>
+#include <wtf/RefPtr.h>
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
 class RealtimeMediaSourceCenterMac final : public RealtimeMediaSourceCenter {
 public:
-    RealtimeMediaSourceCenterMac();
+    WEBCORE_EXPORT static RealtimeMediaSourceCenterMac& singleton();
+
+    static RealtimeMediaSource::VideoCaptureFactory& videoCaptureSourceFactory();
+    static RealtimeMediaSource::AudioCaptureFactory& audioCaptureSourceFactory();
 
 private:
+    friend class NeverDestroyed<RealtimeMediaSourceCenterMac>;
+    RealtimeMediaSourceCenterMac();
     ~RealtimeMediaSourceCenterMac();
 
-    void validateRequestConstraints(ValidConstraintsHandler validHandler, InvalidConstraintsHandler invalidHandler, const MediaConstraints& audioConstraints, const MediaConstraints& videoConstraints) final;
-    void createMediaStream(NewMediaStreamHandler, const String& audioDeviceID, const String& videoDeviceID, const MediaConstraints* audioConstraints, const MediaConstraints* videoConstraints) final;
-    Vector<CaptureDevice> getMediaStreamDevices() final;
+    void setAudioFactory(RealtimeMediaSource::AudioCaptureFactory& factory) final { m_audioFactoryOverride = &factory; }
+    void unsetAudioFactory(RealtimeMediaSource::AudioCaptureFactory&) final { m_audioFactoryOverride = nullptr; }
+
+    RealtimeMediaSource::AudioCaptureFactory& audioFactory() final;
+    RealtimeMediaSource::VideoCaptureFactory& videoFactory() final;
+
+    CaptureDeviceManager& audioCaptureDeviceManager() final;
+    CaptureDeviceManager& videoCaptureDeviceManager() final;
+    CaptureDeviceManager& displayCaptureDeviceManager() final;
+
+    RealtimeMediaSource::AudioCaptureFactory* m_audioFactoryOverride { nullptr };
 };
 
 } // namespace WebCore

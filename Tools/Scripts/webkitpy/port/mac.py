@@ -29,11 +29,14 @@
 
 import logging
 import os
-import time
 import re
 
-from webkitpy.common.system.crashlogs import CrashLogs
+from webkitpy.common.memoized import memoized
 from webkitpy.common.system.executive import ScriptError
+from webkitpy.common.version import Version
+from webkitpy.common.version_name_map import PUBLIC_TABLE, INTERNAL_TABLE
+from webkitpy.common.version_name_map import VersionNameMap
+from webkitpy.port.config import apple_additions
 from webkitpy.port.darwin import DarwinPort
 
 _log = logging.getLogger(__name__)
@@ -42,7 +45,8 @@ _log = logging.getLogger(__name__)
 class MacPort(DarwinPort):
     port_name = "mac"
 
-    VERSION_FALLBACK_ORDER = ['mac-snowleopard', 'mac-lion', 'mac-mountainlion', 'mac-mavericks', 'mac-yosemite', 'mac-elcapitan', 'mac-sierra']
+    CURRENT_VERSION = Version(10, 13)
+
     SDK = 'macosx'
 
     ARCHITECTURES = ['x86_64', 'x86']
@@ -51,29 +55,92 @@ class MacPort(DarwinPort):
 
     def __init__(self, host, port_name, **kwargs):
         DarwinPort.__init__(self, host, port_name, **kwargs)
+        version_name_map = VersionNameMap.map(host.platform)
+        self._os_version = None
+        split_port_name = port_name.split('-')
+        if len(split_port_name) > 1 and split_port_name[1] != 'wk2':
+            self._os_version = version_name_map.from_name(split_port_name[1])[1]
+        elif self.host.platform.is_mac():
+            self._os_version = self.host.platform.os_version
+        if not self._os_version:
+            self._os_version = MacPort.CURRENT_VERSION
+        assert self._os_version.major == 10
 
     def _build_driver_flags(self):
         return ['ARCHS=i386'] if self.architecture() == 'x86' else []
 
+    @memoized
     def default_baseline_search_path(self):
-        name = self._name.replace('-wk2', '')
-        wk_version = [] if self.get_option('webkit_test_runner') else ['mac-wk1']
-        if name.endswith(self.FUTURE_VERSION):
-            fallback_names = wk_version + [self.port_name]
-        else:
-            fallback_names = self.VERSION_FALLBACK_ORDER[self.VERSION_FALLBACK_ORDER.index(name):-1] + wk_version + [self.port_name]
-        # FIXME: mac-wk2 should appear at the same place as mac-wk1.
-        if self.get_option('webkit_test_runner'):
-            fallback_names = [self._wk2_port_name(), 'wk2'] + fallback_names
-        return map(self._webkit_baseline_path, fallback_names)
+        versions_to_fallback = []
+        version_name_map = VersionNameMap.map(self.host.platform)
 
+        if self._os_version == self.CURRENT_VERSION:
+            versions_to_fallback = [self.CURRENT_VERSION]
+        else:
+            temp_version = Version(self._os_version.major, self._os_version.minor)
+            while temp_version != self.CURRENT_VERSION:
+                versions_to_fallback.append(Version.from_iterable(temp_version))
+                if temp_version < self.CURRENT_VERSION:
+                    temp_version.minor += 1
+                else:
+                    temp_version.minor -= 1
+        wk_string = 'wk1'
+        if self.get_option('webkit_test_runner'):
+            wk_string = 'wk2'
+
+        expectations = []
+        for version in versions_to_fallback:
+            version_name = version_name_map.to_name(version, platform=self.port_name)
+            if version_name:
+                standardized_version_name = version_name.lower().replace(' ', '')
+            apple_name = None
+            if apple_additions():
+                apple_name = version_name_map.to_name(version, platform=self.port_name, table=INTERNAL_TABLE)
+
+            if apple_name:
+                expectations.append(self._apple_baseline_path('mac-{}-{}'.format(apple_name.lower().replace(' ', ''), wk_string)))
+            if version_name:
+                expectations.append(self._webkit_baseline_path('mac-{}-{}'.format(standardized_version_name, wk_string)))
+            if apple_name:
+                expectations.append(self._apple_baseline_path('mac-{}'.format(apple_name.lower().replace(' ', ''))))
+            if version_name:
+                expectations.append(self._webkit_baseline_path('mac-{}'.format(standardized_version_name)))
+
+        if apple_additions():
+            expectations.append(self._apple_baseline_path('{}-{}'.format(self.port_name, wk_string)))
+        expectations.append(self._webkit_baseline_path('{}-{}'.format(self.port_name, wk_string)))
+        if apple_additions():
+            expectations.append(self._apple_baseline_path('{}'.format(self.port_name)))
+        expectations.append(self._webkit_baseline_path(self.port_name))
+
+        if self.get_option('webkit_test_runner'):
+            expectations.append(self._webkit_baseline_path('wk2'))
+        return expectations
+
+    @memoized
     def configuration_specifier_macros(self):
-        return {
-            "sierra+": ["sierra", "future"],
-            "elcapitan+": ["elcapitan", "sierra", "future"],
-            "mavericks+": ["mavericks", "yosemite", "elcapitan", "sierra", "future"],
-            "yosemite+": ["yosemite", "elcapitan", "sierra", "future"],
-        }
+        config_map = {}
+        version_name_map = VersionNameMap.map(self.host.platform)
+        for version in self._allowed_versions():
+            version_names = []
+            for newer in self._allowed_versions()[self._allowed_versions().index(version):]:
+                version_name = version_name_map.to_name(newer, platform=self.port_name)
+                if not version_name:
+                    version_name = version_name_map.to_name(newer, platform=self.port_name, table=INTERNAL_TABLE)
+                version_names.append(version_name.lower().replace(' ', ''))
+            for table in [PUBLIC_TABLE, INTERNAL_TABLE]:
+                version_name = version_name_map.to_name(version, platform=self.port_name, table=table)
+                if not version_name:
+                    continue
+                config_map[version_name.lower().replace(' ', '') + '+'] = version_names
+        return config_map
+
+    def environment_for_api_tests(self):
+        result = super(MacPort, self).environment_for_api_tests()
+        if self.get_option('guard_malloc'):
+            result['DYLD_INSERT_LIBRARIES'] = '/usr/lib/libgmalloc.dylib'
+            result['__XPC_DYLD_INSERT_LIBRARIES'] = '/usr/lib/libgmalloc.dylib'
+        return result
 
     def setup_environ_for_server(self, server_name=None):
         env = super(MacPort, self).setup_environ_for_server(server_name)
@@ -162,31 +229,6 @@ class MacPort(DarwinPort):
     def _check_port_build(self):
         return not self.get_option('java') or self._build_java_test_support()
 
-    def _get_crash_log(self, name, pid, stdout, stderr, newer_than, time_fn=None, sleep_fn=None, wait_for_log=True):
-        # Note that we do slow-spin here and wait, since it appears the time
-        # ReportCrash takes to actually write and flush the file varies when there are
-        # lots of simultaneous crashes going on.
-        # FIXME: Should most of this be moved into CrashLogs()?
-        time_fn = time_fn or time.time
-        sleep_fn = sleep_fn or time.sleep
-        crash_log = ''
-        crash_logs = CrashLogs(self.host)
-        now = time_fn()
-        # FIXME: delete this after we're sure this code is working ...
-        _log.debug('looking for crash log for %s:%s' % (name, str(pid)))
-        deadline = now + 5 * int(self.get_option('child_processes', 1))
-        while not crash_log and now <= deadline:
-            crash_log = crash_logs.find_newest_log(name, pid, include_errors=True, newer_than=newer_than)
-            if not wait_for_log:
-                break
-            if not crash_log or not [line for line in crash_log.splitlines() if not line.startswith('ERROR')]:
-                sleep_fn(0.1)
-                now = time_fn()
-
-        if not crash_log:
-            return (stderr, None)
-        return (stderr, crash_log)
-
     def start_helper(self, pixel_tests=False):
         helper_path = self._path_to_helper()
         if not helper_path:
@@ -208,7 +250,7 @@ class MacPort(DarwinPort):
         for domain in ["DumpRenderTree", "WebKitTestRunner"]:
             try:
                 self._executive.run_command(["defaults", "delete", domain])
-            except ScriptError, e:
+            except ScriptError as e:
                 # 'defaults' returns 1 if the domain did not exist
                 if e.exit_code != 1:
                     raise e
@@ -220,7 +262,7 @@ class MacPort(DarwinPort):
                 self._helper.stdin.write("x\n")
                 self._helper.stdin.close()
                 self._helper.wait()
-            except IOError, e:
+            except IOError as e:
                 _log.debug("IOError raised while stopping helper: %s" % str(e))
             self._helper = None
 

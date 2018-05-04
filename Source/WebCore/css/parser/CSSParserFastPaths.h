@@ -27,8 +27,7 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#ifndef CSSParserFastPaths_h
-#define CSSParserFastPaths_h
+#pragma once
 
 #include "CSSParserMode.h"
 #include "CSSPropertyNames.h"
@@ -38,6 +37,7 @@
 namespace WebCore {
 
 class CSSValue;
+class StyleSheetContents;
 
 class CSSParserFastPaths {
 public:
@@ -53,5 +53,3 @@ public:
 };
 
 } // namespace WebCore
-
-#endif // CSSParserFastPaths_h

@@ -29,6 +29,8 @@
 #include "ContextDestructionObserver.h"
 #include <wtf/Assertions.h>
 #include <wtf/Forward.h>
+#include <wtf/RefCounted.h>
+#include <wtf/Threading.h>
 
 namespace WebCore {
 
@@ -83,6 +85,31 @@ public:
         thisObject->deref();
     }
 
+    template<class T>
+    class PendingActivity : public RefCounted<PendingActivity<T>> {
+    public:
+        explicit PendingActivity(T& thisObject)
+            : m_thisObject(thisObject)
+        {
+            ++(m_thisObject->m_pendingActivityCount);
+        }
+
+        ~PendingActivity()
+        {
+            ASSERT(m_thisObject->m_pendingActivityCount > 0);
+            --(m_thisObject->m_pendingActivityCount);
+        }
+
+    private:
+        Ref<T> m_thisObject;
+    };
+
+    template<class T> Ref<PendingActivity<T>> makePendingActivity(T& thisObject)
+    {
+        ASSERT(&thisObject == this);
+        return adoptRef(*new PendingActivity<T>(thisObject));
+    }
+
 protected:
     explicit ActiveDOMObject(ScriptExecutionContext*);
     virtual ~ActiveDOMObject();
@@ -91,6 +118,7 @@ private:
     unsigned m_pendingActivityCount;
 #if !ASSERT_DISABLED
     bool m_suspendIfNeededWasCalled;
+    Ref<Thread> m_creationThread { Thread::current() };
 #endif
 };
 

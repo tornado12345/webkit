@@ -27,13 +27,11 @@
  * SUCH DAMAGE.
  */
 
-#ifndef ViewportStyleResolver_h
-#define ViewportStyleResolver_h
+#pragma once
 
 #if ENABLE(CSS_DEVICE_ADAPTATION)
 
 #include "CSSPropertyNames.h"
-#include "FloatSize.h"
 #include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
 
@@ -70,5 +68,3 @@ private:
 } // namespace WebCore
 
 #endif // ENABLE(CSS_DEVICE_ADAPTATION)
-
-#endif // ViewportStyleResolver_h

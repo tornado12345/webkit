@@ -18,24 +18,23 @@
  *
  */
 
-#ifndef RenderCombineText_h
-#define RenderCombineText_h
+#pragma once
 
 #include "FontCascade.h"
-#include "RenderElement.h"
 #include "RenderText.h"
 #include "Text.h"
 
 namespace WebCore {
 
 class RenderCombineText final : public RenderText {
+    WTF_MAKE_ISO_ALLOCATED(RenderCombineText);
 public:
     RenderCombineText(Text&, const String&);
 
     Text& textNode() const { return downcast<Text>(nodeForNonAnonymous()); }
 
-    void combineText();
-    Optional<FloatPoint> computeTextOrigin(const FloatRect& boxRect) const;
+    void combineTextIfNeeded();
+    std::optional<FloatPoint> computeTextOrigin(const FloatRect& boxRect) const;
     String combinedStringForRendering() const;
     bool isCombined() const { return m_isCombined; }
     float combinedTextWidth(const FontCascade& font) const { return font.size(); }
@@ -62,5 +61,3 @@ private:
 } // namespace WebCore
 
 SPECIALIZE_TYPE_TRAITS_RENDER_OBJECT(RenderCombineText, isCombineText())
-
-#endif // RenderCombineText_h

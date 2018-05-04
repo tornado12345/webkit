@@ -1,4 +1,4 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl
 
 # Copyright (C) 2005-2009, 2013, 2015 Apple Inc. All rights reserved.
 #
@@ -27,6 +27,7 @@
 # THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use strict;
+use warnings;
 use File::Basename;
 use FindBin;
 use Getopt::Long qw(:config pass_through);
@@ -43,7 +44,6 @@ Usage: $programName [options] [options to pass to build system]
   --help        Show this help message
   --clean       Clean up the build directory
   --gtk         Build the GTK+ port
-  --efl         Build the EFL port
 EOF
 
 GetOptions(
@@ -64,10 +64,10 @@ chdirWebKit();
 chdir File::Spec->catdir("Tools", "DumpRenderTree") or die;
 
 my $result;
-if (isAppleMacWebKit()) {
+if (isAppleCocoaWebKit()) {
     $result = buildXCodeProject("DumpRenderTree", $clean, XcodeOptions(), @ARGV);
-} elsif (isGtk() || isEfl() || isAnyWindows()) {
-    # Gtk, EFL, and Windows build everything in one shot. No need to build anything here.
+} elsif (isGtk() || isWPE() || isAnyWindows()) {
+    # GTK, WPE and Windows build everything in one shot. No need to build anything here.
     $result = 0;
 } else {
     die "Building not defined for this platform!\n";

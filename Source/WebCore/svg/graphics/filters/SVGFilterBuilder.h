@@ -18,11 +18,10 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGFilterBuilder_h
-#define SVGFilterBuilder_h
+#pragma once
 
 #include "FilterEffect.h"
-
+#include "SVGUnitTypes.h"
 #include <wtf/HashMap.h>
 #include <wtf/HashSet.h>
 #include <wtf/text/AtomicStringHash.h>
@@ -31,6 +30,7 @@
 namespace WebCore {
 
 class RenderObject;
+class SVGFilterElement;
 
 class SVGFilterBuilder {
 public:
@@ -38,9 +38,15 @@ public:
 
     SVGFilterBuilder(RefPtr<FilterEffect> sourceGraphic);
 
+    void setTargetBoundingBox(const FloatRect& r) { m_targetBoundingBox = r; }
+    FloatRect targetBoundingBox() const { return m_targetBoundingBox; }
+    
+    SVGUnitTypes::SVGUnitType primitiveUnits() const { return m_primitiveUnits; }
+    void setPrimitiveUnits(SVGUnitTypes::SVGUnitType units) { m_primitiveUnits = units; }
+
     void add(const AtomicString& id, RefPtr<FilterEffect>);
 
-    FilterEffect* getEffectById(const AtomicString& id) const;
+    RefPtr<FilterEffect> getEffectById(const AtomicString& id) const;
     FilterEffect* lastEffect() const { return m_lastEffect.get(); }
 
     void appendEffectToEffectReferences(RefPtr<FilterEffect>&&, RenderObject*);
@@ -73,8 +79,8 @@ private:
     HashMap<RenderObject*, FilterEffect*> m_effectRenderer;
 
     RefPtr<FilterEffect> m_lastEffect;
+    FloatRect m_targetBoundingBox;
+    SVGUnitTypes::SVGUnitType m_primitiveUnits { SVGUnitTypes::SVG_UNIT_TYPE_USERSPACEONUSE };
 };
     
 } // namespace WebCore
-
-#endif // SVGFilterBuilder_h

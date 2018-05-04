@@ -23,14 +23,12 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef RenderVTTCue_h
-#define RenderVTTCue_h
+#pragma once
 
 #if ENABLE(VIDEO_TRACK)
 
 #include "FloatPoint.h"
 #include "RenderBlockFlow.h"
-#include "RenderInline.h"
 
 namespace WebCore {
 
@@ -39,6 +37,7 @@ class VTTCue;
 class VTTCueBox;
 
 class RenderVTTCue final : public RenderBlockFlow {
+    WTF_MAKE_ISO_ALLOCATED(RenderVTTCue);
 public:
     RenderVTTCue(VTTCueBox&, RenderStyle&&);
 
@@ -69,5 +68,4 @@ private:
 
 } // namespace WebCore
 
-#endif
-#endif // RenderVTTCue_h
+#endif // ENABLE(VIDEO_TRACK)

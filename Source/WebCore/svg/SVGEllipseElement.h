@@ -18,8 +18,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGEllipseElement_h
-#define SVGEllipseElement_h
+#pragma once
 
 #include "SVGAnimatedBoolean.h"
 #include "SVGAnimatedLength.h"
@@ -28,8 +27,8 @@
 
 namespace WebCore {
 
-class SVGEllipseElement final : public SVGGraphicsElement,
-                                public SVGExternalResourcesRequired {
+class SVGEllipseElement final : public SVGGraphicsElement, public SVGExternalResourcesRequired {
+    WTF_MAKE_ISO_ALLOCATED(SVGEllipseElement);
 public:
     static Ref<SVGEllipseElement> create(const QualifiedName&, Document&);
 
@@ -55,5 +54,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif

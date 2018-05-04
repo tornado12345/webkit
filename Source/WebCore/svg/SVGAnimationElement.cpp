@@ -2,7 +2,7 @@
  * Copyright (C) 2004, 2005 Nikolas Zimmermann <zimmermann@kde.org>
  * Copyright (C) 2004, 2005, 2006, 2007 Rob Buis <buis@kde.org>
  * Copyright (C) 2007 Eric Seidel <eric@webkit.org>
- * Copyright (C) 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2008, 2017 Apple Inc. All rights reserved.
  * Copyright (C) 2009 Cameron McCormack <cam@mcc.id.au>
  * Copyright (C) Research In Motion Limited 2010. All rights reserved.
  * Copyright (C) 2014 Adobe Systems Incorporated. All rights reserved.
@@ -27,8 +27,8 @@
 #include "SVGAnimationElement.h"
 
 #include "CSSComputedStyleDeclaration.h"
-#include "CSSParser.h"
 #include "CSSPropertyNames.h"
+#include "CSSPropertyParser.h"
 #include "Document.h"
 #include "FloatConversion.h"
 #include "RenderObject.h"
@@ -37,11 +37,15 @@
 #include "SVGElement.h"
 #include "SVGNames.h"
 #include "SVGParserUtilities.h"
+#include "SVGStringList.h"
+#include <wtf/IsoMallocInlines.h>
 #include <wtf/MathExtras.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/text/StringView.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(SVGAnimationElement);
 
 // Animated property definitions
 DEFINE_ANIMATED_BOOLEAN(SVGAnimationElement, SVGNames::externalResourcesRequiredAttr, ExternalResourcesRequired, externalResourcesRequired)
@@ -60,18 +64,17 @@ SVGAnimationElement::SVGAnimationElement(const QualifiedName& tagName, Document&
 static void parseKeyTimes(const String& parse, Vector<float>& result, bool verifyOrder)
 {
     result.clear();
-    Vector<String> parseList;
-    parse.split(';', parseList);
-    for (unsigned n = 0; n < parseList.size(); ++n) {
-        String timeString = parseList[n];
+    bool isFirst = true;
+    for (StringView timeString : StringView(parse).split(';')) {
         bool ok;
-        float time = timeString.toFloat(&ok);
+        float time = timeString.toFloat(ok);
         if (!ok || time < 0 || time > 1)
             goto fail;
         if (verifyOrder) {
-            if (!n) {
+            if (isFirst) {
                 if (time)
                     goto fail;
+                isFirst = false;
             } else if (time < result.last())
                 goto fail;
         }
@@ -137,20 +140,23 @@ static void parseKeySplines(const String& parse, Vector<UnitBezier>& result)
 
 bool SVGAnimationElement::isSupportedAttribute(const QualifiedName& attrName)
 {
-    static NeverDestroyed<HashSet<QualifiedName>> supportedAttributes;
-    if (supportedAttributes.get().isEmpty()) {
-        SVGTests::addSupportedAttributes(supportedAttributes);
-        SVGExternalResourcesRequired::addSupportedAttributes(supportedAttributes);
-        supportedAttributes.get().add(SVGNames::valuesAttr);
-        supportedAttributes.get().add(SVGNames::keyTimesAttr);
-        supportedAttributes.get().add(SVGNames::keyPointsAttr);
-        supportedAttributes.get().add(SVGNames::keySplinesAttr);
-        supportedAttributes.get().add(SVGNames::attributeTypeAttr);
-        supportedAttributes.get().add(SVGNames::calcModeAttr);
-        supportedAttributes.get().add(SVGNames::fromAttr);
-        supportedAttributes.get().add(SVGNames::toAttr);
-        supportedAttributes.get().add(SVGNames::byAttr);
-    }
+    static const auto supportedAttributes = makeNeverDestroyed([] {
+        HashSet<QualifiedName> set;
+        SVGTests::addSupportedAttributes(set);
+        SVGExternalResourcesRequired::addSupportedAttributes(set);
+        set.add({
+            SVGNames::valuesAttr.get(),
+            SVGNames::keyTimesAttr.get(),
+            SVGNames::keyPointsAttr.get(),
+            SVGNames::keySplinesAttr.get(),
+            SVGNames::attributeTypeAttr.get(),
+            SVGNames::calcModeAttr.get(),
+            SVGNames::fromAttr.get(),
+            SVGNames::toAttr.get(),
+            SVGNames::byAttr.get(),
+        });
+        return set;
+    }());
     return supportedAttributes.get().contains<SVGAttributeHashTranslator>(attrName);
 }
 
@@ -640,7 +646,7 @@ void SVGAnimationElement::adjustForInheritance(SVGElement* targetElement, const 
     // In the future we might want to work with the value type directly to avoid the String parsing.
     ASSERT(targetElement);
 
-    Element* parent = targetElement->parentElement();
+    auto parent = makeRefPtr(targetElement->parentElement());
     if (!parent || !parent->isSVGElement())
         return;
 
@@ -659,13 +665,13 @@ static bool inheritsFromProperty(SVGElement*, const QualifiedName& attributeName
 
 void SVGAnimationElement::determinePropertyValueTypes(const String& from, const String& to)
 {
-    SVGElement* targetElement = this->targetElement();
+    auto targetElement = makeRefPtr(this->targetElement());
     ASSERT(targetElement);
 
     const QualifiedName& attributeName = this->attributeName();
-    if (inheritsFromProperty(targetElement, attributeName, from))
+    if (inheritsFromProperty(targetElement.get(), attributeName, from))
         m_fromPropertyValueType = InheritValue;
-    if (inheritsFromProperty(targetElement, attributeName, to))
+    if (inheritsFromProperty(targetElement.get(), attributeName, to))
         m_toPropertyValueType = InheritValue;
 }
 void SVGAnimationElement::resetAnimatedPropertyType()
@@ -683,6 +689,21 @@ void SVGAnimationElement::setTargetElement(SVGElement* target)
 void SVGAnimationElement::checkInvalidCSSAttributeType(SVGElement* target)
 {
     m_hasInvalidCSSAttributeType = target && hasValidAttributeName() && attributeType() == AttributeType::CSS && !isTargetAttributeCSSProperty(target, attributeName());
+}
+
+Ref<SVGStringList> SVGAnimationElement::requiredFeatures()
+{
+    return SVGTests::requiredFeatures(*this);
+}
+
+Ref<SVGStringList> SVGAnimationElement::requiredExtensions()
+{ 
+    return SVGTests::requiredExtensions(*this);
+}
+
+Ref<SVGStringList> SVGAnimationElement::systemLanguage()
+{
+    return SVGTests::systemLanguage(*this);
 }
 
 }

@@ -18,16 +18,15 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGFEOffsetElement_h
-#define SVGFEOffsetElement_h
+#pragma once
 
-#include "FEOffset.h"
 #include "SVGAnimatedNumber.h"
 #include "SVGFilterPrimitiveStandardAttributes.h"
 
 namespace WebCore {
 
 class SVGFEOffsetElement final : public SVGFilterPrimitiveStandardAttributes {
+    WTF_MAKE_ISO_ALLOCATED(SVGFEOffsetElement);
 public:
     static Ref<SVGFEOffsetElement> create(const QualifiedName&, Document&);
 
@@ -46,5 +45,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif

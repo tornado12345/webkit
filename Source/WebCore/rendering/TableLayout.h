@@ -18,8 +18,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef TableLayout_h
-#define TableLayout_h
+#pragma once
 
 #include "LayoutUnit.h"
 #include <wtf/FastMalloc.h>
@@ -37,7 +36,7 @@ public:
     {
     }
 
-    virtual ~TableLayout() { }
+    virtual ~TableLayout() = default;
 
     virtual void computeIntrinsicLogicalWidths(LayoutUnit& minWidth, LayoutUnit& maxWidth) = 0;
     virtual LayoutUnit scaledWidthFromPercentColumns() const { return LayoutUnit(0); }
@@ -53,5 +52,3 @@ protected:
 };
 
 } // namespace WebCore
-
-#endif // TableLayout_h

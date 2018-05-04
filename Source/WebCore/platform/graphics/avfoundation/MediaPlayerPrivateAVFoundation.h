@@ -32,9 +32,11 @@
 #include "InbandTextTrackPrivateAVF.h"
 #include "MediaPlayerPrivate.h"
 #include "Timer.h"
-#include <functional>
+#include <wtf/Deque.h>
+#include <wtf/Function.h>
 #include <wtf/HashSet.h>
 #include <wtf/Lock.h>
+#include <wtf/LoggerHelper.h>
 #include <wtf/RetainPtr.h>
 #include <wtf/WeakPtr.h>
 
@@ -45,6 +47,9 @@ class InbandTextTrackPrivateAVF;
 class GenericCueData;
 
 class MediaPlayerPrivateAVFoundation : public MediaPlayerPrivateInterface, public AVFInbandTrackParent
+#if !RELEASE_LOG_DISABLED
+    , private LoggerHelper
+#endif
 {
 public:
     virtual void repaint();
@@ -113,10 +118,10 @@ public:
         {
         }
 
-        Notification(std::function<void ()> function)
+        Notification(WTF::Function<void ()>&& function)
             : m_type(FunctionType)
             , m_finished(false)
-            , m_function(function)
+            , m_function(WTFMove(function))
         {
         }
         
@@ -124,16 +129,16 @@ public:
         bool isValid() { return m_type != None; }
         MediaTime time() { return m_time; }
         bool finished() { return m_finished; }
-        std::function<void ()>& function() { return m_function; }
+        WTF::Function<void ()>& function() { return m_function; }
         
     private:
         Type m_type;
         MediaTime m_time;
         bool m_finished;
-        std::function<void ()> m_function;
+        WTF::Function<void ()> m_function;
     };
 
-    void scheduleMainThreadNotification(Notification);
+    void scheduleMainThreadNotification(Notification&&);
     void scheduleMainThreadNotification(Notification::Type, const MediaTime& = MediaTime::zeroTime());
     void scheduleMainThreadNotification(Notification::Type, bool completed);
     void dispatchNotification();
@@ -143,11 +148,18 @@ public:
     static bool extractKeyURIKeyIDAndCertificateFromInitData(Uint8Array* initData, String& keyURI, String& keyID, RefPtr<Uint8Array>& certificate);
 #endif
 
+#if !RELEASE_LOG_DISABLED
+    const Logger& logger() const final { return m_logger.get(); }
+    const char* logClassName() const override { return "MediaPlayerPrivateAVFoundation"; }
+    const void* logIdentifier() const final { return reinterpret_cast<const void*>(m_logIdentifier); }
+    WTFLogChannel& logChannel() const final;
+#endif
+
 protected:
     explicit MediaPlayerPrivateAVFoundation(MediaPlayer*);
     virtual ~MediaPlayerPrivateAVFoundation();
 
-    WeakPtr<MediaPlayerPrivateAVFoundation> createWeakPtr() { return m_weakPtrFactory.createWeakPtr(); }
+    WeakPtr<MediaPlayerPrivateAVFoundation> createWeakPtr() { return m_weakPtrFactory.createWeakPtr(*this); }
 
     // MediaPlayerPrivatePrivateInterface overrides.
     void load(const String& url) override;
@@ -198,12 +210,15 @@ protected:
     MediaPlayer::MovieLoadType movieLoadType() const override;
     void prepareForRendering() override;
 
+    bool supportsPictureInPicture() const override { return true; }
     bool supportsFullscreen() const override;
     bool supportsScanning() const override { return true; }
     unsigned long long fileSize() const override { return totalBytes(); }
 
+    bool hasSingleSecurityOrigin() const override;
+
     // Required interfaces for concrete derived classes.
-    virtual void createAVAssetForURL(const String&) = 0;
+    virtual void createAVAssetForURL(const URL&) = 0;
     virtual void createAVPlayer() = 0;
     virtual void createAVPlayerItem() = 0;
 
@@ -257,6 +272,7 @@ protected:
     virtual bool hasLayerRenderer() const = 0;
 
     virtual void updateVideoLayerGravity() = 0;
+    virtual void resolvedURLChanged() = 0;
 
     static bool isUnsupportedMIMEType(const String&);
     static const HashSet<String, ASCIICaseInsensitiveHash>& staticMIMETypeList();
@@ -295,6 +311,7 @@ protected:
     const String& assetURL() const { return m_assetURL; }
 
     MediaPlayer* player() { return m_player; }
+    const MediaPlayer* player() const { return m_player; }
 
     String engineDescription() const override { return "AVFoundation"; }
     long platformErrorCode() const override { return assetErrorCode(); }
@@ -308,16 +325,17 @@ protected:
     void clearTextTracks();
     Vector<RefPtr<InbandTextTrackPrivateAVF>> m_textTracks;
 
-    virtual URL resolvedURL() const;
+    void setResolvedURL(URL&&);
+    const URL& resolvedURL() const { return m_resolvedURL; }
 
 private:
     MediaPlayer* m_player;
 
     WeakPtrFactory<MediaPlayerPrivateAVFoundation> m_weakPtrFactory;
 
-    std::function<void()> m_pendingSeek;
+    WTF::Function<void()> m_pendingSeek;
 
-    Vector<Notification> m_queuedNotifications;
+    Deque<Notification> m_queuedNotifications;
     mutable Lock m_queueMutex;
 
     mutable std::unique_ptr<PlatformTimeRanges> m_cachedLoadedTimeRanges;
@@ -325,8 +343,17 @@ private:
     MediaPlayer::NetworkState m_networkState;
     MediaPlayer::ReadyState m_readyState;
 
-    String m_assetURL;
+    URL m_assetURL;
+    URL m_resolvedURL;
+    RefPtr<SecurityOrigin> m_requestedOrigin;
+    RefPtr<SecurityOrigin> m_resolvedOrigin;
+
     MediaPlayer::Preload m_preload;
+
+#if !RELEASE_LOG_DISABLED
+    Ref<const Logger> m_logger;
+    const void* m_logIdentifier;
+#endif
 
     FloatSize m_cachedNaturalSize;
     mutable MediaTime m_cachedMaxTimeLoaded;

@@ -23,8 +23,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef RenderHTMLCanvas_h
-#define RenderHTMLCanvas_h
+#pragma once
 
 #include "RenderReplaced.h"
 
@@ -33,6 +32,7 @@ namespace WebCore {
 class HTMLCanvasElement;
 
 class RenderHTMLCanvas final : public RenderReplaced {
+    WTF_MAKE_ISO_ALLOCATED(RenderHTMLCanvas);
 public:
     RenderHTMLCanvas(HTMLCanvasElement&, RenderStyle&&);
 
@@ -52,5 +52,3 @@ private:
 } // namespace WebCore
 
 SPECIALIZE_TYPE_TRAITS_RENDER_OBJECT(RenderHTMLCanvas, isCanvas())
-
-#endif // RenderHTMLCanvas_h

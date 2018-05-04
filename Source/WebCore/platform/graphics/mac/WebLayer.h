@@ -23,17 +23,18 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef WebLayer_h
-#define WebLayer_h
+#pragma once
 
 #include <QuartzCore/QuartzCore.h>
 
 #ifdef __OBJC__
-@interface WebSimpleLayer : CALayer
+@interface WebSimpleLayer : CALayer {
+    BOOL _isRenderingInContext;
+}
+@property (nonatomic, readonly) BOOL isRenderingInContext;
 @end
 
 @interface WebLayer : WebSimpleLayer
 @end
 #endif
 
-#endif // WebLayer_h

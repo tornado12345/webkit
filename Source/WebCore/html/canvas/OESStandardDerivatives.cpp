@@ -31,14 +31,12 @@
 
 namespace WebCore {
 
-OESStandardDerivatives::OESStandardDerivatives(WebGLRenderingContextBase* context)
+OESStandardDerivatives::OESStandardDerivatives(WebGLRenderingContextBase& context)
     : WebGLExtension(context)
 {
 }
 
-OESStandardDerivatives::~OESStandardDerivatives()
-{
-}
+OESStandardDerivatives::~OESStandardDerivatives() = default;
 
 WebGLExtension::ExtensionName OESStandardDerivatives::getName() const
 {

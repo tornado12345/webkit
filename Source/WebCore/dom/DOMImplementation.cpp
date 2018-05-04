@@ -29,7 +29,6 @@
 #include "ContentType.h"
 #include "DocumentType.h"
 #include "Element.h"
-#include "ExceptionCode.h"
 #include "FTPDirectoryDocument.h"
 #include "Frame.h"
 #include "FrameLoader.h"
@@ -40,7 +39,6 @@
 #include "Image.h"
 #include "ImageDocument.h"
 #include "MIMETypeRegistry.h"
-#include "MainFrame.h"
 #include "MediaDocument.h"
 #include "MediaList.h"
 #include "MediaPlayer.h"
@@ -57,33 +55,11 @@
 #include "Text.h"
 #include "TextDocument.h"
 #include "XMLDocument.h"
-#include "XMLNames.h"
-#include <wtf/NeverDestroyed.h>
 #include <wtf/StdLibExtras.h>
 
 namespace WebCore {
 
 using namespace HTMLNames;
-
-#if ENABLE(VIDEO)
-
-class DOMImplementationSupportsTypeClient : public MediaPlayerSupportsTypeClient {
-public:
-    DOMImplementationSupportsTypeClient(bool needsHacks, const String& host)
-        : m_needsHacks(needsHacks)
-        , m_host(host)
-    {
-    }
-
-private:
-    bool mediaPlayerNeedsSiteSpecificHacks() const override { return m_needsHacks; }
-    String mediaPlayerDocumentHost() const override { return m_host; }
-
-    bool m_needsHacks;
-    String m_host;
-};
-
-#endif
 
 DOMImplementation::DOMImplementation(Document& document)
     : m_document(document)
@@ -115,6 +91,7 @@ ExceptionOr<Ref<XMLDocument>> DOMImplementation::createDocument(const String& na
 
     RefPtr<Element> documentElement;
     if (!qualifiedName.isEmpty()) {
+        ASSERT(!document->domWindow()); // If domWindow is not null, createElementNS could find CustomElementRegistry and arbitrary scripts.
         auto result = document->createElementNS(namespaceURI, qualifiedName);
         if (result.hasException())
             return result.releaseException();
@@ -134,7 +111,7 @@ Ref<CSSStyleSheet> DOMImplementation::createCSSStyleSheet(const String&, const S
     // FIXME: Title should be set.
     // FIXME: Media could have wrong syntax, in which case we should generate an exception.
     auto sheet = CSSStyleSheet::create(StyleSheetContents::create());
-    sheet->setMediaQueries(MediaQuerySet::createAllowingDescriptionSyntax(media));
+    sheet->setMediaQueries(MediaQuerySet::create(media));
     return sheet;
 }
 
@@ -142,7 +119,7 @@ Ref<HTMLDocument> DOMImplementation::createHTMLDocument(const String& title)
 {
     auto document = HTMLDocument::create(nullptr, URL());
     document->open();
-    document->write("<!doctype html><html><head></head><body></body></html>");
+    document->write(nullptr, { ASCIILiteral("<!doctype html><html><head></head><body></body></html>") });
     if (!title.isNull()) {
         auto titleElement = HTMLTitleElement::create(titleTag, document);
         titleElement->appendChild(document->createTextNode(title));
@@ -194,11 +171,10 @@ Ref<Document> DOMImplementation::createDocument(const String& type, Frame* frame
 #if ENABLE(VIDEO)
     // Check to see if the type can be played by our MediaPlayer, if so create a MediaDocument
     // Key system is not applicable here.
-    DOMImplementationSupportsTypeClient client(frame && frame->settings().needsSiteSpecificQuirks(), url.host());
     MediaEngineSupportParameters parameters;
-    parameters.type = type;
+    parameters.type = ContentType(type);
     parameters.url = url;
-    if (MediaPlayer::supportsType(parameters, &client))
+    if (MediaPlayer::supportsType(parameters))
         return MediaDocument::create(frame, url);
 #endif
 

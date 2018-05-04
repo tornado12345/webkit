@@ -1,7 +1,7 @@
 /*
  *  Copyright (C) 1999-2001 Harri Porten (porten@kde.org)
  *  Copyright (C) 2001 Peter Kelly (pmk@post.com)
- *  Copyright (C) 2003, 2004, 2005, 2007, 2008, 2009, 2012, 2015 Apple Inc. All rights reserved.
+ *  Copyright (C) 2003-2018 Apple Inc. All rights reserved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Library General Public
@@ -23,7 +23,6 @@
 #pragma once
 
 #include "JSExportMacros.h"
-#include "PureNaN.h"
 #include <functional>
 #include <math.h>
 #include <stddef.h>
@@ -69,8 +68,13 @@ struct ClassInfo;
 struct DumpContext;
 struct Instruction;
 struct MethodTable;
+enum class Unknown { };
 
-template <class T> class WriteBarrierBase;
+template <class T, typename Traits> class WriteBarrierBase;
+template<class T>
+using WriteBarrierTraitsSelect = typename std::conditional<std::is_same<T, Unknown>::value,
+    DumbValueTraits<T>, DumbPtrTraits<T>
+>::type;
 
 enum PreferredPrimitiveType { NoPreference, PreferNumber, PreferString };
 enum ECMAMode { StrictMode, NotStrictMode };
@@ -157,6 +161,7 @@ public:
     enum { DeletedValueTag = 0xfffffff9 };
 
     enum { LowestTag =  DeletedValueTag };
+
 #endif
 
     static EncodedJSValue encode(JSValue);
@@ -166,6 +171,7 @@ public:
     enum JSUndefinedTag { JSUndefined };
     enum JSTrueTag { JSTrue };
     enum JSFalseTag { JSFalse };
+    enum JSCellTag { JSCellType };
     enum EncodeAsDoubleTag { EncodeAsDouble };
 
     JSValue();
@@ -223,13 +229,15 @@ public:
     bool isAnyInt() const;
     bool isNumber() const;
     bool isString() const;
+    bool isBigInt() const;
     bool isSymbol() const;
     bool isPrimitive() const;
     bool isGetterSetter() const;
     bool isCustomGetterSetter() const;
     bool isObject() const;
-    bool inherits(const ClassInfo*) const;
-    const ClassInfo* classInfoOrNull() const;
+    bool inherits(VM&, const ClassInfo*) const;
+    template<typename Target> bool inherits(VM&) const;
+    const ClassInfo* classInfoOrNull(VM&) const;
         
     // Extracting the value.
     bool getString(ExecState*, WTF::String&) const;
@@ -251,7 +259,7 @@ public:
     double toNumber(ExecState*) const;
 
     // toNumber conversion if it can be done without side effects.
-    Optional<double> toNumberFromPrimitive() const;
+    std::optional<double> toNumberFromPrimitive() const;
 
     JSString* toString(ExecState*) const; // On exception, this returns the empty string.
     JSString* toStringOrNull(ExecState*) const; // On exception, this returns null, to make exception checks faster.
@@ -282,6 +290,8 @@ public:
     bool getPropertySlot(ExecState*, PropertyName, PropertySlot&) const;
     template<typename CallbackWhenNoException> typename std::result_of<CallbackWhenNoException(bool, PropertySlot&)>::type getPropertySlot(ExecState*, PropertyName, CallbackWhenNoException) const;
     template<typename CallbackWhenNoException> typename std::result_of<CallbackWhenNoException(bool, PropertySlot&)>::type getPropertySlot(ExecState*, PropertyName, PropertySlot&, CallbackWhenNoException) const;
+
+    bool getOwnPropertySlot(ExecState*, PropertyName, PropertySlot&) const;
 
     bool put(ExecState*, PropertyName, JSValue, PutPropertySlot&);
     bool putInline(ExecState*, PropertyName, JSValue, PutPropertySlot&);
@@ -316,9 +326,9 @@ public:
 
     // Constants used for Int52. Int52 isn't part of JSValue right now, but JSValues may be
     // converted to Int52s and back again.
-    static const unsigned numberOfInt52Bits = 52;
-    static const int64_t notInt52 = static_cast<int64_t>(1) << numberOfInt52Bits;
-    static const unsigned int52ShiftAmount = 12;
+    static constexpr const unsigned numberOfInt52Bits = 52;
+    static constexpr const int64_t notInt52 = static_cast<int64_t>(1) << numberOfInt52Bits;
+    static constexpr const unsigned int52ShiftAmount = 12;
     
     static ptrdiff_t offsetOfPayload() { return OBJECT_OFFSETOF(JSValue, u.asBits.payload); }
     static ptrdiff_t offsetOfTag() { return OBJECT_OFFSETOF(JSValue, u.asBits.tag); }
@@ -345,12 +355,9 @@ public:
     uint32_t tag() const;
     int32_t payload() const;
 
-#if !ENABLE(JIT)
-    // This should only be used by the LLInt C Loop interpreter who needs
-    // synthesize JSValue from its "register"s holding tag and payload
-    // values.
+    // This should only be used by the LLInt C Loop interpreter and OSRExit code who needs
+    // synthesize JSValue from its "register"s holding tag and payload values.
     explicit JSValue(int32_t tag, int32_t payload);
-#endif
 
 #elif USE(JSVALUE64)
     /*
@@ -433,10 +440,30 @@ public:
     // alignment for a GC cell, and in the zero page).
     #define ValueEmpty   0x0ll
     #define ValueDeleted 0x4ll
+
+    #define TagBitsWasm (TagBitTypeOther | 0x1)
+    #define TagWasmMask (TagTypeNumber | 0x7)
+    // We tag Wasm non-JSCell pointers with a 3 at the bottom. We can test if a 64-bit JSValue pattern
+    // is a Wasm callee by masking the upper 16 bits and the lower 3 bits, and seeing if
+    // the resulting value is 3. The full test is: x & TagWasmMask == TagBitsWasm
+    // This works because the lower 3 bits of the non-number immediate values are as follows:
+    // undefined: 0b010
+    // null:      0b010
+    // true:      0b111
+    // false:     0b110
+    // The test rejects all of these because none have just the value 3 in their lower 3 bits.
+    // The test rejects all numbers because they have non-zero upper 16 bits.
+    // The test also rejects normal cells because they won't have the number 3 as
+    // their lower 3 bits. Note, this bit pattern also allows the normal JSValue isCell(), etc,
+    // predicates to work on a Wasm::Callee because the various tests will fail if you
+    // bit casted a boxed Wasm::Callee* to a JSValue. isCell() would fail since it sees
+    // TagBitTypeOther. The other tests also trivially fail, since it won't be a number,
+    // and it won't be equal to null, undefined, true, or false. The isBoolean() predicate
+    // will fail because we won't have TagBitBool set.
 #endif
 
 private:
-    template <class T> JSValue(WriteBarrierBase<T>);
+    template <class T> JSValue(WriteBarrierBase<T, WriteBarrierTraitsSelect<T>>);
 
     enum HashTableDeletedValueTag { HashTableDeletedValue };
     JSValue(HashTableDeletedValueTag);

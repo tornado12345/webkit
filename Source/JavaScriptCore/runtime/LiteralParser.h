@@ -27,7 +27,6 @@
 
 #include "Identifier.h"
 #include "JSCJSValue.h"
-#include "JSGlobalObjectFunctions.h"
 #include <array>
 #include <wtf/text/StringBuilder.h>
 #include <wtf/text/WTFString.h>
@@ -37,7 +36,7 @@ namespace JSC {
 typedef enum { StrictJSON, NonStrictJSON, JSONP } ParserMode;
 
 enum JSONPPathEntryType {
-    JSONPPathEntryTypeDeclare, // var pathEntryName = JSON
+    JSONPPathEntryTypeDeclareVar, // var pathEntryName = JSON
     JSONPPathEntryTypeDot, // <prior entries>.pathEntryName = JSON
     JSONPPathEntryTypeLookup, // <prior entries>[pathIndex] = JSON
     JSONPPathEntryTypeCall // <prior entries>(JSON)

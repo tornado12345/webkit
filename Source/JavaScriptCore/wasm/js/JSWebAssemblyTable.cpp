@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,12 +29,24 @@
 #if ENABLE(WEBASSEMBLY)
 
 #include "JSCInlines.h"
+#include "JSWebAssemblyInstance.h"
+#include <wtf/CheckedArithmetic.h>
 
 namespace JSC {
 
-JSWebAssemblyTable* JSWebAssemblyTable::create(VM& vm, Structure* structure)
+const ClassInfo JSWebAssemblyTable::s_info = { "WebAssembly.Table", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(JSWebAssemblyTable) };
+
+JSWebAssemblyTable* JSWebAssemblyTable::create(ExecState* exec, VM& vm, Structure* structure, Ref<Wasm::Table>&& table)
 {
-    auto* instance = new (NotNull, allocateCell<JSWebAssemblyTable>(vm.heap)) JSWebAssemblyTable(vm, structure);
+    auto throwScope = DECLARE_THROW_SCOPE(vm);
+    auto* globalObject = exec->lexicalGlobalObject();
+
+    if (!globalObject->webAssemblyEnabled()) {
+        throwException(exec, throwScope, createEvalError(exec, globalObject->webAssemblyDisabledErrorMessage()));
+        return nullptr;
+    }
+
+    auto* instance = new (NotNull, allocateCell<JSWebAssemblyTable>(vm.heap)) JSWebAssemblyTable(vm, structure, WTFMove(table));
     instance->finishCreation(vm);
     return instance;
 }
@@ -44,15 +56,22 @@ Structure* JSWebAssemblyTable::createStructure(VM& vm, JSGlobalObject* globalObj
     return Structure::create(vm, globalObject, prototype, TypeInfo(ObjectType, StructureFlags), info());
 }
 
-JSWebAssemblyTable::JSWebAssemblyTable(VM& vm, Structure* structure)
+JSWebAssemblyTable::JSWebAssemblyTable(VM& vm, Structure* structure, Ref<Wasm::Table>&& table)
     : Base(vm, structure)
+    , m_table(WTFMove(table))
 {
+    // FIXME: It might be worth trying to pre-allocate maximum here. The spec recommends doing so.
+    // But for now, we're not doing that.
+    // FIXME this over-allocates and could be smarter about not committing all of that memory https://bugs.webkit.org/show_bug.cgi?id=181425
+    m_jsFunctions = MallocPtr<PoisonedBarrier<JSObject>>::malloc((sizeof(PoisonedBarrier<JSObject>) * Checked<size_t>(allocatedLength())).unsafeGet());
+    for (uint32_t i = 0; i < allocatedLength(); ++i)
+        new(&m_jsFunctions.get()[i]) PoisonedBarrier<JSObject>();
 }
 
 void JSWebAssemblyTable::finishCreation(VM& vm)
 {
     Base::finishCreation(vm);
-    ASSERT(inherits(info()));
+    ASSERT(inherits(vm, info()));
 }
 
 void JSWebAssemblyTable::destroy(JSCell* cell)
@@ -62,13 +81,60 @@ void JSWebAssemblyTable::destroy(JSCell* cell)
 
 void JSWebAssemblyTable::visitChildren(JSCell* cell, SlotVisitor& visitor)
 {
-    auto* thisObject = jsCast<JSWebAssemblyTable*>(cell);
+    JSWebAssemblyTable* thisObject = jsCast<JSWebAssemblyTable*>(cell);
     ASSERT_GC_OBJECT_INHERITS(thisObject, info());
 
     Base::visitChildren(thisObject, visitor);
+
+    for (unsigned i = 0; i < thisObject->length(); ++i)
+        visitor.append(thisObject->m_jsFunctions.get()[i]);
 }
 
-const ClassInfo JSWebAssemblyTable::s_info = { "WebAssembly.Table", &Base::s_info, 0, CREATE_METHOD_TABLE(JSWebAssemblyTable) };
+bool JSWebAssemblyTable::grow(uint32_t delta)
+{
+    if (delta == 0)
+        return true;
+
+    size_t oldLength = length();
+
+    auto grew = m_table->grow(delta);
+    if (!grew)
+        return false;
+
+    size_t newLength = grew.value();
+    if (newLength > m_table->allocatedLength(oldLength))
+        // FIXME this over-allocates and could be smarter about not committing all of that memory https://bugs.webkit.org/show_bug.cgi?id=181425
+        m_jsFunctions.realloc((sizeof(PoisonedBarrier<JSObject>) * Checked<size_t>(m_table->allocatedLength(newLength))).unsafeGet());
+
+    for (size_t i = oldLength; i < m_table->allocatedLength(newLength); ++i)
+        new (&m_jsFunctions.get()[i]) PoisonedBarrier<JSObject>();
+
+    return true;
+}
+
+JSObject* JSWebAssemblyTable::getFunction(uint32_t index)
+{
+    RELEASE_ASSERT(index < length());
+    return m_jsFunctions.get()[index & m_table->mask()].get();
+}
+
+void JSWebAssemblyTable::clearFunction(uint32_t index)
+{
+    m_table->clearFunction(index);
+    m_jsFunctions.get()[index & m_table->mask()] = PoisonedBarrier<JSObject>();
+}
+
+void JSWebAssemblyTable::setFunction(VM& vm, uint32_t index, WebAssemblyFunction* function)
+{
+    m_table->setFunction(index, function->importableFunction(), &function->instance()->instance());
+    m_jsFunctions.get()[index & m_table->mask()].set(vm, this, function);
+}
+
+void JSWebAssemblyTable::setFunction(VM& vm, uint32_t index, WebAssemblyWrapperFunction* function)
+{
+    m_table->setFunction(index, function->importableFunction(), &function->instance()->instance());
+    m_jsFunctions.get()[index & m_table->mask()].set(vm, this, function);
+}
 
 } // namespace JSC
 

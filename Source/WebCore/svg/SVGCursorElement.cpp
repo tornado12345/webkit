@@ -24,10 +24,14 @@
 #include "CSSCursorImageValue.h"
 #include "Document.h"
 #include "SVGNames.h"
+#include "SVGStringList.h"
 #include "XLinkNames.h"
+#include <wtf/IsoMallocInlines.h>
 #include <wtf/NeverDestroyed.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(SVGCursorElement);
 
 // Animated property definitions
 DEFINE_ANIMATED_LENGTH(SVGCursorElement, SVGNames::xAttr, X, x)
@@ -65,14 +69,14 @@ SVGCursorElement::~SVGCursorElement()
 
 bool SVGCursorElement::isSupportedAttribute(const QualifiedName& attrName)
 {
-    static NeverDestroyed<HashSet<QualifiedName>> supportedAttributes;
-    if (supportedAttributes.get().isEmpty()) {
-        SVGTests::addSupportedAttributes(supportedAttributes);
-        SVGExternalResourcesRequired::addSupportedAttributes(supportedAttributes);
-        SVGURIReference::addSupportedAttributes(supportedAttributes);
-        supportedAttributes.get().add(SVGNames::xAttr);
-        supportedAttributes.get().add(SVGNames::yAttr);
-    }
+    static const auto supportedAttributes = makeNeverDestroyed([] {
+        HashSet<QualifiedName> set;
+        SVGTests::addSupportedAttributes(set);
+        SVGExternalResourcesRequired::addSupportedAttributes(set);
+        SVGURIReference::addSupportedAttributes(set);
+        set.add({ SVGNames::xAttr.get(), SVGNames::yAttr.get() });
+        return set;
+    }());
     return supportedAttributes.get().contains<SVGAttributeHashTranslator>(attrName);
 }
 
@@ -81,9 +85,9 @@ void SVGCursorElement::parseAttribute(const QualifiedName& name, const AtomicStr
     SVGParsingError parseError = NoError;
 
     if (name == SVGNames::xAttr)
-        setXBaseValue(SVGLength::construct(LengthModeWidth, value, parseError));
+        setXBaseValue(SVGLengthValue::construct(LengthModeWidth, value, parseError));
     else if (name == SVGNames::yAttr)
-        setYBaseValue(SVGLength::construct(LengthModeHeight, value, parseError));
+        setYBaseValue(SVGLengthValue::construct(LengthModeHeight, value, parseError));
 
     reportAttributeParsingError(parseError, name, value);
 
@@ -120,6 +124,21 @@ void SVGCursorElement::addSubresourceAttributeURLs(ListHashSet<URL>& urls) const
     SVGElement::addSubresourceAttributeURLs(urls);
 
     addSubresourceURL(urls, document().completeURL(href()));
+}
+
+Ref<SVGStringList> SVGCursorElement::requiredFeatures()
+{
+    return SVGTests::requiredFeatures(*this);
+}
+
+Ref<SVGStringList> SVGCursorElement::requiredExtensions()
+{ 
+    return SVGTests::requiredExtensions(*this);
+}
+
+Ref<SVGStringList> SVGCursorElement::systemLanguage()
+{
+    return SVGTests::systemLanguage(*this);
 }
 
 }

@@ -36,6 +36,7 @@
 #include "HTMLCanvasElement.h"
 #include "HTMLImageElement.h"
 #include "HTMLParserIdioms.h"
+#include "HTMLPictureElement.h"
 #include "KeyboardEvent.h"
 #include "MouseEvent.h"
 #include "PingLoader.h"
@@ -49,9 +50,16 @@
 #include "SecurityPolicy.h"
 #include "Settings.h"
 #include "URLUtils.h"
+#include <wtf/IsoMallocInlines.h>
 #include <wtf/text/StringBuilder.h>
 
+#if USE(SYSTEM_PREVIEW) && USE(APPLE_INTERNAL_SDK)
+#import <WebKitAdditions/SystemPreviewDetection.cpp>
+#endif
+
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(HTMLAnchorElement);
 
 using namespace HTMLNames;
 
@@ -118,7 +126,7 @@ static bool hasNonEmptyBox(RenderBoxModelObject* renderer)
     return false;
 }
 
-bool HTMLAnchorElement::isKeyboardFocusable(KeyboardEvent& event) const
+bool HTMLAnchorElement::isKeyboardFocusable(KeyboardEvent* event) const
 {
     if (!isLink())
         return HTMLElement::isKeyboardFocusable(event);
@@ -129,7 +137,7 @@ bool HTMLAnchorElement::isKeyboardFocusable(KeyboardEvent& event) const
     if (!document().frame())
         return false;
 
-    if (!document().frame()->eventHandler().tabsToLinks(&event))
+    if (!document().frame()->eventHandler().tabsToLinks(event))
         return false;
 
     if (!renderer() && ancestorsOfType<HTMLCanvasElement>(*this).first())
@@ -144,13 +152,10 @@ static void appendServerMapMousePosition(StringBuilder& url, Event& event)
         return;
     auto& mouseEvent = downcast<MouseEvent>(event);
 
-    ASSERT(mouseEvent.target());
-    auto* target = mouseEvent.target()->toNode();
-    ASSERT(target);
-    if (!is<HTMLImageElement>(*target))
+    if (!is<HTMLImageElement>(mouseEvent.target()))
         return;
 
-    auto& imageElement = downcast<HTMLImageElement>(*target);
+    auto& imageElement = downcast<HTMLImageElement>(*mouseEvent.target());
     if (!imageElement.isServerMap())
         return;
 
@@ -201,9 +206,7 @@ void HTMLAnchorElement::defaultEventHandler(Event& event)
 void HTMLAnchorElement::setActive(bool down, bool pause)
 {
     if (hasEditableStyle()) {
-        EditableLinkBehavior editableLinkBehavior = EditableLinkDefaultBehavior;
-        if (Settings* settings = document().settings())
-            editableLinkBehavior = settings->editableLinkBehavior();
+        EditableLinkBehavior editableLinkBehavior = document().settings().editableLinkBehavior();
             
         switch (editableLinkBehavior) {
             default:
@@ -306,12 +309,13 @@ bool HTMLAnchorElement::hasRel(Relation relation) const
     return m_linkRelations.contains(relation);
 }
 
-DOMTokenList& HTMLAnchorElement::relList()
+DOMTokenList& HTMLAnchorElement::relList() const
 {
-    if (!m_relList) 
-        m_relList = std::make_unique<DOMTokenList>(*this, HTMLNames::relAttr, [](StringView token) {
+    if (!m_relList) {
+        m_relList = std::make_unique<DOMTokenList>(const_cast<HTMLAnchorElement&>(*this), HTMLNames::relAttr, [](Document&, StringView token) {
             return equalIgnoringASCIICase(token, "noreferrer") || equalIgnoringASCIICase(token, "noopener");
         });
+    }
     return *m_relList;
 }
 
@@ -353,7 +357,10 @@ bool HTMLAnchorElement::isLiveLink() const
 
 void HTMLAnchorElement::sendPings(const URL& destinationURL)
 {
-    if (!hasAttributeWithoutSynchronization(pingAttr) || !document().settings() || !document().settings()->hyperlinkAuditingEnabled())
+    if (!document().frame())
+        return;
+
+    if (!hasAttributeWithoutSynchronization(pingAttr) || !document().settings().hyperlinkAuditingEnabled())
         return;
 
     SpaceSplitString pingURLs(attributeWithoutSynchronization(pingAttr), false);
@@ -361,11 +368,35 @@ void HTMLAnchorElement::sendPings(const URL& destinationURL)
         PingLoader::sendPing(*document().frame(), document().completeURL(pingURLs[i]), destinationURL);
 }
 
+#if USE(SYSTEM_PREVIEW)
+bool HTMLAnchorElement::isSystemPreviewLink() const
+{
+#if USE(APPLE_INTERNAL_SDK)
+    auto systemPreviewRelValue = getSystemPreviewRelValue();
+#else
+    auto systemPreviewRelValue = String { ASCIILiteral("system-preview") };
+#endif
+
+    if (!relList().contains(systemPreviewRelValue))
+        return false;
+
+    if (auto* child = firstElementChild()) {
+        if (is<HTMLImageElement>(child) || is<HTMLPictureElement>(child)) {
+            auto numChildren = childElementCount();
+            // FIXME: Should only be 1.
+            return numChildren == 1 || numChildren == 2;
+        }
+    }
+
+    return false;
+}
+#endif
+
 void HTMLAnchorElement::handleClick(Event& event)
 {
     event.setDefaultHandled();
 
-    Frame* frame = document().frame();
+    RefPtr<Frame> frame = document().frame();
     if (!frame)
         return;
 
@@ -374,28 +405,20 @@ void HTMLAnchorElement::handleClick(Event& event)
     appendServerMapMousePosition(url, event);
     URL completedURL = document().completeURL(url.toString());
 
-    auto downloadAttribute = nullAtom;
+    String downloadAttribute;
 #if ENABLE(DOWNLOAD_ATTRIBUTE)
     if (RuntimeEnabledFeatures::sharedFeatures().downloadAttributeEnabled()) {
         // Ignore the download attribute completely if the href URL is cross origin.
-        bool isSameOrigin = completedURL.protocolIsData() || document().securityOrigin()->canRequest(completedURL);
+        bool isSameOrigin = completedURL.protocolIsData() || document().securityOrigin().canRequest(completedURL);
         if (isSameOrigin)
-            downloadAttribute = attributeWithoutSynchronization(downloadAttr);
+            downloadAttribute = ResourceResponse::sanitizeSuggestedFilename(attributeWithoutSynchronization(downloadAttr));
         else if (hasAttributeWithoutSynchronization(downloadAttr))
             document().addConsoleMessage(MessageSource::Security, MessageLevel::Warning, "The download attribute on anchor was ignored because its href URL has a different security origin.");
-        // If the a element has a download attribute and the algorithm is not triggered by user activation
-        // then abort these steps.
-        // https://html.spec.whatwg.org/#the-a-element:triggered-by-user-activation
-        if (!downloadAttribute.isNull() && !event.isTrusted() && !ScriptController::processingUserGesture()) {
-            // The specification says to throw an InvalidAccessError but other browsers do not.
-            document().addConsoleMessage(MessageSource::Security, MessageLevel::Warning, "Non user-triggered activations of anchors that have a download attribute are ignored.");
-            return;
-        }
     }
 #endif
 
     ShouldSendReferrer shouldSendReferrer = hasRel(Relation::NoReferrer) ? NeverSendReferrer : MaybeSendReferrer;
-    auto newFrameOpenerPolicy = hasRel(Relation::NoOpener) ? makeOptional(NewFrameOpenerPolicy::Suppress) : Nullopt;
+    auto newFrameOpenerPolicy = hasRel(Relation::NoOpener) ? std::make_optional(NewFrameOpenerPolicy::Suppress) : std::nullopt;
     frame->loader().urlSelected(completedURL, target(), &event, LockHistory::No, LockBackForwardList::No, shouldSendReferrer, document().shouldOpenExternalURLsPolicyToPropagate(), newFrameOpenerPolicy, downloadAttribute);
 
     sendPings(completedURL);
@@ -413,11 +436,7 @@ bool HTMLAnchorElement::treatLinkAsLiveForEventType(EventType eventType) const
     if (!hasEditableStyle())
         return true;
 
-    Settings* settings = document().settings();
-    if (!settings)
-        return true;
-
-    switch (settings->editableLinkBehavior()) {
+    switch (document().settings().editableLinkBehavior()) {
     case EditableLinkDefaultBehavior:
     case EditableLinkAlwaysLive:
         return true;

@@ -1,12 +1,14 @@
 'use strict';
 
-var assert = require('assert');
+const assert = require('assert');
 
 require('../tools/js/v3-models.js');
-let MockModels = require('./resources/mock-v3-models.js').MockModels;
-let MockRemoteAPI = require('./resources/mock-remote-api.js').MockRemoteAPI;
+const MockModels = require('./resources/mock-v3-models.js').MockModels;
+const MockRemoteAPI = require('./resources/mock-remote-api.js').MockRemoteAPI;
+const BrowserPrivilegedAPI = require('../public/v3/privileged-api.js').PrivilegedAPI;
+const NodePrivilegedAPI = require('../tools/js/privileged-api').PrivilegedAPI;
 
-function sampleAnalysisTask()
+function sampleAnalysisTasks()
 {
     return {
         'analysisTasks': [
@@ -43,7 +45,7 @@ function sampleAnalysisTask()
                 'id': '105975',
                 'message': 'Commit message',
                 'order': null,
-                'parent': null,
+                'previousCommit': null,
                 'repository': '11',
                 'revision': '196051',
                 'time': 1454481246108
@@ -72,18 +74,21 @@ function measurementCluster()
                             105978,
                             10,
                             '791451',
+                            null,
                             1454481204649
                         ],
                         [
                             105975,
                             11,
                             '196051',
+                            null,
                             1454481246108
                         ],
                         [
                             105502,
                             9,
                             '10.11 15D21',
+                            1504021,
                             0
                         ]
                     ],
@@ -116,57 +121,99 @@ function measurementCluster()
     };
 }
 
-describe('AnalysisTask', function () {
+describe('AnalysisTask', () => {
     MockModels.inject();
-    let requests = MockRemoteAPI.inject();
 
-    describe('fetchAll', function () {
-        it('should request all analysis tasks', function () {
-            var callCount = 0;
-            AnalysisTask.fetchAll().then(function () { callCount++; });
+    function makeMockPoints(id, commitSet) {
+        return {
+            id,
+            commitSet: () => commitSet
+        }
+    }
+
+    describe('fetchById', () => {
+        const requests = MockRemoteAPI.inject(null, BrowserPrivilegedAPI);
+        it('should fetch the specified analysis task', () => {
+            let callCount = 0;
+            AnalysisTask.fetchById(1).then(() => { callCount++; });
             assert.equal(callCount, 0);
             assert.equal(requests.length, 1);
-            assert.equal(requests[0].url, '../api/analysis-tasks');
+            assert.equal(requests[0].url, '/api/analysis-tasks?id=1');
         });
 
-        it('should not request all analysis tasks multiple times', function () {
-            var callCount = 0;
-            AnalysisTask.fetchAll().then(function () { callCount++; });
+        it('should not fetch the specified analysis task if all analysis task had been fetched', async () => {
+            const fetchAll = AnalysisTask.fetchAll();
+            assert.equal(requests.length, 1);
+            assert.equal(requests[0].url, '/api/analysis-tasks');
+            requests[0].resolve(sampleAnalysisTasks());
+
+            await fetchAll;
+            AnalysisTask.fetchById(sampleAnalysisTasks().analysisTasks[0].id);
+            assert.equal(requests.length, 1);
+        });
+
+        it('should fetch the specified analysis task if all analysis task had been fetched but noCache is set to true', async () => {
+            const fetchAll = AnalysisTask.fetchAll();
+            assert.equal(requests.length, 1);
+            assert.equal(requests[0].url, '/api/analysis-tasks');
+            requests[0].resolve(sampleAnalysisTasks());
+
+            await fetchAll;
+            const taskId = sampleAnalysisTasks().analysisTasks[0].id;
+            AnalysisTask.fetchById(taskId, true);
+            assert.equal(requests.length, 2);
+            assert.equal(requests[1].url, `/api/analysis-tasks?id=${taskId}`);
+        });
+
+    })
+
+    describe('fetchAll', () => {
+        const requests = MockRemoteAPI.inject(null, BrowserPrivilegedAPI);
+        it('should request all analysis tasks', () => {
+            let callCount = 0;
+            AnalysisTask.fetchAll().then(() => { callCount++; });
             assert.equal(callCount, 0);
             assert.equal(requests.length, 1);
-            assert.equal(requests[0].url, '../api/analysis-tasks');
+            assert.equal(requests[0].url, '/api/analysis-tasks');
+        });
 
-            AnalysisTask.fetchAll().then(function () { callCount++; });
+        it('should not request all analysis tasks multiple times', () => {
+            let callCount = 0;
+            AnalysisTask.fetchAll().then(() => { callCount++; });
+            assert.equal(callCount, 0);
+            assert.equal(requests.length, 1);
+            assert.equal(requests[0].url, '/api/analysis-tasks');
+
+            AnalysisTask.fetchAll().then(() => { callCount++; });
             assert.equal(callCount, 0);
             assert.equal(requests.length, 1);
         });
 
-        it('should resolve the promise when the request is fullfilled', function (done) {
-            var callCount = 0;
-            var promise = AnalysisTask.fetchAll().then(function () { callCount++; });
+        it('should resolve the promise when the request is fullfilled', () => {
+            let callCount = 0;
+            const promise = AnalysisTask.fetchAll().then(() => { callCount++; });
             assert.equal(callCount, 0);
             assert.equal(requests.length, 1);
-            assert.equal(requests[0].url, '../api/analysis-tasks');
+            assert.equal(requests[0].url, '/api/analysis-tasks');
 
-            requests[0].resolve(sampleAnalysisTask());
+            requests[0].resolve(sampleAnalysisTasks());
 
-            var anotherCallCount = 0;
-            promise.then(function () {
+            let anotherCallCount = 0;
+            return promise.then(() => {
                 assert.equal(callCount, 1);
-                AnalysisTask.fetchAll().then(function () { anotherCallCount++; });
-            }).then(function () {
+                AnalysisTask.fetchAll().then(() => { anotherCallCount++; });
+            }).then(() => {
                 assert.equal(callCount, 1);
                 assert.equal(anotherCallCount, 1);
                 assert.equal(requests.length, 1);
-                done();
-            }).catch(function (error) { done(error); });
+            });
         });
 
-        it('should create AnalysisTask objects', function (done) {
-            var promise = AnalysisTask.fetchAll();
-            requests[0].resolve(sampleAnalysisTask());
+        it('should create AnalysisTask objects', () => {
+            const promise = AnalysisTask.fetchAll();
+            requests[0].resolve(sampleAnalysisTasks());
 
-            promise.then(function () {
+            return promise.then(() => {
                 assert.equal(AnalysisTask.all().length, 1);
                 var task = AnalysisTask.all()[0];
                 assert.equal(task.id(), 1082);
@@ -181,15 +228,14 @@ describe('AnalysisTask', function () {
                 assert.equal(task.startTime(), 1454444458791);
                 assert.equal(task.endMeasurementId(), 37253448);
                 assert.equal(task.endTime(), 1454515020303);
-                done();
-            }).catch(function (error) { done(error); });
+            });
         });
 
-        it('should create CommitLog objects for `causes`', function (done) {
-            var promise = AnalysisTask.fetchAll();
-            requests[0].resolve(sampleAnalysisTask());
+        it('should create CommitLog objects for `causes`', () => {
+            const promise = AnalysisTask.fetchAll();
+            requests[0].resolve(sampleAnalysisTasks());
 
-            promise.then(function () {
+            return promise.then(() => {
                 assert.equal(AnalysisTask.all().length, 1);
                 var task = AnalysisTask.all()[0];
 
@@ -199,20 +245,19 @@ describe('AnalysisTask', function () {
                 assert.equal(commit.revision(), '196051');
                 assert.equal(commit.repository(), MockModels.webkit);
                 assert.equal(+commit.time(), 1454481246108);
-                done();
-            }).catch(function (error) { done(error); });
+            });
         });
 
-        it('should find CommitLog objects for `causes` when MeasurementAdaptor created matching objects', function (done) {
-            var adoptor = new MeasurementAdaptor(measurementCluster().formatMap);
-            var adoptedMeasurement = adoptor.applyTo(measurementCluster().configurations.current[0]);
-            assert.equal(adoptedMeasurement.id, 37188161);
-            assert.equal(adoptedMeasurement.rootSet().commitForRepository(MockModels.webkit).revision(), '196051');
+        it('should find CommitLog objects for `causes` when MeasurementAdaptor created matching objects', () => {
+            const adaptor = new MeasurementAdaptor(measurementCluster().formatMap);
+            const adaptedMeasurement = adaptor.applyTo(measurementCluster().configurations.current[0]);
+            assert.equal(adaptedMeasurement.id, 37188161);
+            assert.equal(adaptedMeasurement.commitSet().commitForRepository(MockModels.webkit).revision(), '196051');
 
-            var promise = AnalysisTask.fetchAll();
-            requests[0].resolve(sampleAnalysisTask());
+            const promise = AnalysisTask.fetchAll();
+            requests[0].resolve(sampleAnalysisTasks());
 
-            promise.then(function () {
+            return promise.then(() => {
                 assert.equal(AnalysisTask.all().length, 1);
                 var task = AnalysisTask.all()[0];
 
@@ -221,8 +266,183 @@ describe('AnalysisTask', function () {
                 assert.equal(commit.revision(), '196051');
                 assert.equal(commit.repository(), MockModels.webkit);
                 assert.equal(+commit.time(), 1454481246108);
-                done();
-            }).catch(function (error) { done(error); });
+            });
+        });
+    });
+
+
+    function mockStartAndEndPoints() {
+        const startPoint = makeMockPoints(1, new MeasurementCommitSet(1, [
+            [1, MockModels.ios.id(), 'ios-revision-1', null, 0],
+            [3, MockModels.webkit.id(), 'webkit-revision-1', null, 0]
+        ]));
+        const endPoint = makeMockPoints(2, new MeasurementCommitSet(2, [
+            [2, MockModels.ios.id(), 'ios-revision-2', null, 0],
+            [4, MockModels.webkit.id(), 'webkit-revision-2', null, 0]
+        ]));
+        return [startPoint, endPoint];
+    }
+
+    describe('create with browser privilege api', () => {
+        const requests = MockRemoteAPI.inject(null, BrowserPrivilegedAPI);
+
+        it('should create analysis task with confirming repetition count zero as default with browser privilege api', async () => {
+            const [startPoint, endPoint] = mockStartAndEndPoints();
+            AnalysisTask.create('confirm', startPoint, endPoint);
+            assert.equal(requests.length, 1);
+            assert.equal(requests[0].url, '/privileged-api/generate-csrf-token');
+            requests[0].resolve({
+                token: 'abc',
+                expiration: Date.now() + 3600 * 1000,
+            });
+
+            await MockRemoteAPI.waitForRequest();
+            assert.equal(requests[1].url, '/privileged-api/create-analysis-task');
+            assert.equal(requests.length, 2);
+            assert.deepEqual(requests[1].data, {name: 'confirm', startRun: 1, endRun: 2, token: 'abc'});
+        });
+
+        it('should create analysis task with confirming repetition count specified', async () => {
+            const [startPoint, endPoint] = mockStartAndEndPoints();
+            AnalysisTask.create('confirm', startPoint, endPoint, 'Confirm', 4);
+            assert.equal(requests.length, 1);
+            assert.equal(requests[0].url, '/privileged-api/generate-csrf-token');
+            requests[0].resolve({
+                token: 'abc',
+                expiration: Date.now() + 3600 * 1000,
+            });
+
+            await MockRemoteAPI.waitForRequest();
+            assert.equal(requests[1].url, '/privileged-api/create-analysis-task');
+            assert.equal(requests.length, 2);
+            assert.deepEqual(requests[1].data, {name: 'confirm', repetitionCount: 4,
+                startRun: 1, endRun: 2, testGroupName: 'Confirm', token: 'abc', revisionSets: [
+                    {'11': {revision: 'webkit-revision-1', ownerRevision: null, patch: null},
+                        '22': {revision: 'ios-revision-1', ownerRevision: null, patch: null}},
+                    {'11': {revision: 'webkit-revision-2', ownerRevision: null, patch: null},
+                        '22': { revision: 'ios-revision-2', ownerRevision: null, patch: null}}]}
+            );
+        });
+
+        it('should sync the new analysis task status once it is created', async () => {
+            const [startPoint, endPoint] = mockStartAndEndPoints();
+            const creatingPromise = AnalysisTask.create('confirm', startPoint, endPoint, 'Confirm', 4);
+            assert.equal(requests.length, 1);
+            assert.equal(requests[0].url, '/privileged-api/generate-csrf-token');
+            requests[0].resolve({
+                token: 'abc',
+                expiration: Date.now() + 3600 * 1000,
+            });
+
+            await MockRemoteAPI.waitForRequest();
+            assert.equal(requests[1].url, '/privileged-api/create-analysis-task');
+            assert.equal(requests.length, 2);
+            assert.deepEqual(requests[1].data, {name: 'confirm', repetitionCount: 4,
+                startRun: 1, endRun: 2, testGroupName: 'Confirm', token: 'abc', revisionSets: [
+                    {'11': {revision: 'webkit-revision-1', ownerRevision: null, patch: null},
+                        '22': {revision: 'ios-revision-1', ownerRevision: null, patch: null}},
+                    {'11': {revision: 'webkit-revision-2', ownerRevision: null, patch: null},
+                        '22': { revision: 'ios-revision-2', ownerRevision: null, patch: null}}]}
+            );
+
+            requests[1].resolve({taskId: '5255', status: 'OK'});
+
+            await MockRemoteAPI.waitForRequest();
+            assert.equal(requests.length, 3);
+            assert.equal(requests[2].url, '/api/analysis-tasks?id=5255');
+            requests[2].resolve({
+                analysisTasks: [{
+                    author: null,
+                    bugs: [],
+                    buildRequestCount: 8,
+                    finishedBuildRequestCount: 0,
+                    category: 'identified',
+                    causes: [],
+                    createdAt: 4500,
+                    endRun: 2,
+                    endRunTime:  5000,
+                    fixes: [],
+                    id: 5255,
+                    metric: MockModels.someMetric.id(),
+                    name: 'confirm',
+                    needed: null,
+                    platform: MockModels.somePlatform.id(),
+                    result: 'progression',
+                    segmentationStrategy: 1,
+                    startRun: 1,
+                    startRunTime: 4000,
+                    testRangeStrategy: 2
+                }],
+                bugs: [],
+                commits: [],
+                status: 'OK'
+            });
+            const analysisTask = await creatingPromise;
+            assert.equal(analysisTask.id(), 5255);
+            assert.deepEqual(analysisTask.bugs(), []);
+            assert.equal(analysisTask.author(), '');
+            assert.equal(analysisTask.platform(), MockModels.somePlatform);
+            assert.equal(analysisTask.metric(), MockModels.someMetric);
+        });
+
+        it('should return an rejected promise when analysis task creation failed', async () => {
+            const [startPoint, endPoint] = mockStartAndEndPoints();
+            const creatingPromise = AnalysisTask.create('confirm', startPoint, endPoint, 'Confirm', 4);
+            assert.equal(requests.length, 1);
+            assert.equal(requests[0].url, '/privileged-api/generate-csrf-token');
+            requests[0].resolve({
+                token: 'abc',
+                expiration: Date.now() + 3600 * 1000,
+            });
+
+            await MockRemoteAPI.waitForRequest();
+            assert.equal(requests[1].url, '/privileged-api/create-analysis-task');
+            assert.equal(requests.length, 2);
+            assert.deepEqual(requests[1].data, {name: 'confirm', repetitionCount: 4,
+                startRun: 1, endRun: 2, testGroupName: 'Confirm', token: 'abc', revisionSets: [
+                    {'11': {revision: 'webkit-revision-1', ownerRevision: null, patch: null},
+                        '22': {revision: 'ios-revision-1', ownerRevision: null, patch: null}},
+                    {'11': {revision: 'webkit-revision-2', ownerRevision: null, patch: null},
+                        '22': { revision: 'ios-revision-2', ownerRevision: null, patch: null}}]}
+            );
+
+            requests[1].reject('401');
+            return creatingPromise.then(() => {
+                assert.ok(false, 'should not be reached');
+            }, (error) => {
+                assert.ok(true);
+                assert.equal(error, '401');
+            });
+        });
+    });
+
+    describe('create with node privilege api', () => {
+        const requests = MockRemoteAPI.inject(null, NodePrivilegedAPI);
+        beforeEach(() => {
+            PrivilegedAPI.configure('worker', 'password');
+        });
+
+        it('should create analysis task with confirming repetition count zero as default with browser privilege api', () => {
+            const [startPoint, endPoint] = mockStartAndEndPoints();
+            AnalysisTask.create('confirm', startPoint, endPoint);
+            assert.equal(requests[0].url, '/privileged-api/create-analysis-task');
+            assert.equal(requests.length, 1);
+            assert.deepEqual(requests[0].data, {name: 'confirm', startRun: 1, endRun: 2, slaveName: 'worker', slavePassword: 'password'});
+        });
+
+        it('should create analysis task with confirming repetition count specified', () => {
+            const [startPoint, endPoint] = mockStartAndEndPoints();
+            AnalysisTask.create('confirm', startPoint, endPoint, 'Confirm', 4);
+            assert.equal(requests[0].url, '/privileged-api/create-analysis-task');
+            assert.equal(requests.length, 1);
+            assert.deepEqual(requests[0].data, {name: 'confirm', repetitionCount: 4,
+                startRun: 1, endRun: 2, slaveName: 'worker', slavePassword: 'password',
+                testGroupName: 'Confirm', revisionSets: [
+                    {'11': {revision: 'webkit-revision-1', ownerRevision: null, patch: null},
+                        '22': {revision: 'ios-revision-1', ownerRevision: null, patch: null}},
+                    {'11': {revision: 'webkit-revision-2', ownerRevision: null, patch: null},
+                        '22': { revision: 'ios-revision-2', ownerRevision: null, patch: null}}]}
+            );
         });
     });
 });

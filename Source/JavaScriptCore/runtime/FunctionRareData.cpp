@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,10 +27,11 @@
 #include "FunctionRareData.h"
 
 #include "JSCInlines.h"
+#include "ObjectAllocationProfileInlines.h"
 
 namespace JSC {
 
-const ClassInfo FunctionRareData::s_info = { "FunctionRareData", 0, 0, CREATE_METHOD_TABLE(FunctionRareData) };
+const ClassInfo FunctionRareData::s_info = { "FunctionRareData", nullptr, nullptr, nullptr, CREATE_METHOD_TABLE(FunctionRareData) };
 
 FunctionRareData* FunctionRareData::create(VM& vm)
 {
@@ -56,7 +57,7 @@ void FunctionRareData::visitChildren(JSCell* cell, SlotVisitor& visitor)
 
     rareData->m_objectAllocationProfile.visitAggregate(visitor);
     rareData->m_internalFunctionAllocationProfile.visitAggregate(visitor);
-    visitor.append(&rareData->m_boundFunctionStructure);
+    visitor.append(rareData->m_boundFunctionStructure);
 }
 
 FunctionRareData::FunctionRareData(VM& vm)
@@ -79,9 +80,9 @@ FunctionRareData::~FunctionRareData()
 {
 }
 
-void FunctionRareData::initializeObjectAllocationProfile(VM& vm, JSObject* prototype, size_t inlineCapacity)
+void FunctionRareData::initializeObjectAllocationProfile(VM& vm, JSGlobalObject* globalObject, JSObject* prototype, size_t inlineCapacity, JSFunction* constructor)
 {
-    m_objectAllocationProfile.initialize(vm, this, prototype, inlineCapacity);
+    m_objectAllocationProfile.initializeProfile(vm, globalObject, this, prototype, inlineCapacity, constructor, this);
 }
 
 void FunctionRareData::clear(const char* reason)
@@ -89,6 +90,11 @@ void FunctionRareData::clear(const char* reason)
     m_objectAllocationProfile.clear();
     m_internalFunctionAllocationProfile.clear();
     m_objectAllocationProfileWatchpoint.fireAll(*vm(), reason);
+}
+
+void FunctionRareData::AllocationProfileClearingWatchpoint::fireInternal(const FireDetail&)
+{
+    m_rareData->clear("AllocationProfileClearingWatchpoint fired.");
 }
 
 }

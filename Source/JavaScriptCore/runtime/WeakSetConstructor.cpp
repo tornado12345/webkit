@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015-2016 Apple, Inc. All rights reserved.
+ * Copyright (C) 2015-2017 Apple, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -36,13 +36,21 @@
 
 namespace JSC {
 
-const ClassInfo WeakSetConstructor::s_info = { "Function", &Base::s_info, 0, CREATE_METHOD_TABLE(WeakSetConstructor) };
+const ClassInfo WeakSetConstructor::s_info = { "Function", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(WeakSetConstructor) };
 
 void WeakSetConstructor::finishCreation(VM& vm, WeakSetPrototype* prototype)
 {
-    Base::finishCreation(vm, prototype->classInfo()->className);
-    putDirectWithoutTransition(vm, vm.propertyNames->prototype, prototype, DontEnum | DontDelete | ReadOnly);
-    putDirectWithoutTransition(vm, vm.propertyNames->length, jsNumber(0), DontEnum | ReadOnly);
+    Base::finishCreation(vm, prototype->classInfo(vm)->className);
+    putDirectWithoutTransition(vm, vm.propertyNames->prototype, prototype, PropertyAttribute::DontEnum | PropertyAttribute::DontDelete | PropertyAttribute::ReadOnly);
+    putDirectWithoutTransition(vm, vm.propertyNames->length, jsNumber(0), PropertyAttribute::DontEnum | PropertyAttribute::ReadOnly);
+}
+
+static EncodedJSValue JSC_HOST_CALL callWeakSet(ExecState*);
+static EncodedJSValue JSC_HOST_CALL constructWeakSet(ExecState*);
+
+WeakSetConstructor::WeakSetConstructor(VM& vm, Structure* structure)
+    : Base(vm, structure, callWeakSet, constructWeakSet)
+{
 }
 
 static EncodedJSValue JSC_HOST_CALL callWeakSet(ExecState* exec)
@@ -57,15 +65,15 @@ static EncodedJSValue JSC_HOST_CALL constructWeakSet(ExecState* exec)
     VM& vm = exec->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
 
-    JSGlobalObject* globalObject = asInternalFunction(exec->callee())->globalObject();
+    JSGlobalObject* globalObject = jsCast<InternalFunction*>(exec->jsCallee())->globalObject();
     Structure* weakSetStructure = InternalFunction::createSubclassStructure(exec, exec->newTarget(), globalObject->weakSetStructure());
     RETURN_IF_EXCEPTION(scope, encodedJSValue());
-    JSWeakSet* weakSet = JSWeakSet::create(exec, weakSetStructure);
+    JSWeakSet* weakSet = JSWeakSet::create(vm, weakSetStructure);
     JSValue iterable = exec->argument(0);
     if (iterable.isUndefinedOrNull())
         return JSValue::encode(weakSet);
 
-    JSValue adderFunction = weakSet->JSObject::get(exec, exec->propertyNames().add);
+    JSValue adderFunction = weakSet->JSObject::get(exec, vm.propertyNames->add);
     RETURN_IF_EXCEPTION(scope, encodedJSValue());
 
     CallData adderFunctionCallData;
@@ -73,25 +81,15 @@ static EncodedJSValue JSC_HOST_CALL constructWeakSet(ExecState* exec)
     if (adderFunctionCallType == CallType::None)
         return JSValue::encode(throwTypeError(exec, scope));
 
+    scope.release();
     forEachInIterable(exec, iterable, [&](VM&, ExecState* exec, JSValue nextValue) {
         MarkedArgumentBuffer arguments;
         arguments.append(nextValue);
+        ASSERT(!arguments.hasOverflowed());
         call(exec, adderFunction, adderFunctionCallType, adderFunctionCallData, weakSet, arguments);
     });
 
     return JSValue::encode(weakSet);
-}
-
-ConstructType WeakSetConstructor::getConstructData(JSCell*, ConstructData& constructData)
-{
-    constructData.native.function = constructWeakSet;
-    return ConstructType::Host;
-}
-
-CallType WeakSetConstructor::getCallData(JSCell*, CallData& callData)
-{
-    callData.native.function = callWeakSet;
-    return CallType::Host;
 }
 
 }

@@ -38,11 +38,11 @@ namespace WebCore {
 
 class ScrollingTreeFrameScrollingNodeMac : public ScrollingTreeFrameScrollingNode, private ScrollControllerClient {
 public:
-    WEBCORE_EXPORT static Ref<ScrollingTreeFrameScrollingNode> create(ScrollingTree&, ScrollingNodeID);
+    WEBCORE_EXPORT static Ref<ScrollingTreeFrameScrollingNode> create(ScrollingTree&, ScrollingNodeType, ScrollingNodeID);
     virtual ~ScrollingTreeFrameScrollingNodeMac();
 
 private:
-    ScrollingTreeFrameScrollingNodeMac(ScrollingTree&, ScrollingNodeID);
+    ScrollingTreeFrameScrollingNodeMac(ScrollingTree&, ScrollingNodeType, ScrollingNodeID);
 
     void releaseReferencesToScrollerImpsOnTheMainThread();
 
@@ -84,15 +84,16 @@ private:
     void removeTestDeferralForReason(WheelEventTestTrigger::ScrollableAreaIdentifier, WheelEventTestTrigger::DeferTestTriggerReason) const override;
 
 #if ENABLE(CSS_SCROLL_SNAP) && PLATFORM(MAC)
-    LayoutUnit scrollOffsetOnAxis(ScrollEventAxis) const override;
+    FloatPoint scrollOffset() const override;
     void immediateScrollOnAxis(ScrollEventAxis, float delta) override;
     float pageScaleFactor() const override;
     void startScrollSnapTimer() override;
     void stopScrollSnapTimer() override;
     LayoutSize scrollExtent() const override;
+    FloatSize viewportSize() const override;
 #endif
 
-    void logExposedUnfilledArea();
+    unsigned exposedUnfilledArea() const;
 
     ScrollController m_scrollController;
 

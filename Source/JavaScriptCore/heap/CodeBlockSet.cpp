@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,11 +28,10 @@
 
 #include "CodeBlock.h"
 #include "JSCInlines.h"
+#include "SuperSampler.h"
 #include <wtf/CommaPrinter.h>
 
 namespace JSC {
-
-static const bool verbose = false;
 
 CodeBlockSet::CodeBlockSet()
 {
@@ -42,78 +41,13 @@ CodeBlockSet::~CodeBlockSet()
 {
 }
 
-void CodeBlockSet::add(CodeBlock* codeBlock)
-{
-    LockHolder locker(&m_lock);
-    bool isNewEntry = m_newCodeBlocks.add(codeBlock).isNewEntry;
-    ASSERT_UNUSED(isNewEntry, isNewEntry);
-}
-
-void CodeBlockSet::promoteYoungCodeBlocks(const LockHolder&)
-{
-    ASSERT(m_lock.isLocked());
-    m_oldCodeBlocks.add(m_newCodeBlocks.begin(), m_newCodeBlocks.end());
-    m_newCodeBlocks.clear();
-}
-
-void CodeBlockSet::clearMarksForFullCollection()
-{
-    LockHolder locker(&m_lock);
-    for (CodeBlock* codeBlock : m_oldCodeBlocks)
-        codeBlock->clearVisitWeaklyHasBeenCalled();
-
-    // We promote after we clear marks on the old generation CodeBlocks because
-    // none of the young generations CodeBlocks need to be cleared.
-    promoteYoungCodeBlocks(locker);
-}
-
-void CodeBlockSet::lastChanceToFinalize()
-{
-    LockHolder locker(&m_lock);
-    for (CodeBlock* codeBlock : m_newCodeBlocks)
-        codeBlock->classInfo()->methodTable.destroy(codeBlock);
-
-    for (CodeBlock* codeBlock : m_oldCodeBlocks)
-        codeBlock->classInfo()->methodTable.destroy(codeBlock);
-}
-
-void CodeBlockSet::deleteUnmarkedAndUnreferenced(CollectionScope scope)
-{
-    LockHolder locker(&m_lock);
-    HashSet<CodeBlock*>& set = scope == CollectionScope::Eden ? m_newCodeBlocks : m_oldCodeBlocks;
-    Vector<CodeBlock*> unmarked;
-    for (CodeBlock* codeBlock : set) {
-        if (Heap::isMarked(codeBlock))
-            continue;
-        unmarked.append(codeBlock);
-    }
-
-    for (CodeBlock* codeBlock : unmarked) {
-        codeBlock->classInfo()->methodTable.destroy(codeBlock);
-        set.remove(codeBlock);
-    }
-
-    // Any remaining young CodeBlocks are live and need to be promoted to the set of old CodeBlocks.
-    if (scope == CollectionScope::Eden)
-        promoteYoungCodeBlocks(locker);
-}
-
-bool CodeBlockSet::contains(const LockHolder&, void* candidateCodeBlock)
+bool CodeBlockSet::contains(const AbstractLocker&, void* candidateCodeBlock)
 {
     RELEASE_ASSERT(m_lock.isLocked());
     CodeBlock* codeBlock = static_cast<CodeBlock*>(candidateCodeBlock);
     if (!HashSet<CodeBlock*>::isValidValue(codeBlock))
         return false;
-    return m_oldCodeBlocks.contains(codeBlock) || m_newCodeBlocks.contains(codeBlock) || m_currentlyExecuting.contains(codeBlock);
-}
-
-void CodeBlockSet::writeBarrierCurrentlyExecuting(Heap* heap)
-{
-    LockHolder locker(&m_lock);
-    if (verbose)
-        dataLog("Remembering ", m_currentlyExecuting.size(), " code blocks.\n");
-    for (CodeBlock* codeBlock : m_currentlyExecuting)
-        heap->writeBarrier(codeBlock);
+    return m_codeBlocks.contains(codeBlock);
 }
 
 void CodeBlockSet::clearCurrentlyExecuting()
@@ -124,18 +58,28 @@ void CodeBlockSet::clearCurrentlyExecuting()
 void CodeBlockSet::dump(PrintStream& out) const
 {
     CommaPrinter comma;
-    out.print("{old = [");
-    for (CodeBlock* codeBlock : m_oldCodeBlocks)
-        out.print(comma, pointerDump(codeBlock));
-    out.print("], new = [");
-    comma = CommaPrinter();
-    for (CodeBlock* codeBlock : m_newCodeBlocks)
+    out.print("{codeBlocks = [");
+    for (CodeBlock* codeBlock : m_codeBlocks)
         out.print(comma, pointerDump(codeBlock));
     out.print("], currentlyExecuting = [");
     comma = CommaPrinter();
     for (CodeBlock* codeBlock : m_currentlyExecuting)
         out.print(comma, pointerDump(codeBlock));
     out.print("]}");
+}
+
+void CodeBlockSet::add(CodeBlock* codeBlock)
+{
+    auto locker = holdLock(m_lock);
+    auto result = m_codeBlocks.add(codeBlock);
+    RELEASE_ASSERT(result);
+}
+
+void CodeBlockSet::remove(CodeBlock* codeBlock)
+{
+    auto locker = holdLock(m_lock);
+    bool result = m_codeBlocks.remove(codeBlock);
+    RELEASE_ASSERT(result);
 }
 
 } // namespace JSC

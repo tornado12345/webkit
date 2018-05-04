@@ -498,12 +498,9 @@ static const yytype_uint8 yytranslate[] =
 
 #if YYDEBUG
   /* YYRLINE[YYN] -- Source line where rule number YYN was defined.  */
-static const yytype_uint16 yyrline[] =
-{
-       0,   108,   108,   115,   116,   127,   127,   148,   148,   169,
-     172,   175,   178,   181,   184,   187,   190,   193,   196,   221,
-     246,   249,   252,   272,   299,   302,   305,   308,   320,   323
-};
+static const yytype_uint16 yyrline[] = {0,   108, 108, 115, 116, 127, 127, 148, 148, 169,
+                                        172, 175, 178, 181, 184, 187, 190, 193, 196, 221,
+                                        243, 246, 249, 275, 302, 305, 308, 311, 323, 326};
 #endif
 
 #if YYDEBUG || YYERROR_VERBOSE || 0
@@ -1539,14 +1536,11 @@ yyreduce:
             }
             (yyval) = static_cast<YYSTYPE>(0);
         }
-        else if ((yyvsp[-2]) < 0)
-        {
-            // Logical shift left.
-            (yyval) = static_cast<YYSTYPE>(static_cast<UNSIGNED_TYPE>((yyvsp[-2])) << (yyvsp[0]));
-        }
         else
         {
-            (yyval) = (yyvsp[-2]) << (yyvsp[0]);
+            // Logical shift left. Casting to unsigned is needed to ensure there's no signed integer
+            // overflow, which some tools treat as an error.
+            (yyval) = static_cast<YYSTYPE>(static_cast<UNSIGNED_TYPE>((yyvsp[-2])) << (yyvsp[0]));
         }
     }
 
@@ -1585,6 +1579,12 @@ yyreduce:
             }
             (yyval) = static_cast<YYSTYPE>(0);
         }
+        else if (((yyvsp[-2]) == std::numeric_limits<YYSTYPE>::min()) && ((yyvsp[0]) == -1))
+        {
+            // Check for the special case where the minimum representable number is
+            // divided by -1. If left alone this has undefined results.
+            (yyval) = 0;
+        }
         else
         {
             (yyval) = (yyvsp[-2]) % (yyvsp[0]);
@@ -1610,7 +1610,7 @@ yyreduce:
             }
             (yyval) = static_cast<YYSTYPE>(0);
         }
-        else if ((yyvsp[-2]) == std::numeric_limits<YYSTYPE>::min() && (yyvsp[0]) == -1)
+        else if (((yyvsp[-2]) == std::numeric_limits<YYSTYPE>::min()) && ((yyvsp[0]) == -1))
         {
             // Check for the special case where the minimum representable number is
             // divided by -1. If left alone this leads to integer overflow in C++, which

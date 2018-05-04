@@ -10,36 +10,40 @@
 
 #include "angle_gl.h"
 #include "compiler/translator/Compiler.h"
+#include "compiler/translator/IntermTraverse.h"
+
+namespace sh
+{
 
 namespace
 {
 
-class ShaderVariableFinder : public TIntermTraverser
+class FunctionCallFinder : public TIntermTraverser
 {
   public:
-    ShaderVariableFinder(const TString &variableName, TBasicType basicType)
+    FunctionCallFinder(const TString &functionMangledName)
         : TIntermTraverser(true, false, false),
-          mVariableName(variableName),
-          mNodeFound(nullptr),
-          mBasicType(basicType)
+          mFunctionMangledName(functionMangledName),
+          mNodeFound(nullptr)
     {
     }
 
-    void visitSymbol(TIntermSymbol *node)
+    bool visitAggregate(Visit visit, TIntermAggregate *node) override
     {
-        if (node->getBasicType() == mBasicType && node->getSymbol() == mVariableName)
+        if (node->isFunctionCall() && node->getSymbolTableMangledName() == mFunctionMangledName)
         {
             mNodeFound = node;
+            return false;
         }
+        return true;
     }
 
     bool isFound() const { return mNodeFound != nullptr; }
-    const TIntermSymbol *getNode() const { return mNodeFound; }
+    const TIntermAggregate *getNode() const { return mNodeFound; }
 
   private:
-    TString mVariableName;
-    TIntermSymbol *mNodeFound;
-    TBasicType mBasicType;
+    TString mFunctionMangledName;
+    TIntermAggregate *mNodeFound;
 };
 
 }  // anonymous namespace
@@ -53,7 +57,7 @@ bool compileTestShader(GLenum type,
                        std::string *translatedCode,
                        std::string *infoLog)
 {
-    TCompiler *translator = ConstructCompiler(type, spec, output);
+    sh::TCompiler *translator = sh::ConstructCompiler(type, spec, output);
     if (!translator->Init(*resources))
     {
         SafeDelete(translator);
@@ -81,7 +85,7 @@ bool compileTestShader(GLenum type,
                        std::string *infoLog)
 {
     ShBuiltInResources resources;
-    ShInitBuiltInResources(&resources);
+    sh::InitBuiltInResources(&resources);
     return compileTestShader(type, spec, output, shaderString, &resources, compileOptions, translatedCode, infoLog);
 }
 
@@ -90,7 +94,7 @@ MatchOutputCodeTest::MatchOutputCodeTest(GLenum shaderType,
                                          ShShaderOutput outputType)
     : mShaderType(shaderType), mDefaultCompileOptions(defaultCompileOptions)
 {
-    ShInitBuiltInResources(&mResources);
+    sh::InitBuiltInResources(&mResources);
     mOutputCode[outputType] = std::string();
 }
 
@@ -130,20 +134,25 @@ bool MatchOutputCodeTest::compileWithSettings(ShShaderOutput output,
                                               std::string *translatedCode,
                                               std::string *infoLog)
 {
-    return compileTestShader(mShaderType, SH_GLES3_SPEC, output, shaderString, &mResources,
+    return compileTestShader(mShaderType, SH_GLES3_1_SPEC, output, shaderString, &mResources,
                              compileOptions, translatedCode, infoLog);
 }
 
 bool MatchOutputCodeTest::foundInCode(ShShaderOutput output, const char *stringToFind) const
 {
+    return findInCode(output, stringToFind) != std::string::npos;
+}
+
+size_t MatchOutputCodeTest::findInCode(ShShaderOutput output, const char *stringToFind) const
+{
     const auto code = mOutputCode.find(output);
     EXPECT_NE(mOutputCode.end(), code);
     if (code == mOutputCode.end())
     {
-        return false;
+        return std::string::npos;
     }
 
-    return code->second.find(stringToFind) != std::string::npos;
+    return code->second.find(stringToFind);
 }
 
 bool MatchOutputCodeTest::foundInCode(ShShaderOutput output,
@@ -207,11 +216,11 @@ bool MatchOutputCodeTest::notFoundInCode(const char *stringToFind) const
     return true;
 }
 
-const TIntermSymbol *FindSymbolNode(TIntermNode *root,
-                                    const TString &symbolName,
-                                    TBasicType basicType)
+const TIntermAggregate *FindFunctionCallNode(TIntermNode *root, const TString &functionMangledName)
 {
-    ShaderVariableFinder finder(symbolName, basicType);
+    FunctionCallFinder finder(functionMangledName);
     root->traverse(&finder);
     return finder.getNode();
 }
+
+}  // namespace sh

@@ -36,6 +36,8 @@
 #include <vector>
 #include <wtf/RefCounted.h>
 
+extern FILE* testResult;
+
 class TestRunner : public WTR::UIScriptContextDelegate, public RefCounted<TestRunner> {
     WTF_MAKE_NONCOPYABLE(TestRunner);
 public:
@@ -68,9 +70,10 @@ public:
     JSStringRef copyEncodedHostName(JSStringRef name);
     void dispatchPendingLoadRequests();
     void display();
-    void displayInvalidatedRegion();
+    void displayAndTrackRepaints();
     void execCommand(JSStringRef name, JSStringRef value);
     bool findString(JSContextRef, JSStringRef, JSObjectRef optionsArray);
+    void forceImmediateCompletion();
     void goBack();
     JSValueRef originsWithApplicationCache(JSContextRef);
     long long applicationCacheDiskUsageForOrigin(JSStringRef name);
@@ -107,7 +110,7 @@ public:
     void setAutomaticLinkDetectionEnabled(bool flag);
     void setMainFrameIsFirstResponder(bool flag);
     void setMockDeviceOrientation(bool canProvideAlpha, double alpha, bool canProvideBeta, double beta, bool canProvideGamma, double gamma);
-    void setMockGeolocationPosition(double latitude, double longitude, double accuracy, bool providesAltitude, double altitude, bool providesAltitudeAccuracy, double altitudeAccuracy, bool providesHeading, double heading, bool providesSpeed, double speed);
+    void setMockGeolocationPosition(double latitude, double longitude, double accuracy, bool providesAltitude, double altitude, bool providesAltitudeAccuracy, double altitudeAccuracy, bool providesHeading, double heading, bool providesSpeed, double speed, bool providesFloorLevel, double floorLevel);
     void setMockGeolocationPositionUnavailableError(JSStringRef message);
     void setPersistentUserStyleSheetLocation(JSStringRef path);
     void setPluginsEnabled(bool);
@@ -118,7 +121,6 @@ public:
     void setUserStyleSheetEnabled(bool flag);
     void setUserStyleSheetLocation(JSStringRef path);
     void setValueForUser(JSContextRef, JSValueRef nodeObject, JSStringRef value);
-    void setViewModeMediaFeature(JSStringRef);
     void setXSSAuditorEnabled(bool flag);
     void setSpatialNavigationEnabled(bool);
     void setScrollbarPolicy(JSStringRef orientation, JSStringRef policy);
@@ -367,8 +369,19 @@ public:
     double timeout() { return m_timeout; }
 
     unsigned imageCountInGeneralPasteboard() const;
-    
+
     void callUIScriptCallback(unsigned callbackID, JSStringRef result);
+
+    void setDumpJSConsoleLogInStdErr(bool inStdErr) { m_dumpJSConsoleLogInStdErr = inStdErr; }
+    bool dumpJSConsoleLogInStdErr() const { return m_dumpJSConsoleLogInStdErr; }
+
+    void setSpellCheckerLoggingEnabled(bool);
+
+    const std::vector<std::string>& openPanelFiles() const { return m_openPanelFiles; }
+    void setOpenPanelFiles(JSContextRef, JSValueRef);
+
+    bool didCancelClientRedirect() const { return m_didCancelClientRedirect; }
+    void setDidCancelClientRedirect(bool value) { m_didCancelClientRedirect = value; }
 
 private:
     TestRunner(const std::string& testURL, const std::string& expectedPixelHash);
@@ -434,6 +447,8 @@ private:
     bool m_areLegacyWebNotificationPermissionRequestsIgnored;
     bool m_customFullScreenBehavior;
     bool m_hasPendingWebNotificationClick;
+    bool m_dumpJSConsoleLogInStdErr { false };
+    bool m_didCancelClientRedirect { false };
 
     double m_databaseDefaultQuota;
     double m_databaseMaxQuota;
@@ -458,6 +473,8 @@ private:
 
     std::unique_ptr<WTR::UIScriptContext> m_UIScriptContext;
     UIScriptInvocationData* m_pendingUIScriptInvocationData { nullptr };
+
+    std::vector<std::string> m_openPanelFiles;
 
     static JSClassRef getJSClass();
     static JSStaticValue* staticValues();

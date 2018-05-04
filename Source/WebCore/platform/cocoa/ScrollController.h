@@ -37,6 +37,7 @@
 
 #if ENABLE(CSS_SCROLL_SNAP)
 #include "ScrollSnapAnimatorState.h"
+#include "ScrollSnapOffsetsInfo.h"
 #endif
 
 namespace WebCore {
@@ -48,7 +49,7 @@ class WheelEventTestTrigger;
 
 class ScrollControllerClient {
 protected:
-    virtual ~ScrollControllerClient() { }
+    virtual ~ScrollControllerClient() = default;
 
 public:
 #if ENABLE(RUBBER_BANDING)
@@ -60,6 +61,7 @@ public:
     virtual bool canScrollVertically() = 0;
     virtual bool shouldRubberBandInDirection(ScrollDirection) = 0;
 
+    // FIXME: use ScrollClamping to collapse these to one.
     virtual void immediateScrollBy(const FloatSize&) = 0;
     virtual void immediateScrollByWithoutContentEdgeConstraints(const FloatSize&) = 0;
     virtual void startSnapRubberbandTimer()
@@ -81,7 +83,7 @@ public:
     virtual void removeTestDeferralForReason(WheelEventTestTrigger::ScrollableAreaIdentifier, WheelEventTestTrigger::DeferTestTriggerReason) const { /* Do nothing */ }
 
 #if ENABLE(CSS_SCROLL_SNAP)
-    virtual LayoutUnit scrollOffsetOnAxis(ScrollEventAxis) const = 0;
+    virtual FloatPoint scrollOffset() const = 0;
     virtual void immediateScrollOnAxis(ScrollEventAxis, float delta) = 0;
     virtual void startScrollSnapTimer()
     {
@@ -104,7 +106,19 @@ public:
     }
 
     virtual LayoutSize scrollExtent() const = 0;
+    virtual FloatSize viewportSize() const = 0;
 #endif
+};
+
+enum class WheelEventStatus {
+    UserScrollBegin,
+    UserScrolling,
+    UserScrollEnd,
+    InertialScrollBegin,
+    InertialScrolling,
+    InertialScrollEnd,
+    StatelessScrollEvent,
+    Unknown
 };
 
 class ScrollController {
@@ -121,7 +135,7 @@ public:
     bool isScrollSnapInProgress() const;
 
 #if ENABLE(CSS_SCROLL_SNAP)
-    void updateScrollSnapPoints(ScrollEventAxis, const Vector<LayoutUnit>&);
+    void updateScrollSnapPoints(ScrollEventAxis, const Vector<LayoutUnit>&, const Vector<ScrollOffsetRange<LayoutUnit>>&);
     void setActiveScrollSnapIndexForAxis(ScrollEventAxis, unsigned);
     void setActiveScrollSnapIndicesForOffset(int x, int y);
     bool activeScrollSnapIndexDidChange() const { return m_activeScrollSnapIndexDidChange; }
@@ -144,30 +158,25 @@ private:
 #endif
 
 #if ENABLE(CSS_SCROLL_SNAP)
-    LayoutUnit scrollOffsetOnAxis(ScrollEventAxis) const;
     void setNearestScrollSnapIndexForAxisAndOffset(ScrollEventAxis, int);
-    ScrollSnapAnimatorState& scrollSnapPointState(ScrollEventAxis);
-    const ScrollSnapAnimatorState& scrollSnapPointState(ScrollEventAxis) const;
 #if PLATFORM(MAC)
     void scrollSnapTimerFired();
     void startScrollSnapTimer();
     void stopScrollSnapTimer();
 
-    void processWheelEventForScrollSnapOnAxis(ScrollEventAxis, const PlatformWheelEvent&);
-    bool shouldOverrideWheelEvent(ScrollEventAxis, const PlatformWheelEvent&) const;
-
-    void beginScrollSnapAnimation(ScrollEventAxis, ScrollSnapState);
-    
-    void endScrollSnapAnimation(ScrollSnapState);
-    void initializeScrollSnapAnimationParameters();
-    bool isSnappingOnAxis(ScrollEventAxis) const;
-    
+    bool shouldOverrideInertialScrolling() const;
+    void statelessSnapTransitionTimerFired();
+    void startDeferringTestsDueToScrollSnapping();
+    void stopDeferringTestsDueToScrollSnapping();
+    void scheduleStatelessScrollSnap();
 #endif
 #endif
 
     ScrollControllerClient& m_client;
-    
+
+#if PLATFORM(MAC)
     CFTimeInterval m_lastMomentumScrollTimestamp { 0 };
+#endif
     FloatSize m_overflowScrollDelta;
     FloatSize m_stretchScrollForce;
     FloatSize m_momentumVelocity;
@@ -181,20 +190,21 @@ private:
 #endif
 
 #if ENABLE(CSS_SCROLL_SNAP)
-    bool m_expectingHorizontalStatelessScrollSnap { false };
-    bool m_expectingVerticalStatelessScrollSnap { false };
-    std::unique_ptr<ScrollSnapAnimatorState> m_horizontalScrollSnapState;
-    std::unique_ptr<ScrollSnapAnimatorState> m_verticalScrollSnapState;
-    std::unique_ptr<ScrollSnapAnimationCurveState> m_scrollSnapCurveState;
+    std::unique_ptr<ScrollSnapAnimatorState> m_scrollSnapState;
 #if PLATFORM(MAC)
+    FloatSize m_dragEndedScrollingVelocity;
+    RunLoop::Timer<ScrollController> m_statelessSnapTransitionTimer;
     RunLoop::Timer<ScrollController> m_scrollSnapTimer;
 #endif
 #endif
 
+#if PLATFORM(MAC)
     bool m_inScrollGesture { false };
     bool m_momentumScrollInProgress { false };
     bool m_ignoreMomentumScrolls { false };
     bool m_snapRubberbandTimerIsActive { false };
+#endif
+
     bool m_activeScrollSnapIndexDidChange { false };
 };
     

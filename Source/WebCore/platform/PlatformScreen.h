@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006 Apple Inc.  All rights reserved.
+ * Copyright (C) 2006-2018 Apple Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,7 +25,13 @@
 
 #pragma once
 
+#if USE(GLIB)
+#include <wtf/Function.h>
+#endif
+
 #if PLATFORM(MAC)
+#include <wtf/HashMap.h>
+
 OBJC_CLASS NSScreen;
 OBJC_CLASS NSWindow;
 #ifdef NSGEOMETRY_TYPES_SAME_AS_CGGEOMETRY_TYPES
@@ -41,6 +47,10 @@ typedef struct _NSPoint NSPoint;
 OBJC_CLASS UIScreen;
 #endif
 
+#if USE(CG)
+typedef struct CGColorSpace *CGColorSpaceRef;
+#endif
+
 namespace WebCore {
 
 class FloatRect;
@@ -54,21 +64,37 @@ int screenDepthPerComponent(Widget*);
 bool screenIsMonochrome(Widget*);
 
 bool screenHasInvertedColors();
+#if USE(GLIB)
+double screenDPI();
+void setScreenDPIObserverHandler(Function<void()>&&, void*);
+#endif
 
 FloatRect screenRect(Widget*);
 FloatRect screenAvailableRect(Widget*);
 
 WEBCORE_EXPORT bool screenSupportsExtendedColor(Widget* = nullptr);
 
+#if USE(CG)
+WEBCORE_EXPORT CGColorSpaceRef screenColorSpace(Widget* = nullptr);
+#endif
+
 #if PLATFORM(MAC)
+struct ScreenProperties;
 
 NSScreen *screen(NSWindow *);
 NSScreen *screen(PlatformDisplayID);
 
+FloatRect screenRectForDisplay(PlatformDisplayID);
+
 WEBCORE_EXPORT FloatRect toUserSpace(const NSRect&, NSWindow *destination);
+FloatRect toUserSpaceForPrimaryScreen(const NSRect&);
 WEBCORE_EXPORT NSRect toDeviceSpace(const FloatRect&, NSWindow *source);
 
 NSPoint flipScreenPoint(const NSPoint&, NSScreen *);
+
+WEBCORE_EXPORT std::pair<PlatformDisplayID, HashMap<PlatformDisplayID, ScreenProperties>> getScreenProperties();
+WEBCORE_EXPORT void setScreenProperties(PlatformDisplayID primaryScreenID, const HashMap<PlatformDisplayID, ScreenProperties>&);
+ScreenProperties screenProperties(PlatformDisplayID);
 
 #endif
 
@@ -77,6 +103,7 @@ NSPoint flipScreenPoint(const NSPoint&, NSScreen *);
 float screenPPIFactor();
 WEBCORE_EXPORT FloatSize screenSize();
 WEBCORE_EXPORT FloatSize availableScreenSize();
+WEBCORE_EXPORT FloatSize overrideScreenSize();
 WEBCORE_EXPORT float screenScaleFactor(UIScreen * = nullptr);
 
 #endif

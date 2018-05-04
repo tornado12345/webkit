@@ -23,8 +23,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef RenderIFrame_h
-#define RenderIFrame_h
+#pragma once
 
 #include "RenderFrameBase.h"
 
@@ -33,6 +32,7 @@ namespace WebCore {
 class RenderView;
 
 class RenderIFrame final : public RenderFrameBase {
+    WTF_MAKE_ISO_ALLOCATED(RenderIFrame);
 public:
     RenderIFrame(HTMLIFrameElement&, RenderStyle&&);
 
@@ -60,10 +60,10 @@ private:
     bool requiresLayer() const override;
 
     RenderView* contentRootRenderer() const;
+
+    bool isFullScreenIFrame() const;
 };
 
 } // namespace WebCore
 
 SPECIALIZE_TYPE_TRAITS_RENDER_OBJECT(RenderIFrame, isRenderIFrame())
-
-#endif // RenderIFrame_h

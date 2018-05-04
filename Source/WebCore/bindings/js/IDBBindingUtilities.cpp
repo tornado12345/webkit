@@ -28,6 +28,7 @@
 #include "config.h"
 
 #if ENABLE(INDEXED_DATABASE)
+
 #include "IDBBindingUtilities.h"
 
 #include "IDBIndexInfo.h"
@@ -37,26 +38,25 @@
 #include "IDBValue.h"
 #include "IndexKey.h"
 #include "JSDOMBinding.h"
-#include "JSDOMConvert.h"
-#include "JSDOMStringList.h"
+#include "JSDOMConvertDate.h"
+#include "JSDOMConvertNullable.h"
 #include "Logging.h"
 #include "MessagePort.h"
 #include "ScriptExecutionContext.h"
 #include "SerializedScriptValue.h"
 #include "SharedBuffer.h"
 #include "ThreadSafeDataBuffer.h"
-#include <runtime/ArrayBuffer.h>
-#include <runtime/DateInstance.h>
-#include <runtime/ObjectConstructor.h>
-
-using namespace JSC;
+#include <JavaScriptCore/ArrayBuffer.h>
+#include <JavaScriptCore/DateInstance.h>
+#include <JavaScriptCore/ObjectConstructor.h>
 
 namespace WebCore {
+using namespace JSC;
 
 static bool get(ExecState& exec, JSValue object, const String& keyPathElement, JSValue& result)
 {
     if (object.isString() && keyPathElement == "length") {
-        result = jsNumber(object.toString(&exec)->length());
+        result = jsNumber(asString(object)->length());
         return true;
     }
     if (!object.isObject())
@@ -101,8 +101,10 @@ JSValue toJS(ExecState& state, JSGlobalObject& globalObject, IDBKey* key)
         unsigned size = inArray.size();
         auto outArray = constructEmptyArray(&state, 0, &globalObject, size);
         RETURN_IF_EXCEPTION(scope, JSValue());
-        for (size_t i = 0; i < size; ++i)
+        for (size_t i = 0; i < size; ++i) {
             outArray->putDirectIndex(&state, i, toJS(state, globalObject, inArray.at(i).get()));
+            RETURN_IF_EXCEPTION(scope, JSValue());
+        }
         return outArray;
     }
     case KeyType::Binary: {
@@ -142,19 +144,22 @@ static const size_t maximumDepth = 2000;
 
 static RefPtr<IDBKey> createIDBKeyFromValue(ExecState& exec, JSValue value, Vector<JSArray*>& stack)
 {
+    VM& vm = exec.vm();
     if (value.isNumber() && !std::isnan(value.toNumber(&exec)))
         return IDBKey::createNumber(value.toNumber(&exec));
 
     if (value.isString())
-        return IDBKey::createString(value.toString(&exec)->value(&exec));
+        return IDBKey::createString(asString(value)->value(&exec));
 
-    if (value.inherits(DateInstance::info()) && !std::isnan(valueToDate(&exec, value)))
-        return IDBKey::createDate(valueToDate(&exec, value));
+    if (value.inherits<DateInstance>(vm)) {
+        auto dateValue = valueToDate(exec, value);
+        if (!std::isnan(dateValue))
+            return IDBKey::createDate(dateValue);
+    }
 
     if (value.isObject()) {
         JSObject* object = asObject(value);
-        if (isJSArray(object) || object->inherits(JSArray::info())) {
-            JSArray* array = asArray(object);
+        if (auto* array = jsDynamicCast<JSArray*>(vm, object)) {
             size_t length = array->length();
 
             if (stack.contains(array))
@@ -179,10 +184,10 @@ static RefPtr<IDBKey> createIDBKeyFromValue(ExecState& exec, JSValue value, Vect
             return IDBKey::createArray(subkeys);
         }
 
-        if (auto* arrayBuffer = jsDynamicCast<JSArrayBuffer*>(value))
+        if (auto* arrayBuffer = jsDynamicCast<JSArrayBuffer*>(vm, value))
             return IDBKey::createBinary(*arrayBuffer);
 
-        if (auto* arrayBufferView = jsDynamicCast<JSArrayBufferView*>(value))
+        if (auto* arrayBufferView = jsDynamicCast<JSArrayBufferView*>(vm, value))
             return IDBKey::createBinary(*arrayBufferView);
     }
     return nullptr;
@@ -338,7 +343,7 @@ static JSValue deserializeIDBValueToJSValue(ExecState& state, JSC::JSGlobalObjec
 
     state.vm().apiLock().lock();
     Vector<RefPtr<MessagePort>> messagePorts;
-    JSValue result = serializedValue->deserialize(state, &globalObject, messagePorts, value.blobURLs(), value.blobFilePaths(), NonThrowing);
+    JSValue result = serializedValue->deserialize(state, &globalObject, messagePorts, value.blobURLs(), value.blobFilePaths(), SerializationErrorMode::NonThrowing);
     state.vm().apiLock().unlock();
 
     return result;
@@ -358,12 +363,6 @@ JSC::JSValue toJS(JSC::ExecState* state, JSDOMGlobalObject* globalObject, const 
 Ref<IDBKey> scriptValueToIDBKey(ExecState& exec, const JSValue& scriptValue)
 {
     return createIDBKeyFromValue(exec, scriptValue);
-}
-
-JSC::JSValue idbKeyDataToScriptValue(JSC::ExecState& exec, const IDBKeyData& keyData)
-{
-    RefPtr<IDBKey> key = keyData.maybeCreateIDBKey();
-    return toJS(exec, *exec.lexicalGlobalObject(), key.get());
 }
 
 JSC::JSValue toJS(JSC::ExecState* state, JSDOMGlobalObject* globalObject, const IDBKeyData& keyData)
@@ -392,7 +391,7 @@ static Vector<IDBKeyData> createKeyPathArray(ExecState& exec, JSValue value, con
         Vector<IDBKeyData> keys;
         for (auto& entry : vector) {
             auto key = internalCreateIDBKeyFromScriptValueAndKeyPath(exec, value, entry);
-            if (!key)
+            if (!key || !key->isValid())
                 return { };
             keys.append(key.get());
         }
@@ -410,19 +409,6 @@ void generateIndexKeyForValue(ExecState& exec, const IDBIndexInfo& info, JSValue
         return;
 
     outKey = IndexKey(WTFMove(keyDatas));
-}
-
-JSValue toJS(ExecState& state, JSDOMGlobalObject& globalObject, const Optional<IDBKeyPath>& keyPath)
-{
-    if (!keyPath)
-        return jsNull();
-
-    auto visitor = WTF::makeVisitor([&](const String& string) -> JSValue {
-        return toJS<IDLDOMString>(state, globalObject, string);
-    }, [&](const Vector<String>& vector) -> JSValue {
-        return toJS<IDLSequence<IDLDOMString>>(state, globalObject, vector);
-    });
-    return WTF::visit(visitor, keyPath.value());
 }
 
 } // namespace WebCore

@@ -23,8 +23,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef XPCSPI_h
-#define XPCSPI_h
+#pragma once
 
 #include <dispatch/dispatch.h>
 #include <os/object.h>
@@ -56,11 +55,15 @@ typedef void* xpc_connection_t;
 
 typedef const struct _xpc_type_s* xpc_type_t;
 
+#if PLATFORM(IOS) && __has_attribute(noescape)
+#define XPC_NOESCAPE __attribute__((__noescape__))
+#endif
+
 #if COMPILER_SUPPORTS(BLOCKS)
 typedef bool (^xpc_array_applier_t)(size_t index, xpc_object_t);
 typedef bool (^xpc_dictionary_applier_t)(const char *key, xpc_object_t value);
 typedef void (^xpc_handler_t)(xpc_object_t);
-#endif
+#endif // COMPILER_SUPPORTS(BLOCKS)
 
 typedef void (*xpc_connection_handler_t)(xpc_connection_t connection);
 
@@ -77,6 +80,14 @@ typedef void (*xpc_connection_handler_t)(xpc_connection_t connection);
 
 #if USE(APPLE_INTERNAL_SDK)
 #include <xpc/private.h>
+#else
+enum {
+    DISPATCH_MACH_SEND_POSSIBLE = 0x8,
+};
+#endif
+
+#if !defined(XPC_NOESCAPE)
+#define XPC_NOESCAPE
 #endif
 
 WTF_EXTERN_C_BEGIN
@@ -92,8 +103,8 @@ extern const struct _xpc_type_s _xpc_type_string;
 
 xpc_object_t xpc_array_create(const xpc_object_t*, size_t count);
 #if COMPILER_SUPPORTS(BLOCKS)
-bool xpc_array_apply(xpc_object_t, xpc_array_applier_t);
-bool xpc_dictionary_apply(xpc_object_t xdict, xpc_dictionary_applier_t applier);
+bool xpc_array_apply(xpc_object_t, XPC_NOESCAPE xpc_array_applier_t);
+bool xpc_dictionary_apply(xpc_object_t xdict, XPC_NOESCAPE xpc_dictionary_applier_t applier);
 #endif
 size_t xpc_array_get_count(xpc_object_t);
 const char* xpc_array_get_string(xpc_object_t, size_t index);
@@ -149,7 +160,7 @@ xpc_object_t xpc_retain(xpc_object_t);
 #endif
 
 #if OS_OBJECT_USE_OBJC_RETAIN_RELEASE
-#if !defined(xpc_retain)
+#if !defined(xpc_release)
 #define xpc_release(object) ({ xpc_object_t _o = (object); _xpc_object_validate(_o); [_o release]; })
 #endif
 #else
@@ -157,5 +168,3 @@ void xpc_release(xpc_object_t);
 #endif
 
 WTF_EXTERN_C_END
-
-#endif // XPCSPI_h

@@ -18,16 +18,16 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGPathElement_h
-#define SVGPathElement_h
+#pragma once
 
+#include "Path.h"
 #include "SVGAnimatedBoolean.h"
 #include "SVGAnimatedNumber.h"
 #include "SVGExternalResourcesRequired.h"
-#include "SVGGraphicsElement.h"
+#include "SVGGeometryElement.h"
 #include "SVGNames.h"
 #include "SVGPathByteStream.h"
-#include "SVGPathSegList.h"
+#include "SVGPathSegListValues.h"
 
 namespace WebCore {
 
@@ -50,15 +50,16 @@ class SVGPathSegCurvetoCubicSmoothAbs;
 class SVGPathSegCurvetoCubicSmoothRel;
 class SVGPathSegCurvetoQuadraticSmoothAbs;
 class SVGPathSegCurvetoQuadraticSmoothRel;
-class SVGPathSegListPropertyTearOff;
+class SVGPathSegList;
+class SVGPoint;
 
-class SVGPathElement final : public SVGGraphicsElement,
-                             public SVGExternalResourcesRequired {
+class SVGPathElement final : public SVGGeometryElement, public SVGExternalResourcesRequired {
+    WTF_MAKE_ISO_ALLOCATED(SVGPathElement);
 public:
     static Ref<SVGPathElement> create(const QualifiedName&, Document&);
     
-    float getTotalLength() const;
-    SVGPoint getPointAtLength(float distance) const;
+    float getTotalLength() const final;
+    Ref<SVGPoint> getPointAtLength(float distance) const final;
     unsigned getPathSegAtLength(float distance) const;
 
     Ref<SVGPathSegClosePath> createSVGPathSegClosePath(SVGPathSegRole = PathSegUndefinedRole);
@@ -82,12 +83,13 @@ public:
     Ref<SVGPathSegCurvetoQuadraticSmoothRel> createSVGPathSegCurvetoQuadraticSmoothRel(float x, float y, SVGPathSegRole = PathSegUndefinedRole);
 
     // Used in the bindings only.
-    RefPtr<SVGPathSegListPropertyTearOff> pathSegList();
-    RefPtr<SVGPathSegListPropertyTearOff> animatedPathSegList();
-    RefPtr<SVGPathSegListPropertyTearOff> normalizedPathSegList();
-    RefPtr<SVGPathSegListPropertyTearOff> animatedNormalizedPathSegList();
+    Ref<SVGPathSegList> pathSegList();
+    Ref<SVGPathSegList> animatedPathSegList();
+    RefPtr<SVGPathSegList> normalizedPathSegList();
+    RefPtr<SVGPathSegList> animatedNormalizedPathSegList();
 
     const SVGPathByteStream& pathByteStream() const;
+    Path pathForByteStream() const;
 
     void pathSegListChanged(SVGPathSegRole, ListModification = ListModificationUnknown);
 
@@ -97,7 +99,7 @@ public:
 
     bool isAnimValObserved() const { return m_isAnimValObserved; }
 
-    WeakPtr<SVGPathElement> createWeakPtr() const { return m_weakPtrFactory.createWeakPtr(); }
+    WeakPtr<SVGPathElement> createWeakPtr() const { return m_weakPtrFactory.createWeakPtr(*const_cast<SVGPathElement*>(this)); }
 
     void animatedPropertyWillBeDeleted();
 
@@ -124,18 +126,17 @@ private:
 
     RenderPtr<RenderElement> createElementRenderer(RenderStyle&&, const RenderTreePosition&) final;
 
-    Node::InsertionNotificationRequest insertedInto(ContainerNode&) final;
-    void removedFrom(ContainerNode&) final;
+    Node::InsertedIntoAncestorResult insertedIntoAncestor(InsertionType, ContainerNode&) final;
+    void removedFromAncestor(RemovalType, ContainerNode&) final;
 
     void invalidateMPathDependencies();
 
 private:
     SVGPathByteStream m_pathByteStream;
-    mutable SVGSynchronizableAnimatedProperty<SVGPathSegList> m_pathSegList;
+    mutable std::optional<Path> m_cachedPath;
+    mutable SVGSynchronizableAnimatedProperty<SVGPathSegListValues> m_pathSegList;
     WeakPtrFactory<SVGPathElement> m_weakPtrFactory;
     bool m_isAnimValObserved;
 };
 
 } // namespace WebCore
-
-#endif

@@ -25,7 +25,6 @@
 
 #include "Document.h"
 #include "EventHandler.h"
-#include "EventNames.h"
 #include "Frame.h"
 #include "FrameLoader.h"
 #include "FrameLoaderTypes.h"
@@ -41,8 +40,11 @@
 #include "SVGNames.h"
 #include "SVGSMILElement.h"
 #include "XLinkNames.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(SVGAElement);
 
 // Animated property definitions
 DEFINE_ANIMATED_STRING(SVGAElement, SVGNames::targetAttr, SVGTarget, svgTarget)
@@ -126,7 +128,7 @@ void SVGAElement::defaultEventHandler(Event& event)
             String url = stripLeadingAndTrailingHTMLSpaces(href());
 
             if (url[0] == '#') {
-                Element* targetElement = treeScope().getElementById(url.substringSharingImpl(1));
+                auto targetElement = makeRefPtr(treeScope().getElementById(url.substringSharingImpl(1)));
                 if (is<SVGSMILElement>(targetElement)) {
                     downcast<SVGSMILElement>(*targetElement).beginByLinkActivation();
                     event.setDefaultHandled();
@@ -142,7 +144,7 @@ void SVGAElement::defaultEventHandler(Event& event)
                 target = "_blank";
             event.setDefaultHandled();
 
-            Frame* frame = document().frame();
+            auto frame = makeRefPtr(document().frame());
             if (!frame)
                 return;
             frame->loader().urlSelected(document().completeURL(url), target, &event, LockHistory::No, LockBackForwardList::No, MaybeSendReferrer, document().shouldOpenExternalURLsPolicyToPropagate());
@@ -167,14 +169,6 @@ bool SVGAElement::supportsFocus() const
     return isLink() || Element::supportsFocus();
 }
 
-bool SVGAElement::isFocusable() const
-{
-    if (renderer() && renderer()->absoluteClippedOverflowRect().isEmpty())
-        return false;
-    
-    return SVGElement::isFocusable();
-}
-
 bool SVGAElement::isURLAttribute(const Attribute& attribute) const
 {
     return attribute.name().localName() == XLinkNames::hrefAttr || SVGGraphicsElement::isURLAttribute(attribute);
@@ -190,13 +184,13 @@ bool SVGAElement::isMouseFocusable() const
     return SVGElement::isMouseFocusable();
 }
 
-bool SVGAElement::isKeyboardFocusable(KeyboardEvent& event) const
+bool SVGAElement::isKeyboardFocusable(KeyboardEvent* event) const
 {
     if (isFocusable() && Element::supportsFocus())
         return SVGElement::isKeyboardFocusable(event);
 
     if (isLink())
-        return document().frame()->eventHandler().tabsToLinks(&event);
+        return document().frame()->eventHandler().tabsToLinks(event);
 
     return SVGElement::isKeyboardFocusable(event);
 }

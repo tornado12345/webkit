@@ -43,7 +43,7 @@ String WorkerLocation::protocol() const
 
 String WorkerLocation::host() const
 {
-    return m_url.port() ? m_url.host() + ":" + String::number(m_url.port().value()) : m_url.host();
+    return m_url.hostAndPort();
 }
 
 String WorkerLocation::hostname() const
@@ -73,7 +73,7 @@ String WorkerLocation::hash() const
 
 String WorkerLocation::origin() const
 {
-    return SecurityOrigin::create(m_url)->toString();
+    return SecurityOriginData::fromURL(m_url).toString();
 }
 
 } // namespace WebCore

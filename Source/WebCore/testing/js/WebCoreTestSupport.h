@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2011, 2015 Google Inc. All rights reserved.
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,8 +24,9 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef WebCoreTestSupport_h
-#define WebCoreTestSupport_h
+#pragma once
+
+#include <wtf/Forward.h>
 
 typedef const struct OpaqueJSContext* JSContextRef;
 typedef struct OpaqueJSString* JSStringRef;
@@ -36,10 +37,6 @@ typedef struct OpaqueJSValue* JSObjectRef;
 #else
 #define TEST_SUPPORT_EXPORT
 #endif
-
-namespace WTF {
-class String;
-}
 
 namespace WebCore {
 class Frame;
@@ -64,6 +61,6 @@ void setMockGamepadDetails(unsigned index, const WTF::String& gamepadID, unsigne
 void setMockGamepadAxisValue(unsigned index, unsigned axisIndex, double value) TEST_SUPPORT_EXPORT;
 void setMockGamepadButtonValue(unsigned index, unsigned buttonIndex, double value) TEST_SUPPORT_EXPORT;
 
-} // namespace WebCoreTestSupport
+void setupNewlyCreatedServiceWorker(uint64_t serviceWorkerIdentifier) TEST_SUPPORT_EXPORT;
 
-#endif
+} // namespace WebCoreTestSupport

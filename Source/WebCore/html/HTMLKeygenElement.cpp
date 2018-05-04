@@ -2,7 +2,7 @@
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2004-2006, 2010, 2012-2016 Apple Inc. All rights reserved.
  *           (C) 2006 Alexey Proskuryakov (ap@nypop.com)
  *
  * This library is free software; you can redistribute it and/or
@@ -26,14 +26,16 @@
 #include "HTMLKeygenElement.h"
 
 #include "Attribute.h"
+#include "DOMFormData.h"
 #include "Document.h"
-#include "FormDataList.h"
+#include "ElementChildIterator.h"
 #include "HTMLNames.h"
 #include "HTMLSelectElement.h"
 #include "HTMLOptionElement.h"
 #include "SSLKeyGenerator.h"
 #include "ShadowRoot.h"
 #include "Text.h"
+#include <wtf/IsoMallocInlines.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/StdLibExtras.h>
 
@@ -41,9 +43,12 @@ using namespace WebCore;
 
 namespace WebCore {
 
+WTF_MAKE_ISO_ALLOCATED_IMPL(HTMLKeygenElement);
+
 using namespace HTMLNames;
 
 class KeygenSelectElement final : public HTMLSelectElement {
+    WTF_MAKE_ISO_ALLOCATED_INLINE(KeygenSelectElement);
 public:
     static Ref<KeygenSelectElement> create(Document& document)
     {
@@ -114,15 +119,15 @@ String HTMLKeygenElement::keytype() const
     return isKeytypeRSA() ? ASCIILiteral("rsa") : emptyString();
 }
 
-bool HTMLKeygenElement::appendFormData(FormDataList& encoded_values, bool)
+bool HTMLKeygenElement::appendFormData(DOMFormData& formData, bool)
 {
     // Only RSA is supported at this time.
     if (!isKeytypeRSA())
         return false;
-    String value = signedPublicKeyAndChallengeString(shadowSelect()->selectedIndex(), attributeWithoutSynchronization(challengeAttr), document().baseURL());
+    auto value = document().signedPublicKeyAndChallengeString(shadowSelect()->selectedIndex(), attributeWithoutSynchronization(challengeAttr), document().baseURL());
     if (value.isNull())
         return false;
-    encoded_values.appendData(name(), value.utf8());
+    formData.append(name(), value);
     return true;
 }
 
@@ -144,8 +149,11 @@ bool HTMLKeygenElement::shouldSaveAndRestoreFormControlState() const
 
 HTMLSelectElement* HTMLKeygenElement::shadowSelect() const
 {
-    ShadowRoot* root = userAgentShadowRoot();
-    return root ? downcast<HTMLSelectElement>(root->firstChild()) : nullptr;
+    auto root = userAgentShadowRoot();
+    if (!root)
+        return nullptr;
+
+    return childrenOfType<HTMLSelectElement>(*root).first();
 }
 
 } // namespace

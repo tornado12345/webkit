@@ -23,35 +23,19 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef RenderMediaControls_h
-#define RenderMediaControls_h
+#pragma once
 
-#if ENABLE(VIDEO)
-
-#include "MediaControlElements.h"
+#if ENABLE(VIDEO) && PLATFORM(WIN) && USE(CG)
 
 namespace WebCore {
 
-struct PaintInfo;
-
-class HTMLMediaElement;
-class IntRect;
-class IntSize;
-class RenderBox;
-class RenderObject;
 class RenderStyle;
 
 class RenderMediaControls {
 public:
-
-#if PLATFORM(WIN)
-    static bool paintMediaControlsPart(MediaControlElementType, const RenderObject&, const PaintInfo&, const IntRect&);
     static void adjustMediaSliderThumbSize(RenderStyle&);
-#endif
 };
 
 } // namespace WebCore
 
-#endif // ENABLE(VIDEO)
-
-#endif // RenderMediaControls_h
+#endif // ENABLE(VIDEO) && PLATFORM(WIN) && USE(CG)

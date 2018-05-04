@@ -26,11 +26,12 @@
 #import "config.h"
 #import "TestRunner.h"
 
+#import "ActivateFonts.h"
 #import "InjectedBundle.h"
 #import <JavaScriptCore/JSStringRefCF.h>
 
 #if !PLATFORM(IOS)
-#import <WebCore/SoftLinking.h>
+#import <wtf/SoftLinking.h>
 
 SOFT_LINK_STAGED_FRAMEWORK(WebInspectorUI, PrivateFrameworks, A)
 #endif
@@ -89,6 +90,11 @@ JSRetainPtr<JSStringRef> TestRunner::inspectorTestStubURL()
     CFStringRef urlString = CFURLGetString(url.get());
     return adopt(JSStringCreateWithCFString(urlString));
 #endif
+}
+
+void TestRunner::installFakeHelvetica(JSStringRef configuration)
+{
+    WTR::installFakeHelvetica(toWK(configuration).get());
 }
 
 } // namespace WTR

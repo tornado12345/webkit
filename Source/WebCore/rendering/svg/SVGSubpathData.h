@@ -17,11 +17,10 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGSubpathData_h
-#define SVGSubpathData_h
+#pragma once
 
 #include "Path.h"
-#include <wtf/Vector.h>
+#include <wtf/Forward.h>
 
 namespace WebCore {
 
@@ -87,7 +86,4 @@ private:
     bool m_pathIsZeroLength { false };
 };
 
-}
-
-#endif // SVGSubpathData_h
-
+} // namespace WebCore

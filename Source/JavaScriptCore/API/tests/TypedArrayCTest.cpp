@@ -26,7 +26,11 @@
 #include "config.h"
 #include "TypedArrayCTest.h"
 
-#include "JavaScriptCore.h"
+#include "JavaScript.h"
+#include <cmath>
+#include <limits.h>
+#include <math.h>
+#include <stdio.h>
 #include <wtf/Assertions.h>
 
 extern "C" void JSSynchronousGarbageCollectForDebugging(JSContextRef);
@@ -81,7 +85,7 @@ inline int unexpectedException(const char* name)
 static int assertEqualsAsNumber(JSGlobalContextRef context, JSValueRef value, double expectedValue)
 {
     double number = JSValueToNumber(context, value, nullptr);
-    if (number != expectedValue && !(isnan(number) && isnan(expectedValue))) {
+    if (number != expectedValue && !(std::isnan(number) && std::isnan(expectedValue))) {
         fprintf(stderr, "assertEqualsAsNumber FAILED: %p, %lf\n", value, expectedValue);
         return 1;
     }

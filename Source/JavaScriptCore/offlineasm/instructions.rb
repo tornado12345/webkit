@@ -1,4 +1,4 @@
-# Copyright (C) 2011 Apple Inc. All rights reserved.
+# Copyright (C) 2011-2018 Apple Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -249,7 +249,10 @@ MACRO_INSTRUCTIONS =
      "bnz",
      "leai",
      "leap",
-     "memfence"
+     "memfence",
+     "tagReturnAddress",
+     "untagReturnAddress",
+     "removeCodePtrTag"
     ]
 
 X86_INSTRUCTIONS =
@@ -267,7 +270,8 @@ ARM_INSTRUCTIONS =
 ARM64_INSTRUCTIONS =
     [
      "pcrtoaddr",   # Address from PC relative offset - adr instruction
-     "nopFixCortexA53Err835769" # nop on Cortex-A53 (nothing otherwise)
+     "nopFixCortexA53Err835769", # nop on Cortex-A53 (nothing otherwise)
+     "globaladdr"
     ]
 
 RISC_INSTRUCTIONS =
@@ -290,23 +294,6 @@ MIPS_INSTRUCTIONS =
     "pichdr"
     ]
 
-SH4_INSTRUCTIONS =
-    [
-    "flushcp",
-    "alignformova",
-    "mova",
-    "shllx",
-    "shlrx",
-    "shld",
-    "shad",
-    "bdnan",
-    "loaddReversedAndIncrementAddress",
-    "storedReversedAndDecrementAddress",
-    "ldspr",
-    "stspr",
-    "setargs"
-    ]
-
 CXX_INSTRUCTIONS =
     [
      "cloopCrash",              # no operands
@@ -324,7 +311,7 @@ CXX_INSTRUCTIONS =
      "cloopDo",              # no operands
     ]
 
-INSTRUCTIONS = MACRO_INSTRUCTIONS + X86_INSTRUCTIONS + ARM_INSTRUCTIONS + ARM64_INSTRUCTIONS + RISC_INSTRUCTIONS + MIPS_INSTRUCTIONS + SH4_INSTRUCTIONS + CXX_INSTRUCTIONS
+INSTRUCTIONS = MACRO_INSTRUCTIONS + X86_INSTRUCTIONS + ARM_INSTRUCTIONS + ARM64_INSTRUCTIONS + RISC_INSTRUCTIONS + MIPS_INSTRUCTIONS + CXX_INSTRUCTIONS
 
 INSTRUCTION_SET = INSTRUCTIONS.to_set
 

@@ -25,13 +25,16 @@
 #include "CSSPropertyNames.h"
 #include "RenderSVGForeignObject.h"
 #include "RenderSVGResource.h"
-#include "SVGLength.h"
+#include "SVGLengthValue.h"
 #include "SVGNames.h"
 #include "XLinkNames.h"
 #include <wtf/Assertions.h>
+#include <wtf/IsoMallocInlines.h>
 #include <wtf/NeverDestroyed.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(SVGForeignObjectElement);
 
 // Animated property definitions
 DEFINE_ANIMATED_LENGTH(SVGForeignObjectElement, SVGNames::xAttr, X, x)
@@ -69,15 +72,13 @@ Ref<SVGForeignObjectElement> SVGForeignObjectElement::create(const QualifiedName
 
 bool SVGForeignObjectElement::isSupportedAttribute(const QualifiedName& attrName)
 {
-    static NeverDestroyed<HashSet<QualifiedName>> supportedAttributes;
-    if (supportedAttributes.get().isEmpty()) {
-        SVGLangSpace::addSupportedAttributes(supportedAttributes);
-        SVGExternalResourcesRequired::addSupportedAttributes(supportedAttributes);
-        supportedAttributes.get().add(SVGNames::xAttr);
-        supportedAttributes.get().add(SVGNames::yAttr);
-        supportedAttributes.get().add(SVGNames::widthAttr);
-        supportedAttributes.get().add(SVGNames::heightAttr);
-    }
+    static const auto supportedAttributes = makeNeverDestroyed([] {
+        HashSet<QualifiedName> set;
+        SVGLangSpace::addSupportedAttributes(set);
+        SVGExternalResourcesRequired::addSupportedAttributes(set);
+        set.add({ SVGNames::xAttr.get(), SVGNames::yAttr.get(), SVGNames::widthAttr.get(), SVGNames::heightAttr.get() });
+        return set;
+    }());
     return supportedAttributes.get().contains<SVGAttributeHashTranslator>(attrName);
 }
 
@@ -86,13 +87,13 @@ void SVGForeignObjectElement::parseAttribute(const QualifiedName& name, const At
     SVGParsingError parseError = NoError;
 
     if (name == SVGNames::xAttr)
-        setXBaseValue(SVGLength::construct(LengthModeWidth, value, parseError));
+        setXBaseValue(SVGLengthValue::construct(LengthModeWidth, value, parseError));
     else if (name == SVGNames::yAttr)
-        setYBaseValue(SVGLength::construct(LengthModeHeight, value, parseError));
+        setYBaseValue(SVGLengthValue::construct(LengthModeHeight, value, parseError));
     else if (name == SVGNames::widthAttr)
-        setWidthBaseValue(SVGLength::construct(LengthModeWidth, value, parseError));
+        setWidthBaseValue(SVGLengthValue::construct(LengthModeWidth, value, parseError));
     else if (name == SVGNames::heightAttr)
-        setHeightBaseValue(SVGLength::construct(LengthModeHeight, value, parseError));
+        setHeightBaseValue(SVGLengthValue::construct(LengthModeHeight, value, parseError));
 
     reportAttributeParsingError(parseError, name, value);
 
@@ -144,7 +145,7 @@ bool SVGForeignObjectElement::rendererIsNeeded(const RenderStyle& style)
     // Note that we currently do not support foreignObject instantiation via <use>, hence it is safe
     // to use parentElement() here. If that changes, this method should be updated to use
     // parentOrShadowHostElement() instead.
-    Element* ancestor = parentElement();
+    auto ancestor = makeRefPtr(parentElement());
     while (ancestor && ancestor->isSVGElement()) {
         if (ancestor->renderer() && ancestor->renderer()->isSVGHiddenContainer())
             return false;

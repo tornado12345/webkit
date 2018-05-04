@@ -28,12 +28,14 @@
 
 #pragma once
 
-#include "EventTarget.h"
+#include "ExceptionOr.h"
 #include "SQLCallbackWrapper.h"
 #include "SQLTransactionBackend.h"
 #include "SQLTransactionStateMachine.h"
-#include <wtf/Ref.h>
-#include <wtf/RefPtr.h>
+#include "SQLValue.h"
+#include <wtf/Deque.h>
+#include <wtf/Lock.h>
+#include <wtf/Optional.h>
 
 namespace WebCore {
 
@@ -44,12 +46,11 @@ class SQLStatementErrorCallback;
 class SQLTransactionBackend;
 class SQLTransactionCallback;
 class SQLTransactionErrorCallback;
-class SQLValue;
 class VoidCallback;
 
 class SQLTransactionWrapper : public ThreadSafeRefCounted<SQLTransactionWrapper> {
 public:
-    virtual ~SQLTransactionWrapper() { }
+    virtual ~SQLTransactionWrapper() = default;
     virtual bool performPreflight(SQLTransaction&) = 0;
     virtual bool performPostflight(SQLTransaction&) = 0;
     virtual SQLError* sqlError() const = 0;
@@ -61,7 +62,7 @@ public:
     static Ref<SQLTransaction> create(Ref<Database>&&, RefPtr<SQLTransactionCallback>&&, RefPtr<VoidCallback>&& successCallback, RefPtr<SQLTransactionErrorCallback>&&, RefPtr<SQLTransactionWrapper>&&, bool readOnly);
     ~SQLTransaction();
 
-    void executeSQL(const String& sqlStatement, const Vector<SQLValue>& arguments, RefPtr<SQLStatementCallback>&&, RefPtr<SQLStatementErrorCallback>&&, ExceptionCode&);
+    ExceptionOr<void> executeSql(const String& sqlStatement, std::optional<Vector<SQLValue>>&& arguments, RefPtr<SQLStatementCallback>&&, RefPtr<SQLStatementErrorCallback>&&);
 
     void lockAcquired();
     void performNextStep();
@@ -127,14 +128,14 @@ private:
 
     void (SQLTransaction::*m_nextStep)();
 
-    bool m_executeSqlAllowed;
+    bool m_executeSqlAllowed { false };
     RefPtr<SQLError> m_transactionError;
 
-    bool m_shouldRetryCurrentStatement;
-    bool m_modifiedDatabase;
-    bool m_lockAcquired;
-    bool m_readOnly;
-    bool m_hasVersionMismatch;
+    bool m_shouldRetryCurrentStatement { false };
+    bool m_modifiedDatabase { false };
+    bool m_lockAcquired { false };
+    bool m_readOnly { false };
+    bool m_hasVersionMismatch { false };
 
     Lock m_statementMutex;
     Deque<std::unique_ptr<SQLStatement>> m_statementQueue;

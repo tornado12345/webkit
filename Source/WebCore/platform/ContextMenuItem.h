@@ -43,7 +43,7 @@ enum ContextMenuAction {
     ContextMenuItemTagOpenImageInNewWindow,
     ContextMenuItemTagDownloadImageToDisk,
     ContextMenuItemTagCopyImageToClipboard,
-#if PLATFORM(GTK) || PLATFORM(EFL)
+#if PLATFORM(GTK)
     ContextMenuItemTagCopyImageUrlToClipboard,
 #endif
     ContextMenuItemTagOpenFrameInNewWindow,
@@ -56,11 +56,7 @@ enum ContextMenuAction {
     ContextMenuItemTagPaste,
 #if PLATFORM(GTK)
     ContextMenuItemTagDelete,
-#endif
-#if PLATFORM(GTK) || PLATFORM (EFL)
     ContextMenuItemTagSelectAll,
-#endif
-#if PLATFORM(GTK)
     ContextMenuItemTagInputMethods,
     ContextMenuItemTagUnicode,
     ContextMenuItemTagUnicodeInsertLRMMark,
@@ -182,7 +178,7 @@ public:
 
     void setSubMenu(ContextMenu*);
 
-    ContextMenuItem(ContextMenuAction, const String&, bool enabled, bool checked, const Vector<ContextMenuItem>& subMenuItems);
+    WEBCORE_EXPORT ContextMenuItem(ContextMenuAction, const String&, bool enabled, bool checked, const Vector<ContextMenuItem>& subMenuItems);
     ContextMenuItem();
 
     bool isNull() const;

@@ -23,8 +23,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef SystemTracing_h
-#define SystemTracing_h
+#pragma once
 
 #if USE(APPLE_INTERNAL_SDK)
 #include <System/sys/kdebug.h>
@@ -42,64 +41,92 @@ enum TracePointCode {
     WTFRange = 0,
 
     JavaScriptRange = 2500,
+    VMEntryScopeStart,
+    VMEntryScopeEnd,
+    WebAssemblyCompileStart,
+    WebAssemblyCompileEnd,
+    WebAssemblyExecuteStart,
+    WebAssemblyExecuteEnd,
 
     WebCoreRange = 5000,
+    MainResourceLoadDidStartProvisional,
+    MainResourceLoadDidEnd,
+    SubresourceLoadWillStart,
+    SubresourceLoadDidEnd,
+    FetchCookiesStart,
+    FetchCookiesEnd,
     StyleRecalcStart,
     StyleRecalcEnd,
+    RenderTreeBuildStart,
+    RenderTreeBuildEnd,
     LayoutStart,
     LayoutEnd,
-    PaintViewStart,
-    PaintViewEnd,
     PaintLayerStart,
     PaintLayerEnd,
-    RAFDisplayLinkScheduled,
-    RAFDisplayLinkFired,
+    AsyncImageDecodeStart,
+    AsyncImageDecodeEnd,
     RAFCallbackStart,
     RAFCallbackEnd,
+    MemoryPressureHandlerStart,
+    MemoryPressureHandlerEnd,
+    UpdateTouchRegionsStart,
+    UpdateTouchRegionsEnd,
+    DisplayListRecordStart,
+    DisplayListRecordEnd,
+    DisplayRefreshDispatchingToMainThread,
 
     WebKitRange = 10000,
-    WebKit2Range = 12000,
+    WebHTMLViewPaintStart,
+    WebHTMLViewPaintEnd,
 
-    RAFDidUpdateStart,
-    RAFDidUpdateEnd,
-    RAFBackingStoreFlushStart,
-    RAFBackingStoreFlushEnd,
-    RAFBuildTransactionStart,
-    RAFBuildTransactionEnd,
+    WebKit2Range = 12000,
+    BackingStoreFlushStart,
+    BackingStoreFlushEnd,
+    BuildTransactionStart,
+    BuildTransactionEnd,
+    SyncMessageStart,
+    SyncMessageEnd,
+    SyncTouchEventStart,
+    SyncTouchEventEnd,
+    InitializeWebProcessStart,
+    InitializeWebProcessEnd,
 
     UIProcessRange = 14000,
-
-    RAFCommitLayerTreeStart,
-    RAFCommitLayerTreeEnd,
-    RAFDidRefreshDisplayStart,
-    RAFDidRefreshDisplayEnd,
+    CommitLayerTreeStart,
+    CommitLayerTreeEnd,
+    ProcessLaunchStart,
+    ProcessLaunchEnd,
 };
 
 #ifdef __cplusplus
 
 namespace WTF {
 
-inline void TracePoint(TracePointCode code)
+inline void tracePoint(TracePointCode code, uint64_t data1 = 0, uint64_t data2 = 0, uint64_t data3 = 0, uint64_t data4 = 0)
 {
 #if HAVE(KDEBUG_H)
-    kdebug_trace(ARIADNEDBG_CODE(WEBKIT_COMPONENT, code), 0, 0, 0, 0);
+    kdebug_trace(ARIADNEDBG_CODE(WEBKIT_COMPONENT, code), data1, data2, data3, data4);
 #else
     UNUSED_PARAM(code);
+    UNUSED_PARAM(data1);
+    UNUSED_PARAM(data2);
+    UNUSED_PARAM(data3);
+    UNUSED_PARAM(data4);
 #endif
 }
 
 class TraceScope {
 public:
 
-    TraceScope(TracePointCode entryCode, TracePointCode exitCode)
+    TraceScope(TracePointCode entryCode, TracePointCode exitCode, uint64_t data1 = 0, uint64_t data2 = 0, uint64_t data3 = 0, uint64_t data4 = 0)
         : m_exitCode(exitCode)
     {
-        TracePoint(entryCode);
+        tracePoint(entryCode, data1, data2, data3, data4);
     }
 
     ~TraceScope()
     {
-        TracePoint(m_exitCode);
+        tracePoint(m_exitCode);
     }
 
 private:
@@ -109,9 +136,6 @@ private:
 } // namespace WTF
 
 using WTF::TraceScope;
-using WTF::TracePoint;
+using WTF::tracePoint;
 
 #endif // __cplusplus
-
-#endif // SystemTracing_h
-

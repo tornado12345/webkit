@@ -1,6 +1,7 @@
 /*
  * Copyright (C) 2010, 2015 Apple Inc. All rights reserved.
  * Portions Copyright (c) 2010 Motorola Mobility, Inc.  All rights reserved.
+ * Copyright (C) 2017 Sony Interactive Entertainment Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,22 +28,18 @@
 #ifndef WorkQueue_h
 #define WorkQueue_h
 
-#include <chrono>
-#include <functional>
 #include <wtf/Forward.h>
 #include <wtf/FunctionDispatcher.h>
-#include <wtf/RefCounted.h>
+#include <wtf/Seconds.h>
 #include <wtf/Threading.h>
 
 #if USE(COCOA_EVENT_LOOP)
 #include <dispatch/dispatch.h>
 #endif
 
-#if USE(EFL_EVENT_LOOP)
-#include <DispatchQueueEfl.h>
-#endif
-
 #if USE(WINDOWS_EVENT_LOOP)
+#include <wtf/HashMap.h>
+#include <wtf/ThreadingPrimitives.h>
 #include <wtf/Vector.h>
 #endif
 
@@ -53,7 +50,12 @@
 
 namespace WTF {
 
+#if USE(WINDOWS_EVENT_LOOP)
+class WorkItemContext;
+#endif
+
 class WorkQueue final : public FunctionDispatcher {
+
 public:
     enum class Type {
         Serial,
@@ -70,18 +72,18 @@ public:
     WTF_EXPORT_PRIVATE static Ref<WorkQueue> create(const char* name, Type = Type::Serial, QOS = QOS::Default);
     virtual ~WorkQueue();
 
-    WTF_EXPORT_PRIVATE void dispatch(Function<void ()>&&) override;
-    WTF_EXPORT_PRIVATE void dispatchAfter(std::chrono::nanoseconds, Function<void ()>&&);
+    WTF_EXPORT_PRIVATE void dispatch(Function<void()>&&) override;
+    WTF_EXPORT_PRIVATE void dispatchAfter(Seconds, Function<void()>&&);
 
-    WTF_EXPORT_PRIVATE static void concurrentApply(size_t iterations, const std::function<void (size_t index)>&);
+    WTF_EXPORT_PRIVATE static void concurrentApply(size_t iterations, WTF::Function<void(size_t index)>&&);
 
-#if USE(EFL_EVENT_LOOP)
-    void registerSocketEventHandler(int, std::function<void ()>);
-    void unregisterSocketEventHandler(int);
-#elif USE(COCOA_EVENT_LOOP)
+#if USE(COCOA_EVENT_LOOP)
     dispatch_queue_t dispatchQueue() const { return m_dispatchQueue; }
 #elif USE(GLIB_EVENT_LOOP) || USE(GENERIC_EVENT_LOOP)
     RunLoop& runLoop() const { return *m_runLoop; }
+#elif USE(WINDOWS_EVENT_LOOP)
+    WTF_EXPORT_PRIVATE void registerHandle(HANDLE, Function<void()>&&);
+    WTF_EXPORT_PRIVATE void unregisterAndCloseHandle(HANDLE);
 #endif
 
 private:
@@ -91,33 +93,32 @@ private:
     void platformInvalidate();
 
 #if USE(WINDOWS_EVENT_LOOP)
+    static void CALLBACK handleCallback(void* context, BOOLEAN timerOrWaitFired);
     static void CALLBACK timerCallback(void* context, BOOLEAN timerOrWaitFired);
     static DWORD WINAPI workThreadCallback(void* context);
 
     bool tryRegisterAsWorkThread();
     void unregisterAsWorkThread();
     void performWorkOnRegisteredWorkThread();
+
+    static void unregisterWaitAndDestroyItemSoon(Ref<WorkItemContext>&&);
+    static DWORD WINAPI unregisterWaitAndDestroyItemCallback(void* context);
 #endif
 
-#if USE(EFL_EVENT_LOOP)
-    RefPtr<DispatchQueue> m_dispatchQueue;
-#elif USE(COCOA_EVENT_LOOP)
+#if USE(COCOA_EVENT_LOOP)
     static void executeFunction(void*);
     dispatch_queue_t m_dispatchQueue;
 #elif USE(WINDOWS_EVENT_LOOP)
     volatile LONG m_isWorkThreadRegistered;
 
-    Mutex m_functionQueueLock;
-    Vector<Function<void ()>> m_functionQueue;
+    Lock m_functionQueueLock;
+    Lock m_itemsMapLock;
+    Vector<Function<void()>> m_functionQueue;
+    HashMap<HANDLE, Ref<WorkItemContext>> m_itemsMap;
 
     HANDLE m_timerQueue;
 #elif USE(GLIB_EVENT_LOOP) || USE(GENERIC_EVENT_LOOP)
-    ThreadIdentifier m_workQueueThread;
-    Lock m_initializeRunLoopConditionMutex;
-    Condition m_initializeRunLoopCondition;
     RunLoop* m_runLoop;
-    Lock m_terminateRunLoopConditionMutex;
-    Condition m_terminateRunLoopCondition;
 #endif
 };
 

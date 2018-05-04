@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012-2013, 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2012-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,7 +27,9 @@
 #include "JITExceptions.h"
 
 #include "CallFrame.h"
+#include "CatchScope.h"
 #include "CodeBlock.h"
+#include "Disassembler.h"
 #include "Interpreter.h"
 #include "JSCInlines.h"
 #include "JSCJSValue.h"
@@ -54,8 +56,8 @@ void genericUnwind(VM* vm, ExecState* callFrame, UnwindStart unwindStart)
     
     ExecState* shadowChickenTopFrame = callFrame;
     if (unwindStart == UnwindFromCallerFrame) {
-        VMEntryFrame* topVMEntryFrame = vm->topVMEntryFrame;
-        shadowChickenTopFrame = callFrame->callerFrame(topVMEntryFrame);
+        EntryFrame* topEntryFrame = vm->topEntryFrame;
+        shadowChickenTopFrame = callFrame->callerFrame(topEntryFrame);
     }
     vm->shadowChicken().log(*vm, shadowChickenTopFrame, ShadowChicken::Packet::throwPacket());
     
@@ -80,10 +82,11 @@ void genericUnwind(VM* vm, ExecState* callFrame, UnwindStart unwindStart)
         catchRoutine = catchPCForInterpreter->u.pointer;
 #endif
     } else
-        catchRoutine = LLInt::getCodePtr(handleUncaughtException);
+        catchRoutine = LLInt::getCodePtr<ExceptionHandlerPtrTag>(handleUncaughtException).executableAddress();
     
-    ASSERT(bitwise_cast<uintptr_t>(callFrame) < bitwise_cast<uintptr_t>(vm->topVMEntryFrame));
+    ASSERT(bitwise_cast<uintptr_t>(callFrame) < bitwise_cast<uintptr_t>(vm->topEntryFrame));
 
+    assertIsTaggedWith(catchRoutine, ExceptionHandlerPtrTag);
     vm->callFrameForCatch = callFrame;
     vm->targetMachinePCForThrow = catchRoutine;
     vm->targetInterpreterPCForThrow = catchPCForInterpreter;

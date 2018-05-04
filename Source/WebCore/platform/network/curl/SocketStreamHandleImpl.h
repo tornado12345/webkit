@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2009-2018 Apple Inc. All rights reserved.
  * Copyright (C) 2009 Google Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -37,12 +37,15 @@
 #include <winsock2.h>
 #endif
 
-#include "SessionID.h"
 #include <curl/curl.h>
+#include <pal/SessionID.h>
 #include <wtf/Deque.h>
 #include <wtf/Lock.h>
 #include <wtf/RefCounted.h>
+#include <wtf/Seconds.h>
+#include <wtf/StreamBuffer.h>
 #include <wtf/Threading.h>
+#include <wtf/UniqueArray.h>
 
 namespace WebCore {
 
@@ -50,19 +53,23 @@ class SocketStreamHandleClient;
 
 class SocketStreamHandleImpl : public SocketStreamHandle {
 public:
-    static Ref<SocketStreamHandleImpl> create(const URL& url, SocketStreamHandleClient& client, SessionID) { return adoptRef(*new SocketStreamHandleImpl(url, client)); }
+    static Ref<SocketStreamHandleImpl> create(const URL& url, SocketStreamHandleClient& client, PAL::SessionID, const String&, SourceApplicationAuditToken&&) { return adoptRef(*new SocketStreamHandleImpl(url, client)); }
 
     virtual ~SocketStreamHandleImpl();
 
+    WEBCORE_EXPORT void platformSend(const uint8_t* data, size_t length, Function<void(bool)>&&) final;
+    WEBCORE_EXPORT void platformSendHandshake(const uint8_t* data, size_t length, const std::optional<CookieRequestHeaderFieldProxy>&, Function<void(bool, bool)>&&) final;
+    WEBCORE_EXPORT void platformClose() final;
 private:
-    SocketStreamHandleImpl(const URL&, SocketStreamHandleClient&);
+    WEBCORE_EXPORT SocketStreamHandleImpl(const URL&, SocketStreamHandleClient&);
 
-    Optional<size_t> platformSend(const char* data, size_t length) final;
-    void platformClose() final;
+    size_t bufferedAmount() final;
+    std::optional<size_t> platformSendInternal(const uint8_t*, size_t);
+    bool sendPendingData();
 
     bool readData(CURL*);
     bool sendData(CURL*);
-    bool waitForAvailableData(CURL*, std::chrono::milliseconds selectTimeout);
+    bool waitForAvailableData(CURL*, Seconds selectTimeout);
 
     void startThread();
     void stopThread();
@@ -71,7 +78,7 @@ private:
     void didOpenSocket();
 
     struct SocketData {
-        SocketData(std::unique_ptr<char[]>&& source, size_t length)
+        SocketData(UniqueArray<char>&& source, size_t length)
         {
             data = WTFMove(source);
             size = length;
@@ -84,16 +91,20 @@ private:
             other.size = 0;
         }
 
-        std::unique_ptr<char[]> data;
+        UniqueArray<char> data;
         size_t size { 0 };
     };
 
-    ThreadIdentifier m_workerThread { 0 };
+    RefPtr<Thread> m_workerThread;
     std::atomic<bool> m_stopThread { false };
     Lock m_mutexSend;
     Lock m_mutexReceive;
     Deque<SocketData> m_sendData;
     Deque<SocketData> m_receiveData;
+    bool m_closed { false };
+
+    StreamBuffer<uint8_t, 1024 * 1024> m_buffer;
+    static const unsigned maxBufferSize = 100 * 1024 * 1024;
 };
 
 } // namespace WebCore

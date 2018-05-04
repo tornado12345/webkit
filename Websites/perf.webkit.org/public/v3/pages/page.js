@@ -1,6 +1,6 @@
 
 class Page extends ComponentBase {
-    constructor(name, container)
+    constructor(name)
     {
         super('page-component');
         this._name = name;
@@ -19,12 +19,19 @@ class Page extends ComponentBase {
         if (this._router)
             this._router.pageDidOpen(this);
         this.updateFromSerializedState(state, true);
-        this.render();
+        this.enqueueToRender();
+    }
+
+    enqueueToRender()
+    {
+        if (this._router && this._router.currentPage() != this)
+            return;
+        super.enqueueToRender();
     }
 
     render()
     {
-        var title = this.pageTitle();
+        const title = this.pageTitle();
         if (document.title != title)
             document.title = title;
         super.render();

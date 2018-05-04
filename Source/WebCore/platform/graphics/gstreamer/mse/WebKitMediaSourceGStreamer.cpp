@@ -29,7 +29,7 @@
 #if ENABLE(VIDEO) && ENABLE(MEDIA_SOURCE) && USE(GSTREAMER)
 
 #include "AudioTrackPrivateGStreamer.h"
-#include "GStreamerUtilities.h"
+#include "GStreamerCommon.h"
 #include "MediaDescription.h"
 #include "MediaPlayerPrivateGStreamerMSE.h"
 #include "MediaSample.h"
@@ -48,9 +48,14 @@
 #include <gst/video/video.h>
 #include <wtf/Condition.h>
 #include <wtf/MainThread.h>
-#include <wtf/glib/GMutexLocker.h>
 #include <wtf/glib/GUniquePtr.h>
 #include <wtf/text/CString.h>
+
+GST_DEBUG_CATEGORY_STATIC(webkit_media_src_debug);
+#define GST_CAT_DEFAULT webkit_media_src_debug
+
+#define webkit_media_src_parent_class parent_class
+#define WEBKIT_MEDIA_SRC_CATEGORY_INIT GST_DEBUG_CATEGORY_INIT(webkit_media_src_debug, "webkitmediasrc", 0, "websrc element");
 
 static GstStaticPadTemplate srcTemplate = GST_STATIC_PAD_TEMPLATE("src_%u", GST_PAD_SRC,
     GST_PAD_SOMETIMES, GST_STATIC_CAPS_ANY);
@@ -186,11 +191,6 @@ static Stream* getStreamByAppsrc(WebKitMediaSrc* source, GstElement* appsrc)
     return nullptr;
 }
 
-GST_DEBUG_CATEGORY_STATIC(webkit_media_src_debug);
-#define GST_CAT_DEFAULT webkit_media_src_debug
-
-#define webkit_media_src_parent_class parent_class
-#define WEBKIT_MEDIA_SRC_CATEGORY_INIT GST_DEBUG_CATEGORY_INIT(webkit_media_src_debug, "webkitmediasrc", 0, "websrc element");
 G_DEFINE_TYPE_WITH_CODE(WebKitMediaSrc, webkit_media_src, GST_TYPE_BIN,
     G_IMPLEMENT_INTERFACE(GST_TYPE_URI_HANDLER, webKitMediaSrcUriHandlerInit);
     WEBKIT_MEDIA_SRC_CATEGORY_INIT);
@@ -268,7 +268,7 @@ void webKitMediaSrcFinalize(GObject* object)
     WebKitMediaSrc* source = WEBKIT_MEDIA_SRC(object);
     WebKitMediaSrcPrivate* priv = source->priv;
 
-    Deque<Stream*> oldStreams;
+    Vector<Stream*> oldStreams;
     source->priv->streams.swap(oldStreams);
 
     for (Stream* stream : oldStreams)
@@ -401,8 +401,8 @@ gboolean webKitMediaSrcQueryWithParent(GstPad* pad, GstObject* parent, GstQuery*
         switch (format) {
         case GST_FORMAT_TIME: {
             if (source->priv && source->priv->mediaPlayerPrivate) {
-                float duration = source->priv->mediaPlayerPrivate->durationMediaTime().toFloat();
-                if (duration > 0) {
+                MediaTime duration = source->priv->mediaPlayerPrivate->durationMediaTime();
+                if (duration > MediaTime::zeroTime()) {
                     gst_query_set_duration(query, format, WebCore::toGstClockTime(duration));
                     GST_DEBUG_OBJECT(source, "Answering: duration=%" GST_TIME_FORMAT, GST_TIME_ARGS(WebCore::toGstClockTime(duration)));
                     result = TRUE;
@@ -451,18 +451,13 @@ gboolean webKitMediaSrcQueryWithParent(GstPad* pad, GstObject* parent, GstQuery*
 
 void webKitMediaSrcUpdatePresentationSize(GstCaps* caps, Stream* stream)
 {
-    GstStructure* structure = gst_caps_get_structure(caps, 0);
-    const gchar* structureName = gst_structure_get_name(structure);
-    GstVideoInfo info;
-
     GST_OBJECT_LOCK(stream->parent);
-    if (g_str_has_prefix(structureName, "video/") && gst_video_info_from_caps(&info, caps)) {
-        float width, height;
-
-        // FIXME: Correct?.
-        width = info.width;
-        height = info.height * ((float) info.par_d / (float) info.par_n);
-        stream->presentationSize = WebCore::FloatSize(width, height);
+    if (WebCore::doCapsHaveType(caps, GST_VIDEO_CAPS_TYPE_PREFIX)) {
+        std::optional<WebCore::FloatSize> size = WebCore::getVideoResolutionFromCaps(caps);
+        if (size.has_value())
+            stream->presentationSize = size.value();
+        else
+            stream->presentationSize = WebCore::FloatSize();
     } else
         stream->presentationSize = WebCore::FloatSize();
 
@@ -518,7 +513,32 @@ void webKitMediaSrcFreeStream(WebKitMediaSrc* source, Stream* stream)
         // Don't trigger callbacks from this appsrc to avoid using the stream anymore.
         gst_app_src_set_callbacks(GST_APP_SRC(stream->appsrc), &disabledAppsrcCallbacks, nullptr, nullptr);
         gst_app_src_end_of_stream(GST_APP_SRC(stream->appsrc));
+        gst_element_set_state(stream->appsrc, GST_STATE_NULL);
+        gst_bin_remove(GST_BIN(source), stream->appsrc);
+        stream->appsrc = nullptr;
     }
+
+    if (stream->parser) {
+        gst_element_set_state(stream->parser, GST_STATE_NULL);
+        gst_bin_remove(GST_BIN(source), stream->parser);
+        stream->parser = nullptr;
+    }
+
+    GST_OBJECT_LOCK(source);
+    switch (stream->type) {
+    case WebCore::Audio:
+        source->priv->numberOfAudioStreams--;
+        break;
+    case WebCore::Video:
+        source->priv->numberOfVideoStreams--;
+        break;
+    case WebCore::Text:
+        source->priv->numberOfTextStreams--;
+        break;
+    default:
+        break;
+    }
+    GST_OBJECT_UNLOCK(source);
 
     if (stream->type != WebCore::Invalid) {
         GST_DEBUG("Freeing track-related info on stream %p", stream);
@@ -592,7 +612,7 @@ GstURIType webKitMediaSrcUriGetType(GType)
 
 const gchar* const* webKitMediaSrcGetProtocols(GType)
 {
-    static const char* protocols[] = {"mediasourceblob", 0 };
+    static const char* protocols[] = {"mediasourceblob", nullptr };
     return protocols;
 }
 

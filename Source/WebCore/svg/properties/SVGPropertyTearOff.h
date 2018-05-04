@@ -42,19 +42,13 @@ public:
 
     // Used for child types (baseVal/animVal) of a SVGAnimated* property (for example: SVGAnimatedLength::baseVal()).
     // Also used for list tear offs (for example: text.x.baseVal.getItem(0)).
-    static Ref<Self> create(SVGAnimatedProperty* animatedProperty, SVGPropertyRole role, PropertyType& value)
+    static Ref<Self> create(SVGAnimatedProperty& animatedProperty, SVGPropertyRole role, PropertyType& value)
     {
-        ASSERT(animatedProperty);
         return adoptRef(*new Self(animatedProperty, role, value));
     }
 
     // Used for non-animated POD types (for example: SVGSVGElement::createSVGLength()).
     static Ref<Self> create(const PropertyType& initialValue)
-    {
-        return adoptRef(*new Self(initialValue));
-    }
-
-    static Ref<Self> create(const PropertyType* initialValue)
     {
         return adoptRef(*new Self(initialValue));
     }
@@ -131,6 +125,11 @@ public:
         return false;
     }
 
+    WeakPtr<SVGPropertyTearOff> createWeakPtr() const
+    {
+        return m_weakPtrFactory.createWeakPtr(*const_cast<SVGPropertyTearOff*>(this));
+    }
+
 protected:
     SVGPropertyTearOff(SVGAnimatedProperty* animatedProperty, SVGPropertyRole role, PropertyType& value)
         : m_animatedProperty(animatedProperty)
@@ -159,9 +158,6 @@ protected:
             detachChildren();
             delete m_value;
         }
-
-        if (m_animatedProperty)
-            m_animatedProperty->propertyWillBeDeleted(*this);
     }
 
     void detachChildren()
@@ -177,7 +173,8 @@ protected:
     SVGPropertyRole m_role;
     PropertyType* m_value;
     Vector<WeakPtr<SVGPropertyTearOffBase>> m_childTearOffs;
-    bool m_valueIsCopy : 1;
+    WeakPtrFactory<SVGPropertyTearOff> m_weakPtrFactory;
+    bool m_valueIsCopy;
 };
 
 }

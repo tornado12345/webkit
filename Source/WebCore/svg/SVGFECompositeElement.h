@@ -18,8 +18,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGFECompositeElement_h
-#define SVGFECompositeElement_h
+#pragma once
 
 #include "FEComposite.h"
 #include "SVGAnimatedEnumeration.h"
@@ -81,6 +80,7 @@ struct SVGPropertyTraits<CompositeOperationType> {
 };
 
 class SVGFECompositeElement final : public SVGFilterPrimitiveStandardAttributes {
+    WTF_MAKE_ISO_ALLOCATED(SVGFECompositeElement);
 public:
     static Ref<SVGFECompositeElement> create(const QualifiedName&, Document&);
 
@@ -104,5 +104,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif

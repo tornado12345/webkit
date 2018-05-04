@@ -25,7 +25,6 @@
 
 #pragma once
 
-#include "PlatformExportMacros.h"
 #include <wtf/Forward.h>
 #include <wtf/RetainPtr.h>
 #include <wtf/text/WTFString.h>
@@ -41,6 +40,10 @@ typedef const struct __CFURL* CFURLRef;
 #if USE(FOUNDATION)
 OBJC_CLASS NSURL;
 #endif
+
+namespace WTF {
+class TextStream;
+}
 
 namespace WebCore {
 
@@ -71,8 +74,8 @@ public:
     WEBCORE_EXPORT URL(const URL& base, const String& relative);
     URL(const URL& base, const String& relative, const TextEncoding&);
 
-    static URL fakeURLWithRelativePart(const String&);
-    static URL fileURLWithFileSystemPath(const String&);
+    WEBCORE_EXPORT static URL fakeURLWithRelativePart(const String&);
+    WEBCORE_EXPORT static URL fileURLWithFileSystemPath(const String&);
 
     String strippedForUseAsReferrer() const;
 
@@ -98,11 +101,13 @@ public:
 
     const String& string() const { return m_string; }
 
-    String stringCenterEllipsizedToLength(unsigned length = 1024) const;
+    WEBCORE_EXPORT String stringCenterEllipsizedToLength(unsigned length = 1024) const;
 
     WEBCORE_EXPORT StringView protocol() const;
     WEBCORE_EXPORT String host() const;
-    WEBCORE_EXPORT Optional<uint16_t> port() const;
+    WEBCORE_EXPORT std::optional<uint16_t> port() const;
+    WEBCORE_EXPORT String hostAndPort() const;
+    WEBCORE_EXPORT String protocolHostAndPort() const;
     WEBCORE_EXPORT String user() const;
     WEBCORE_EXPORT String pass() const;
     WEBCORE_EXPORT String path() const;
@@ -133,7 +138,10 @@ public:
     bool protocolIsData() const { return protocolIs("data"); }
     bool protocolIsInHTTPFamily() const;
     WEBCORE_EXPORT bool isLocalFile() const;
-    bool isBlankURL() const;
+    WEBCORE_EXPORT bool isBlankURL() const;
+    bool cannotBeABaseURL() const { return m_cannotBeABaseURL; }
+
+    WEBCORE_EXPORT bool isMatchingDomain(const String&) const;
 
     WEBCORE_EXPORT bool setProtocol(const String&);
     void setHost(const String&);
@@ -154,10 +162,12 @@ public:
     // The query may begin with a question mark, or, if not, one will be added
     // for you. Setting the query to the empty string will leave a "?" in the
     // URL (with nothing after it). To clear the query, pass a null string.
-    void setQuery(const String&);
+    WEBCORE_EXPORT void setQuery(const String&);
 
-    void setFragmentIdentifier(const String&);
-    void removeFragmentIdentifier();
+    WEBCORE_EXPORT void setFragmentIdentifier(StringView);
+    WEBCORE_EXPORT void removeFragmentIdentifier();
+
+    WEBCORE_EXPORT void removeQueryAndFragmentIdentifier();
 
     WEBCORE_EXPORT friend bool equalIgnoringFragmentIdentifier(const URL&, const URL&);
 
@@ -165,6 +175,8 @@ public:
 
     unsigned hostStart() const;
     unsigned hostEnd() const;
+
+    WEBCORE_EXPORT static bool hostIsIPAddress(const String&);
 
     unsigned pathStart() const;
     unsigned pathEnd() const;
@@ -196,8 +208,7 @@ public:
 
     template <class Encoder> void encode(Encoder&) const;
     template <class Decoder> static bool decode(Decoder&, URL&);
-
-    String serialize(bool omitFragment = false) const;
+    template <class Decoder> static std::optional<URL> decode(Decoder&);
 
 private:
     friend class URLParser;
@@ -205,12 +216,6 @@ private:
     static bool protocolIs(const String&, const char*);
     void init(const URL&, const String&, const TextEncoding&);
     void copyToBuffer(Vector<char, 512>& buffer) const;
-
-    // Parses the given URL. The originalString parameter allows for an
-    // optimization: When the source is the same as the fixed-up string,
-    // it will use the passed-in string instead of allocating a new one.
-    void parse(const String&);
-    void parse(const char* url, const String* originalString = 0);
 
     bool hasPath() const;
 
@@ -228,7 +233,6 @@ private:
     unsigned m_pathAfterLastSlash;
     unsigned m_pathEnd;
     unsigned m_queryEnd;
-    unsigned m_fragmentEnd;
 };
 
 template <class Encoder>
@@ -248,45 +252,53 @@ void URL::encode(Encoder& encoder) const
     encoder << m_pathAfterLastSlash;
     encoder << m_pathEnd;
     encoder << m_queryEnd;
-    encoder << m_fragmentEnd;
 }
 
 template <class Decoder>
 bool URL::decode(Decoder& decoder, URL& url)
 {
-    if (!decoder.decode(url.m_string))
+    auto optionalURL = URL::decode(decoder);
+    if (!optionalURL)
         return false;
+    url = WTFMove(*optionalURL);
+    return true;
+}
+
+template <class Decoder>
+std::optional<URL> URL::decode(Decoder& decoder)
+{
+    URL url;
+    if (!decoder.decode(url.m_string))
+        return std::nullopt;
     bool isValid;
     if (!decoder.decode(isValid))
-        return false;
+        return std::nullopt;
     url.m_isValid = isValid;
     if (!isValid)
-        return true;
+        return WTFMove(url);
     bool protocolIsInHTTPFamily;
     if (!decoder.decode(protocolIsInHTTPFamily))
-        return false;
+        return std::nullopt;
     url.m_protocolIsInHTTPFamily = protocolIsInHTTPFamily;
     if (!decoder.decode(url.m_schemeEnd))
-        return false;
+        return std::nullopt;
     if (!decoder.decode(url.m_userStart))
-        return false;
+        return std::nullopt;
     if (!decoder.decode(url.m_userEnd))
-        return false;
+        return std::nullopt;
     if (!decoder.decode(url.m_passwordEnd))
-        return false;
+        return std::nullopt;
     if (!decoder.decode(url.m_hostEnd))
-        return false;
+        return std::nullopt;
     if (!decoder.decode(url.m_portEnd))
-        return false;
+        return std::nullopt;
     if (!decoder.decode(url.m_pathAfterLastSlash))
-        return false;
+        return std::nullopt;
     if (!decoder.decode(url.m_pathEnd))
-        return false;
+        return std::nullopt;
     if (!decoder.decode(url.m_queryEnd))
-        return false;
-    if (!decoder.decode(url.m_fragmentEnd))
-        return false;
-    return true;
+        return std::nullopt;
+    return WTFMove(url);
 }
 
 bool operator==(const URL&, const URL&);
@@ -297,6 +309,7 @@ bool operator!=(const URL&, const String&);
 bool operator!=(const String&, const URL&);
 
 WEBCORE_EXPORT bool equalIgnoringFragmentIdentifier(const URL&, const URL&);
+WEBCORE_EXPORT bool equalIgnoringQueryAndFragment(const URL&, const URL&);
 WEBCORE_EXPORT bool protocolHostAndPortAreEqual(const URL&, const URL&);
 WEBCORE_EXPORT bool hostsAreEqual(const URL&, const URL&);
 
@@ -309,9 +322,10 @@ WEBCORE_EXPORT const URL& blankURL();
 
 WEBCORE_EXPORT bool protocolIs(const String& url, const char* protocol);
 WEBCORE_EXPORT bool protocolIsJavaScript(const String& url);
+bool protocolIsJavaScript(StringView url);
 WEBCORE_EXPORT bool protocolIsInHTTPFamily(const String& url);
 
-Optional<uint16_t> defaultPortForProtocol(StringView protocol);
+std::optional<uint16_t> defaultPortForProtocol(StringView protocol);
 WEBCORE_EXPORT bool isDefaultPortForProtocol(uint16_t port, StringView protocol);
 WEBCORE_EXPORT bool portAllowed(const URL&); // Blacklist ports that should never be used for Web resources.
 
@@ -321,7 +335,6 @@ WEBCORE_EXPORT void clearDefaultPortForProtocolMapForTesting();
 bool isValidProtocol(const String&);
 
 String mimeTypeFromDataURL(const String& url);
-WEBCORE_EXPORT String mimeTypeFromURL(const URL&);
 
 // Unescapes the given string using URL escaping rules, given an optional
 // encoding (defaulting to UTF-8 otherwise). DANGER: If the URL has "%00"
@@ -408,7 +421,7 @@ inline bool URL::hasQuery() const
 
 inline bool URL::hasFragment() const
 {
-    return m_fragmentEnd > m_queryEnd;
+    return m_isValid && m_string.length() > m_queryEnd;
 }
 
 inline bool URL::protocolIsInHTTPFamily() const
@@ -441,14 +454,16 @@ inline unsigned URL::pathAfterLastSlash() const
     return m_pathAfterLastSlash;
 }
 
+WTF::TextStream& operator<<(WTF::TextStream&, const URL&);
+
 } // namespace WebCore
 
 namespace WTF {
 
-    // URLHash is the default hash for String
-    template<typename T> struct DefaultHash;
-    template<> struct DefaultHash<WebCore::URL> {
-        typedef WebCore::URLHash Hash;
-    };
+// URLHash is the default hash for String
+template<typename T> struct DefaultHash;
+template<> struct DefaultHash<WebCore::URL> {
+    typedef WebCore::URLHash Hash;
+};
 
 } // namespace WTF

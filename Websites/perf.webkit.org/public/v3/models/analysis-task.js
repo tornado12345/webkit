@@ -7,10 +7,10 @@ class AnalysisTask extends LabeledObject {
         this._author = object.author;
         this._createdAt = object.createdAt;
 
-        console.assert(object.platform instanceof Platform);
+        console.assert(!object.platform || object.platform instanceof Platform);
         this._platform = object.platform;
 
-        console.assert(object.metric instanceof Metric);
+        console.assert(!object.metric || object.metric instanceof Metric);
         this._metric = object.metric;
 
         this._startMeasurementId = object.startRun;
@@ -29,7 +29,11 @@ class AnalysisTask extends LabeledObject {
 
     static findByPlatformAndMetric(platformId, metricId)
     {
-        return this.all().filter(function (task) { return task._platform.id() == platformId && task._metric.id() == metricId; });
+        return this.all().filter((task) => {
+            const platform = task._platform;
+            const metric = task._metric;
+            return platform && metric && platform.id() == platformId && metric.id() == metricId;
+        });
     }
 
     updateSingleton(object)
@@ -55,6 +59,7 @@ class AnalysisTask extends LabeledObject {
         this._finishedBuildRequestCount = +object.finishedBuildRequestCount;
     }
 
+    isCustom() { return !this._platform; }
     hasResults() { return this._finishedBuildRequestCount; }
     hasPendingRequests() { return this._finishedBuildRequestCount < this._buildRequestCount; }
     requestLabel() { return `${this._finishedBuildRequestCount} of ${this._buildRequestCount}`; }
@@ -81,7 +86,7 @@ class AnalysisTask extends LabeledObject {
     {
         param.task = this.id();
         return PrivilegedAPI.sendRequest('update-analysis-task', param).then(function (data) {
-            return AnalysisTask.cachedFetch('../api/analysis-tasks', {id: param.task}, true)
+            return AnalysisTask.cachedFetch('/api/analysis-tasks', {id: param.task}, true)
                 .then(AnalysisTask._constructAnalysisTasksFromRawData.bind(AnalysisTask));
         });
     }
@@ -96,7 +101,7 @@ class AnalysisTask extends LabeledObject {
             bugTracker: tracker.id(),
             number: bugNumber,
         }).then(function (data) {
-            return AnalysisTask.cachedFetch('../api/analysis-tasks', {id: id}, true)
+            return AnalysisTask.cachedFetch('/api/analysis-tasks', {id: id}, true)
                 .then(AnalysisTask._constructAnalysisTasksFromRawData.bind(AnalysisTask));
         });
     }
@@ -112,7 +117,7 @@ class AnalysisTask extends LabeledObject {
             number: bug.bugNumber(),
             shouldDelete: true,
         }).then(function (data) {
-            return AnalysisTask.cachedFetch('../api/analysis-tasks', {id: id}, true)
+            return AnalysisTask.cachedFetch('/api/analysis-tasks', {id: id}, true)
                 .then(AnalysisTask._constructAnalysisTasksFromRawData.bind(AnalysisTask));
         });
     }
@@ -121,14 +126,16 @@ class AnalysisTask extends LabeledObject {
     {
         console.assert(kind == 'cause' || kind == 'fix');
         console.assert(repository instanceof Repository);
-        var id = this.id();
+        if (revision.startsWith('r'))
+            revision = revision.substring(1);
+        const id = this.id();
         return PrivilegedAPI.sendRequest('associate-commit', {
             task: id,
             repository: repository.id(),
             revision: revision,
             kind: kind,
-        }).then(function (data) {
-            return AnalysisTask.cachedFetch('../api/analysis-tasks', {id: id}, true)
+        }).then((data) => {
+            return AnalysisTask.cachedFetch('/api/analysis-tasks', {id}, true)
                 .then(AnalysisTask._constructAnalysisTasksFromRawData.bind(AnalysisTask));
         });
     }
@@ -141,7 +148,7 @@ class AnalysisTask extends LabeledObject {
             task: id,
             commit: commit.id(),
         }).then(function (data) {
-            return AnalysisTask.cachedFetch('../api/analysis-tasks', {id: id}, true)
+            return AnalysisTask.cachedFetch('/api/analysis-tasks', {id: id}, true)
                 .then(AnalysisTask._constructAnalysisTasksFromRawData.bind(AnalysisTask));
         });
     }
@@ -160,6 +167,32 @@ class AnalysisTask extends LabeledObject {
         return category;
     }
 
+    async commitSetsFromTestGroupsAndMeasurementSet()
+    {
+
+        const platform = this.platform();
+        const metric = this.metric();
+        if (!platform || !metric)
+            return [];
+
+        const lastModified = platform.lastModified(metric);
+        const measurementSet = MeasurementSet.findSet(platform.id(), metric.id(), lastModified);
+        const fetchingMeasurementSetPromise = measurementSet.fetchBetween(this.startTime(), this.endTime());
+
+        const allTestGroupsInTask = await TestGroup.fetchForTask(this.id());
+        const allCommitSetsInTask = new Set;
+        for (const group of allTestGroupsInTask)
+            group.requestedCommitSets().forEach((commitSet) => allCommitSetsInTask.add(commitSet));
+
+        await fetchingMeasurementSetPromise;
+
+        const series = measurementSet.fetchedTimeSeries('current', false, false);
+        const startPoint = series.findById(this.startMeasurementId());
+        const endPoint = series.findById(this.endMeasurementId());
+
+        return Array.from(series.viewBetweenPoints(startPoint, endPoint)).map((point) => point.commitSet());
+    }
+
     static categories()
     {
         return [
@@ -169,9 +202,9 @@ class AnalysisTask extends LabeledObject {
         ];
     }
 
-    static fetchById(id)
+    static fetchById(id, noCache)
     {
-        return this._fetchSubset({id: id}).then(function (data) { return AnalysisTask.findById(id); });
+        return this._fetchSubset({id: id}, noCache).then((data) => AnalysisTask.findById(id));
     }
 
     static fetchByBuildRequestId(id)
@@ -201,6 +234,8 @@ class AnalysisTask extends LabeledObject {
                 }
             }
             for (var otherTask of AnalysisTask.all()) {
+                if (task.isCustom())
+                    continue;
                 if (task.endTime() < otherTask.startTime()
                     || otherTask.endTime() < task.startTime()
                     || task.metric() != otherTask.metric())
@@ -213,15 +248,15 @@ class AnalysisTask extends LabeledObject {
 
     static _fetchSubset(params, noCache)
     {
-        if (this._fetchAllPromise)
+        if (this._fetchAllPromise && !noCache)
             return this._fetchAllPromise;
-        return this.cachedFetch('../api/analysis-tasks', params, noCache).then(this._constructAnalysisTasksFromRawData.bind(this));
+        return this.cachedFetch('/api/analysis-tasks', params, noCache).then(this._constructAnalysisTasksFromRawData.bind(this));
     }
 
     static fetchAll()
     {
         if (!this._fetchAllPromise)
-            this._fetchAllPromise = RemoteAPI.getJSONWithStatus('../api/analysis-tasks').then(this._constructAnalysisTasksFromRawData.bind(this));
+            this._fetchAllPromise = RemoteAPI.getJSONWithStatus('/api/analysis-tasks').then(this._constructAnalysisTasksFromRawData.bind(this));
         return this._fetchAllPromise;
     }
 
@@ -257,9 +292,6 @@ class AnalysisTask extends LabeledObject {
         for (var rawData of data.analysisTasks) {
             rawData.platform = Platform.findById(rawData.platform);
             rawData.metric = Metric.findById(rawData.metric);
-            if (!rawData.platform || !rawData.metric)
-                continue;
-
             rawData.bugs = taskToBug[rawData.id];
             rawData.causes = resolveCommits(rawData.causes);
             rawData.fixes = resolveCommits(rawData.fixes);
@@ -271,13 +303,17 @@ class AnalysisTask extends LabeledObject {
         return results;
     }
 
-    static create(name, startRunId, endRunId)
+    static async create(name, startPoint, endPoint, testGroupName=null, repetitionCount=0)
     {
-        return PrivilegedAPI.sendRequest('create-analysis-task', {
-            name: name,
-            startRun: startRunId,
-            endRun: endRunId,
-        });
+        const parameters = {name, startRun: startPoint.id, endRun: endPoint.id};
+        if (testGroupName) {
+            console.assert(repetitionCount);
+            parameters['revisionSets'] = CommitSet.revisionSetsFromCommitSets([startPoint.commitSet(), endPoint.commitSet()]);
+            parameters['repetitionCount'] = repetitionCount;
+            parameters['testGroupName'] = testGroupName;
+        }
+        const response = await PrivilegedAPI.sendRequest('create-analysis-task', parameters);
+        return AnalysisTask.fetchById(response.taskId, true);
     }
 }
 

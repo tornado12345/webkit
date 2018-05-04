@@ -20,11 +20,9 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGRootInlineBox_h
-#define SVGRootInlineBox_h
+#pragma once
 
 #include "RootInlineBox.h"
-#include "SVGRenderSupport.h"
 #include "SVGTextLayoutEngine.h"
 
 namespace WebCore {
@@ -33,6 +31,7 @@ class RenderSVGText;
 class SVGInlineTextBox;
 
 class SVGRootInlineBox final : public RootInlineBox {
+    WTF_MAKE_ISO_ALLOCATED(SVGRootInlineBox);
 public:
     explicit SVGRootInlineBox(RenderSVGText&);
 
@@ -62,5 +61,3 @@ private:
 } // namespace WebCore
 
 SPECIALIZE_TYPE_TRAITS_INLINE_BOX(SVGRootInlineBox, isSVGRootInlineBox())
-
-#endif // SVGRootInlineBox_h

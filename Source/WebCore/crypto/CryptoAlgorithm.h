@@ -26,66 +26,59 @@
 #pragma once
 
 #include "CryptoAlgorithmIdentifier.h"
+#include "CryptoKeyFormat.h"
+#include "CryptoKeyPair.h"
 #include "CryptoKeyUsage.h"
+#include "ExceptionOr.h"
 #include "JsonWebKey.h"
 #include "SubtleCrypto.h"
 #include <wtf/Function.h>
-#include <wtf/Noncopyable.h>
-#include <wtf/RefCounted.h>
 #include <wtf/Variant.h>
 #include <wtf/Vector.h>
+#include <wtf/WorkQueue.h>
 
 #if ENABLE(SUBTLE_CRYPTO)
 
 namespace WebCore {
 
-typedef int ExceptionCode;
-
 class CryptoAlgorithmParameters;
-class CryptoAlgorithmParametersDeprecated;
 class CryptoKey;
-class CryptoKeyPair;
-class CryptoKeyData;
 class ScriptExecutionContext;
 
-// Data is mutable, so async operations should copy it first.
-typedef std::pair<const uint8_t*, size_t> CryptoOperationData;
-
 using KeyData = Variant<Vector<uint8_t>, JsonWebKey>;
+using KeyOrKeyPair = Variant<RefPtr<CryptoKey>, CryptoKeyPair>;
 
 class CryptoAlgorithm : public RefCounted<CryptoAlgorithm> {
 public:
-    virtual ~CryptoAlgorithm();
+    virtual ~CryptoAlgorithm() = default;
 
     virtual CryptoAlgorithmIdentifier identifier() const = 0;
 
     using BoolCallback = WTF::Function<void(bool)>;
     using KeyCallback = WTF::Function<void(CryptoKey&)>;
-    using KeyOrKeyPairCallback = WTF::Function<void(CryptoKey*, CryptoKeyPair*)>;
+    using KeyOrKeyPairCallback = WTF::Function<void(KeyOrKeyPair&&)>;
+    // FIXME: https://bugs.webkit.org/show_bug.cgi?id=169395
     using VectorCallback = WTF::Function<void(const Vector<uint8_t>&)>;
     using VoidCallback = WTF::Function<void()>;
     using ExceptionCallback = WTF::Function<void(ExceptionCode)>;
+    using KeyDataCallback = WTF::Function<void(CryptoKeyFormat, KeyData&&)>;
 
-    virtual void generateKey(const std::unique_ptr<CryptoAlgorithmParameters>&&, bool extractable, CryptoKeyUsageBitmap, KeyOrKeyPairCallback&&, ExceptionCallback&&, ScriptExecutionContext*);
-    virtual void importKey(SubtleCrypto::KeyFormat, KeyData&&, const std::unique_ptr<CryptoAlgorithmParameters>&&, bool extractable, CryptoKeyUsageBitmap, KeyCallback&&, ExceptionCallback&&);
+    virtual void encrypt(std::unique_ptr<CryptoAlgorithmParameters>&&, Ref<CryptoKey>&&, Vector<uint8_t>&&, VectorCallback&&, ExceptionCallback&&, ScriptExecutionContext&, WorkQueue&);
+    virtual void decrypt(std::unique_ptr<CryptoAlgorithmParameters>&&, Ref<CryptoKey>&&, Vector<uint8_t>&&, VectorCallback&&, ExceptionCallback&&, ScriptExecutionContext&, WorkQueue&);
+    virtual void sign(std::unique_ptr<CryptoAlgorithmParameters>&&, Ref<CryptoKey>&&, Vector<uint8_t>&&, VectorCallback&&, ExceptionCallback&&, ScriptExecutionContext&, WorkQueue&);
+    virtual void verify(std::unique_ptr<CryptoAlgorithmParameters>&&, Ref<CryptoKey>&&, Vector<uint8_t>&& signature, Vector<uint8_t>&&, BoolCallback&&, ExceptionCallback&&, ScriptExecutionContext&, WorkQueue&);
+    virtual void digest(Vector<uint8_t>&&, VectorCallback&&, ExceptionCallback&&, ScriptExecutionContext&, WorkQueue&);
+    virtual void generateKey(const CryptoAlgorithmParameters&, bool extractable, CryptoKeyUsageBitmap, KeyOrKeyPairCallback&&, ExceptionCallback&&, ScriptExecutionContext&);
+    virtual void deriveBits(std::unique_ptr<CryptoAlgorithmParameters>&&, Ref<CryptoKey>&&, size_t length, VectorCallback&&, ExceptionCallback&&, ScriptExecutionContext&, WorkQueue&);
+    // FIXME: https://bugs.webkit.org/show_bug.cgi?id=169262
+    virtual void importKey(CryptoKeyFormat, KeyData&&, const std::unique_ptr<CryptoAlgorithmParameters>&&, bool extractable, CryptoKeyUsageBitmap, KeyCallback&&, ExceptionCallback&&);
+    virtual void exportKey(CryptoKeyFormat, Ref<CryptoKey>&&, KeyDataCallback&&, ExceptionCallback&&);
+    virtual void wrapKey(Ref<CryptoKey>&&, Vector<uint8_t>&&, VectorCallback&&, ExceptionCallback&&);
+    virtual void unwrapKey(Ref<CryptoKey>&&, Vector<uint8_t>&&, VectorCallback&&, ExceptionCallback&&);
+    virtual ExceptionOr<size_t> getKeyLength(const CryptoAlgorithmParameters&);
 
-    // The following will be deprecated.
-    virtual void encrypt(const CryptoAlgorithmParametersDeprecated&, const CryptoKey&, const CryptoOperationData&, VectorCallback&&, VoidCallback&& failureCallback, ExceptionCode&);
-    virtual void decrypt(const CryptoAlgorithmParametersDeprecated&, const CryptoKey&, const CryptoOperationData&, VectorCallback&&, VoidCallback&& failureCallback, ExceptionCode&);
-    virtual void sign(const CryptoAlgorithmParametersDeprecated&, const CryptoKey&, const CryptoOperationData&, VectorCallback&&, VoidCallback&& failureCallback, ExceptionCode&);
-    virtual void verify(const CryptoAlgorithmParametersDeprecated&, const CryptoKey&, const CryptoOperationData& signature, const CryptoOperationData&, BoolCallback&&, VoidCallback&& failureCallback, ExceptionCode&);
-    virtual void digest(const CryptoAlgorithmParametersDeprecated&, const CryptoOperationData&, VectorCallback&&, VoidCallback&& failureCallback, ExceptionCode&);
-    virtual void generateKey(const CryptoAlgorithmParametersDeprecated&, bool extractable, CryptoKeyUsageBitmap, KeyOrKeyPairCallback&&, VoidCallback&& failureCallback, ExceptionCode&, ScriptExecutionContext*);
-    virtual void deriveKey(const CryptoAlgorithmParametersDeprecated&, const CryptoKey& baseKey, CryptoAlgorithm* derivedKeyType, bool extractable, CryptoKeyUsageBitmap, KeyCallback&&, VoidCallback&& failureCallback, ExceptionCode&);
-    virtual void deriveBits(const CryptoAlgorithmParametersDeprecated&, const CryptoKey& baseKey, unsigned long length, VectorCallback&&, VoidCallback&& failureCallback, ExceptionCode&);
-    virtual void importKey(const CryptoAlgorithmParametersDeprecated&, const CryptoKeyData&, bool extractable, CryptoKeyUsageBitmap, KeyCallback&&, VoidCallback&& failureCallback, ExceptionCode&);
-
-    // These are only different from encrypt/decrypt because some algorithms may not expose encrypt/decrypt.
-    virtual void encryptForWrapKey(const CryptoAlgorithmParametersDeprecated&, const CryptoKey&, const CryptoOperationData&, VectorCallback&&, VoidCallback&& failureCallback, ExceptionCode&);
-    virtual void decryptForUnwrapKey(const CryptoAlgorithmParametersDeprecated&, const CryptoKey&, const CryptoOperationData&, VectorCallback&&, VoidCallback&& failureCallback, ExceptionCode&);
-
-protected:
-    CryptoAlgorithm();
+    static void dispatchOperation(WorkQueue&, ScriptExecutionContext&, VectorCallback&&, ExceptionCallback&&, WTF::Function<ExceptionOr<Vector<uint8_t>>()>&&);
+    static void dispatchOperation(WorkQueue&, ScriptExecutionContext&, BoolCallback&&, ExceptionCallback&&, WTF::Function<ExceptionOr<bool>()>&&);
 };
 
 } // namespace WebCore

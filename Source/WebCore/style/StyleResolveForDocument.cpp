@@ -30,7 +30,9 @@
 #include "StyleResolveForDocument.h"
 
 #include "CSSFontSelector.h"
+#include "ConstantPropertyMap.h"
 #include "Document.h"
+#include "FontCascade.h"
 #include "Frame.h"
 #include "FrameView.h"
 #include "HTMLIFrameElement.h"
@@ -92,10 +94,10 @@ RenderStyle resolveForDocument(const Document& document)
     const Pagination& pagination = renderView.frameView().pagination();
     if (pagination.mode != Pagination::Unpaginated) {
         documentStyle.setColumnStylesFromPaginationMode(pagination.mode);
-        documentStyle.setColumnGap(pagination.gap);
-        if (renderView.multiColumnFlowThread())
+        documentStyle.setColumnGap(GapLength(Length((int) pagination.gap, Fixed)));
+        if (renderView.multiColumnFlow())
             renderView.updateColumnProgressionFromStyle(documentStyle);
-        if (renderView.frame().page()->paginationLineGridEnabled()) {
+        if (renderView.page().paginationLineGridEnabled()) {
             documentStyle.setLineGrid("-webkit-default-pagination-grid");
             documentStyle.setLineSnap(LineSnapContain);
         }
@@ -107,6 +109,7 @@ RenderStyle resolveForDocument(const Document& document)
     fontDescription.setLocale(document.contentLanguage());
     fontDescription.setRenderingMode(settings.fontRenderingMode());
     fontDescription.setOneFamily(standardFamily);
+    fontDescription.setShouldAllowUserInstalledFonts(settings.shouldAllowUserInstalledFonts() ? AllowUserInstalledFonts::Yes : AllowUserInstalledFonts::No);
 
     fontDescription.setKeywordSizeFromIdentifier(CSSValueMedium);
     int size = fontSizeForKeyword(CSSValueMedium, false, document);
@@ -123,6 +126,9 @@ RenderStyle resolveForDocument(const Document& document)
     documentStyle.setFontDescription(fontDescription);
 
     documentStyle.fontCascade().update(&const_cast<Document&>(document).fontSelector());
+
+    for (auto& it : document.constantProperties().values())
+        documentStyle.setCustomPropertyValue(it.key, makeRef(it.value.get()));
 
     return documentStyle;
 }

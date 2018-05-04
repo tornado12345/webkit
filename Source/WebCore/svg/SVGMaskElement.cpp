@@ -28,11 +28,15 @@
 #include "RenderSVGResourceMasker.h"
 #include "SVGNames.h"
 #include "SVGRenderSupport.h"
+#include "SVGStringList.h"
 #include "SVGUnitTypes.h"
 #include "StyleResolver.h"
+#include <wtf/IsoMallocInlines.h>
 #include <wtf/NeverDestroyed.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(SVGMaskElement);
 
 // Animated property definitions
 DEFINE_ANIMATED_ENUMERATION(SVGMaskElement, SVGNames::maskUnitsAttr, MaskUnits, maskUnits, SVGUnitTypes::SVGUnitType)
@@ -77,18 +81,22 @@ Ref<SVGMaskElement> SVGMaskElement::create(const QualifiedName& tagName, Documen
 
 bool SVGMaskElement::isSupportedAttribute(const QualifiedName& attrName)
 {
-    static NeverDestroyed<HashSet<QualifiedName>> supportedAttributes;
-    if (supportedAttributes.get().isEmpty()) {
-        SVGTests::addSupportedAttributes(supportedAttributes);
-        SVGLangSpace::addSupportedAttributes(supportedAttributes);
-        SVGExternalResourcesRequired::addSupportedAttributes(supportedAttributes);
-        supportedAttributes.get().add(SVGNames::maskUnitsAttr);
-        supportedAttributes.get().add(SVGNames::maskContentUnitsAttr);
-        supportedAttributes.get().add(SVGNames::xAttr);
-        supportedAttributes.get().add(SVGNames::yAttr);
-        supportedAttributes.get().add(SVGNames::widthAttr);
-        supportedAttributes.get().add(SVGNames::heightAttr);
-    }
+    static const auto supportedAttributes = makeNeverDestroyed([] {
+        HashSet<QualifiedName> set;
+        SVGTests::addSupportedAttributes(set);
+        SVGLangSpace::addSupportedAttributes(set);
+        SVGExternalResourcesRequired::addSupportedAttributes(set);
+        set.add({
+            SVGNames::maskUnitsAttr.get(),
+            SVGNames::maskContentUnitsAttr.get(),
+            SVGNames::refYAttr.get(),
+            SVGNames::xAttr.get(),
+            SVGNames::yAttr.get(),
+            SVGNames::widthAttr.get(),
+            SVGNames::heightAttr.get(),
+        });
+        return set;
+    }());
     return supportedAttributes.get().contains<SVGAttributeHashTranslator>(attrName);
 }
 
@@ -110,13 +118,13 @@ void SVGMaskElement::parseAttribute(const QualifiedName& name, const AtomicStrin
     SVGParsingError parseError = NoError;
 
     if (name == SVGNames::xAttr)
-        setXBaseValue(SVGLength::construct(LengthModeWidth, value, parseError));
+        setXBaseValue(SVGLengthValue::construct(LengthModeWidth, value, parseError));
     else if (name == SVGNames::yAttr)
-        setYBaseValue(SVGLength::construct(LengthModeHeight, value, parseError));
+        setYBaseValue(SVGLengthValue::construct(LengthModeHeight, value, parseError));
     else if (name == SVGNames::widthAttr)
-        setWidthBaseValue(SVGLength::construct(LengthModeWidth, value, parseError));
+        setWidthBaseValue(SVGLengthValue::construct(LengthModeWidth, value, parseError));
     else if (name == SVGNames::heightAttr)
-        setHeightBaseValue(SVGLength::construct(LengthModeHeight, value, parseError));
+        setHeightBaseValue(SVGLengthValue::construct(LengthModeHeight, value, parseError));
 
     reportAttributeParsingError(parseError, name, value);
 
@@ -150,7 +158,7 @@ void SVGMaskElement::childrenChanged(const ChildChange& change)
 {
     SVGElement::childrenChanged(change);
 
-    if (change.source == ChildChangeSourceParser)
+    if (change.source == ChildChangeSource::Parser)
         return;
 
     if (RenderObject* object = renderer())
@@ -160,6 +168,21 @@ void SVGMaskElement::childrenChanged(const ChildChange& change)
 RenderPtr<RenderElement> SVGMaskElement::createElementRenderer(RenderStyle&& style, const RenderTreePosition&)
 {
     return createRenderer<RenderSVGResourceMasker>(*this, WTFMove(style));
+}
+
+Ref<SVGStringList> SVGMaskElement::requiredFeatures()
+{
+    return SVGTests::requiredFeatures(*this);
+}
+
+Ref<SVGStringList> SVGMaskElement::requiredExtensions()
+{ 
+    return SVGTests::requiredExtensions(*this);
+}
+
+Ref<SVGStringList> SVGMaskElement::systemLanguage()
+{
+    return SVGTests::systemLanguage(*this);
 }
 
 }

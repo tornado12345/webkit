@@ -1,7 +1,7 @@
 /*
  *  Copyright (C) 1999-2002 Harri Porten (porten@kde.org)
  *  Copyright (C) 2001 Peter Kelly (pmk@post.com)
- *  Copyright (C) 2004, 2007-2008, 2015-2016 Apple Inc. All rights reserved.
+ *  Copyright (C) 2004-2017 Apple Inc. All rights reserved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Library General Public
@@ -33,18 +33,19 @@
 
 namespace JSC {
     
-const ClassInfo JSString::s_info = { "string", 0, 0, CREATE_METHOD_TABLE(JSString) };
+const ClassInfo JSString::s_info = { "string", nullptr, nullptr, nullptr, CREATE_METHOD_TABLE(JSString) };
 
 Structure* JSString::createStructure(VM& vm, JSGlobalObject* globalObject, JSValue proto)
 {
     return Structure::create(vm, globalObject, proto, TypeInfo(StringType, StructureFlags), info());
 }
 
-void JSRopeString::RopeBuilder::expand()
+template<>
+void JSRopeString::RopeBuilder<RecordOverflow>::expand()
 {
+    RELEASE_ASSERT(!this->hasOverflowed());
     ASSERT(m_index == JSRopeString::s_maxInternalRopeLength);
     JSString* jsString = m_jsString;
-    RELEASE_ASSERT(jsString);
     m_jsString = jsStringBuilder(&m_vm);
     m_index = 0;
     append(jsString);
@@ -52,14 +53,14 @@ void JSRopeString::RopeBuilder::expand()
 
 void JSString::destroy(JSCell* cell)
 {
-    JSString* thisObject = static_cast<JSString*>(cell);
-    thisObject->JSString::~JSString();
+    static_cast<JSString*>(cell)->JSString::~JSString();
 }
 
 void JSString::dumpToStream(const JSCell* cell, PrintStream& out)
 {
+    VM& vm = *cell->vm();
     const JSString* thisObject = jsCast<const JSString*>(cell);
-    out.printf("<%p, %s, [%u], ", thisObject, thisObject->className(), thisObject->length());
+    out.printf("<%p, %s, [%u], ", thisObject, thisObject->className(vm), thisObject->length());
     if (thisObject->isRope())
         out.printf("[rope]");
     else {
@@ -84,7 +85,7 @@ bool JSString::equalSlowCase(ExecState* exec, JSString* other) const
 
 size_t JSString::estimatedSize(JSCell* cell)
 {
-    JSString* thisObject = jsCast<JSString*>(cell);
+    JSString* thisObject = asString(cell);
     if (thisObject->isRope())
         return Base::estimatedSize(cell);
     return Base::estimatedSize(cell) + thisObject->m_value.impl()->costDuringGC();
@@ -92,26 +93,23 @@ size_t JSString::estimatedSize(JSCell* cell)
 
 void JSString::visitChildren(JSCell* cell, SlotVisitor& visitor)
 {
-    JSString* thisObject = jsCast<JSString*>(cell);
+    JSString* thisObject = asString(cell);
     Base::visitChildren(thisObject, visitor);
     
     if (thisObject->isRope())
         static_cast<JSRopeString*>(thisObject)->visitFibers(visitor);
-    else {
-        StringImpl* impl = thisObject->m_value.impl();
-        ASSERT(impl);
+    if (StringImpl* impl = thisObject->m_value.impl())
         visitor.reportExtraMemoryVisited(impl->costDuringGC());
-    }
 }
 
 void JSRopeString::visitFibers(SlotVisitor& visitor)
 {
     if (isSubstring()) {
-        visitor.append(&substringBase());
+        visitor.append(substringBase());
         return;
     }
     for (size_t i = 0; i < s_maxInternalRopeLength && fiber(i); ++i)
-        visitor.append(&fiber(i));
+        visitor.append(fiber(i));
 }
 
 static const unsigned maxLengthForOnStackResolve = 2048;
@@ -119,8 +117,7 @@ static const unsigned maxLengthForOnStackResolve = 2048;
 void JSRopeString::resolveRopeInternal8(LChar* buffer) const
 {
     if (isSubstring()) {
-        StringImpl::copyChars(
-            buffer, substringBase()->m_value.characters8() + substringOffset(), length());
+        StringImpl::copyCharacters(buffer, substringBase()->m_value.characters8() + substringOffset(), length());
         return;
     }
     
@@ -140,7 +137,7 @@ void JSRopeString::resolveRopeInternal8NoSubstring(LChar* buffer) const
     for (size_t i = 0; i < s_maxInternalRopeLength && fiber(i); ++i) {
         const StringImpl& fiberString = *fiber(i)->m_value.impl();
         unsigned length = fiberString.length();
-        StringImpl::copyChars(position, fiberString.characters8(), length);
+        StringImpl::copyCharacters(position, fiberString.characters8(), length);
         position += length;
     }
     ASSERT((buffer + length()) == position);
@@ -149,7 +146,7 @@ void JSRopeString::resolveRopeInternal8NoSubstring(LChar* buffer) const
 void JSRopeString::resolveRopeInternal16(UChar* buffer) const
 {
     if (isSubstring()) {
-        StringImpl::copyChars(
+        StringImpl::copyCharacters(
             buffer, substringBase()->m_value.characters16() + substringOffset(), length());
         return;
     }
@@ -171,9 +168,9 @@ void JSRopeString::resolveRopeInternal16NoSubstring(UChar* buffer) const
         const StringImpl& fiberString = *fiber(i)->m_value.impl();
         unsigned length = fiberString.length();
         if (fiberString.is8Bit())
-            StringImpl::copyChars(position, fiberString.characters8(), length);
+            StringImpl::copyCharacters(position, fiberString.characters8(), length);
         else
-            StringImpl::copyChars(position, fiberString.characters16(), length);
+            StringImpl::copyCharacters(position, fiberString.characters16(), length);
         position += length;
     }
     ASSERT((buffer + length()) == position);
@@ -274,7 +271,7 @@ void JSRopeString::resolveRope(ExecState* exec) const
         ASSERT(!isRope());
         return;
     }
-
+    
     UChar* buffer;
     if (auto newImpl = StringImpl::tryCreateUninitialized(length(), buffer)) {
         Heap::heap(this)->reportExtraMemoryAllocated(newImpl->cost());
@@ -283,7 +280,7 @@ void JSRopeString::resolveRope(ExecState* exec) const
         outOfMemory(exec);
         return;
     }
-
+    
     resolveRopeInternal16NoSubstring(buffer);
     clearFibers();
     ASSERT(!isRope());
@@ -329,7 +326,7 @@ void JSRopeString::resolveRopeSlowCase8(LChar* buffer) const
         
         unsigned length = currentFiber->length();
         position -= length;
-        StringImpl::copyChars(position, characters, length);
+        StringImpl::copyCharacters(position, characters, length);
     }
 
     ASSERT(buffer == position);
@@ -357,9 +354,9 @@ void JSRopeString::resolveRopeSlowCase(UChar* buffer) const
                 unsigned length = currentFiberAsRope->length();
                 position -= length;
                 if (string->is8Bit())
-                    StringImpl::copyChars(position, string->characters8() + offset, length);
+                    StringImpl::copyCharacters(position, string->characters8() + offset, length);
                 else
-                    StringImpl::copyChars(position, string->characters16() + offset, length);
+                    StringImpl::copyCharacters(position, string->characters16() + offset, length);
                 continue;
             }
             for (size_t i = 0; i < s_maxInternalRopeLength && currentFiberAsRope->fiber(i); ++i)
@@ -371,9 +368,9 @@ void JSRopeString::resolveRopeSlowCase(UChar* buffer) const
         unsigned length = string->length();
         position -= length;
         if (string->is8Bit())
-            StringImpl::copyChars(position, string->characters8(), length);
+            StringImpl::copyCharacters(position, string->characters8(), length);
         else
-            StringImpl::copyChars(position, string->characters16(), length);
+            StringImpl::copyCharacters(position, string->characters16(), length);
     }
 
     ASSERT(buffer == position);
@@ -398,14 +395,22 @@ JSValue JSString::toPrimitive(ExecState*, PreferredPrimitiveType) const
 
 bool JSString::getPrimitiveNumber(ExecState* exec, double& number, JSValue& result) const
 {
+    VM& vm = exec->vm();
+    auto scope = DECLARE_THROW_SCOPE(vm);
+    StringView view = unsafeView(exec);
+    RETURN_IF_EXCEPTION(scope, false);
     result = this;
-    number = jsToNumber(unsafeView(*exec));
+    number = jsToNumber(view);
     return false;
 }
 
 double JSString::toNumber(ExecState* exec) const
 {
-    return jsToNumber(unsafeView(*exec));
+    VM& vm = exec->vm();
+    auto scope = DECLARE_THROW_SCOPE(vm);
+    StringView view = unsafeView(exec);
+    RETURN_IF_EXCEPTION(scope, 0);
+    return jsToNumber(view);
 }
 
 inline StringObject* StringObject::create(VM& vm, JSGlobalObject* globalObject, JSString* string)
@@ -424,19 +429,20 @@ JSValue JSString::toThis(JSCell* cell, ExecState* exec, ECMAMode ecmaMode)
 {
     if (ecmaMode == StrictMode)
         return cell;
-    return StringObject::create(exec->vm(), exec->lexicalGlobalObject(), jsCast<JSString*>(cell));
+    return StringObject::create(exec->vm(), exec->lexicalGlobalObject(), asString(cell));
 }
 
 bool JSString::getStringPropertyDescriptor(ExecState* exec, PropertyName propertyName, PropertyDescriptor& descriptor)
 {
-    if (propertyName == exec->propertyNames().length) {
-        descriptor.setDescriptor(jsNumber(length()), DontEnum | DontDelete | ReadOnly);
+    VM& vm = exec->vm();
+    if (propertyName == vm.propertyNames->length) {
+        descriptor.setDescriptor(jsNumber(length()), PropertyAttribute::DontEnum | PropertyAttribute::DontDelete | PropertyAttribute::ReadOnly);
         return true;
     }
     
-    Optional<uint32_t> index = parseIndex(propertyName);
+    std::optional<uint32_t> index = parseIndex(propertyName);
     if (index && index.value() < length()) {
-        descriptor.setDescriptor(getIndex(exec, index.value()), DontDelete | ReadOnly);
+        descriptor.setDescriptor(getIndex(exec, index.value()), PropertyAttribute::DontDelete | PropertyAttribute::ReadOnly);
         return true;
     }
     

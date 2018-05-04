@@ -36,9 +36,11 @@
 #include "RenderMathMLRow.h"
 #include "RenderTreeUpdater.h"
 #include "SVGElement.h"
-#include "SVGNames.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(MathMLSelectElement);
 
 using namespace MathMLNames;
 

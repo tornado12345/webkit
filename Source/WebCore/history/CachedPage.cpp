@@ -29,13 +29,17 @@
 #include "Document.h"
 #include "Element.h"
 #include "FocusController.h"
+#include "Frame.h"
+#include "FrameLoader.h"
 #include "FrameView.h"
-#include "MainFrame.h"
+#include "HistoryController.h"
+#include "HistoryItem.h"
 #include "Node.h"
 #include "Page.h"
+#include "PageTransitionEvent.h"
+#include "ScriptDisallowedScope.h"
 #include "Settings.h"
 #include "VisitedLinkState.h"
-#include <wtf/CurrentTime.h>
 #include <wtf/RefCountedLeakCounter.h>
 #include <wtf/StdLibExtras.h>
 
@@ -43,14 +47,15 @@
 #include "FrameSelection.h"
 #endif
 
-using namespace JSC;
 
 namespace WebCore {
+using namespace JSC;
 
 DEFINE_DEBUG_ONLY_GLOBAL(WTF::RefCountedLeakCounter, cachedPageCounter, ("CachedPage"));
 
 CachedPage::CachedPage(Page& page)
-    : m_expirationTime(monotonicallyIncreasingTime() + page.settings().backForwardCacheExpirationInterval())
+    : m_page(page)
+    , m_expirationTime(MonotonicTime::now() + Seconds(page.settings().backForwardCacheExpirationInterval()))
     , m_cachedMainFrame(std::make_unique<CachedFrame>(page.mainFrame()))
 {
 #ifndef NDEBUG
@@ -68,14 +73,57 @@ CachedPage::~CachedPage()
         m_cachedMainFrame->destroy();
 }
 
+static void firePageShowAndPopStateEvents(Page& page)
+{
+    // Dispatching JavaScript events can cause frame destruction.
+    auto& mainFrame = page.mainFrame();
+    Vector<Ref<Frame>> childFrames;
+    for (auto* child = mainFrame.tree().traverseNextInPostOrder(CanWrap::Yes); child; child = child->tree().traverseNextInPostOrder(CanWrap::No))
+        childFrames.append(*child);
+
+    for (auto& child : childFrames) {
+        if (!child->tree().isDescendantOf(&mainFrame))
+            continue;
+        auto* document = child->document();
+        if (!document)
+            continue;
+
+        // FIXME: Update Page Visibility state here.
+        // https://bugs.webkit.org/show_bug.cgi?id=116770
+        document->dispatchPageshowEvent(PageshowEventPersisted);
+
+        auto* historyItem = child->loader().history().currentItem();
+        if (historyItem && historyItem->stateObject())
+            document->dispatchPopstateEvent(historyItem->stateObject());
+    }
+}
+
+class CachedPageRestorationScope {
+public:
+    CachedPageRestorationScope(Page& page)
+        : m_page(page)
+    {
+        m_page.setIsRestoringCachedPage(true);
+    }
+
+    ~CachedPageRestorationScope()
+    {
+        m_page.setIsRestoringCachedPage(false);
+    }
+
+private:
+    Page& m_page;
+};
+
 void CachedPage::restore(Page& page)
 {
     ASSERT(m_cachedMainFrame);
     ASSERT(m_cachedMainFrame->view()->frame().isMainFrame());
     ASSERT(!page.subframeCount());
 
+    CachedPageRestorationScope restorationScope(page);
     m_cachedMainFrame->open();
-    
+
     // Restore the focus appearance for the focused element.
     // FIXME: Right now we don't support pages w/ frames in the b/f cache.  This may need to be tweaked when we add support for that.
     Document* focusedDocument = page.focusController().focusedOrMainFrame().document();
@@ -115,6 +163,8 @@ void CachedPage::restore(Page& page)
             frameView->updateContentsSize();
     }
 
+    firePageShowAndPopStateEvents(page);
+
     clear();
 }
 
@@ -132,7 +182,7 @@ void CachedPage::clear()
 
 bool CachedPage::hasExpired() const
 {
-    return monotonicallyIncreasingTime() > m_expirationTime;
+    return MonotonicTime::now() > m_expirationTime;
 }
 
 } // namespace WebCore

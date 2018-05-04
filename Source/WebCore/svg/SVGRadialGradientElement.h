@@ -18,8 +18,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGRadialGradientElement_h
-#define SVGRadialGradientElement_h
+#pragma once
 
 #include "SVGAnimatedLength.h"
 #include "SVGGradientElement.h"
@@ -30,6 +29,7 @@ namespace WebCore {
 struct RadialGradientAttributes;
 
 class SVGRadialGradientElement final : public SVGGradientElement {
+    WTF_MAKE_ISO_ALLOCATED(SVGRadialGradientElement);
 public:
     static Ref<SVGRadialGradientElement> create(const QualifiedName&, Document&);
 
@@ -57,5 +57,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif

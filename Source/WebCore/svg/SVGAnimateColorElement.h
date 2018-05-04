@@ -19,14 +19,14 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGAnimateColorElement_h
-#define SVGAnimateColorElement_h
+#pragma once
 
 #include "SVGAnimateElementBase.h"
 
 namespace WebCore {
 
 class SVGAnimateColorElement final : public SVGAnimateElementBase {
+    WTF_MAKE_ISO_ALLOCATED(SVGAnimateColorElement);
 public:
     static Ref<SVGAnimateColorElement> create(const QualifiedName&, Document&);
 
@@ -36,5 +36,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif // SVGAnimateColorElement_h

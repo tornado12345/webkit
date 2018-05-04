@@ -27,9 +27,9 @@
 #include "config.h"
 #include "NavigatorBase.h"
 
-#include "Language.h"
-#include "NetworkStateNotifier.h"
+#include "ServiceWorkerContainer.h"
 #include <mutex>
+#include <wtf/Language.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/NumberOfCores.h>
 #include <wtf/text/WTFString.h>
@@ -75,9 +75,17 @@
 
 namespace WebCore {
 
-NavigatorBase::~NavigatorBase()
+NavigatorBase::NavigatorBase(ScriptExecutionContext& context)
+#if ENABLE(SERVICE_WORKER)
+    : m_serviceWorkerContainer(makeUniqueRef<ServiceWorkerContainer>(context, *this))
+#endif
 {
+#if !ENABLE(SERVICE_WORKER)
+    UNUSED_PARAM(context);
+#endif
 }
+
+NavigatorBase::~NavigatorBase() = default;
 
 String NavigatorBase::appName()
 {
@@ -129,11 +137,6 @@ String NavigatorBase::vendorSub()
     return WEBCORE_NAVIGATOR_VENDOR_SUB;
 }
 
-bool NavigatorBase::onLine()
-{
-    return networkStateNotifier().onLine();
-}
-
 String NavigatorBase::language()
 {
     return defaultLanguage();
@@ -145,30 +148,18 @@ Vector<String> NavigatorBase::languages()
     return { defaultLanguage() };
 }
 
-#if ENABLE(NAVIGATOR_HWCONCURRENCY)
-
-int NavigatorBase::hardwareConcurrency()
+#if ENABLE(SERVICE_WORKER)
+ServiceWorkerContainer& NavigatorBase::serviceWorker()
 {
-    static int numberOfCores;
-
-    static std::once_flag once;
-    std::call_once(once, [] {
-        // Enforce a maximum for the number of cores reported to mitigate
-        // fingerprinting for the minority of machines with large numbers of cores.
-        // If machines with more than 8 cores become commonplace, we should bump this number.
-        // see https://bugs.webkit.org/show_bug.cgi?id=132588 for the
-        // rationale behind this decision.
-#if PLATFORM(IOS)
-        const int maxCoresToReport = 2;
-#else
-        const int maxCoresToReport = 8;
-#endif
-        numberOfCores = std::min(WTF::numberOfProcessorCores(), maxCoresToReport);
-    });
-
-    return numberOfCores;
+    return m_serviceWorkerContainer;
 }
 
+ExceptionOr<ServiceWorkerContainer&> NavigatorBase::serviceWorker(ScriptExecutionContext& context)
+{
+    if (is<Document>(context) && downcast<Document>(context).isSandboxed(SandboxOrigin))
+        return Exception { SecurityError, "Service Worker is disabled because the context is sandboxed and lacks the 'allow-same-origin' flag" };
+    return m_serviceWorkerContainer.get();
+}
 #endif
 
 } // namespace WebCore

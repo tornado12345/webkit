@@ -18,8 +18,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGSwitchElement_h
-#define SVGSwitchElement_h
+#pragma once
 
 #include "SVGAnimatedBoolean.h"
 #include "SVGExternalResourcesRequired.h"
@@ -27,8 +26,8 @@
 
 namespace WebCore {
 
-class SVGSwitchElement final : public SVGGraphicsElement,
-                               public SVGExternalResourcesRequired {
+class SVGSwitchElement final : public SVGGraphicsElement, public SVGExternalResourcesRequired {
+    WTF_MAKE_ISO_ALLOCATED(SVGSwitchElement);
 public:
     static Ref<SVGSwitchElement> create(const QualifiedName&, Document&);
 
@@ -46,5 +45,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif

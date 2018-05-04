@@ -27,7 +27,7 @@
 #define KJS_RUNTIME_OBJECT_H
 
 #include "BridgeJSC.h"
-#include <runtime/JSGlobalObject.h>
+#include <JavaScriptCore/JSGlobalObject.h>
 
 namespace JSC {
 namespace Bindings {
@@ -63,9 +63,9 @@ public:
 
     DECLARE_INFO;
 
-    static ObjectPrototype* createPrototype(VM&, JSGlobalObject* globalObject)
+    static ObjectPrototype* createPrototype(VM&, JSGlobalObject& globalObject)
     {
-        return globalObject->objectPrototype();
+        return globalObject.objectPrototype();
     }
 
     static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype)

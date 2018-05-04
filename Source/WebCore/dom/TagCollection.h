@@ -43,8 +43,7 @@ public:
 private:
     TagCollection(ContainerNode& rootNode, const AtomicString& qualifiedName);
 
-    AtomicString m_prefix;
-    AtomicString m_localName;
+    AtomicString m_qualifiedName;
 };
 
 class TagCollectionNS final : public CachedHTMLCollection<TagCollectionNS, CollectionTypeTraits<ByTag>::traversalType> {
@@ -78,29 +77,27 @@ public:
 private:
     HTMLTagCollection(ContainerNode& rootNode, const AtomicString& qualifiedName);
 
-    AtomicString m_prefix;
-    AtomicString m_loweredPrefix;
-    AtomicString m_localName;
-    AtomicString m_loweredLocalName;
+    AtomicString m_qualifiedName;
+    AtomicString m_loweredQualifiedName;
 };
 
 inline bool TagCollection::elementMatches(Element& element) const
 {
-    return m_localName == element.localName() && m_prefix == element.prefix();
+    return m_qualifiedName == element.tagQName().toString();
 }
 
 inline bool TagCollectionNS::elementMatches(Element& element) const
 {
-    if (m_localName != starAtom && m_localName != element.localName())
+    if (m_localName != starAtom() && m_localName != element.localName())
         return false;
-    return m_namespaceURI == starAtom || m_namespaceURI == element.namespaceURI();
+    return m_namespaceURI == starAtom() || m_namespaceURI == element.namespaceURI();
 }
 
 inline bool HTMLTagCollection::elementMatches(Element& element) const
 {
     if (element.isHTMLElement())
-        return m_loweredLocalName == element.localName() && m_loweredPrefix == element.prefix();
-    return m_localName == element.localName() && m_prefix == element.prefix();
+        return m_loweredQualifiedName == element.tagQName().toString();
+    return m_qualifiedName == element.tagQName().toString();
 }
 
 } // namespace WebCore

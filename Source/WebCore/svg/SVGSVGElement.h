@@ -19,9 +19,9 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGSVGElement_h
-#define SVGSVGElement_h
+#pragma once
 
+#include "FloatPoint.h"
 #include "SVGAnimatedBoolean.h"
 #include "SVGAnimatedLength.h"
 #include "SVGAnimatedPreserveAspectRatio.h"
@@ -33,11 +33,17 @@
 
 namespace WebCore {
 
-class SVGAngle;
-class SVGViewSpec;
 class SMILTimeContainer;
+class SVGAngle;
+class SVGLength;
+class SVGMatrix;
+class SVGNumber;
+class SVGRect;
+class SVGTransform;
+class SVGViewSpec;
 
 class SVGSVGElement final : public SVGGraphicsElement, public SVGExternalResourcesRequired, public SVGFitToViewBox, public SVGZoomAndPan {
+    WTF_MAKE_ISO_ALLOCATED(SVGSVGElement);
 
     BEGIN_DECLARE_ANIMATED_PROPERTIES(SVGSVGElement)
         DECLARE_ANIMATED_LENGTH(X, x)
@@ -56,7 +62,7 @@ public: // DOM
     const AtomicString& contentStyleType() const;
     void setContentStyleType(const AtomicString&);
 
-    FloatRect viewport() const;
+    Ref<SVGRect> viewport() const;
 
     float pixelUnitToMillimeterX() const;
     float pixelUnitToMillimeterY() const;
@@ -69,7 +75,8 @@ public: // DOM
     float currentScale() const;
     void setCurrentScale(float);
 
-    SVGPoint& currentTranslate();
+    Ref<SVGPoint> currentTranslate();
+    FloatPoint currentTranslateValue();
 
     unsigned suspendRedraw(unsigned maxWaitMilliseconds);
     void unsuspendRedraw(unsigned suspendHandleId);
@@ -79,24 +86,25 @@ public: // DOM
     void pauseAnimations();
     void unpauseAnimations();
     bool animationsPaused() const;
+    bool hasActiveAnimation() const;
 
     float getCurrentTime() const;
     void setCurrentTime(float);
 
-    Ref<NodeList> getIntersectionList(const FloatRect&, SVGElement* referenceElement);
-    Ref<NodeList> getEnclosureList(const FloatRect&, SVGElement* referenceElement);
-    static bool checkIntersection(const SVGElement*, const FloatRect&);
-    static bool checkEnclosure(const SVGElement*, const FloatRect&);
+    Ref<NodeList> getIntersectionList(SVGRect&, SVGElement* referenceElement);
+    Ref<NodeList> getEnclosureList(SVGRect&, SVGElement* referenceElement);
+    static bool checkIntersection(RefPtr<SVGElement>&&, SVGRect&);
+    static bool checkEnclosure(RefPtr<SVGElement>&&, SVGRect&);
     void deselectAll();
 
-    static float createSVGNumber();
-    static SVGLength createSVGLength();
+    static Ref<SVGNumber> createSVGNumber();
+    static Ref<SVGLength> createSVGLength();
     static Ref<SVGAngle> createSVGAngle();
-    static SVGPoint createSVGPoint();
-    static SVGMatrix createSVGMatrix();
-    static FloatRect createSVGRect();
-    static SVGTransform createSVGTransform();
-    static SVGTransform createSVGTransformFromMatrix(const SVGMatrix&);
+    static Ref<SVGPoint> createSVGPoint();
+    static Ref<SVGMatrix> createSVGMatrix();
+    static Ref<SVGRect> createSVGRect();
+    static Ref<SVGTransform> createSVGTransform();
+    static Ref<SVGTransform> createSVGTransformFromMatrix(SVGMatrix&);
 
     Element* getElementById(const AtomicString&);
 
@@ -106,7 +114,8 @@ public: // DOM
 public:
     static Ref<SVGSVGElement> create(const QualifiedName&, Document&);
     static Ref<SVGSVGElement> create(Document&);
-    void scrollToAnchor(const String& fragmentIdentifier, Element* anchor);
+    bool scrollToFragment(const String& fragmentIdentifier);
+    void resetScrollAnchor();
 
     using SVGGraphicsElement::ref;
     using SVGGraphicsElement::deref;
@@ -132,27 +141,32 @@ private:
     virtual ~SVGSVGElement();
 
     bool isValid() const override;
-    void didMoveToNewDocument(Document* oldDocument) override;
+    void didMoveToNewDocument(Document& oldDocument, Document& newDocument) override;
     void parseAttribute(const QualifiedName&, const AtomicString&) override;
     bool rendererIsNeeded(const RenderStyle&) override;
     RenderPtr<RenderElement> createElementRenderer(RenderStyle&&, const RenderTreePosition&) override;
-    InsertionNotificationRequest insertedInto(ContainerNode&) override;
-    void removedFrom(ContainerNode&) override;
+    InsertedIntoAncestorResult insertedIntoAncestor(InsertionType, ContainerNode&) override;
+    void removedFromAncestor(RemovalType, ContainerNode&) override;
     void svgAttributeChanged(const QualifiedName&) override;
     bool selfHasRelativeLengths() const override;
     void prepareForDocumentSuspension() override;
     void resumeFromDocumentSuspension() override;
     AffineTransform localCoordinateSpaceTransform(SVGLocatable::CTMScope) const override;
 
-    Frame* frameForCurrentScale() const;
+    RefPtr<Frame> frameForCurrentScale() const;
     void inheritViewAttributes(const SVGViewElement&);
-    Ref<NodeList> collectIntersectionOrEnclosureList(const FloatRect&, SVGElement*, bool (*checkFunction)(const SVGElement*, const FloatRect&));
+    Ref<NodeList> collectIntersectionOrEnclosureList(SVGRect&, SVGElement*, bool (*checkFunction)(SVGElement&, SVGRect&));
+
+    SVGViewElement* findViewAnchor(const String& fragmentIdentifier) const;
+    SVGSVGElement* findRootAnchor(const SVGViewElement*) const;
+    SVGSVGElement* findRootAnchor(const String&) const;
 
     bool m_useCurrentView { false };
     SVGZoomAndPanType m_zoomAndPan { SVGZoomAndPanMagnify };
     Ref<SMILTimeContainer> m_timeContainer;
-    SVGPoint m_currentTranslate;
+    FloatPoint m_currentTranslate;
     RefPtr<SVGViewSpec> m_viewSpec;
+    String m_currentViewFragmentIdentifier;
 };
 
 inline bool SVGSVGElement::useCurrentView() const
@@ -160,7 +174,7 @@ inline bool SVGSVGElement::useCurrentView() const
     return m_useCurrentView;
 }
 
-inline SVGPoint& SVGSVGElement::currentTranslate()
+inline FloatPoint SVGSVGElement::currentTranslateValue()
 {
     return m_currentTranslate;
 }
@@ -185,11 +199,4 @@ inline bool SVGSVGElement::hasEmptyViewBox() const
     return viewBoxIsValid() && viewBox().isEmpty();
 }
 
-inline float SVGSVGElement::createSVGNumber()
-{
-    return 0;
-}
-
 } // namespace WebCore
-
-#endif

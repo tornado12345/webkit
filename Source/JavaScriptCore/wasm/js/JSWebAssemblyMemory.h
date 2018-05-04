@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,25 +27,49 @@
 
 #if ENABLE(WEBASSEMBLY)
 
+#include "JSCPoison.h"
 #include "JSDestructibleObject.h"
 #include "JSObject.h"
+#include "WasmMemory.h"
+#include <wtf/Ref.h>
+#include <wtf/RefPtr.h>
 
 namespace JSC {
 
-class JSWebAssemblyMemory : public JSDestructibleObject {
+class ArrayBuffer;
+class JSArrayBuffer;
+
+class JSWebAssemblyMemory final : public JSDestructibleObject {
 public:
     typedef JSDestructibleObject Base;
 
-    static JSWebAssemblyMemory* create(VM&, Structure*);
+    template<typename CellType>
+    static CompleteSubspace* subspaceFor(VM& vm)
+    {
+        // We hold onto a lot of memory, so it makes a lot of sense to be swept eagerly.
+        return &vm.eagerlySweptDestructibleObjectSpace;
+    }
+
+    static JSWebAssemblyMemory* create(ExecState*, VM&, Structure*);
     static Structure* createStructure(VM&, JSGlobalObject*, JSValue);
 
-    DECLARE_INFO;
+    DECLARE_EXPORT_INFO;
 
-protected:
+    void adopt(Ref<Wasm::Memory>&&);
+    Wasm::Memory& memory() { return m_memory.get(); }
+    JSArrayBuffer* buffer(VM& vm, JSGlobalObject*);
+    Wasm::PageCount grow(VM&, ExecState*, uint32_t delta);
+    void growSuccessCallback(VM&, Wasm::PageCount oldPageCount, Wasm::PageCount newPageCount);
+
+private:
     JSWebAssemblyMemory(VM&, Structure*);
     void finishCreation(VM&);
     static void destroy(JSCell*);
     static void visitChildren(JSCell*, SlotVisitor&);
+
+    PoisonedRef<JSWebAssemblyMemoryPoison, Wasm::Memory> m_memory;
+    PoisonedWriteBarrier<JSWebAssemblyMemoryPoison, JSArrayBuffer> m_bufferWrapper;
+    PoisonedRefPtr<JSWebAssemblyMemoryPoison, ArrayBuffer> m_buffer;
 };
 
 } // namespace JSC

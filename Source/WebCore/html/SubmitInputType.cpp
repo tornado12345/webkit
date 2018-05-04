@@ -32,8 +32,8 @@
 #include "config.h"
 #include "SubmitInputType.h"
 
+#include "DOMFormData.h"
 #include "Event.h"
-#include "FormDataList.h"
 #include "HTMLFormElement.h"
 #include "HTMLInputElement.h"
 #include "InputTypeNames.h"
@@ -46,11 +46,11 @@ const AtomicString& SubmitInputType::formControlType() const
     return InputTypeNames::submit();
 }
 
-bool SubmitInputType::appendFormData(FormDataList& encoding, bool) const
+bool SubmitInputType::appendFormData(DOMFormData& formData, bool) const
 {
     if (!element().isActivatedSubmit())
         return false;
-    encoding.appendData(element().name(), element().valueWithDefault());
+    formData.append(element().name(), element().valueWithDefault());
     return true;
 }
 
@@ -64,8 +64,16 @@ void SubmitInputType::handleDOMActivateEvent(Event& event)
     Ref<HTMLInputElement> element(this->element());
     if (element->isDisabledFormControl() || !element->form())
         return;
+
+    Ref<HTMLFormElement> protectedForm(*element->form());
+
+    // Update layout before processing form actions in case the style changes
+    // the Form or button relationships.
+    element->document().updateLayoutIgnorePendingStylesheets();
+
     element->setActivatedSubmit(true);
-    element->form()->prepareForSubmission(event); // Event handlers can run.
+    if (auto currentForm = element->form())
+        currentForm->prepareForSubmission(event); // Event handlers can run.
     element->setActivatedSubmit(false);
     event.setDefaultHandled();
 }

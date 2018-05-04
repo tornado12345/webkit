@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009, 2010, 2013-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2009-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,14 +29,8 @@
 #include "CallData.h"
 #include "CodeBlockHash.h"
 #include "CodeSpecializationKind.h"
-#include "CompilationResult.h"
-#include "ExecutableInfo.h"
-#include "HandlerInfo.h"
-#include "InferredValue.h"
 #include "JITCode.h"
 #include "JSGlobalObject.h"
-#include "SourceCode.h"
-#include "TypeSet.h"
 #include "UnlinkedCodeBlock.h"
 #include "UnlinkedFunctionExecutable.h"
 
@@ -50,7 +44,6 @@ class JSWebAssemblyModule;
 class LLIntOffsetsExtractor;
 class ModuleProgramCodeBlock;
 class ProgramCodeBlock;
-class WebAssemblyCodeBlock;
 
 enum CompilationKind { FirstCompilation, OptimizingCompilation };
 
@@ -64,6 +57,7 @@ inline bool isCall(CodeSpecializationKind kind)
 
 class ExecutableBase : public JSCell {
     friend class JIT;
+    friend MacroAssemblerCodeRef<JITThunkPtrTag> boundThisNoArgsFunctionCallGenerator(VM*);
 
 protected:
     static const int NUM_PARAMETERS_IS_HOST = 0;
@@ -88,6 +82,10 @@ public:
 
     static const bool needsDestruction = true;
     static void destroy(JSCell*);
+    
+    // Force subclasses to override this.
+    template<typename>
+    static void subspaceFor(VM&) { }
         
     CodeBlockHash hashFor(CodeSpecializationKind) const;
 
@@ -115,13 +113,6 @@ public:
         return m_numParametersForCall == NUM_PARAMETERS_IS_HOST;
     }
 
-#if ENABLE(WEBASSEMBLY)
-    bool isWebAssemblyExecutable() const
-    {
-        return type() == WebAssemblyExecutableType;
-    }
-#endif
-
     static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue proto) { return Structure::create(vm, globalObject, proto, TypeInfo(CellType, StructureFlags), info()); }
         
     void clearCode();
@@ -133,27 +124,27 @@ protected:
     int m_numParametersForConstruct;
 
 public:
-    PassRefPtr<JITCode> generatedJITCodeForCall()
+    Ref<JITCode> generatedJITCodeForCall()
     {
         ASSERT(m_jitCodeForCall);
-        return m_jitCodeForCall;
+        return *m_jitCodeForCall;
     }
 
-    PassRefPtr<JITCode> generatedJITCodeForConstruct()
+    Ref<JITCode> generatedJITCodeForConstruct()
     {
         ASSERT(m_jitCodeForConstruct);
-        return m_jitCodeForConstruct;
+        return *m_jitCodeForConstruct;
     }
         
-    PassRefPtr<JITCode> generatedJITCodeFor(CodeSpecializationKind kind)
+    Ref<JITCode> generatedJITCodeFor(CodeSpecializationKind kind)
     {
         if (kind == CodeForCall)
             return generatedJITCodeForCall();
         ASSERT(kind == CodeForConstruct);
         return generatedJITCodeForConstruct();
     }
-    
-    MacroAssemblerCodePtr entrypointFor(CodeSpecializationKind kind, ArityCheckMode arity)
+
+    MacroAssemblerCodePtr<JSEntryPtrTag> entrypointFor(CodeSpecializationKind kind, ArityCheckMode arity)
     {
         // Check if we have a cached result. We only have it for arity check because we use the
         // no-arity entrypoint in non-virtual calls, which will "cache" this value directly in
@@ -161,17 +152,16 @@ public:
         if (arity == MustCheckArity) {
             switch (kind) {
             case CodeForCall:
-                if (MacroAssemblerCodePtr result = m_jitCodeForCallWithArityCheck)
+                if (MacroAssemblerCodePtr<JSEntryPtrTag> result = m_jitCodeForCallWithArityCheck)
                     return result;
                 break;
             case CodeForConstruct:
-                if (MacroAssemblerCodePtr result = m_jitCodeForConstructWithArityCheck)
+                if (MacroAssemblerCodePtr<JSEntryPtrTag> result = m_jitCodeForConstructWithArityCheck)
                     return result;
                 break;
             }
         }
-        MacroAssemblerCodePtr result =
-            generatedJITCodeFor(kind)->addressForCall(arity);
+        MacroAssemblerCodePtr<JSEntryPtrTag> result = generatedJITCodeFor(kind)->addressForCall(arity);
         if (arity == MustCheckArity) {
             // Cache the result; this is necessary for the JIT's virtual call optimizations.
             switch (kind) {
@@ -241,8 +231,8 @@ protected:
     Intrinsic m_intrinsic;
     RefPtr<JITCode> m_jitCodeForCall;
     RefPtr<JITCode> m_jitCodeForConstruct;
-    MacroAssemblerCodePtr m_jitCodeForCallWithArityCheck;
-    MacroAssemblerCodePtr m_jitCodeForConstructWithArityCheck;
+    MacroAssemblerCodePtr<JSEntryPtrTag> m_jitCodeForCallWithArityCheck;
+    MacroAssemblerCodePtr<JSEntryPtrTag> m_jitCodeForConstructWithArityCheck;
 };
 
 } // namespace JSC

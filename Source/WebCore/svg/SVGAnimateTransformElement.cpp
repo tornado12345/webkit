@@ -25,12 +25,15 @@
 
 #include "SVGNames.h"
 #include "SVGTransformable.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
 
+WTF_MAKE_ISO_ALLOCATED_IMPL(SVGAnimateTransformElement);
+
 inline SVGAnimateTransformElement::SVGAnimateTransformElement(const QualifiedName& tagName, Document& document)
     : SVGAnimateElementBase(tagName, document)
-    , m_type(SVGTransform::SVG_TRANSFORM_UNKNOWN)
+    , m_type(SVGTransformValue::SVG_TRANSFORM_UNKNOWN)
 {
     ASSERT(hasTagName(SVGNames::animateTransformTag));
 }
@@ -42,8 +45,7 @@ Ref<SVGAnimateTransformElement> SVGAnimateTransformElement::create(const Qualifi
 
 bool SVGAnimateTransformElement::hasValidAttributeType()
 {
-    SVGElement* targetElement = this->targetElement();
-    if (!targetElement)
+    if (!this->targetElement())
         return false;
 
     if (attributeType() == AttributeType::CSS)
@@ -56,8 +58,8 @@ void SVGAnimateTransformElement::parseAttribute(const QualifiedName& name, const
 {
     if (name == SVGNames::typeAttr) {
         m_type = SVGTransformable::parseTransformType(value);
-        if (m_type == SVGTransform::SVG_TRANSFORM_MATRIX)
-            m_type = SVGTransform::SVG_TRANSFORM_UNKNOWN;
+        if (m_type == SVGTransformValue::SVG_TRANSFORM_MATRIX)
+            m_type = SVGTransformValue::SVG_TRANSFORM_UNKNOWN;
         return;
     }
 

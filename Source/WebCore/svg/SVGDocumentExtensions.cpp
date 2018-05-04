@@ -40,19 +40,20 @@
 
 namespace WebCore {
 
-SVGDocumentExtensions::SVGDocumentExtensions(Document* document)
+SVGDocumentExtensions::SVGDocumentExtensions(Document& document)
     : m_document(document)
     , m_resourcesCache(std::make_unique<SVGResourcesCache>())
+    , m_areAnimationsPaused(!document.page() || !document.page()->isVisible())
 {
 }
 
-SVGDocumentExtensions::~SVGDocumentExtensions()
-{
-}
+SVGDocumentExtensions::~SVGDocumentExtensions() = default;
 
 void SVGDocumentExtensions::addTimeContainer(SVGSVGElement* element)
 {
     m_timeContainers.add(element);
+    if (m_areAnimationsPaused)
+        element->pauseAnimations();
 }
 
 void SVGDocumentExtensions::removeTimeContainer(SVGSVGElement* element)
@@ -103,12 +104,14 @@ void SVGDocumentExtensions::pauseAnimations()
 {
     for (auto& container : m_timeContainers)
         container->pauseAnimations();
+    m_areAnimationsPaused = true;
 }
 
 void SVGDocumentExtensions::unpauseAnimations()
 {
     for (auto& container : m_timeContainers)
         container->unpauseAnimations();
+    m_areAnimationsPaused = false;
 }
 
 void SVGDocumentExtensions::dispatchSVGLoadEventToOutermostSVGElements()
@@ -123,10 +126,10 @@ void SVGDocumentExtensions::dispatchSVGLoadEventToOutermostSVGElements()
     }
 }
 
-static void reportMessage(Document* document, MessageLevel level, const String& message)
+static void reportMessage(Document& document, MessageLevel level, const String& message)
 {
-    if (document->frame())
-        document->addConsoleMessage(MessageSource::Rendering, level, message);
+    if (document.frame())
+        document.addConsoleMessage(MessageSource::Rendering, level, message);
 }
 
 void SVGDocumentExtensions::reportWarning(const String& message)
@@ -259,7 +262,7 @@ void SVGDocumentExtensions::markPendingResourcesForRemoval(const AtomicString& i
         m_pendingResourcesForRemoval.add(id, WTFMove(existing));
 }
 
-Element* SVGDocumentExtensions::removeElementFromPendingResourcesForRemovalMap(const AtomicString& id)
+RefPtr<Element> SVGDocumentExtensions::removeElementFromPendingResourcesForRemovalMap(const AtomicString& id)
 {
     if (id.isEmpty())
         return 0;
@@ -269,7 +272,7 @@ Element* SVGDocumentExtensions::removeElementFromPendingResourcesForRemovalMap(c
         return 0;
 
     auto firstElement = resourceSet->begin();
-    Element* element = *firstElement;
+    RefPtr<Element> element = *firstElement;
 
     resourceSet->remove(firstElement);
 

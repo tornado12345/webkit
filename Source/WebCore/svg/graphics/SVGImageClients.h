@@ -26,10 +26,10 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef SVGImageClients_h
-#define SVGImageClients_h
+#pragma once
 
 #include "EmptyClients.h"
+#include "SVGImage.h"
 
 namespace WebCore {
 
@@ -52,14 +52,18 @@ private:
     
     void invalidateContentsAndRootView(const IntRect& r) final
     {
-        // If m_image->m_page is null, we're being destructed, don't fire changedInRect() in that case.
-        if (m_image && m_image->imageObserver() && m_image->m_page)
-            m_image->imageObserver()->changedInRect(m_image, &r);
+        // If m_image->m_page is null, we're being destroyed.
+        if (!m_image || !m_image->m_page)
+            return;
+
+        auto* imageObserver = m_image->imageObserver();
+        if (!imageObserver)
+            return;
+
+        imageObserver->imageFrameAvailable(*m_image, m_image->isAnimating() ? ImageAnimatingState::Yes : ImageAnimatingState::No, &r);
     }
     
     SVGImage* m_image;
 };
 
-}
-
-#endif // SVGImageClients_h
+} // namespace WebCore

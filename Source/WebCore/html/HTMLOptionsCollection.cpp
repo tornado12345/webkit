@@ -21,9 +21,6 @@
 #include "config.h"
 #include "HTMLOptionsCollection.h"
 
-#include "ExceptionCode.h"
-#include "HTMLOptionElement.h"
-
 namespace WebCore {
 
 HTMLOptionsCollection::HTMLOptionsCollection(HTMLSelectElement& select)
@@ -36,7 +33,7 @@ Ref<HTMLOptionsCollection> HTMLOptionsCollection::create(HTMLSelectElement& sele
     return adoptRef(*new HTMLOptionsCollection(select));
 }
 
-ExceptionOr<void> HTMLOptionsCollection::add(const OptionOrOptGroupElement& element, Optional<HTMLElementOrInt> before)
+ExceptionOr<void> HTMLOptionsCollection::add(const OptionOrOptGroupElement& element, const std::optional<HTMLElementOrInt>& before)
 {
     return selectElement().add(element, before);
 }
@@ -44,11 +41,6 @@ ExceptionOr<void> HTMLOptionsCollection::add(const OptionOrOptGroupElement& elem
 void HTMLOptionsCollection::remove(int index)
 {
     selectElement().remove(index);
-}
-
-void HTMLOptionsCollection::remove(HTMLOptionElement& option)
-{
-    selectElement().remove(option);
 }
 
 int HTMLOptionsCollection::selectedIndex() const

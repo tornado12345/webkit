@@ -28,11 +28,9 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef CSSToLengthConversionData_h
-#define CSSToLengthConversionData_h
+#pragma once
 
 #include <wtf/Assertions.h>
-#include <wtf/Noncopyable.h>
 
 namespace WebCore {
 
@@ -92,5 +90,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif

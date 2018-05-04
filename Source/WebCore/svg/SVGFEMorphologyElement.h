@@ -17,8 +17,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGFEMorphologyElement_h
-#define SVGFEMorphologyElement_h
+#pragma once
 
 #include "FEMorphology.h"
 #include "SVGAnimatedEnumeration.h"
@@ -57,6 +56,7 @@ struct SVGPropertyTraits<MorphologyOperatorType> {
 };
 
 class SVGFEMorphologyElement final : public SVGFilterPrimitiveStandardAttributes {
+    WTF_MAKE_ISO_ALLOCATED(SVGFEMorphologyElement);
 public:
     static Ref<SVGFEMorphologyElement> create(const QualifiedName&, Document&);
 
@@ -82,5 +82,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif

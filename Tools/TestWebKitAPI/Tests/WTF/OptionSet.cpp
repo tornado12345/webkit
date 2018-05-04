@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -77,13 +77,35 @@ TEST(WTF_OptionSet, NotEqual)
     EXPECT_FALSE(set != ExampleFlags::A);
 }
 
+TEST(WTF_OptionSet, Or)
+{
+    OptionSet<ExampleFlags> set { ExampleFlags::A, ExampleFlags::B, ExampleFlags::C };
+    OptionSet<ExampleFlags> set2 { ExampleFlags::C, ExampleFlags::D };
+
+    EXPECT_TRUE(((set | ExampleFlags::A) == OptionSet<ExampleFlags> { ExampleFlags::A, ExampleFlags::B, ExampleFlags::C }));
+    EXPECT_TRUE(((set | ExampleFlags::D) == OptionSet<ExampleFlags> { ExampleFlags::A, ExampleFlags::B, ExampleFlags::C, ExampleFlags::D }));
+    EXPECT_TRUE(((set | set2) == OptionSet<ExampleFlags> { ExampleFlags::A, ExampleFlags::B, ExampleFlags::C, ExampleFlags::D }));
+}
+
 TEST(WTF_OptionSet, Minus)
 {
     OptionSet<ExampleFlags> set { ExampleFlags::A, ExampleFlags::B, ExampleFlags::C };
-    
+
     EXPECT_TRUE(((set - ExampleFlags::A) == OptionSet<ExampleFlags> { ExampleFlags::B, ExampleFlags::C }));
     EXPECT_TRUE(((set - ExampleFlags::D) == OptionSet<ExampleFlags> { ExampleFlags::A, ExampleFlags::B, ExampleFlags::C }));
     EXPECT_TRUE((set - set).isEmpty());
+}
+
+TEST(WTF_OptionSet, MinusEqual)
+{
+    OptionSet<ExampleFlags> set { ExampleFlags::A, ExampleFlags::B, ExampleFlags::C };
+
+    EXPECT_TRUE(((set -= ExampleFlags::A) == OptionSet<ExampleFlags> { ExampleFlags::B, ExampleFlags::C }));
+    EXPECT_TRUE((set == OptionSet<ExampleFlags> { ExampleFlags::B, ExampleFlags::C }));
+    EXPECT_TRUE(((set -= ExampleFlags::D) == OptionSet<ExampleFlags> { ExampleFlags::B, ExampleFlags::C }));
+    EXPECT_TRUE((set == OptionSet<ExampleFlags> { ExampleFlags::B, ExampleFlags::C }));
+    EXPECT_TRUE((set -= set).isEmpty());
+    EXPECT_TRUE(set.isEmpty());
 }
 
 TEST(WTF_OptionSet, ContainsTwoFlags)

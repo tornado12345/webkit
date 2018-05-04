@@ -109,6 +109,12 @@ void printInternal(PrintStream& out, UseKind useKind)
     case SetObjectUse:
         out.print("SetObjectUse");
         return;
+    case WeakMapObjectUse:
+        out.print("WeakMapObjectUse");
+        return;
+    case WeakSetObjectUse:
+        out.print("WeakSetObjectUse");
+        return;
     case ObjectOrOtherUse:
         out.print("ObjectOrOther");
         return;
@@ -130,6 +136,9 @@ void printInternal(PrintStream& out, UseKind useKind)
     case SymbolUse:
         out.print("Symbol");
         return;
+    case BigIntUse:
+        out.print("BigInt");
+        return;
     case StringObjectUse:
         out.print("StringObject");
         return;
@@ -138,6 +147,9 @@ void printInternal(PrintStream& out, UseKind useKind)
         return;
     case NotStringVarUse:
         out.print("NotStringVar");
+        return;
+    case NotSymbolUse:
+        out.print("NotSymbol");
         return;
     case NotCellUse:
         out.print("NotCell");

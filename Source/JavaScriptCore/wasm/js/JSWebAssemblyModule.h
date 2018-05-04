@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,34 +27,68 @@
 
 #if ENABLE(WEBASSEMBLY)
 
+#include "JSCPoison.h"
 #include "JSDestructibleObject.h"
 #include "JSObject.h"
-#include "WasmFormat.h"
+#include "UnconditionalFinalizer.h"
+#include "WasmMemoryMode.h"
+#include <wtf/Bag.h>
+#include <wtf/Expected.h>
+#include <wtf/Forward.h>
+#include <wtf/Ref.h>
+#include <wtf/text/WTFString.h>
 
 namespace JSC {
 
-class JSWebAssemblyModule : public JSDestructibleObject {
+namespace Wasm {
+class Module;
+struct ModuleInformation;
+class Plan;
+using SignatureIndex = uint32_t;
+}
+
+class SymbolTable;
+class JSWebAssemblyCodeBlock;
+class JSWebAssemblyMemory;
+class WebAssemblyToJSCallee;
+
+class JSWebAssemblyModule final : public JSDestructibleObject {
 public:
     typedef JSDestructibleObject Base;
 
-    static JSWebAssemblyModule* create(VM&, Structure*, std::unique_ptr<Wasm::ModuleInformation>&, Wasm::CompiledFunctions&);
+    DECLARE_EXPORT_INFO;
+
+    JS_EXPORT_PRIVATE static JSWebAssemblyModule* createStub(VM&, ExecState*, Structure*, Expected<RefPtr<Wasm::Module>, String>&&);
     static Structure* createStructure(VM&, JSGlobalObject*, JSValue);
 
-    DECLARE_INFO;
+    const Wasm::ModuleInformation& moduleInformation() const;
+    SymbolTable* exportSymbolTable() const;
+    Wasm::SignatureIndex signatureIndexFromFunctionIndexSpace(unsigned functionIndexSpace) const;
+    WebAssemblyToJSCallee* callee() const;
 
-    const Wasm::ModuleInformation* moduleInformation() const
-    {
-        return m_moduleInformation.get();
-    }
+    JSWebAssemblyCodeBlock* codeBlock(Wasm::MemoryMode mode);
+    void setCodeBlock(VM&, Wasm::MemoryMode, JSWebAssemblyCodeBlock*);
 
-protected:
-    JSWebAssemblyModule(VM&, Structure*, std::unique_ptr<Wasm::ModuleInformation>&, Wasm::CompiledFunctions&);
+    const Vector<uint8_t>& source() const;
+
+    JS_EXPORT_PRIVATE Wasm::Module& module();
+
+private:
+    friend class JSWebAssemblyCodeBlock;
+
+    JSWebAssemblyModule(VM&, Structure*, Ref<Wasm::Module>&&);
     void finishCreation(VM&);
     static void destroy(JSCell*);
     static void visitChildren(JSCell*, SlotVisitor&);
-private:
-    std::unique_ptr<Wasm::ModuleInformation> m_moduleInformation;
-    Wasm::CompiledFunctions m_compiledFunctions;
+
+    PoisonedRef<JSWebAssemblyModulePoison, Wasm::Module> m_module;
+
+    template<typename T>
+    using PoisonedBarrier = PoisonedWriteBarrier<JSWebAssemblyModulePoison, T>;
+
+    PoisonedBarrier<SymbolTable> m_exportSymbolTable;
+    PoisonedBarrier<JSWebAssemblyCodeBlock> m_codeBlocks[Wasm::NumberOfMemoryModes];
+    PoisonedBarrier<WebAssemblyToJSCallee> m_callee;
 };
 
 } // namespace JSC

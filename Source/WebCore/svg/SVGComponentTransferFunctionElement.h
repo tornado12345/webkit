@@ -18,8 +18,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGComponentTransferFunctionElement_h
-#define SVGComponentTransferFunctionElement_h
+#pragma once
 
 #include "FEComponentTransfer.h"
 #include "SVGAnimatedEnumeration.h"
@@ -71,6 +70,7 @@ struct SVGPropertyTraits<ComponentTransferType> {
 };
 
 class SVGComponentTransferFunctionElement : public SVGElement {
+    WTF_MAKE_ISO_ALLOCATED(SVGComponentTransferFunctionElement);
 public:
     ComponentTransferFunction transferFunction() const;
 
@@ -97,5 +97,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif

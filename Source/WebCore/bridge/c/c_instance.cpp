@@ -38,16 +38,15 @@
 #include "npruntime_impl.h"
 #include "runtime_method.h"
 #include "runtime_root.h"
-#include <interpreter/CallFrame.h>
-#include <runtime/ArgList.h>
-#include <runtime/Error.h>
-#include <runtime/FunctionPrototype.h>
-#include <runtime/JSLock.h>
-#include <runtime/PropertyNameArray.h>
+#include <JavaScriptCore/ArgList.h>
+#include <JavaScriptCore/CallFrame.h>
+#include <JavaScriptCore/Error.h>
+#include <JavaScriptCore/FunctionPrototype.h>
+#include <JavaScriptCore/JSLock.h>
+#include <JavaScriptCore/PropertyNameArray.h>
 #include <wtf/Assertions.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/StdLibExtras.h>
-#include <wtf/StringExtras.h>
 #include <wtf/Vector.h>
 
 using namespace WebCore;
@@ -117,17 +116,18 @@ public:
 
     static CRuntimeMethod* create(ExecState* exec, JSGlobalObject* globalObject, const String& name, Bindings::Method* method)
     {
+        VM& vm = globalObject->vm();
         // FIXME: deprecatedGetDOMStructure uses the prototype off of the wrong global object
         // We need to pass in the right global object for "i".
         Structure* domStructure = WebCore::deprecatedGetDOMStructure<CRuntimeMethod>(exec);
-        CRuntimeMethod* runtimeMethod = new (NotNull, allocateCell<CRuntimeMethod>(*exec->heap())) CRuntimeMethod(globalObject, domStructure, method);
-        runtimeMethod->finishCreation(exec->vm(), name);
+        CRuntimeMethod* runtimeMethod = new (NotNull, allocateCell<CRuntimeMethod>(vm.heap)) CRuntimeMethod(globalObject, domStructure, method);
+        runtimeMethod->finishCreation(vm, name);
         return runtimeMethod;
     }
 
     static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype)
     {
-        return Structure::create(vm, globalObject, prototype, TypeInfo(ObjectType, StructureFlags), info());
+        return Structure::create(vm, globalObject, prototype, TypeInfo(InternalFunctionType, StructureFlags), info());
     }
 
     DECLARE_INFO;
@@ -141,12 +141,12 @@ private:
     void finishCreation(VM& vm, const String& name)
     {
         Base::finishCreation(vm, name);
-        ASSERT(inherits(info()));
+        ASSERT(inherits(vm, info()));
     }
 
 };
 
-const ClassInfo CRuntimeMethod::s_info = { "CRuntimeMethod", &RuntimeMethod::s_info, 0, CREATE_METHOD_TABLE(CRuntimeMethod) };
+const ClassInfo CRuntimeMethod::s_info = { "CRuntimeMethod", &RuntimeMethod::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(CRuntimeMethod) };
 
 JSValue CInstance::getMethod(ExecState* exec, PropertyName propertyName)
 {
@@ -159,7 +159,7 @@ JSValue CInstance::invokeMethod(ExecState* exec, RuntimeMethod* runtimeMethod)
     VM& vm = exec->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
 
-    if (!asObject(runtimeMethod)->inherits(CRuntimeMethod::info()))
+    if (!asObject(runtimeMethod)->inherits<CRuntimeMethod>(vm))
         return throwTypeError(exec, scope, ASCIILiteral("Attempt to invoke non-plug-in method on plug-in object."));
 
     CMethod* method = static_cast<CMethod*>(runtimeMethod->method());

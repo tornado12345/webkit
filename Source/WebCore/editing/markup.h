@@ -29,21 +29,31 @@
 #include "FragmentScriptingPermission.h"
 #include "HTMLInterchange.h"
 #include <wtf/Forward.h>
-#include <wtf/Vector.h>
+#include <wtf/Function.h>
+#include <wtf/HashMap.h>
 
 namespace WebCore {
 
+class ArchiveResource;
 class ContainerNode;
 class Document;
 class DocumentFragment;
 class Element;
+class Frame;
 class HTMLElement;
 class URL;
 class Node;
+class Page;
 class QualifiedName;
 class Range;
 
-typedef int ExceptionCode;
+void replaceSubresourceURLs(Ref<DocumentFragment>&&, HashMap<AtomicString, AtomicString>&&);
+void removeSubresourceURLAttributes(Ref<DocumentFragment>&&, WTF::Function<bool(const URL&)> shouldRemoveURL);
+
+enum class MSOListQuirks { CheckIfNeeded, Disabled };
+std::unique_ptr<Page> createPageForSanitizingWebContent();
+String sanitizeMarkup(const String&, MSOListQuirks = MSOListQuirks::Disabled, std::optional<WTF::Function<void(DocumentFragment&)>> fragmentSanitizer = std::nullopt);
+String sanitizedMarkupForFragmentInDocument(Ref<DocumentFragment>&&, Document&, MSOListQuirks, const String& originalMarkup);
 
 enum EChildrenOnly { IncludeNode, ChildrenOnly };
 enum EAbsoluteURLs { DoNotResolveURLs, ResolveAllURLs, ResolveNonLocalURLs };
@@ -53,13 +63,13 @@ WEBCORE_EXPORT Ref<DocumentFragment> createFragmentFromText(Range& context, cons
 WEBCORE_EXPORT Ref<DocumentFragment> createFragmentFromMarkup(Document&, const String& markup, const String& baseURL, ParserContentPolicy = AllowScriptingContent);
 ExceptionOr<Ref<DocumentFragment>> createFragmentForInnerOuterHTML(Element&, const String& markup, ParserContentPolicy);
 RefPtr<DocumentFragment> createFragmentForTransformToFragment(Document&, const String& sourceString, const String& sourceMIMEType);
+Ref<DocumentFragment> createFragmentForImageAndURL(Document&, const String&);
 ExceptionOr<Ref<DocumentFragment>> createContextualFragment(Element&, const String& markup, ParserContentPolicy);
 
 bool isPlainTextMarkup(Node*);
 
 // These methods are used by HTMLElement & ShadowRoot to replace the children with respected fragment/text.
 ExceptionOr<void> replaceChildrenWithFragment(ContainerNode&, Ref<DocumentFragment>&&);
-ExceptionOr<void> replaceChildrenWithText(ContainerNode&, const String&);
 
 String createMarkup(const Range&, Vector<Node*>* = nullptr, EAnnotateForInterchange = DoNotAnnotateForInterchange, bool convertBlocksToInlines = false, EAbsoluteURLs = DoNotResolveURLs);
 String createMarkup(const Node&, EChildrenOnly = IncludeNode, Vector<Node*>* = nullptr, EAbsoluteURLs = DoNotResolveURLs, Vector<QualifiedName>* tagNamesToSkip = nullptr, EFragmentSerialization = HTMLFragmentSerialization);

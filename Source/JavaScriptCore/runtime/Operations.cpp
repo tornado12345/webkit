@@ -46,17 +46,28 @@ NEVER_INLINE JSValue jsAddSlowCase(CallFrame* callFrame, JSValue v1, JSValue v2)
     VM& vm = callFrame->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
     JSValue p1 = v1.toPrimitive(callFrame);
-    RETURN_IF_EXCEPTION(scope, JSValue());
+    RETURN_IF_EXCEPTION(scope, { });
     JSValue p2 = v2.toPrimitive(callFrame);
-    RETURN_IF_EXCEPTION(scope, JSValue());
+    RETURN_IF_EXCEPTION(scope, { });
 
-    if (p1.isString())
-        return jsString(callFrame, asString(p1), p2.toString(callFrame));
+    if (p1.isString()) {
+        JSString* p2String = p2.toString(callFrame);
+        RETURN_IF_EXCEPTION(scope, { });
+        scope.release();
+        return jsString(callFrame, asString(p1), p2String);
+    }
 
-    if (p2.isString())
-        return jsString(callFrame, p1.toString(callFrame), asString(p2));
+    if (p2.isString()) {
+        JSString* p1String = p1.toString(callFrame);
+        RETURN_IF_EXCEPTION(scope, { });
+        scope.release();
+        return jsString(callFrame, p1String, asString(p2));
+    }
 
-    return jsNumber(p1.toNumber(callFrame) + p2.toNumber(callFrame));
+    double p1Number = p1.toNumber(callFrame);
+    RETURN_IF_EXCEPTION(scope, { });
+    scope.release();
+    return jsNumber(p1Number + p2.toNumber(callFrame));
 }
 
 JSValue jsTypeStringForValue(VM& vm, JSGlobalObject* globalObject, JSValue v)
@@ -71,6 +82,8 @@ JSValue jsTypeStringForValue(VM& vm, JSGlobalObject* globalObject, JSValue v)
         return vm.smallStrings.stringString();
     if (v.isSymbol())
         return vm.smallStrings.symbolString();
+    if (v.isBigInt())
+        return vm.smallStrings.bigintString();
     if (v.isObject()) {
         JSObject* object = asObject(v);
         // Return "undefined" for objects that should be treated
@@ -96,18 +109,19 @@ JSValue jsTypeStringForValue(CallFrame* callFrame, JSValue v)
 
 bool jsIsObjectTypeOrNull(CallFrame* callFrame, JSValue v)
 {
+    VM& vm = callFrame->vm();
     if (!v.isCell())
         return v.isNull();
 
     JSType type = v.asCell()->type();
-    if (type == StringType || type == SymbolType)
+    if (type == StringType || type == SymbolType || type == BigIntType)
         return false;
     if (type >= ObjectType) {
-        if (asObject(v)->structure(callFrame->vm())->masqueradesAsUndefined(callFrame->lexicalGlobalObject()))
+        if (asObject(v)->structure(vm)->masqueradesAsUndefined(callFrame->lexicalGlobalObject()))
             return false;
         CallData callData;
         JSObject* object = asObject(v);
-        if (object->methodTable(callFrame->vm())->getCallData(object, callData) != CallType::None)
+        if (object->methodTable(vm)->getCallData(object, callData) != CallType::None)
             return false;
     }
     return true;
@@ -124,23 +138,30 @@ bool jsIsFunctionType(JSValue v)
     return false;
 }
 
-size_t normalizePrototypeChain(CallFrame* callFrame, Structure* structure)
+size_t normalizePrototypeChain(CallFrame* callFrame, JSCell* base, bool& sawPolyProto)
 {
     VM& vm = callFrame->vm();
     size_t count = 0;
+    sawPolyProto = false;
+    JSCell* current = base;
+    JSGlobalObject* globalObject = callFrame->lexicalGlobalObject();
     while (1) {
+        Structure* structure = current->structure(vm);
         if (structure->isProxy())
             return InvalidPrototypeChain;
-        JSValue v = structure->prototypeForLookup(callFrame);
-        if (v.isNull())
+
+        sawPolyProto |= structure->hasPolyProto();
+
+        JSValue prototype = structure->prototypeForLookup(globalObject, current);
+        if (prototype.isNull())
             return count;
 
-        JSCell* base = v.asCell();
-        structure = base->structure(vm);
+        current = prototype.asCell();
+        structure = current->structure(vm);
         if (structure->isDictionary()) {
             if (structure->hasBeenFlattenedBefore())
                 return InvalidPrototypeChain;
-            structure->flattenDictionaryStructure(vm, asObject(base));
+            structure->flattenDictionaryStructure(vm, asObject(current));
         }
 
         ++count;

@@ -29,7 +29,6 @@
 
 import datetime
 import logging
-import os
 import re
 
 from webkitpy.common.memoized import memoized
@@ -37,7 +36,7 @@ from webkitpy.common.system.executive import Executive, ScriptError
 
 from .commitmessage import CommitMessage
 from .scm import AuthenticationError, SCM, commit_error_handler
-from .svn import SVN, SVNRepository
+from .svn import SVNRepository
 
 _log = logging.getLogger(__name__)
 
@@ -110,9 +109,17 @@ class Git(SCM, SVNRepository):
     def in_working_directory(cls, path, executive=None):
         try:
             executive = executive or Executive()
-            return executive.run_command([cls.executable_name, 'rev-parse', '--is-inside-work-tree'], cwd=path, error_handler=Executive.ignore_error).rstrip() == "true"
-        except OSError, e:
+            return executive.run_command([cls.executable_name, 'rev-parse', '--is-inside-work-tree'], cwd=path, ignore_errors=True).rstrip() == "true"
+        except OSError as e:
             # The Windows bots seem to through a WindowsError when git isn't installed.
+            return False
+
+    @classmethod
+    def clone(cls, url, directory, executive=None):
+        try:
+            executive = executive or Executive()
+            return executive.run_command([cls.executable_name, 'clone', '-v', url, directory], ignore_errors=True)
+        except OSError as e:
             return False
 
     def find_checkout_root(self, path):
@@ -135,7 +142,7 @@ class Git(SCM, SVNRepository):
         # Pass the cwd if provided so that we can handle the case of running webkit-patch outside of the working directory.
         # FIXME: This should use an Executive.
         executive = executive or Executive()
-        return executive.run_command([cls.executable_name, "config", "--get-all", key], error_handler=Executive.ignore_error, cwd=cwd).rstrip('\n')
+        return executive.run_command([cls.executable_name, "config", "--get-all", key], ignore_errors=True, cwd=cwd).rstrip('\n')
 
     @staticmethod
     def commit_success_regexp():
@@ -270,12 +277,18 @@ class Git(SCM, SVNRepository):
         # git 1.7.0.4 (and earlier) didn't support the separate arg.
         return self._run_git(['log', '-1', '--grep=' + grep_str, '--date=iso', self.find_checkout_root(path)])
 
+    def _most_recent_log_for_revision(self, revision, path):
+        return self._run_git(['log', '-1', revision, '--date=iso', self.find_checkout_root(path)])
+
     def svn_revision(self, path):
         git_log = self._most_recent_log_matching('git-svn-id:', path)
         match = re.search("^\s*git-svn-id:.*@(?P<svn_revision>\d+)\ ", git_log, re.MULTILINE)
         if not match:
             return ""
         return str(match.group('svn_revision'))
+
+    def native_revision(self, path):
+        return self._run_git(['-C', self.find_checkout_root(path), 'log', '-1', '--pretty=format:%H'])
 
     def svn_url(self):
         git_command = ['svn', 'info']
@@ -299,6 +312,11 @@ class Git(SCM, SVNRepository):
         sign = 1 if match.group(7) == '+' else -1
         time_without_timezone = time_with_timezone - datetime.timedelta(hours=sign * int(match.group(8)), minutes=int(match.group(9)))
         return time_without_timezone.strftime('%Y-%m-%dT%H:%M:%SZ')
+
+    def timestamp_of_native_revision(self, path, sha):
+        unix_timestamp = self._run_git(['-C', self.find_checkout_root(path), 'log', '-1', sha, '--pretty=format:%ct']).rstrip()
+        commit_timestamp = datetime.datetime.utcfromtimestamp(float(unix_timestamp))
+        return commit_timestamp.strftime('%Y-%m-%dT%H:%M:%SZ')
 
     def prepend_svn_revision(self, diff):
         revision = self.head_svn_revision()
@@ -340,7 +358,7 @@ class Git(SCM, SVNRepository):
     def _string_to_int_or_none(self, string):
         try:
             return int(string)
-        except ValueError, e:
+        except ValueError as e:
             return None
 
     @memoized
@@ -382,7 +400,7 @@ class Git(SCM, SVNRepository):
         # Assume the revision is an svn revision.
         git_commit = self.git_commit_from_svn_revision(revision)
         # I think this will always fail due to ChangeLogs.
-        self._run_git(['revert', '--no-commit', git_commit], error_handler=Executive.ignore_error)
+        self._run_git(['revert', '--no-commit', git_commit], ignore_errors=True)
 
     def revert_files(self, file_paths):
         self._run_git(['checkout', 'HEAD'] + file_paths)
@@ -453,7 +471,7 @@ class Git(SCM, SVNRepository):
 
             self._run_git(['commit', '-m', message])
             output = self.push_local_commits_to_server(username=username, password=password)
-        except Exception, e:
+        except Exception as e:
             _log.warning("COMMIT FAILED: " + str(e))
             output = "Commit failed."
             commit_succeeded = False
@@ -488,11 +506,11 @@ class Git(SCM, SVNRepository):
     def deinit_submodules(self):
         return self._run_git(['submodule', 'deinit', '-f', '.'])
 
-    def _branch_ref_exists(self, branch_ref):
+    def branch_ref_exists(self, branch_ref):
         return self._run_git(['show-ref', '--quiet', '--verify', branch_ref], return_exit_code=True) == 0
 
     def delete_branch(self, branch_name):
-        if self._branch_ref_exists('refs/heads/' + branch_name):
+        if self.branch_ref_exists('refs/heads/' + branch_name):
             self._run_git(['branch', '-D', branch_name])
 
     def remote_merge_base(self):
@@ -503,7 +521,7 @@ class Git(SCM, SVNRepository):
         remote_branch_refs = self.read_git_config('svn-remote.svn.fetch', cwd=self.checkout_root, executive=self._executive)
         if not remote_branch_refs:
             remote_master_ref = 'refs/remotes/origin/master'
-            if not self._branch_ref_exists(remote_master_ref):
+            if not self.branch_ref_exists(remote_master_ref):
                 raise ScriptError(message="Can't find a branch to diff against. svn-remote.svn.fetch is not in the git config and %s does not exist" % remote_master_ref)
             return remote_master_ref
 
@@ -561,3 +579,43 @@ class Git(SCM, SVNRepository):
 
     def files_changed_summary_for_commit(self, commit_id):
         return self._run_git(['diff-tree', '--shortstat', '--no-renames', '--no-commit-id', commit_id])
+
+    def fetch(self, remote='origin'):
+        return self._run_git(['fetch', remote])
+
+    # Reset current HEAD to the specified commit.
+    def reset_hard(self, commit):
+        return self._run_git(['reset', '--hard', commit])
+
+    def apply_mail_patch(self, options):
+        return self._run_git(['apply', '--index'] + options)
+
+    def commit(self, options):
+        return self._run_git(['commit'] + options)
+
+    def format_patch(self, options):
+        return self._run_git(['format-patch'] + options)
+
+    def request_pull(self, options):
+        return self._run_git(['request-pull'] + options)
+
+    def remote(self, options):
+        return self._run_git(['remote'] + options)
+
+    def push(self, options):
+        return self._run_git(['push'] + options)
+
+    def local_config(self, key):
+        return self._run_git(['config', '--get', '--local', key], error_handler=Executive.ignore_error)
+
+    def set_local_config(self, key, value):
+        return self._run_git(['config', '--add', '--local', key, value], error_handler=Executive.ignore_error)
+
+    def checkout_new_branch(self, branch_name):
+        return self._run_git(['checkout', '-b', branch_name])
+
+    def checkout(self, revision, quiet=None):
+        command = ['checkout', revision]
+        if quiet:
+            command += ['-q']
+        return self._run_git(command)

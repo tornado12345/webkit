@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,8 +29,9 @@
 #if ENABLE(JIT)
 
 #include "GPRInfo.h"
-#include "MacroAssembler.h"
 #include "JSCInlines.h"
+#include "MacroAssembler.h"
+#include "RegisterAtOffsetList.h"
 #include <wtf/CommaPrinter.h>
 
 namespace JSC {
@@ -50,8 +51,10 @@ RegisterSet RegisterSet::reservedHardwareRegisters()
 #else
     return RegisterSet(ARM64Registers::lr);
 #endif // PLATFORM(IOS)
+#elif CPU(ARM_THUMB2) || CPU(ARM_TRADITIONAL)
+    return RegisterSet(ARMRegisters::lr, ARMRegisters::pc);
 #else
-    return RegisterSet();
+    return { };
 #endif
 }
 
@@ -60,7 +63,7 @@ RegisterSet RegisterSet::runtimeRegisters()
 #if USE(JSVALUE64)
     return RegisterSet(GPRInfo::tagTypeNumberRegister, GPRInfo::tagMaskRegister);
 #else
-    return RegisterSet();
+    return { };
 #endif
 }
 
@@ -98,7 +101,7 @@ RegisterSet RegisterSet::macroScratchRegisters()
     result.set(MacroAssembler::cmpTempRegister);
     return result;
 #else
-    return RegisterSet();
+    return { };
 #endif
 }
 
@@ -113,6 +116,10 @@ RegisterSet RegisterSet::calleeSaveRegisters()
 #elif CPU(X86_64)
     result.set(X86Registers::ebx);
     result.set(X86Registers::ebp);
+#if OS(WINDOWS)
+    result.set(X86Registers::edi);
+    result.set(X86Registers::esi);
+#endif
     result.set(X86Registers::r12);
     result.set(X86Registers::r13);
     result.set(X86Registers::r14);
@@ -195,6 +202,16 @@ RegisterSet RegisterSet::vmCalleeSaveRegisters()
     return result;
 }
 
+RegisterAtOffsetList* RegisterSet::vmCalleeSaveRegisterOffsets()
+{
+    static RegisterAtOffsetList* result;
+    static std::once_flag calleeSavesFlag;
+    std::call_once(calleeSavesFlag, [] () {
+        result = new RegisterAtOffsetList(vmCalleeSaveRegisters(), RegisterAtOffsetList::ZeroBased);
+    });
+    return result;
+}
+
 RegisterSet RegisterSet::llintBaselineCalleeSaveRegisters()
 {
     RegisterSet result;
@@ -222,7 +239,6 @@ RegisterSet RegisterSet::llintBaselineCalleeSaveRegisters()
     result.set(GPRInfo::regCS8);
     result.set(GPRInfo::regCS9);
 #elif CPU(MIPS)
-#elif CPU(SH4)
 #else
     UNREACHABLE_FOR_PLATFORM();
 #endif
@@ -258,7 +274,6 @@ RegisterSet RegisterSet::dfgCalleeSaveRegisters()
     result.set(GPRInfo::regCS8);
     result.set(GPRInfo::regCS9);
 #elif CPU(MIPS)
-#elif CPU(SH4)
 #else
     UNREACHABLE_FOR_PLATFORM();
 #endif
@@ -305,39 +320,6 @@ RegisterSet RegisterSet::ftlCalleeSaveRegisters()
 #endif
     return result;
 }
-
-#if ENABLE(WEBASSEMBLY)
-RegisterSet RegisterSet::webAssemblyCalleeSaveRegisters()
-{
-    RegisterSet result;
-#if CPU(X86)
-#elif CPU(X86_64)
-#if !OS(WINDOWS)
-    ASSERT(GPRInfo::regCS3 == GPRInfo::tagTypeNumberRegister);
-    ASSERT(GPRInfo::regCS4 == GPRInfo::tagMaskRegister);
-    result.set(GPRInfo::regCS3);
-    result.set(GPRInfo::regCS4);
-#else
-    ASSERT(GPRInfo::regCS5 == GPRInfo::tagTypeNumberRegister);
-    ASSERT(GPRInfo::regCS6 == GPRInfo::tagMaskRegister);
-    result.set(GPRInfo::regCS5);
-    result.set(GPRInfo::regCS6);
-#endif
-#elif CPU(ARM_THUMB2)
-#elif CPU(ARM_TRADITIONAL)
-#elif CPU(ARM64)
-    ASSERT(GPRInfo::regCS8 == GPRInfo::tagTypeNumberRegister);
-    ASSERT(GPRInfo::regCS9 == GPRInfo::tagMaskRegister);
-    result.set(GPRInfo::regCS8);
-    result.set(GPRInfo::regCS9);
-#elif CPU(MIPS)
-#elif CPU(SH4)
-#else
-    UNREACHABLE_FOR_PLATFORM();
-#endif
-    return result;
-}
-#endif
 
 RegisterSet RegisterSet::argumentGPRS()
 {

@@ -24,7 +24,6 @@
 
 #pragma once
 
-#include "SMILTime.h"
 #include "SVGAnimatedBoolean.h"
 #include "SVGExternalResourcesRequired.h"
 #include "SVGSMILElement.h"
@@ -54,6 +53,7 @@ enum AnimatedPropertyValueType { RegularPropertyValue, CurrentColorValue, Inheri
 enum class CalcMode { Discrete, Linear, Paced, Spline };
 
 class SVGAnimationElement : public SVGSMILElement, public SVGTests, public SVGExternalResourcesRequired {
+    WTF_MAKE_ISO_ALLOCATED(SVGAnimationElement);
 public:
     float getStartTime() const;
     float getCurrentTime() const;
@@ -146,6 +146,11 @@ public:
             animatedNumber = number;
     }
 
+    // SVGTests
+    Ref<SVGStringList> requiredFeatures();
+    Ref<SVGStringList> requiredExtensions();
+    Ref<SVGStringList> systemLanguage();
+
 protected:
     SVGAnimationElement(const QualifiedName&, Document&);
 
@@ -208,9 +213,9 @@ private:
     END_DECLARE_ANIMATED_PROPERTIES
 
     // SVGTests
-    void synchronizeRequiredFeatures() override { SVGTests::synchronizeRequiredFeatures(this); }
-    void synchronizeRequiredExtensions() override { SVGTests::synchronizeRequiredExtensions(this); }
-    void synchronizeSystemLanguage() override { SVGTests::synchronizeSystemLanguage(this); }
+    void synchronizeRequiredFeatures() final { SVGTests::synchronizeRequiredFeatures(*this); }
+    void synchronizeRequiredExtensions() final { SVGTests::synchronizeRequiredExtensions(*this); }
+    void synchronizeSystemLanguage() final { SVGTests::synchronizeSystemLanguage(*this); }
 
     void setCalcMode(const AtomicString&);
 

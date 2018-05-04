@@ -17,8 +17,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGProperty_h
-#define SVGProperty_h
+#pragma once
 
 #include <wtf/RefCounted.h>
 
@@ -32,12 +31,10 @@ enum SVGPropertyRole {
 
 class SVGProperty : public RefCounted<SVGProperty> {
 public:
-    virtual ~SVGProperty() { }
+    virtual ~SVGProperty() = default;
 
     virtual bool isReadOnly() const = 0;
     virtual void commitChange() = 0;
 };
 
-}
-
-#endif // SVGProperty_h
+} // namespace WebCore

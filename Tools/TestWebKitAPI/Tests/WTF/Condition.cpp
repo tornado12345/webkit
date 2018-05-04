@@ -81,7 +81,7 @@ void runTest(
     unsigned numMessagesPerProducer,
     NotifyStyle notifyStyle,
     Seconds timeout = Seconds::infinity(),
-    Seconds delay = Seconds(0))
+    Seconds delay = 0_s)
 {
     Deque<unsigned> queue;
     bool shouldContinue = true;
@@ -89,14 +89,14 @@ void runTest(
     Condition emptyCondition;
     Condition fullCondition;
 
-    Vector<ThreadIdentifier> consumerThreads;
-    Vector<ThreadIdentifier> producerThreads;
+    Vector<Ref<Thread>> consumerThreads;
+    Vector<Ref<Thread>> producerThreads;
 
     Vector<unsigned> received;
     Lock receivedLock;
     
     for (unsigned i = numConsumers; i--;) {
-        ThreadIdentifier threadIdentifier = createThread(
+        consumerThreads.append(Thread::create(
             "Consumer thread",
             [&] () {
                 for (;;) {
@@ -108,7 +108,7 @@ void runTest(
                             emptyCondition, locker, 
                             [&] () {
                                 if (verbose)
-                                    dataLog(toString(currentThread(), ": Checking consumption predicate with shouldContinue = ", shouldContinue, ", queue.size() == ", queue.size(), "\n"));
+                                    dataLog(toString(Thread::current(), ": Checking consumption predicate with shouldContinue = ", shouldContinue, ", queue.size() == ", queue.size(), "\n"));
                                 return !shouldContinue || !queue.isEmpty();
                             },
                             timeout);
@@ -124,14 +124,13 @@ void runTest(
                         received.append(result);
                     }
                 }
-            });
-        consumerThreads.append(threadIdentifier);
+            }));
     }
 
     sleep(delay);
 
     for (unsigned i = numProducers; i--;) {
-        ThreadIdentifier threadIdentifier = createThread(
+        producerThreads.append(Thread::create(
             "Producer Thread",
             [&] () {
                 for (unsigned i = 0; i < numMessagesPerProducer; ++i) {
@@ -142,7 +141,7 @@ void runTest(
                             fullCondition, locker,
                             [&] () {
                                 if (verbose)
-                                    dataLog(toString(currentThread(), ": Checking production predicate with shouldContinue = ", shouldContinue, ", queue.size() == ", queue.size(), "\n"));
+                                    dataLog(toString(Thread::current(), ": Checking production predicate with shouldContinue = ", shouldContinue, ", queue.size() == ", queue.size(), "\n"));
                                 return queue.size() < maxQueueSize;
                             },
                             timeout);
@@ -151,12 +150,11 @@ void runTest(
                     }
                     notify(notifyStyle, emptyCondition, shouldNotify);
                 }
-            });
-        producerThreads.append(threadIdentifier);
+            }));
     }
 
-    for (ThreadIdentifier threadIdentifier : producerThreads)
-        waitForThreadCompletion(threadIdentifier);
+    for (auto& thread : producerThreads)
+        thread->waitForCompletion();
 
     {
         std::lock_guard<Lock> locker(lock);
@@ -164,8 +162,8 @@ void runTest(
     }
     emptyCondition.notifyAll();
 
-    for (ThreadIdentifier threadIdentifier : consumerThreads)
-        waitForThreadCompletion(threadIdentifier);
+    for (auto& thread : consumerThreads)
+        thread->waitForCompletion();
 
     EXPECT_EQ(numProducers * numMessagesPerProducer, received.size());
     std::sort(received.begin(), received.end());

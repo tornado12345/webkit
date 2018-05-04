@@ -19,8 +19,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef StyleRuleImport_h
-#define StyleRuleImport_h
+#pragma once
 
 #include "CachedResourceHandle.h"
 #include "CachedStyleSheetClient.h"
@@ -59,8 +58,8 @@ private:
 class ImportedStyleSheetClient final : public CachedStyleSheetClient {
     public:
         ImportedStyleSheetClient(StyleRuleImport* ownerRule) : m_ownerRule(ownerRule) { }
-        virtual ~ImportedStyleSheetClient() { }
-        virtual void setCSSStyleSheet(const String& href, const URL& baseURL, const String& charset, const CachedCSSStyleSheet* sheet)
+        virtual ~ImportedStyleSheetClient() = default;
+        void setCSSStyleSheet(const String& href, const URL& baseURL, const String& charset, const CachedCSSStyleSheet* sheet) final
         {
             m_ownerRule->setCSSStyleSheet(href, baseURL, charset, sheet);
         }
@@ -88,5 +87,3 @@ class ImportedStyleSheetClient final : public CachedStyleSheetClient {
 SPECIALIZE_TYPE_TRAITS_BEGIN(WebCore::StyleRuleImport)
     static bool isType(const WebCore::StyleRuleBase& rule) { return rule.isImportRule(); }
 SPECIALIZE_TYPE_TRAITS_END()
-
-#endif

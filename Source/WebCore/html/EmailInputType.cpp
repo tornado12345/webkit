@@ -28,16 +28,14 @@
 #include "HTMLParserIdioms.h"
 #include "InputTypeNames.h"
 #include "LocalizedStrings.h"
+#include <JavaScriptCore/RegularExpression.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/text/StringBuilder.h>
-#include <yarr/RegularExpression.h>
 
 namespace WebCore {
 
-static const char emailPattern[] =
-    "[a-z0-9!#$%&'*+/=?^_`{|}~.-]+" // local part
-    "@"
-    "[a-z0-9-]+(\\.[a-z0-9-]+)*"; // domain part
+// From https://html.spec.whatwg.org/#valid-e-mail-address.
+static const char emailPattern[] = "^[a-zA-Z0-9.!#$%&'*+\\/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$";
 
 static bool isValidEmailAddress(const String& address)
 {
@@ -45,7 +43,7 @@ static bool isValidEmailAddress(const String& address)
     if (!addressLength)
         return false;
 
-    static NeverDestroyed<const JSC::Yarr::RegularExpression> regExp(emailPattern, TextCaseInsensitive);
+    static NeverDestroyed<const JSC::Yarr::RegularExpression> regExp(emailPattern, JSC::Yarr::TextCaseInsensitive);
 
     int matchLength;
     int matchOffset = regExp.get().match(address, 0, &matchLength);

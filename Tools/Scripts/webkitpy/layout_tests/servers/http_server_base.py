@@ -47,6 +47,10 @@ class ServerError(Exception):
 class HttpServerBase(object):
     """A skeleton class for starting and stopping servers used by the layout tests."""
 
+    HTTP_SERVER_PORT = 8000
+    ALTERNATIVE_HTTP_SERVER_PORT = 8080
+    HTTPS_SERVER_PORT = 8443
+
     def __init__(self, port_obj):
         self._executive = port_obj._executive
         self._filesystem = port_obj._filesystem
@@ -67,6 +71,9 @@ class HttpServerBase(object):
 
         self._runtime_path = self._filesystem.join(tmpdir, "WebKit")
         self._filesystem.maybe_make_directory(self._runtime_path)
+
+    def ports_to_forward(self):
+        return [mapping['port'] for mapping in self._mappings]
 
     def start(self):
         """Starts the server. It is an error to start an already started server.
@@ -157,11 +164,15 @@ class HttpServerBase(object):
     # Utility routines.
 
     def aliases(self):
+        """Return path pairs used to define aliases. First item is URL path and second
+        one is actual location in the file system."""
         json_data = self._filesystem.read_text_file(self._port_obj.path_from_webkit_base("Tools", "Scripts", "webkitpy", "layout_tests", "servers", "aliases.json"))
-        results = []
-        for item in json.loads(json_data):
-            results.append([item[0], self._port_obj._filesystem.join(self.tests_dir, item[1])])
-        return results
+        return self._build_alias_path_pairs(json.loads(json_data))
+
+    def _build_alias_path_pairs(self, data):
+        def _make_path(path):
+            return self._filesystem.join(self.tests_dir, self._filesystem.normpath(path))
+        return [(alias, _make_path(path)) for (alias, path) in data]
 
     def _remove_pid_file(self):
         if self._filesystem.exists(self._pid_file):
@@ -193,18 +204,23 @@ class HttpServerBase(object):
             raise ServerError("Server exited")
 
         for mapping in self._mappings:
-            s = socket.socket()
-            port = mapping['port']
-            try:
-                s.connect(('localhost', port))
-                _log.debug("Server running on %d" % port)
-            except IOError, e:
-                if e.errno not in (errno.ECONNREFUSED, errno.ECONNRESET):
-                    raise
-                _log.debug("Server NOT running on %d: %s" % (port, e))
+            if not self._is_running_on_port(mapping['port']):
                 return False
-            finally:
-                s.close()
+        return True
+
+    @classmethod
+    def _is_running_on_port(cls, port):
+        s = socket.socket()
+        try:
+            s.connect(('localhost', port))
+            _log.debug("Server running on %d" % port)
+        except IOError as e:
+            if e.errno not in (errno.ECONNREFUSED, errno.ECONNRESET):
+                raise
+            _log.debug("Server NOT running on %d: %s" % (port, e))
+            return False
+        finally:
+            s.close()
         return True
 
     def _check_that_all_ports_are_available(self):
@@ -214,7 +230,7 @@ class HttpServerBase(object):
             port = mapping['port']
             try:
                 s.bind(('localhost', port))
-            except IOError, e:
+            except IOError as e:
                 if e.errno in (errno.EALREADY, errno.EADDRINUSE):
                     raise ServerError('Port %d is already in use.' % port)
                 elif sys.platform.startswith('win') and e.errno in (errno.WSAEACCES,):  # pylint: disable=E1101
@@ -223,3 +239,7 @@ class HttpServerBase(object):
                     raise
             finally:
                 s.close()
+
+
+def is_http_server_running():
+    return HttpServerBase._is_running_on_port(HttpServerBase.HTTP_SERVER_PORT)

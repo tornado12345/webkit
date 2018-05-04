@@ -27,24 +27,25 @@
 #ifndef ThreadGlobalData_h
 #define ThreadGlobalData_h
 
-#include <wtf/Noncopyable.h>
+#include <wtf/ThreadSafeRefCounted.h>
 #include <wtf/text/StringHash.h>
-
-#include <wtf/ThreadSpecific.h>
-#include <wtf/Threading.h>
-using WTF::ThreadSpecific;
 
 namespace WebCore {
 
+    class QualifiedNameCache;
     class ThreadTimers;
 
     struct CachedResourceRequestInitiators;
     struct EventNames;
     struct ICUConverterWrapper;
-    struct TECConverterWrapper;
 
+#if USE(WEB_THREAD)
+    class ThreadGlobalData : public ThreadSafeRefCounted<ThreadGlobalData> {
+#else
     class ThreadGlobalData {
+#endif
         WTF_MAKE_NONCOPYABLE(ThreadGlobalData);
+        WTF_MAKE_FAST_ALLOCATED;
     public:
         WEBCORE_EXPORT ThreadGlobalData();
         WEBCORE_EXPORT ~ThreadGlobalData();
@@ -53,12 +54,9 @@ namespace WebCore {
         const CachedResourceRequestInitiators& cachedResourceRequestInitiators() { return *m_cachedResourceRequestInitiators; }
         EventNames& eventNames() { return *m_eventNames; }
         ThreadTimers& threadTimers() { return *m_threadTimers; }
+        QualifiedNameCache& qualifiedNameCache() { return *m_qualifiedNameCache; }
 
         ICUConverterWrapper& cachedConverterICU() { return *m_cachedConverterICU; }
-
-#if PLATFORM(MAC)
-        TECConverterWrapper& cachedConverterTEC() { return *m_cachedConverterTEC; }
-#endif
 
 #if USE(WEB_THREAD)
         void setWebCoreThreadData();
@@ -68,6 +66,7 @@ namespace WebCore {
         std::unique_ptr<CachedResourceRequestInitiators> m_cachedResourceRequestInitiators;
         std::unique_ptr<EventNames> m_eventNames;
         std::unique_ptr<ThreadTimers> m_threadTimers;
+        std::unique_ptr<QualifiedNameCache> m_qualifiedNameCache;
 
 #ifndef NDEBUG
         bool m_isMainThread;
@@ -75,14 +74,6 @@ namespace WebCore {
 
         std::unique_ptr<ICUConverterWrapper> m_cachedConverterICU;
 
-#if PLATFORM(MAC)
-        std::unique_ptr<TECConverterWrapper> m_cachedConverterTEC;
-#endif
-
-        WEBCORE_EXPORT static ThreadSpecific<ThreadGlobalData>* staticData;
-#if USE(WEB_THREAD)
-        WEBCORE_EXPORT static ThreadGlobalData* sharedMainThreadStaticData;
-#endif
         WEBCORE_EXPORT friend ThreadGlobalData& threadGlobalData();
     };
 

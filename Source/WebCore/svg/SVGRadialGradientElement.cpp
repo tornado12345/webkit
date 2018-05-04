@@ -30,12 +30,13 @@
 #include "RenderSVGResourceRadialGradient.h"
 #include "SVGNames.h"
 #include "SVGStopElement.h"
-#include "SVGTransform.h"
-#include "SVGTransformList.h"
 #include "SVGUnitTypes.h"
+#include <wtf/IsoMallocInlines.h>
 #include <wtf/NeverDestroyed.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(SVGRadialGradientElement);
 
 // Animated property definitions
 DEFINE_ANIMATED_LENGTH(SVGRadialGradientElement, SVGNames::cxAttr, Cx, cx)
@@ -76,15 +77,9 @@ Ref<SVGRadialGradientElement> SVGRadialGradientElement::create(const QualifiedNa
 
 bool SVGRadialGradientElement::isSupportedAttribute(const QualifiedName& attrName)
 {
-    static NeverDestroyed<HashSet<QualifiedName>> supportedAttributes;
-    if (supportedAttributes.get().isEmpty()) {
-        supportedAttributes.get().add(SVGNames::cxAttr);
-        supportedAttributes.get().add(SVGNames::cyAttr);
-        supportedAttributes.get().add(SVGNames::fxAttr);
-        supportedAttributes.get().add(SVGNames::fyAttr);
-        supportedAttributes.get().add(SVGNames::rAttr);
-        supportedAttributes.get().add(SVGNames::frAttr);
-    }
+    static const auto supportedAttributes = makeNeverDestroyed(HashSet<QualifiedName> {
+        SVGNames::cxAttr.get(), SVGNames::cyAttr.get(), SVGNames::fxAttr.get(), SVGNames::fyAttr.get(), SVGNames::rAttr.get(), SVGNames::frAttr.get(),
+    });
     return supportedAttributes.get().contains<SVGAttributeHashTranslator>(attrName);
 }
 
@@ -93,17 +88,17 @@ void SVGRadialGradientElement::parseAttribute(const QualifiedName& name, const A
     SVGParsingError parseError = NoError;
 
     if (name == SVGNames::cxAttr)
-        setCxBaseValue(SVGLength::construct(LengthModeWidth, value, parseError));
+        setCxBaseValue(SVGLengthValue::construct(LengthModeWidth, value, parseError));
     else if (name == SVGNames::cyAttr)
-        setCyBaseValue(SVGLength::construct(LengthModeHeight, value, parseError));
+        setCyBaseValue(SVGLengthValue::construct(LengthModeHeight, value, parseError));
     else if (name == SVGNames::rAttr)
-        setRBaseValue(SVGLength::construct(LengthModeOther, value, parseError, ForbidNegativeLengths));
+        setRBaseValue(SVGLengthValue::construct(LengthModeOther, value, parseError, ForbidNegativeLengths));
     else if (name == SVGNames::fxAttr)
-        setFxBaseValue(SVGLength::construct(LengthModeWidth, value, parseError));
+        setFxBaseValue(SVGLengthValue::construct(LengthModeWidth, value, parseError));
     else if (name == SVGNames::fyAttr)
-        setFyBaseValue(SVGLength::construct(LengthModeHeight, value, parseError));
+        setFyBaseValue(SVGLengthValue::construct(LengthModeHeight, value, parseError));
     else if (name == SVGNames::frAttr)
-        setFrBaseValue(SVGLength::construct(LengthModeOther, value, parseError, ForbidNegativeLengths));
+        setFrBaseValue(SVGLengthValue::construct(LengthModeOther, value, parseError, ForbidNegativeLengths));
 
     reportAttributeParsingError(parseError, name, value);
 
@@ -186,9 +181,9 @@ bool SVGRadialGradientElement::collectGradientAttributes(RadialGradientAttribute
 
     while (true) {
         // Respect xlink:href, take attributes from referenced element
-        Node* refNode = SVGURIReference::targetElementFromIRIString(current->href(), document());
+        auto refNode = makeRefPtr(SVGURIReference::targetElementFromIRIString(current->href(), document()));
         if (is<SVGGradientElement>(refNode)) {
-            current = downcast<SVGGradientElement>(refNode);
+            current = downcast<SVGGradientElement>(refNode.get());
 
             // Cycle detection
             if (processedGradients.contains(current))

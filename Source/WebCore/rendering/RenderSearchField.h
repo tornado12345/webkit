@@ -20,8 +20,7 @@
  *
  */
 
-#ifndef RenderSearchField_h
-#define RenderSearchField_h
+#pragma once
 
 #include "PopupMenuClient.h"
 #include "RenderTextControlSingleLine.h"
@@ -32,6 +31,7 @@ namespace WebCore {
 class HTMLInputElement;
 
 class RenderSearchField final : public RenderTextControlSingleLine, private PopupMenuClient {
+    WTF_MAKE_ISO_ALLOCATED(RenderSearchField);
 public:
     RenderSearchField(HTMLInputElement&, RenderStyle&&);
     virtual ~RenderSearchField();
@@ -46,9 +46,10 @@ public:
     void hidePopup();
 
 private:
-    void centerContainerIfNeeded(RenderBox*) const override;
+    bool isSearchField() const final { return true; }
+
+    void willBeDestroyed() override;
     LayoutUnit computeControlLogicalHeight(LayoutUnit lineHeight, LayoutUnit nonContentHeight) const override;
-    LayoutUnit computeLogicalHeightLimit() const override;
     void updateFromElement() override;
     EVisibility visibilityForCancelButton() const;
     const AtomicString& autosaveName() const;
@@ -92,6 +93,4 @@ private:
 
 } // namespace WebCore
 
-SPECIALIZE_TYPE_TRAITS_RENDER_OBJECT(RenderSearchField, isTextField())
-
-#endif
+SPECIALIZE_TYPE_TRAITS_RENDER_OBJECT(RenderSearchField, isSearchField())

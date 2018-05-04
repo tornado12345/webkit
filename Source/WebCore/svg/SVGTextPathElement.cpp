@@ -23,11 +23,15 @@
 
 #include "RenderSVGResource.h"
 #include "RenderSVGTextPath.h"
+#include "SVGDocumentExtensions.h"
 #include "SVGNames.h"
 #include "XLinkNames.h"
+#include <wtf/IsoMallocInlines.h>
 #include <wtf/NeverDestroyed.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(SVGTextPathElement);
 
 // Animated property definitions
 DEFINE_ANIMATED_LENGTH(SVGTextPathElement, SVGNames::startOffsetAttr, StartOffset, startOffset)
@@ -70,13 +74,12 @@ void SVGTextPathElement::clearResourceReferences()
 
 bool SVGTextPathElement::isSupportedAttribute(const QualifiedName& attrName)
 {
-    static NeverDestroyed<HashSet<QualifiedName>> supportedAttributes;
-    if (supportedAttributes.get().isEmpty()) {
-        SVGURIReference::addSupportedAttributes(supportedAttributes);
-        supportedAttributes.get().add(SVGNames::startOffsetAttr);
-        supportedAttributes.get().add(SVGNames::methodAttr);
-        supportedAttributes.get().add(SVGNames::spacingAttr);
-    }
+    static const auto supportedAttributes = makeNeverDestroyed([] {
+        HashSet<QualifiedName> set;
+        SVGURIReference::addSupportedAttributes(set);
+        set.add({ SVGNames::startOffsetAttr.get(), SVGNames::methodAttr.get(), SVGNames::spacingAttr.get() });
+        return set;
+    }());
     return supportedAttributes.get().contains<SVGAttributeHashTranslator>(attrName);
 }
 
@@ -85,7 +88,7 @@ void SVGTextPathElement::parseAttribute(const QualifiedName& name, const AtomicS
     SVGParsingError parseError = NoError;
 
     if (name == SVGNames::startOffsetAttr)
-        setStartOffsetBaseValue(SVGLength::construct(LengthModeOther, value, parseError));
+        setStartOffsetBaseValue(SVGLengthValue::construct(LengthModeOther, value, parseError));
     else if (name == SVGNames::methodAttr) {
         SVGTextPathMethodType propertyValue = SVGPropertyTraits<SVGTextPathMethodType>::fromString(value);
         if (propertyValue > 0)
@@ -152,11 +155,11 @@ bool SVGTextPathElement::rendererIsNeeded(const RenderStyle& style)
 void SVGTextPathElement::buildPendingResource()
 {
     clearResourceReferences();
-    if (!inDocument())
+    if (!isConnected())
         return;
 
     String id;
-    Element* target = SVGURIReference::targetElementFromIRIString(href(), document(), &id);
+    auto target = makeRefPtr(SVGURIReference::targetElementFromIRIString(href(), document(), &id));
     if (!target) {
         // Do not register as pending if we are already pending this resource.
         if (document().accessSVGExtensions().isPendingResource(this, id))
@@ -169,25 +172,25 @@ void SVGTextPathElement::buildPendingResource()
     } else if (target->hasTagName(SVGNames::pathTag)) {
         // Register us with the target in the dependencies map. Any change of hrefElement
         // that leads to relayout/repainting now informs us, so we can react to it.
-        document().accessSVGExtensions().addElementReferencingTarget(this, downcast<SVGElement>(target));
+        document().accessSVGExtensions().addElementReferencingTarget(this, downcast<SVGElement>(target.get()));
     }
 }
 
-Node::InsertionNotificationRequest SVGTextPathElement::insertedInto(ContainerNode& rootParent)
+Node::InsertedIntoAncestorResult SVGTextPathElement::insertedIntoAncestor(InsertionType insertionType, ContainerNode& parentOfInsertedTree)
 {
-    SVGTextContentElement::insertedInto(rootParent);
-    return InsertionShouldCallFinishedInsertingSubtree;
+    SVGTextContentElement::insertedIntoAncestor(insertionType, parentOfInsertedTree);
+    return InsertedIntoAncestorResult::NeedsPostInsertionCallback;
 }
 
-void SVGTextPathElement::finishedInsertingSubtree()
+void SVGTextPathElement::didFinishInsertingNode()
 {
     buildPendingResource();
 }
 
-void SVGTextPathElement::removedFrom(ContainerNode& rootParent)
+void SVGTextPathElement::removedFromAncestor(RemovalType removalType, ContainerNode& oldParentOfRemovedTree)
 {
-    SVGTextContentElement::removedFrom(rootParent);
-    if (rootParent.inDocument())
+    SVGTextContentElement::removedFromAncestor(removalType, oldParentOfRemovedTree);
+    if (removalType.disconnectedFromDocument)
         clearResourceReferences();
 }
 

@@ -25,6 +25,7 @@
 
 import os
 import sys
+import subprocess
 
 
 def enumerablePseudoType(stringPseudoType):
@@ -91,7 +92,7 @@ output_file.write("""
 #include "config.h"
 #include "SelectorPseudoTypeMap.h"
 
-#include "CSSParserValues.h"
+#include "CSSParserSelector.h"
 
 #if defined(__clang__)
 #pragma clang diagnostic push
@@ -185,19 +186,6 @@ static inline const SelectorPseudoClassOrCompatibilityPseudoElementEntry* parseP
 """ % longest_keyword)
 
 output_file.write("""
-PseudoClassOrCompatibilityPseudoElement parsePseudoClassAndCompatibilityElementString(const CSSParserString& pseudoTypeString)
-{
-    const SelectorPseudoClassOrCompatibilityPseudoElementEntry* entry;
-    if (pseudoTypeString.is8Bit())
-        entry = parsePseudoClassAndCompatibilityElementString(pseudoTypeString.characters8(), pseudoTypeString.length());
-    else
-        entry = parsePseudoClassAndCompatibilityElementString(pseudoTypeString.characters16(), pseudoTypeString.length());
-
-    if (entry)
-        return entry->pseudoTypes;
-    return { CSSSelector::PseudoClassUnknown, CSSSelector::PseudoElementUnknown };
-}
-
 PseudoClassOrCompatibilityPseudoElement parsePseudoClassAndCompatibilityElementString(const StringView& pseudoTypeString)
 {
     const SelectorPseudoClassOrCompatibilityPseudoElementEntry* entry;
@@ -224,7 +212,6 @@ gperf_command = sys.argv[2]
 if 'GPERF' in os.environ:
     gperf_command = os.environ['GPERF']
 
-gperf_return = os.system("%s --key-positions=\"*\" -m 10 -s 2 SelectorPseudoClassAndCompatibilityElementMap.gperf --output-file=SelectorPseudoClassAndCompatibilityElementMap.cpp" % gperf_command)
-if gperf_return != 0:
+if subprocess.call([gperf_command, '--key-positions=*', '-m', '10', '-s', '2', 'SelectorPseudoClassAndCompatibilityElementMap.gperf', '--output-file=SelectorPseudoClassAndCompatibilityElementMap.cpp']) != 0:
     print("Error when generating SelectorPseudoClassAndCompatibilityElementMap.cpp from SelectorPseudoClassAndCompatibilityElementMap.gperf :(")
     sys.exit(gperf_return)

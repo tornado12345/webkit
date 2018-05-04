@@ -18,8 +18,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGGraphicsElement_h
-#define SVGGraphicsElement_h
+#pragma once
 
 #include "SVGAnimatedTransformList.h"
 #include "SVGElement.h"
@@ -30,13 +29,20 @@ namespace WebCore {
 
 class AffineTransform;
 class Path;
+class SVGRect;
+class SVGMatrix;
 
 class SVGGraphicsElement : public SVGElement, public SVGTransformable, public SVGTests {
+    WTF_MAKE_ISO_ALLOCATED(SVGGraphicsElement);
 public:
     virtual ~SVGGraphicsElement();
 
+    Ref<SVGMatrix> getCTMForBindings();
     AffineTransform getCTM(StyleUpdateStrategy = AllowStyleUpdate) override;
+
+    Ref<SVGMatrix> getScreenCTMForBindings();
     AffineTransform getScreenCTM(StyleUpdateStrategy = AllowStyleUpdate) override;
+
     SVGElement* nearestViewportElement() const override;
     SVGElement* farthestViewportElement() const override;
 
@@ -44,16 +50,22 @@ public:
     AffineTransform animatedLocalTransform() const override;
     AffineTransform* supplementalTransform() override;
 
+    Ref<SVGRect> getBBoxForBindings();
     FloatRect getBBox(StyleUpdateStrategy = AllowStyleUpdate) override;
 
     bool shouldIsolateBlending() const { return m_shouldIsolateBlending; }
     void setShouldIsolateBlending(bool isolate) { m_shouldIsolateBlending = isolate; }
 
     // "base class" methods for all the elements which render as paths
-    virtual void toClipPath(Path&);
+    virtual Path toClipPath();
     RenderPtr<RenderElement> createElementRenderer(RenderStyle&&, const RenderTreePosition&) override;
 
     size_t approximateMemoryCost() const override { return sizeof(*this); }
+
+    // SVGTests
+    Ref<SVGStringList> requiredFeatures();
+    Ref<SVGStringList> requiredExtensions();
+    Ref<SVGStringList> systemLanguage();
 
 protected:
     SVGGraphicsElement(const QualifiedName&, Document&);
@@ -73,9 +85,9 @@ private:
     static bool isSupportedAttribute(const QualifiedName&);
 
     // SVGTests
-    void synchronizeRequiredFeatures() override { SVGTests::synchronizeRequiredFeatures(this); }
-    void synchronizeRequiredExtensions() override { SVGTests::synchronizeRequiredExtensions(this); }
-    void synchronizeSystemLanguage() override { SVGTests::synchronizeSystemLanguage(this); }
+    void synchronizeRequiredFeatures() final { SVGTests::synchronizeRequiredFeatures(*this); }
+    void synchronizeRequiredExtensions() final { SVGTests::synchronizeRequiredExtensions(*this); }
+    void synchronizeSystemLanguage() final { SVGTests::synchronizeSystemLanguage(*this); }
 
     // Used by <animateMotion>
     std::unique_ptr<AffineTransform> m_supplementalTransform;
@@ -90,5 +102,3 @@ SPECIALIZE_TYPE_TRAITS_BEGIN(WebCore::SVGGraphicsElement)
     static bool isType(const WebCore::SVGElement& element) { return element.isSVGGraphicsElement(); }
     static bool isType(const WebCore::Node& node) { return is<WebCore::SVGElement>(node) && isType(downcast<WebCore::SVGElement>(node)); }
 SPECIALIZE_TYPE_TRAITS_END()
-
-#endif // SVGGraphicsElement_h

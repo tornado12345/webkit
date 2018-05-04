@@ -2,7 +2,7 @@
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011, 2013, 2014 Apple Inc. All rights reserved.
+ * Copyright (C) 2004-2018 Apple Inc. All rights reserved.
  *           (C) 2006 Alexey Proskuryakov (ap@nypop.com)
  * Copyright (C) 2007 Samuel Weinig (sam@webkit.org)
  * Copyright (C) 2009, 2010, 2011, 2012 Google Inc. All rights reserved.
@@ -33,18 +33,16 @@
 #include "ButtonInputType.h"
 #include "CheckboxInputType.h"
 #include "ColorInputType.h"
+#include "DOMFormData.h"
 #include "DateComponents.h"
 #include "DateInputType.h"
 #include "DateTimeInputType.h"
 #include "DateTimeLocalInputType.h"
 #include "EmailInputType.h"
 #include "EventNames.h"
-#include "ExceptionCode.h"
-#include "ExceptionCodePlaceholder.h"
 #include "FileInputType.h"
 #include "FileList.h"
 #include "FormController.h"
-#include "FormDataList.h"
 #include "HTMLFormElement.h"
 #include "HTMLInputElement.h"
 #include "HTMLNames.h"
@@ -70,7 +68,7 @@
 #include "ShadowRoot.h"
 #include "SubmitInputType.h"
 #include "TelephoneInputType.h"
-#include <wtf/text/TextBreakIterator.h>
+#include "TextControlInnerElements.h"
 #include "TextInputType.h"
 #include "TimeInputType.h"
 #include "URLInputType.h"
@@ -79,6 +77,7 @@
 #include <wtf/Assertions.h>
 #include <wtf/HashMap.h>
 #include <wtf/text/StringHash.h>
+#include <wtf/text/TextBreakIterator.h>
 
 namespace WebCore {
 
@@ -86,16 +85,16 @@ using namespace HTMLNames;
 
 typedef bool (RuntimeEnabledFeatures::*InputTypeConditionalFunction)() const;
 typedef const AtomicString& (*InputTypeNameFunction)();
-typedef std::unique_ptr<InputType> (*InputTypeFactoryFunction)(HTMLInputElement&);
+typedef Ref<InputType> (*InputTypeFactoryFunction)(HTMLInputElement&);
 typedef HashMap<AtomicString, InputTypeFactoryFunction, ASCIICaseInsensitiveHash> InputTypeFactoryMap;
 
 template<class T>
-static std::unique_ptr<InputType> createInputType(HTMLInputElement& element)
+static Ref<InputType> createInputType(HTMLInputElement& element)
 {
-    return std::make_unique<T>(element);
+    return adoptRef(*new T(element));
 }
 
-static void populateInputTypeFactoryMap(InputTypeFactoryMap& map)
+static InputTypeFactoryMap createInputTypeFactoryMap()
 {
     static const struct InputTypes {
         InputTypeConditionalFunction conditionalFunction;
@@ -141,39 +140,35 @@ static void populateInputTypeFactoryMap(InputTypeFactoryMap& map)
         // No need to register "text" because it is the default type.
     };
 
+    InputTypeFactoryMap map;
     for (auto& inputType : inputTypes) {
         auto conditionalFunction = inputType.conditionalFunction;
         if (!conditionalFunction || (RuntimeEnabledFeatures::sharedFeatures().*conditionalFunction)())
             map.add(inputType.nameFunction(), inputType.factoryFunction);
     }
+    return map;
 }
 
-std::unique_ptr<InputType> InputType::create(HTMLInputElement& element, const AtomicString& typeName)
+Ref<InputType> InputType::create(HTMLInputElement& element, const AtomicString& typeName)
 {
-    static NeverDestroyed<InputTypeFactoryMap> factoryMap;
-    if (factoryMap.get().isEmpty())
-        populateInputTypeFactoryMap(factoryMap);
-
     if (!typeName.isEmpty()) {
+        static const auto factoryMap = makeNeverDestroyed(createInputTypeFactoryMap());
         if (auto factory = factoryMap.get().get(typeName))
             return factory(element);
     }
-    return std::make_unique<TextInputType>(element);
+    return adoptRef(*new TextInputType(element));
 }
 
-std::unique_ptr<InputType> InputType::createText(HTMLInputElement& element)
+Ref<InputType> InputType::createText(HTMLInputElement& element)
 {
-    return std::make_unique<TextInputType>(element);
+    return adoptRef(*new TextInputType(element));
 }
 
-InputType::~InputType()
-{
-}
+InputType::~InputType() = default;
 
 bool InputType::themeSupportsDataListUI(InputType* type)
 {
-    Document& document = type->element().document();
-    return RenderTheme::themeForPage(document.page())->supportsDataListUI(type->formControlType());
+    return RenderTheme::singleton().supportsDataListUI(type->formControlType());
 }
 
 bool InputType::isTextField() const
@@ -198,10 +193,10 @@ bool InputType::shouldSaveAndRestoreFormControlState() const
 
 FormControlState InputType::saveFormControlState() const
 {
-    String currentValue = element().value();
+    auto currentValue = element().value();
     if (currentValue == element().defaultValue())
-        return FormControlState();
-    return FormControlState(currentValue);
+        return { };
+    return { { currentValue } };
 }
 
 void InputType::restoreFormControlState(const FormControlState& state)
@@ -215,10 +210,10 @@ bool InputType::isFormDataAppendable() const
     return !element().name().isEmpty();
 }
 
-bool InputType::appendFormData(FormDataList& encoding, bool) const
+bool InputType::appendFormData(DOMFormData& formData, bool) const
 {
     // Always successful.
-    encoding.appendData(element().name(), element().value());
+    formData.append(element().name(), element().value());
     return true;
 }
 
@@ -229,7 +224,7 @@ double InputType::valueAsDate() const
 
 ExceptionOr<void> InputType::setValueAsDate(double) const
 {
-    return Exception { INVALID_STATE_ERR };
+    return Exception { InvalidStateError };
 }
 
 double InputType::valueAsDouble() const
@@ -244,7 +239,7 @@ ExceptionOr<void> InputType::setValueAsDouble(double doubleValue, TextFieldEvent
 
 ExceptionOr<void> InputType::setValueAsDecimal(const Decimal&, TextFieldEventBehavior) const
 {
-    return Exception { INVALID_STATE_ERR };
+    return Exception { InvalidStateError };
 }
 
 bool InputType::supportsValidation() const
@@ -483,11 +478,6 @@ bool InputType::shouldSubmitImplicitly(Event& event)
     return is<KeyboardEvent>(event) && event.type() == eventNames().keypressEvent && downcast<KeyboardEvent>(event).charCode() == '\r';
 }
 
-PassRefPtr<HTMLFormElement> InputType::formForSubmission() const
-{
-    return element().form();
-}
-
 RenderPtr<RenderElement> InputType::createInputRenderer(RenderStyle&& style)
 {
     return RenderPtr<RenderElement>(RenderElement::createFor(element(), WTFMove(style)));
@@ -504,7 +494,7 @@ void InputType::createShadowSubtree()
 
 void InputType::destroyShadowSubtree()
 {
-    ShadowRoot* root = element().userAgentShadowRoot();
+    RefPtr<ShadowRoot> root = element().userAgentShadowRoot();
     if (!root)
         return;
 
@@ -552,7 +542,7 @@ Chrome* InputType::chrome() const
 {
     if (Page* page = element().document().page())
         return &page->chrome();
-    return 0;
+    return nullptr;
 }
 
 bool InputType::canSetStringValue() const
@@ -565,7 +555,7 @@ bool InputType::hasCustomFocusLogic() const
     return true;
 }
 
-bool InputType::isKeyboardFocusable(KeyboardEvent& event) const
+bool InputType::isKeyboardFocusable(KeyboardEvent* event) const
 {
     return !element().isReadOnly() && element().isTextFormControlKeyboardFocusable(event);
 }
@@ -637,7 +627,7 @@ bool InputType::canBeSuccessfulSubmitButton()
 
 HTMLElement* InputType::placeholderElement() const
 {
-    return 0;
+    return nullptr;
 }
 
 bool InputType::rendererIsNeeded()
@@ -647,10 +637,10 @@ bool InputType::rendererIsNeeded()
 
 FileList* InputType::files()
 {
-    return 0;
+    return nullptr;
 }
 
-void InputType::setFiles(PassRefPtr<FileList>)
+void InputType::setFiles(RefPtr<FileList>&&)
 {
 }
 
@@ -707,7 +697,7 @@ void InputType::willDispatchClick(InputElementClickState&)
 {
 }
 
-void InputType::didDispatchClick(Event*, const InputElementClickState&)
+void InputType::didDispatchClick(Event&, const InputElementClickState&)
 {
 }
 
@@ -732,26 +722,26 @@ String InputType::sanitizeValue(const String& proposedValue) const
 }
 
 #if ENABLE(DRAG_SUPPORT)
+
 bool InputType::receiveDroppedFiles(const DragData&)
 {
     ASSERT_NOT_REACHED();
     return false;
 }
+
 #endif
 
 Icon* InputType::icon() const
 {
     ASSERT_NOT_REACHED();
-    return 0;
+    return nullptr;
 }
 
-#if PLATFORM(IOS)
 String InputType::displayString() const
 {
     ASSERT_NOT_REACHED();
     return String();
 }
-#endif
 
 bool InputType::shouldResetOnDocumentActivation()
 {
@@ -906,7 +896,7 @@ void InputType::updatePlaceholderText()
 {
 }
 
-void InputType::attributeChanged()
+void InputType::attributeChanged(const QualifiedName&)
 {
 }
 
@@ -956,10 +946,10 @@ void InputType::listAttributeTargetChanged()
 {
 }
 
-Optional<Decimal> InputType::findClosestTickMarkValue(const Decimal&)
+std::optional<Decimal> InputType::findClosestTickMarkValue(const Decimal&)
 {
     ASSERT_NOT_REACHED();
-    return Nullopt;
+    return std::nullopt;
 }
 #endif
 
@@ -992,18 +982,18 @@ ExceptionOr<void> InputType::applyStep(int count, AnyStepHandling anyStepHandlin
 {
     StepRange stepRange(createStepRange(anyStepHandling));
     if (!stepRange.hasStep())
-        return Exception { INVALID_STATE_ERR };
+        return Exception { InvalidStateError };
 
     const Decimal current = parseToNumberOrNaN(element().value());
     if (!current.isFinite())
-        return Exception { INVALID_STATE_ERR };
+        return Exception { InvalidStateError };
     Decimal newValue = current + stepRange.step() * count;
     if (!newValue.isFinite())
-        return Exception { INVALID_STATE_ERR };
+        return Exception { InvalidStateError };
 
     const Decimal acceptableErrorValue = stepRange.acceptableError();
     if (newValue - stepRange.minimum() < -acceptableErrorValue)
-        return Exception { INVALID_STATE_ERR };
+        return Exception { InvalidStateError };
     if (newValue < stepRange.minimum())
         newValue = stepRange.minimum();
 
@@ -1011,7 +1001,7 @@ ExceptionOr<void> InputType::applyStep(int count, AnyStepHandling anyStepHandlin
         newValue = stepRange.alignValueForStep(current, newValue);
 
     if (newValue - stepRange.maximum() > acceptableErrorValue)
-        return Exception { INVALID_STATE_ERR };
+        return Exception { InvalidStateError };
     if (newValue > stepRange.maximum())
         newValue = stepRange.maximum();
 
@@ -1041,7 +1031,7 @@ StepRange InputType::createStepRange(AnyStepHandling) const
 ExceptionOr<void> InputType::stepUp(int n)
 {
     if (!isSteppable())
-        return Exception { INVALID_STATE_ERR };
+        return Exception { InvalidStateError };
     return applyStep(n, RejectAny, DispatchNoEvent);
 }
 
@@ -1152,8 +1142,13 @@ Color InputType::valueAsColor() const
     return Color::transparent;
 }
 
-void InputType::selectColor(const Color&)
+void InputType::selectColor(StringView)
 {
+}
+
+RefPtr<TextControlInnerTextElement> InputType::innerTextElement() const
+{
+    return nullptr;
 }
 
 } // namespace WebCore

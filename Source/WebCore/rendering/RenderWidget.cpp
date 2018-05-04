@@ -31,10 +31,14 @@
 #include "RenderLayer.h"
 #include "RenderLayerBacking.h"
 #include "RenderView.h"
+#include "SecurityOrigin.h"
+#include <wtf/IsoMallocInlines.h>
 #include <wtf/StackStats.h>
 #include <wtf/Ref.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(RenderWidget);
 
 static HashMap<const Widget*, RenderWidget*>& widgetRendererMap()
 {
@@ -52,29 +56,27 @@ WidgetHierarchyUpdatesSuspensionScope::WidgetToParentMap& WidgetHierarchyUpdates
 
 void WidgetHierarchyUpdatesSuspensionScope::moveWidgets()
 {
-    WidgetToParentMap map;
-    widgetNewParentMap().swap(map);
-    WidgetToParentMap::iterator end = map.end();
-    for (WidgetToParentMap::iterator it = map.begin(); it != end; ++it) {
-        Widget* child = it->key.get();
-        ScrollView* currentParent = child->parent();
-        FrameView* newParent = it->value;
+    auto map = WTFMove(widgetNewParentMap());
+    for (auto& entry : map) {
+        auto& child = *entry.key;
+        auto* currentParent = child.parent();
+        auto* newParent = entry.value;
         if (newParent != currentParent) {
             if (currentParent)
-                currentParent->removeChild(*child);
+                currentParent->removeChild(child);
             if (newParent)
                 newParent->addChild(child);
         }
     }
 }
 
-static void moveWidgetToParentSoon(Widget* child, FrameView* parent)
+static void moveWidgetToParentSoon(Widget& child, FrameView* parent)
 {
     if (!WidgetHierarchyUpdatesSuspensionScope::isSuspended()) {
         if (parent)
             parent->addChild(child);
         else
-            child->removeFromParent();
+            child.removeFromParent();
         return;
     }
     WidgetHierarchyUpdatesSuspensionScope::scheduleWidgetToMove(child, parent);
@@ -82,7 +84,6 @@ static void moveWidgetToParentSoon(Widget* child, FrameView* parent)
 
 RenderWidget::RenderWidget(HTMLFrameOwnerElement& element, RenderStyle&& style)
     : RenderReplaced(element, WTFMove(style))
-    , m_weakPtrFactory(this)
 {
     setInline(false);
 }
@@ -130,7 +131,7 @@ bool RenderWidget::setWidgetGeometry(const LayoutRect& frame)
 
     m_clipRect = clipRect;
 
-    WeakPtr<RenderWidget> weakThis = createWeakPtr();
+    auto weakThis = makeWeakPtr(*this);
     // These calls *may* cause this renderer to disappear from underneath...
     if (boundsChanged)
         m_widget->setFrameRect(newFrameRect);
@@ -167,7 +168,7 @@ void RenderWidget::setWidget(RefPtr<Widget>&& widget)
         return;
 
     if (m_widget) {
-        moveWidgetToParentSoon(m_widget.get(), 0);
+        moveWidgetToParentSoon(*m_widget, nullptr);
         view().frameView().willRemoveWidgetFromRenderTree(*m_widget);
         widgetRendererMap().remove(m_widget.get());
         m_widget = nullptr;
@@ -180,7 +181,7 @@ void RenderWidget::setWidget(RefPtr<Widget>&& widget)
         // widget immediately, but we have to have really been fully constructed.
         if (hasInitializedStyle()) {
             if (!needsLayout()) {
-                WeakPtr<RenderWidget> weakThis = createWeakPtr();
+                auto weakThis = makeWeakPtr(*this);
                 updateWidgetGeometry();
                 if (!weakThis)
                     return;
@@ -193,7 +194,7 @@ void RenderWidget::setWidget(RefPtr<Widget>&& widget)
                 repaint();
             }
         }
-        moveWidgetToParentSoon(m_widget.get(), &view().frameView());
+        moveWidgetToParentSoon(*m_widget, &view().frameView());
     }
 }
 
@@ -218,10 +219,24 @@ void RenderWidget::styleDidChange(StyleDifference diff, const RenderStyle* oldSt
 
 void RenderWidget::paintContents(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
+    if (paintInfo.requireSecurityOriginAccessForWidgets) {
+        if (auto contentDocument = frameOwnerElement().contentDocument()) {
+            if (!document().securityOrigin().canAccess(contentDocument->securityOrigin()))
+                return;
+        }
+    }
+
     IntPoint contentPaintOffset = roundedIntPoint(paintOffset + location() + contentBoxRect().location());
     // Tell the widget to paint now. This is the only time the widget is allowed
     // to paint itself. That way it will composite properly with z-indexed layers.
     LayoutRect paintRect = paintInfo.rect;
+
+    PaintBehavior oldBehavior = PaintBehaviorNormal;
+    if (is<FrameView>(*m_widget) && (paintInfo.paintBehavior & PaintBehaviorTileFirstPaint)) {
+        FrameView& frameView = downcast<FrameView>(*m_widget);
+        oldBehavior = frameView.paintBehavior();
+        frameView.setPaintBehavior(oldBehavior | PaintBehaviorTileFirstPaint);
+    }
 
     IntPoint widgetLocation = m_widget->frameRect().location();
     IntSize widgetPaintOffset = contentPaintOffset - widgetLocation;
@@ -231,8 +246,8 @@ void RenderWidget::paintContents(PaintInfo& paintInfo, const LayoutPoint& paintO
         paintInfo.context().translate(widgetPaintOffset);
         paintRect.move(-widgetPaintOffset);
     }
-    // FIXME: Remove repaintrect encolsing/integral snapping when RenderWidget becomes device pixel snapped.
-    m_widget->paint(paintInfo.context(), snappedIntRect(paintRect));
+    // FIXME: Remove repaintrect enclosing/integral snapping when RenderWidget becomes device pixel snapped.
+    m_widget->paint(paintInfo.context(), snappedIntRect(paintRect), paintInfo.requireSecurityOriginAccessForWidgets ? Widget::SecurityOriginPaintPolicy::AccessibleOriginOnly : Widget::SecurityOriginPaintPolicy::AnyOrigin);
 
     if (!widgetPaintOffset.isZero())
         paintInfo.context().translate(-widgetPaintOffset);
@@ -244,6 +259,8 @@ void RenderWidget::paintContents(PaintInfo& paintInfo, const LayoutPoint& paintO
             ASSERT(!paintInfo.overlapTestRequests->contains(this) || (paintInfo.overlapTestRequests->get(this) == m_widget->frameRect()));
             paintInfo.overlapTestRequests->set(this, m_widget->frameRect());
         }
+        if (paintInfo.paintBehavior & PaintBehaviorTileFirstPaint)
+            frameView.setPaintBehavior(oldBehavior);
     }
 }
 
@@ -308,7 +325,7 @@ RenderWidget::ChildWidgetState RenderWidget::updateWidgetPosition()
     if (!m_widget)
         return ChildWidgetState::Destroyed;
 
-    WeakPtr<RenderWidget> weakThis = createWeakPtr();
+    auto weakThis = makeWeakPtr(*this);
     bool widgetSizeChanged = updateWidgetGeometry();
     if (!weakThis || !m_widget)
         return ChildWidgetState::Destroyed;
@@ -318,8 +335,8 @@ RenderWidget::ChildWidgetState RenderWidget::updateWidgetPosition()
     if (is<FrameView>(*m_widget)) {
         FrameView& frameView = downcast<FrameView>(*m_widget);
         // Check the frame's page to make sure that the frame isn't in the process of being destroyed.
-        if ((widgetSizeChanged || frameView.needsLayout()) && frameView.frame().page())
-            frameView.layout();
+        if ((widgetSizeChanged || frameView.needsLayout()) && frameView.frame().page() && frameView.frame().document())
+            frameView.layoutContext().layout();
     }
     return ChildWidgetState::Valid;
 }
@@ -338,9 +355,9 @@ void RenderWidget::setSelectionState(SelectionState state)
         m_widget->setIsSelected(isSelected());
 }
 
-RenderWidget* RenderWidget::find(const Widget* widget)
+RenderWidget* RenderWidget::find(const Widget& widget)
 {
-    return widgetRendererMap().get(widget);
+    return widgetRendererMap().get(&widget);
 }
 
 bool RenderWidget::nodeAtPoint(const HitTestRequest& request, HitTestResult& result, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, HitTestAction action)
@@ -357,8 +374,8 @@ bool RenderWidget::nodeAtPoint(const HitTestRequest& request, HitTestResult& res
 
         bool isInsideChildFrame = childRoot.hitTest(newHitTestRequest, newHitTestLocation, childFrameResult);
 
-        if (newHitTestLocation.isRectBasedTest())
-            result.append(childFrameResult);
+        if (request.resultIsElementList())
+            result.append(childFrameResult, request);
         else if (isInsideChildFrame)
             result = childFrameResult;
 

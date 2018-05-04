@@ -83,10 +83,17 @@ public:
         // NB. This code is not written for performance, since it is not intended to run
         // in release builds.
 
-        // Validate that all local variables at the head of the root block are dead.
-        BasicBlock* root = m_graph.block(0);
-        for (unsigned i = 0; i < root->variablesAtHead.numberOfLocals(); ++i)
-            V_EQUAL((virtualRegisterForLocal(i), root), static_cast<Node*>(0), root->variablesAtHead.local(i));
+        VALIDATE((m_graph.block(0)), m_graph.isRoot(m_graph.block(0)));
+        VALIDATE((m_graph.block(0)), m_graph.block(0) == m_graph.m_roots[0]);
+
+        for (BasicBlock* block : m_graph.m_roots)
+            VALIDATE((block), block->predecessors.isEmpty());
+
+        // Validate that all local variables at the head of all entrypoints are dead.
+        for (BasicBlock* entrypoint : m_graph.m_roots) {
+            for (unsigned i = 0; i < entrypoint->variablesAtHead.numberOfLocals(); ++i)
+                V_EQUAL((virtualRegisterForLocal(i), entrypoint), static_cast<Node*>(nullptr), entrypoint->variablesAtHead.local(i));
+        }
         
         // Validate ref counts and uses.
         for (BlockIndex blockIndex = 0; blockIndex < m_graph.numBlocks(); ++blockIndex) {
@@ -209,7 +216,7 @@ public:
                         || node->origin.forExit != previousNode->origin.forExit);
                 }
                 
-                VALIDATE((node), !node->hasStructure() || !!node->structure());
+                VALIDATE((node), !node->hasStructure() || !!node->structure().get());
                 VALIDATE((node), !node->hasCellOperand() || node->cellOperand()->value().isCell());
                 VALIDATE((node), !node->hasCellOperand() || !!node->cellOperand()->value());
                 
@@ -222,6 +229,7 @@ public:
                  
                 switch (node->op()) {
                 case Identity:
+                case IdentityWithProfile:
                     VALIDATE((node), canonicalResultRepresentation(node->result()) == canonicalResultRepresentation(node->child1()->result()));
                     break;
                 case SetLocal:
@@ -259,8 +267,11 @@ public:
                 case CompareLessEq:
                 case CompareGreater:
                 case CompareGreaterEq:
+                case CompareBelow:
+                case CompareBelowEq:
                 case CompareEq:
                 case CompareStrictEq:
+                case SameValue:
                 case StrCat:
                     VALIDATE((node), !!node->child1());
                     VALIDATE((node), !!node->child2());
@@ -268,6 +279,11 @@ public:
                 case CompareEqPtr:
                     VALIDATE((node), !!node->child1());
                     VALIDATE((node), !!node->cellOperand()->value() && node->cellOperand()->value().isCell());
+                    break;
+                case CheckStructureOrEmpty:
+                    VALIDATE((node), is64Bit());
+                    VALIDATE((node), !!node->child1());
+                    VALIDATE((node), node->child1().useKind() == CellUse);
                     break;
                 case CheckStructure:
                 case StringFromCharCode:
@@ -285,7 +301,7 @@ public:
                     }
                     break;
                 case MaterializeNewObject:
-                    for (Structure* structure : node->structureSet()) {
+                    for (RegisteredStructure structure : node->structureSet()) {
                         // This only supports structures that are JSFinalObject or JSArray.
                         VALIDATE(
                             (node),
@@ -313,6 +329,35 @@ public:
                     VALIDATE((node), !!m_graph.m_vm.hasOwnPropertyCache());
                     break;
                 }
+                case GetVectorLength: {
+                    Array::Type type = node->arrayMode().type();
+                    VALIDATE((node), type == Array::ArrayStorage || type == Array::SlowPutArrayStorage);
+                    break;
+                }
+                case CPUIntrinsic: {
+                    switch (node->intrinsic()) {
+                    case CPUMfenceIntrinsic:
+                    case CPURdtscIntrinsic:
+                    case CPUCpuidIntrinsic:
+                    case CPUPauseIntrinsic:
+                        break;
+                    default:
+                        VALIDATE((node), false);
+                        break;
+                    }
+                    break;
+                }
+                case GetArgumentCountIncludingThis: {
+                    if (InlineCallFrame* inlineCallFrame = node->argumentsInlineCallFrame())
+                        VALIDATE((node), inlineCallFrame->isVarargs());
+                    break;
+                }
+                case NewArray:
+                    VALIDATE((node), node->vectorLengthHint() >= node->numChildren());
+                    break;
+                case NewArrayBuffer:
+                    VALIDATE((node), node->vectorLengthHint() >= node->castOperand<JSFixedArray*>()->length());
+                    break;
                 default:
                     break;
                 }
@@ -382,6 +427,11 @@ private:
     
     void validateCPS()
     {
+        VALIDATE((), !m_graph.m_rootToArguments.isEmpty()); // We should have at least one root.
+        VALIDATE((), m_graph.m_rootToArguments.size() == m_graph.m_roots.size());
+        for (BasicBlock* root : m_graph.m_rootToArguments.keys())
+            VALIDATE((), m_graph.m_roots.contains(root));
+
         for (BlockIndex blockIndex = 0; blockIndex < m_graph.numBlocks(); ++blockIndex) {
             BasicBlock* block = m_graph.block(blockIndex);
             if (!block)
@@ -400,6 +450,18 @@ private:
                     if (!edge)
                         continue;
                     VALIDATE((node, edge), m_acceptableNodes.contains(edge.node()));
+                }
+            }
+
+            {
+                HashSet<Node*> seenNodes;
+                for (size_t i = 0; i < block->size(); ++i) {
+                    Node* node = block->at(i);
+                    m_graph.doToChildren(node, [&] (const Edge& edge) {
+                        Node* child = edge.node();
+                        VALIDATE((node), block->isInPhis(child) || seenNodes.contains(child));
+                    });
+                    seenNodes.add(node);
                 }
             }
             
@@ -529,7 +591,10 @@ private:
                 case PhantomNewObject:
                 case PhantomNewFunction:
                 case PhantomNewGeneratorFunction:
+                case PhantomNewAsyncFunction:
+                case PhantomNewAsyncGeneratorFunction:
                 case PhantomCreateActivation:
+                case PhantomNewRegexp:
                 case GetMyArgumentByVal:
                 case GetMyArgumentByValOutOfBounds:
                 case PutHint:
@@ -538,6 +603,8 @@ private:
                 case PutStack:
                 case KillStack:
                 case GetStack:
+                case EntrySwitch:
+                case InitializeEntrypointArguments:
                     VALIDATE((node), !"unexpected node type in CPS");
                     break;
                 case MaterializeNewObject: {
@@ -564,7 +631,7 @@ private:
                     // CPS disallows int32 and double arrays. Those require weird type checks and
                     // conversions. They are not needed in the DFG right now. We should add support
                     // for these if the DFG ever needs it.
-                    for (Structure* structure : node->structureSet()) {
+                    for (RegisteredStructure structure : node->structureSet()) {
                         VALIDATE((node), !hasInt32(structure->indexingType()));
                         VALIDATE((node), !hasDouble(structure->indexingType()));
                     }
@@ -628,6 +695,14 @@ private:
         // FIXME: Add more things here.
         // https://bugs.webkit.org/show_bug.cgi?id=123471
         
+        VALIDATE((), m_graph.m_roots.size() == 1);
+        VALIDATE((), m_graph.m_roots[0] == m_graph.block(0));
+        VALIDATE((), !m_graph.m_argumentFormats.isEmpty()); // We always have at least one entrypoint.
+        VALIDATE((), m_graph.m_rootToArguments.isEmpty()); // This is only used in CPS.
+
+        for (unsigned entrypointIndex : m_graph.m_entrypointIndexToCatchBytecodeOffset.keys())
+            VALIDATE((), entrypointIndex > 0); // By convention, 0 is the entrypoint index for the op_enter entrypoint, which can not be in a catch.
+
         for (BlockIndex blockIndex = 0; blockIndex < m_graph.numBlocks(); ++blockIndex) {
             BasicBlock* block = m_graph.block(blockIndex);
             if (!block)
@@ -636,9 +711,9 @@ private:
             VALIDATE((block), block->phis.isEmpty());
 
             bool didSeeExitOK = false;
+            bool isOSRExited = false;
             
-            for (unsigned nodeIndex = 0; nodeIndex < block->size(); ++nodeIndex) {
-                Node* node = block->at(nodeIndex);
+            for (auto* node : *block) {
                 didSeeExitOK |= node->origin.exitOK;
                 switch (node->op()) {
                 case Phi:
@@ -653,7 +728,6 @@ private:
                     
                 case GetLocal:
                 case SetLocal:
-                case GetLocalUnlinked:
                 case SetArgument:
                 case Phantom:
                     VALIDATE((node), !"bad node type for SSA");
@@ -664,14 +738,20 @@ private:
                     // https://bugs.webkit.org/show_bug.cgi?id=123471
                     break;
                 }
+
+                if (isOSRExited)
+                    continue;
                 switch (node->op()) {
                 case PhantomNewObject:
                 case PhantomNewFunction:
                 case PhantomNewGeneratorFunction:
+                case PhantomNewAsyncFunction:
+                case PhantomNewAsyncGeneratorFunction:
                 case PhantomCreateActivation:
                 case PhantomDirectArguments:
                 case PhantomCreateRest:
                 case PhantomClonedArguments:
+                case PhantomNewRegexp:
                 case MovHint:
                 case Upsilon:
                 case ForwardVarargs:
@@ -684,11 +764,62 @@ private:
                     break;
 
                 case Check:
+                case CheckVarargs:
                     // FIXME: This is probably not correct.
                     break;
 
                 case PutHint:
                     VALIDATE((node), node->child1()->isPhantomAllocation());
+                    break;
+
+                case PhantomSpread:
+                    VALIDATE((node), m_graph.m_form == SSA);
+                    // We currently support PhantomSpread over PhantomCreateRest and PhantomNewArrayBuffer.
+                    VALIDATE((node), node->child1()->op() == PhantomCreateRest || node->child1()->op() == PhantomNewArrayBuffer);
+                    break;
+
+                case PhantomNewArrayWithSpread: {
+                    VALIDATE((node), m_graph.m_form == SSA);
+                    BitVector* bitVector = node->bitVector();
+                    for (unsigned i = 0; i < node->numChildren(); i++) {
+                        Node* child = m_graph.varArgChild(node, i).node();
+                        if (bitVector->get(i)) {
+                            // We currently support PhantomSpread over PhantomCreateRest and PhantomNewArrayBuffer.
+                            VALIDATE((node), child->op() == PhantomSpread);
+                        } else
+                            VALIDATE((node), !child->isPhantomAllocation());
+                    }
+                    break;
+                }
+
+                case PhantomNewArrayBuffer:
+                    VALIDATE((node), m_graph.m_form == SSA);
+                    VALIDATE((node), node->vectorLengthHint() >= node->castOperand<JSFixedArray*>()->length());
+                    break;
+
+                case NewArrayWithSpread: {
+                    BitVector* bitVector = node->bitVector();
+                    for (unsigned i = 0; i < node->numChildren(); i++) {
+                        Node* child = m_graph.varArgChild(node, i).node();
+                        if (child->isPhantomAllocation()) {
+                            VALIDATE((node), bitVector->get(i));
+                            VALIDATE((node), m_graph.m_form == SSA);
+                            VALIDATE((node), child->op() == PhantomSpread);
+                        }
+                    }
+                    break;
+                }
+
+                case Spread:
+                    VALIDATE((node), !node->child1()->isPhantomAllocation() || node->child1()->op() == PhantomCreateRest || node->child1()->op() == PhantomNewArrayBuffer);
+                    break;
+
+                case EntrySwitch:
+                    VALIDATE((node), node->entrySwitchData()->cases.size() == m_graph.m_numberOfEntrypoints);
+                    break;
+
+                case InitializeEntrypointArguments:
+                    VALIDATE((node), node->entrypointIndex() < m_graph.m_numberOfEntrypoints);
                     break;
 
                 default:
@@ -699,6 +830,7 @@ private:
                         });
                     break;
                 }
+                isOSRExited |= node->isPseudoTerminal();
             }
         }
     }
@@ -730,6 +862,8 @@ private:
             getLocalPositions.operand(operand) < setLocalPositions.operand(operand));
     }
     
+    void reportValidationContext() { }
+
     void reportValidationContext(Node* node)
     {
         dataLogF("@%u", node->index());

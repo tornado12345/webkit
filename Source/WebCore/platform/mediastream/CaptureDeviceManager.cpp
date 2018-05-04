@@ -23,98 +23,51 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#import "config.h"
-#import "CaptureDeviceManager.h"
+#include "config.h"
+#include "CaptureDeviceManager.h"
 
 #if ENABLE(MEDIA_STREAM)
 
-#import "Logging.h"
-#import "MediaConstraints.h"
-#import "RealtimeMediaSource.h"
-#import "RealtimeMediaSourceCenter.h"
-#import "RealtimeMediaSourceSettings.h"
-#import "UUID.h"
-#import <wtf/MainThread.h>
-#import <wtf/NeverDestroyed.h>
-#import <wtf/text/StringHash.h>
+#include "Logging.h"
+#include "MediaConstraints.h"
+#include "RealtimeMediaSource.h"
+#include "RealtimeMediaSourceCenter.h"
+#include "RealtimeMediaSourceSettings.h"
+#include <wtf/MainThread.h>
+#include <wtf/text/StringHash.h>
 
 using namespace WebCore;
 
-CaptureDeviceManager::~CaptureDeviceManager()
-{
-}
+CaptureDeviceManager::~CaptureDeviceManager() = default;
 
-Vector<CaptureDevice> CaptureDeviceManager::getSourcesInfo()
+CaptureDevice CaptureDeviceManager::captureDeviceFromPersistentID(const String& captureDeviceID)
 {
-    Vector<CaptureDevice> sourcesInfo;
-    for (auto captureDevice : captureDeviceList()) {
-        if (!captureDevice.m_enabled || captureDevice.m_sourceType == RealtimeMediaSource::None)
-            continue;
-
-        CaptureDevice::SourceKind kind = captureDevice.m_sourceType == RealtimeMediaSource::Video ? CaptureDevice::SourceKind::Video : CaptureDevice::SourceKind::Audio;
-        sourcesInfo.append(CaptureDevice(captureDevice.m_persistentDeviceID, kind, captureDevice.m_localizedName, captureDevice.m_groupID));
-    }
-    LOG(Media, "CaptureDeviceManager::getSourcesInfo(%p), found %zu active devices", this, sourcesInfo.size());
-    return sourcesInfo;
-}
-
-bool CaptureDeviceManager::captureDeviceFromDeviceID(const String& captureDeviceID, CaptureDeviceInfo& foundDevice)
-{
-    for (auto& device : captureDeviceList()) {
-        if (device.m_persistentDeviceID == captureDeviceID) {
-            foundDevice = device;
-            return true;
-        }
+    for (auto& device : captureDevices()) {
+        if (device.persistentId() == captureDeviceID)
+            return device;
     }
 
-    return false;
+    return { };
 }
 
-Vector<String> CaptureDeviceManager::bestSourcesForTypeAndConstraints(RealtimeMediaSource::Type type, const MediaConstraints& constraints, String& invalidConstraint)
+static CaptureDeviceManager::ObserverToken nextObserverToken()
 {
-    Vector<RefPtr<RealtimeMediaSource>> bestSources;
-
-    struct {
-        bool operator()(RefPtr<RealtimeMediaSource> a, RefPtr<RealtimeMediaSource> b)
-        {
-            return a->fitnessScore() < b->fitnessScore();
-        }
-    } sortBasedOnFitnessScore;
-
-    for (auto& captureDevice : captureDeviceList()) {
-        if (!captureDevice.m_enabled)
-            continue;
-
-        if (RefPtr<RealtimeMediaSource> captureSource = sourceWithUID(captureDevice.m_persistentDeviceID, type, &constraints, invalidConstraint))
-            bestSources.append(captureSource.leakRef());
-    }
-
-    Vector<String> sourceUIDs;
-    if (bestSources.isEmpty())
-        return sourceUIDs;
-
-    sourceUIDs.reserveInitialCapacity(bestSources.size());
-    std::sort(bestSources.begin(), bestSources.end(), sortBasedOnFitnessScore);
-    for (auto& device : bestSources)
-        sourceUIDs.append(device->persistentID());
-
-    return sourceUIDs;
+    static CaptureDeviceManager::ObserverToken nextToken = 0;
+    return ++nextToken;
 }
 
-RefPtr<RealtimeMediaSource> CaptureDeviceManager::sourceWithUID(const String& deviceUID, RealtimeMediaSource::Type type, const MediaConstraints* constraints, String& invalidConstraint)
+CaptureDeviceManager::ObserverToken CaptureDeviceManager::addCaptureDeviceChangedObserver(CaptureDeviceChangedCallback&& observer)
 {
-    for (auto& captureDevice : captureDeviceList()) {
-        if (captureDevice.m_persistentDeviceID != deviceUID || captureDevice.m_sourceType != type)
-            continue;
-
-        if (!captureDevice.m_enabled)
-            continue;
-
-        if (auto mediaSource = createMediaSourceForCaptureDeviceWithConstraints(captureDevice, constraints, invalidConstraint))
-            return mediaSource;
-    }
-
-    return nullptr;
+    auto token = nextObserverToken();
+    m_observers.set(token, WTFMove(observer));
+    return token;
 }
+
+void CaptureDeviceManager::removeCaptureDeviceChangedObserver(ObserverToken token)
+{
+    ASSERT(m_observers.contains(token));
+    m_observers.remove(token);
+}
+
 
 #endif // ENABLE(MEDIA_STREAM)

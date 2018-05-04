@@ -17,8 +17,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGMPathElement_h
-#define SVGMPathElement_h
+#pragma once
 
 #include "SVGAnimatedBoolean.h"
 #include "SVGAnimatedString.h"
@@ -32,12 +31,13 @@ namespace WebCore {
 class SVGPathElement;
 
 class SVGMPathElement final : public SVGElement, public SVGURIReference, public SVGExternalResourcesRequired {
+    WTF_MAKE_ISO_ALLOCATED(SVGMPathElement);
 public:
     static Ref<SVGMPathElement> create(const QualifiedName&, Document&);
 
     virtual ~SVGMPathElement();
 
-    SVGPathElement* pathElement();
+    RefPtr<SVGPathElement> pathElement();
 
     void targetPathChanged();
 
@@ -46,14 +46,14 @@ private:
 
     void buildPendingResource() final;
     void clearResourceReferences();
-    InsertionNotificationRequest insertedInto(ContainerNode&) final;
-    void removedFrom(ContainerNode&) final;
+    InsertedIntoAncestorResult insertedIntoAncestor(InsertionType, ContainerNode&) final;
+    void removedFromAncestor(RemovalType, ContainerNode&) final;
 
     void parseAttribute(const QualifiedName&, const AtomicString&) final;
     void svgAttributeChanged(const QualifiedName&) final;
 
     bool rendererIsNeeded(const RenderStyle&) final { return false; }
-    void finishedInsertingSubtree() final;
+    void didFinishInsertingNode() final;
 
     void notifyParentOfPathChange(ContainerNode*);
 
@@ -64,5 +64,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif // SVGMPathElement_h

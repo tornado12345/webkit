@@ -27,7 +27,6 @@
 #include "GraphicsContext.h"
 
 #include "COMPtr.h"
-#include "CurrentTime.h"
 #include "DisplayListRecorder.h"
 #include "FloatRoundedRect.h"
 #include "GraphicsContextPlatformPrivateDirect2D.h"
@@ -41,9 +40,9 @@
 
 #pragma warning (disable : 4756)
 
-using namespace std;
 
 namespace WebCore {
+using namespace std;
 
 GraphicsContext::GraphicsContext(HDC hdc, bool hasAlpha)
 {
@@ -267,9 +266,9 @@ void GraphicsContext::drawNativeImage(const COMPtr<ID2D1Bitmap>& image, const Fl
         context->SetTransform(ctm);
 }
 
-void GraphicsContext::releaseWindowsContext(HDC hdc, const IntRect& dstRect, bool supportAlphaBlend, bool mayCreateBitmap)
+void GraphicsContext::releaseWindowsContext(HDC hdc, const IntRect& dstRect, bool supportAlphaBlend)
 {
-    bool createdBitmap = mayCreateBitmap && (!m_data->m_hdc || isInTransparencyLayer());
+    bool createdBitmap = m_impl || !m_data->m_hdc || isInTransparencyLayer();
     if (!createdBitmap) {
         m_data->restore();
         return;
@@ -935,7 +934,7 @@ void GraphicsContext::drawPath(const Path& path)
     flush();
 }
 
-void GraphicsContext::drawWithoutShadow(const FloatRect& /*boundingRect*/, const std::function<void(ID2D1RenderTarget*)>& drawCommands)
+void GraphicsContext::drawWithoutShadow(const FloatRect& /*boundingRect*/, const WTF::Function<void(ID2D1RenderTarget*)>& drawCommands)
 {
     drawCommands(platformContext());
 }
@@ -981,7 +980,7 @@ static void drawWithShadowHelper(ID2D1RenderTarget* context, ID2D1Bitmap* bitmap
     deviceContext->DrawImage(compositor.get(), D2D1_INTERPOLATION_MODE_LINEAR);
 }
 
-void GraphicsContext::drawWithShadow(const FloatRect& boundingRect, const std::function<void(ID2D1RenderTarget*)>& drawCommands)
+void GraphicsContext::drawWithShadow(const FloatRect& boundingRect, const WTF::Function<void(ID2D1RenderTarget*)>& drawCommands)
 {
     auto context = platformContext();
 

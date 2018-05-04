@@ -33,14 +33,12 @@
 
 namespace WebCore {
 
-WebGLDebugRendererInfo::WebGLDebugRendererInfo(WebGLRenderingContextBase* context)
+WebGLDebugRendererInfo::WebGLDebugRendererInfo(WebGLRenderingContextBase& context)
     : WebGLExtension(context)
 {
 }
 
-WebGLDebugRendererInfo::~WebGLDebugRendererInfo()
-{
-}
+WebGLDebugRendererInfo::~WebGLDebugRendererInfo() = default;
 
 WebGLExtension::ExtensionName WebGLDebugRendererInfo::getName() const
 {

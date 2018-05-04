@@ -26,14 +26,14 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef RenderReplica_h
-#define RenderReplica_h
+#pragma once
 
 #include "RenderBox.h"
 
 namespace WebCore {
 
 class RenderReplica final : public RenderBox {
+    WTF_MAKE_ISO_ALLOCATED(RenderReplica);
 public:
     RenderReplica(Document&, RenderStyle&&);
     virtual ~RenderReplica();
@@ -50,9 +50,6 @@ private:
     bool isReplica() const override { return true; }
     bool canHaveChildren() const override { return false; }
     void computePreferredLogicalWidths() override;
-
 };
 
 } // namespace WebCore
-
-#endif // RenderReplica_h

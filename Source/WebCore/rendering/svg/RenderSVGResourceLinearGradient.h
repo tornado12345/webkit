@@ -18,8 +18,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef RenderSVGResourceLinearGradient_h
-#define RenderSVGResourceLinearGradient_h
+#pragma once
 
 #include "LinearGradientAttributes.h"
 #include "RenderSVGResourceGradient.h"
@@ -28,6 +27,7 @@
 namespace WebCore {
 
 class RenderSVGResourceLinearGradient final : public RenderSVGResourceGradient {
+    WTF_MAKE_ISO_ALLOCATED(RenderSVGResourceLinearGradient);
 public:
     RenderSVGResourceLinearGradient(SVGLinearGradientElement&, RenderStyle&&);
     virtual ~RenderSVGResourceLinearGradient();
@@ -39,7 +39,7 @@ public:
     SVGUnitTypes::SVGUnitType gradientUnits() const override { return m_attributes.gradientUnits(); }
     void calculateGradientTransform(AffineTransform& transform) override { transform = m_attributes.gradientTransform(); }
     bool collectGradientAttributes() override;
-    void buildGradient(GradientData*) const override;
+    void buildGradient(GradientData*, const RenderStyle&) const override;
 
     FloatPoint startPoint(const LinearGradientAttributes&) const;
     FloatPoint endPoint(const LinearGradientAttributes&) const;
@@ -52,8 +52,6 @@ private:
     LinearGradientAttributes m_attributes;
 };
 
-}
+} // namespace WebCore
 
 SPECIALIZE_TYPE_TRAITS_RENDER_SVG_RESOURCE(RenderSVGResourceLinearGradient, LinearGradientResourceType)
-
-#endif

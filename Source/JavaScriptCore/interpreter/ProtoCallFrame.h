@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2013-2018 Apple Inc. All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,16 +26,19 @@
 #pragma once
 
 #include "Register.h"
+#include <wtf/ForbidHeapAllocation.h>
 
 namespace JSC {
 
 struct JS_EXPORT_PRIVATE ProtoCallFrame {
+    WTF_FORBID_HEAP_ALLOCATION;
+public:
     Register codeBlockValue;
     Register calleeValue;
     Register argCountAndCodeOriginValue;
     Register thisArg;
     uint32_t paddedArgCount;
-    bool arityMissMatch;
+    bool hasArityMismatch;
     JSValue *args;
 
     void init(CodeBlock*, JSObject*, JSValue, int, JSValue* otherArgs = 0);
@@ -56,7 +59,7 @@ struct JS_EXPORT_PRIVATE ProtoCallFrame {
     JSValue thisValue() const { return thisArg.Register::jsValue(); }
     void setThisValue(JSValue value) { thisArg = value; }
 
-    bool needArityCheck() { return arityMissMatch; }
+    bool needArityCheck() { return hasArityMismatch; }
 
     JSValue argument(size_t argumentIndex)
     {

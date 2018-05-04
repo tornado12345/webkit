@@ -31,14 +31,12 @@
 
 namespace WebCore {
 
-OESElementIndexUint::OESElementIndexUint(WebGLRenderingContextBase* context)
+OESElementIndexUint::OESElementIndexUint(WebGLRenderingContextBase& context)
     : WebGLExtension(context)
 {
 }
 
-OESElementIndexUint::~OESElementIndexUint()
-{
-}
+OESElementIndexUint::~OESElementIndexUint() = default;
 
 WebGLExtension::ExtensionName OESElementIndexUint::getName() const
 {

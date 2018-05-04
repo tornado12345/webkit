@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2009-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,10 +24,9 @@
  */
 
 #include "config.h"
+#include "WebGLFramebuffer.h"
 
 #if ENABLE(WEBGL)
-
-#include "WebGLFramebuffer.h"
 
 #include "Extensions3D.h"
 #include "WebGLContextGroup.h"
@@ -261,24 +260,20 @@ namespace {
 
 } // anonymous namespace
 
-WebGLFramebuffer::WebGLAttachment::WebGLAttachment()
-{
-}
+WebGLFramebuffer::WebGLAttachment::WebGLAttachment() = default;
 
-WebGLFramebuffer::WebGLAttachment::~WebGLAttachment()
-{
-}
+WebGLFramebuffer::WebGLAttachment::~WebGLAttachment() = default;
 
-Ref<WebGLFramebuffer> WebGLFramebuffer::create(WebGLRenderingContextBase* ctx)
+Ref<WebGLFramebuffer> WebGLFramebuffer::create(WebGLRenderingContextBase& ctx)
 {
     return adoptRef(*new WebGLFramebuffer(ctx));
 }
 
-WebGLFramebuffer::WebGLFramebuffer(WebGLRenderingContextBase* ctx)
+WebGLFramebuffer::WebGLFramebuffer(WebGLRenderingContextBase& ctx)
     : WebGLContextObject(ctx)
     , m_hasEverBeenBound(false)
 {
-    setObject(ctx->graphicsContext3D()->createFramebuffer());
+    setObject(ctx.graphicsContext3D()->createFramebuffer());
 }
 
 WebGLFramebuffer::~WebGLFramebuffer()
@@ -315,7 +310,7 @@ void WebGLFramebuffer::setAttachmentForBoundFramebuffer(GC3Denum attachment, Web
 void WebGLFramebuffer::attach(GC3Denum attachment, GC3Denum attachmentPoint)
 {
     ASSERT(isBound());
-    WebGLAttachment* attachmentObject = getAttachment(attachment);
+    RefPtr<WebGLAttachment> attachmentObject = getAttachment(attachment);
     if (attachmentObject)
         attachmentObject->attach(context()->graphicsContext3D(), attachmentPoint);
 }
@@ -324,7 +319,7 @@ WebGLSharedObject* WebGLFramebuffer::getAttachmentObject(GC3Denum attachment) co
 {
     if (!object())
         return 0;
-    WebGLAttachment* attachmentObject = getAttachment(attachment);
+    RefPtr<WebGLAttachment> attachmentObject = getAttachment(attachment);
     return attachmentObject ? attachmentObject->getObject() : 0;
 }
 
@@ -340,7 +335,7 @@ void WebGLFramebuffer::removeAttachmentFromBoundFramebuffer(GC3Denum attachment)
     if (!object())
         return;
 
-    WebGLAttachment* attachmentObject = getAttachment(attachment);
+    RefPtr<WebGLAttachment> attachmentObject = getAttachment(attachment);
     if (attachmentObject) {
         attachmentObject->onDetached(context()->graphicsContext3D());
         m_attachments.remove(attachment);
@@ -372,7 +367,7 @@ void WebGLFramebuffer::removeAttachmentFromBoundFramebuffer(WebGLSharedObject* a
     do {
         checkMore = false;
         for (auto& entry : m_attachments) {
-            WebGLAttachment* attachmentObject = entry.value.get();
+            RefPtr<WebGLAttachment> attachmentObject = entry.value.get();
             if (attachmentObject->isSharedObject(attachment)) {
                 GC3Denum attachmentType = entry.key;
                 attachmentObject->unattach(context()->graphicsContext3D(), attachmentType);
@@ -388,7 +383,7 @@ GC3Dsizei WebGLFramebuffer::getColorBufferWidth() const
 {
     if (!object())
         return 0;
-    WebGLAttachment* attachment = getAttachment(GraphicsContext3D::COLOR_ATTACHMENT0);
+    RefPtr<WebGLAttachment> attachment = getAttachment(GraphicsContext3D::COLOR_ATTACHMENT0);
     if (!attachment)
         return 0;
 
@@ -399,7 +394,7 @@ GC3Dsizei WebGLFramebuffer::getColorBufferHeight() const
 {
     if (!object())
         return 0;
-    WebGLAttachment* attachment = getAttachment(GraphicsContext3D::COLOR_ATTACHMENT0);
+    RefPtr<WebGLAttachment> attachment = getAttachment(GraphicsContext3D::COLOR_ATTACHMENT0);
     if (!attachment)
         return 0;
 
@@ -410,7 +405,7 @@ GC3Denum WebGLFramebuffer::getColorBufferFormat() const
 {
     if (!object())
         return 0;
-    WebGLAttachment* attachment = getAttachment(GraphicsContext3D::COLOR_ATTACHMENT0);
+    RefPtr<WebGLAttachment> attachment = getAttachment(GraphicsContext3D::COLOR_ATTACHMENT0);
     if (!attachment)
         return 0;
     return attachment->getFormat();
@@ -424,8 +419,8 @@ GC3Denum WebGLFramebuffer::checkStatus(const char** reason) const
     bool haveStencil = false;
     bool haveDepthStencil = false;
     for (auto& entry : m_attachments) {
-        WebGLAttachment* attachment = entry.value.get();
-        if (!isAttachmentComplete(attachment, entry.key, reason))
+        RefPtr<WebGLAttachment> attachment = entry.value.get();
+        if (!isAttachmentComplete(attachment.get(), entry.key, reason))
             return GraphicsContext3D::FRAMEBUFFER_INCOMPLETE_ATTACHMENT;
         if (!attachment->isValid()) {
             *reason = "attachment is not valid";
@@ -479,18 +474,16 @@ GC3Denum WebGLFramebuffer::checkStatus(const char** reason) const
     return GraphicsContext3D::FRAMEBUFFER_COMPLETE;
 }
 
-bool WebGLFramebuffer::onAccess(GraphicsContext3D* context3d, bool needToInitializeAttachments, const char** reason)
+bool WebGLFramebuffer::onAccess(GraphicsContext3D* context3d, const char** reason)
 {
     if (checkStatus(reason) != GraphicsContext3D::FRAMEBUFFER_COMPLETE)
         return false;
-    if (needToInitializeAttachments)
-        return initializeAttachments(context3d, reason);
-    return true;
+    return initializeAttachments(context3d, reason);
 }
 
 bool WebGLFramebuffer::hasStencilBuffer() const
 {
-    WebGLAttachment* attachment = getAttachment(GraphicsContext3D::STENCIL_ATTACHMENT);
+    RefPtr<WebGLAttachment> attachment = getAttachment(GraphicsContext3D::STENCIL_ATTACHMENT);
     if (!attachment)
         attachment = getAttachment(GraphicsContext3D::DEPTH_STENCIL_ATTACHMENT);
     return attachment && attachment->isValid();
@@ -511,7 +504,7 @@ bool WebGLFramebuffer::initializeAttachments(GraphicsContext3D* g3d, const char*
 
     for (auto& entry : m_attachments) {
         GC3Denum attachmentType = entry.key;
-        WebGLAttachment* attachment = entry.value.get();
+        RefPtr<WebGLAttachment> attachment = entry.value.get();
         if (!attachment->isInitialized())
            mask |= GraphicsContext3D::getClearBitsByAttachmentType(attachmentType);
     }
@@ -583,7 +576,7 @@ bool WebGLFramebuffer::initializeAttachments(GraphicsContext3D* g3d, const char*
 
     for (AttachmentMap::iterator it = m_attachments.begin(); it != m_attachments.end(); ++it) {
         GC3Denum attachmentType = it->key;
-        WebGLAttachment* attachment = it->value.get();
+        auto attachment = it->value;
         GC3Dbitfield bits = GraphicsContext3D::getClearBitsByAttachmentType(attachmentType);
         if (bits & mask)
             attachment->setInitialized();
@@ -608,6 +601,9 @@ void WebGLFramebuffer::drawBuffers(const Vector<GC3Denum>& bufs)
 void WebGLFramebuffer::drawBuffersIfNecessary(bool force)
 {
 #if ENABLE(WEBGL2)
+    // FIXME: The logic here seems wrong. If we don't have WebGL 2 enabled at all, then
+    // we skip the m_webglDrawBuffers check. But if we do have WebGL 2 enabled, then we
+    // perform this check, for WebGL 1 contexts only.
     if (!context()->m_webglDrawBuffers && !context()->isWebGL2())
         return;
 #endif
@@ -627,7 +623,7 @@ void WebGLFramebuffer::drawBuffersIfNecessary(bool force)
         }
     }
     if (reset) {
-        context()->graphicsContext3D()->getExtensions()->drawBuffersEXT(
+        context()->graphicsContext3D()->getExtensions().drawBuffersEXT(
             m_filteredDrawBuffers.size(), m_filteredDrawBuffers.data());
     }
 }

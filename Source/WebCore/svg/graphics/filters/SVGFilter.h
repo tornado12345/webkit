@@ -18,17 +18,13 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGFilter_h
-#define SVGFilter_h
+#pragma once
 
 #include "AffineTransform.h"
 #include "Filter.h"
 #include "FilterEffect.h"
 #include "FloatRect.h"
-#include "FloatSize.h"
-
-#include <wtf/RefCounted.h>
-#include <wtf/RefPtr.h>
+#include <wtf/Ref.h>
 #include <wtf/TypeCasts.h>
 
 namespace WebCore {
@@ -40,8 +36,7 @@ public:
     FloatRect filterRegionInUserSpace() const { return m_filterRegion; }
     FloatRect filterRegion() const final { return m_absoluteFilterRegion; }
 
-    float applyHorizontalScale(float value) const final;
-    float applyVerticalScale(float value) const final;
+    FloatSize scaledByFilterResolution(FloatSize) const final;
 
     FloatRect sourceImageRect() const final { return m_absoluteSourceDrawingRegion; }
     FloatRect targetBoundingBox() const { return m_targetBoundingBox; }
@@ -63,5 +58,3 @@ private:
 SPECIALIZE_TYPE_TRAITS_BEGIN(WebCore::SVGFilter)
     static bool isType(const WebCore::Filter& filter) { return filter.isSVGFilter(); }
 SPECIALIZE_TYPE_TRAITS_END()
-
-#endif // SVGFilter_h

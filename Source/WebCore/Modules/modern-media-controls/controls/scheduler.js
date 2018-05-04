@@ -10,6 +10,11 @@ const scheduler = new class
 
     // Public
 
+    get hasScheduledLayoutCallbacks()
+    {
+        return this._frameID !== -1 || this._layoutCallbacks.size > 0;
+    }
+
     scheduleLayout(callback)
     {
         if (typeof callback !== "function")
@@ -27,6 +32,11 @@ const scheduler = new class
         this._layoutCallbacks.delete(callback);
     }
 
+    flushScheduledLayoutCallbacks()
+    {
+        this._frameDidFire();
+    }
+
     // Private
 
     _requestFrameIfNeeded()
@@ -42,7 +52,7 @@ const scheduler = new class
 
         this._layout();
         this._frameID = -1;
-        this._requestFrameIfNeeded();   
+        this._requestFrameIfNeeded();
 
         if (typeof scheduler.frameDidFire === "function")
             scheduler.frameDidFire();
@@ -58,4 +68,4 @@ const scheduler = new class
             callback();
     }
 
-}
+};

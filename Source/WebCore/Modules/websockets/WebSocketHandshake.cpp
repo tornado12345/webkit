@@ -1,6 +1,7 @@
 /*
  * Copyright (C) 2011 Google Inc.  All rights reserved.
  * Copyright (C) Research In Motion Limited 2011. All rights reserved.
+ * Copyright (C) 2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -30,11 +31,7 @@
  */
 
 #include "config.h"
-
-#if ENABLE(WEB_SOCKETS)
-
 #include "WebSocketHandshake.h"
-#include "WebSocket.h"
 
 #include "Cookie.h"
 #include "CookieJar.h"
@@ -42,11 +39,13 @@
 #include "HTTPHeaderMap.h"
 #include "HTTPHeaderNames.h"
 #include "HTTPParsers.h"
-#include "URL.h"
+#include "InspectorInstrumentation.h"
 #include "Logging.h"
 #include "ResourceRequest.h"
 #include "ScriptExecutionContext.h"
 #include "SecurityOrigin.h"
+#include "URL.h"
+#include "WebSocket.h"
 #include <wtf/ASCIICType.h>
 #include <wtf/CryptographicallyRandomNumber.h>
 #include <wtf/MD5.h>
@@ -132,9 +131,7 @@ WebSocketHandshake::WebSocketHandshake(const URL& url, const String& protocol, D
     m_expectedAccept = getExpectedWebSocketAccept(m_secWebSocketKey);
 }
 
-WebSocketHandshake::~WebSocketHandshake()
-{
-}
+WebSocketHandshake::~WebSocketHandshake() = default;
 
 const URL& WebSocketHandshake::url() const
 {
@@ -169,7 +166,7 @@ bool WebSocketHandshake::secure() const
 
 String WebSocketHandshake::clientOrigin() const
 {
-    return m_document->securityOrigin()->toString();
+    return m_document->securityOrigin().toString();
 }
 
 String WebSocketHandshake::clientLocation() const
@@ -199,12 +196,8 @@ CString WebSocketHandshake::clientHandshakeMessage() const
     if (!m_clientProtocol.isEmpty())
         fields.append("Sec-WebSocket-Protocol: " + m_clientProtocol);
 
-    URL url = httpURLForAuthenticationAndCookies();
-    if (m_allowCookies && m_document) {
-        String cookie = cookieRequestHeaderFieldValue(*m_document, url);
-        if (!cookie.isEmpty())
-            fields.append("Cookie: " + cookie);
-    }
+    // Note: Cookies are not retrieved in the WebContent process. Instead, a proxy object is
+    // added in the handshake, and is exchanged for actual cookies in the Network process.
 
     // Add no-cache headers to avoid compatibility issue.
     // There are some proxies that rewrite "Connection: upgrade"
@@ -250,6 +243,7 @@ ResourceRequest WebSocketHandshake::clientHandshakeRequest() const
 
     URL url = httpURLForAuthenticationAndCookies();
     if (m_allowCookies && m_document) {
+        RELEASE_ASSERT_WITH_SECURITY_IMPLICATION(InspectorInstrumentation::hasFrontends());
         String cookie = cookieRequestHeaderFieldValue(*m_document, url);
         if (!cookie.isEmpty())
             request.setHTTPHeaderField(HTTPHeaderName::Cookie, cookie);
@@ -268,6 +262,13 @@ ResourceRequest WebSocketHandshake::clientHandshakeRequest() const
     request.setHTTPHeaderField(HTTPHeaderName::UserAgent, m_document->userAgent(m_document->url()));
 
     return request;
+}
+
+std::optional<CookieRequestHeaderFieldProxy> WebSocketHandshake::clientHandshakeCookieRequestHeaderFieldProxy() const
+{
+    if (!m_document || !m_allowCookies)
+        return std::nullopt;
+    return cookieRequestHeaderFieldProxy(*m_document, httpURLForAuthenticationAndCookies());
 }
 
 void WebSocketHandshake::reset()
@@ -487,7 +488,7 @@ int WebSocketHandshake::readStatusLine(const char* header, size_t headerLength, 
     if (statusCodeString.length() != 3) // Status code must consist of three digits.
         return lineLength;
     for (int i = 0; i < 3; ++i)
-        if (statusCodeString[i] < '0' || statusCodeString[i] > '9') {
+        if (!isASCIIDigit(statusCodeString[i])) {
             m_failureReason = makeString("Invalid status code: ", statusCodeString);
             return lineLength;
         }
@@ -530,7 +531,7 @@ const char* WebSocketHandshake::readHTTPHeaders(const char* start, const char* e
         if ((headerName == HTTPHeaderName::SecWebSocketExtensions
             || headerName == HTTPHeaderName::SecWebSocketAccept
             || headerName == HTTPHeaderName::SecWebSocketProtocol)
-            && !value.containsOnlyASCII()) {
+            && !value.isAllASCII()) {
             m_failureReason = makeString(name, " header value should only contain ASCII characters");
             return nullptr;
         }
@@ -615,5 +616,3 @@ bool WebSocketHandshake::checkResponseHeaders()
 }
 
 } // namespace WebCore
-
-#endif // ENABLE(WEB_SOCKETS)

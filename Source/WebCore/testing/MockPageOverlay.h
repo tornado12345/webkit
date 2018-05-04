@@ -23,14 +23,11 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef MockPageOverlay_h
-#define MockPageOverlay_h
+#pragma once
 
 #include "PageOverlay.h"
 
 namespace WebCore {
-
-class MainFrame;
 
 class MockPageOverlay : public RefCounted<MockPageOverlay> {
 public:
@@ -46,6 +43,4 @@ private:
     RefPtr<PageOverlay> m_overlay;
 };
 
-}
-
-#endif // MockPageOverlay_h
+} // namespace WebCore

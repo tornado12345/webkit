@@ -1,7 +1,7 @@
 /*
  *  Copyright (C) 1999-2001 Harri Porten (porten@kde.org)
  *  Copyright (C) 2001 Peter Kelly (pmk@post.com)
- *  Copyright (C) 2003, 2007, 2008 Apple Inc. All rights reserved.
+ *  Copyright (C) 2003-2018 Apple Inc. All rights reserved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Library General Public
@@ -24,11 +24,14 @@
 #include "JSCell.h"
 
 #include "ArrayBufferView.h"
+#include "JSCInlines.h"
+#include "JSCast.h"
 #include "JSFunction.h"
 #include "JSString.h"
 #include "JSObject.h"
 #include "NumberObject.h"
-#include "JSCInlines.h"
+#include "WebAssemblyToJSCallee.h"
+#include <wtf/LockAlgorithmInlines.h>
 #include <wtf/MathExtras.h>
 
 namespace JSC {
@@ -48,7 +51,7 @@ void JSCell::dump(PrintStream& out) const
 
 void JSCell::dumpToStream(const JSCell* cell, PrintStream& out)
 {
-    out.printf("<%p, %s>", cell, cell->className());
+    out.printf("<%p, %s>", cell, cell->className(*cell->vm()));
 }
 
 size_t JSCell::estimatedSizeInBytes() const
@@ -59,6 +62,11 @@ size_t JSCell::estimatedSizeInBytes() const
 size_t JSCell::estimatedSize(JSCell* cell)
 {
     return cell->cellSize();
+}
+
+PropertyReificationResult JSCell::reifyPropertyNameIfNeeded(JSCell*, ExecState*, PropertyName&)
+{
+    return PropertyReificationResult::Nothing;
 }
 
 void JSCell::heapSnapshot(JSCell*, HeapSnapshotBuilder&)
@@ -90,23 +98,23 @@ const JSObject* JSCell::getObject() const
 
 CallType JSCell::getCallData(JSCell*, CallData& callData)
 {
-    callData.js.functionExecutable = 0;
-    callData.js.scope = 0;
-    callData.native.function = 0;
+    callData.js.functionExecutable = nullptr;
+    callData.js.scope = nullptr;
+    callData.native.function = nullptr;
     return CallType::None;
 }
 
 ConstructType JSCell::getConstructData(JSCell*, ConstructData& constructData)
 {
-    constructData.js.functionExecutable = 0;
-    constructData.js.scope = 0;
-    constructData.native.function = 0;
+    constructData.js.functionExecutable = nullptr;
+    constructData.js.scope = nullptr;
+    constructData.native.function = nullptr;
     return ConstructType::None;
 }
 
 bool JSCell::put(JSCell* cell, ExecState* exec, PropertyName identifier, JSValue value, PutPropertySlot& slot)
 {
-    if (cell->isString() || cell->isSymbol())
+    if (cell->isString() || cell->isSymbol() || cell->isBigInt())
         return JSValue(cell).putToPrimitive(exec, identifier, value, slot);
 
     JSObject* thisObject = cell->toObject(exec, exec->lexicalGlobalObject());
@@ -115,7 +123,7 @@ bool JSCell::put(JSCell* cell, ExecState* exec, PropertyName identifier, JSValue
 
 bool JSCell::putByIndex(JSCell* cell, ExecState* exec, unsigned identifier, JSValue value, bool shouldThrow)
 {
-    if (cell->isString() || cell->isSymbol()) {
+    if (cell->isString() || cell->isSymbol() || cell->isBigInt()) {
         PutPropertySlot slot(cell, shouldThrow);
         return JSValue(cell).putToPrimitive(exec, Identifier::from(exec, identifier), value, slot);
     }
@@ -148,6 +156,8 @@ JSValue JSCell::toPrimitive(ExecState* exec, PreferredPrimitiveType preferredTyp
         return static_cast<const JSString*>(this)->toPrimitive(exec, preferredType);
     if (isSymbol())
         return static_cast<const Symbol*>(this)->toPrimitive(exec, preferredType);
+    if (isBigInt())
+        return static_cast<const JSBigInt*>(this)->toPrimitive(exec, preferredType);
     return static_cast<const JSObject*>(this)->toPrimitive(exec, preferredType);
 }
 
@@ -157,26 +167,31 @@ bool JSCell::getPrimitiveNumber(ExecState* exec, double& number, JSValue& value)
         return static_cast<const JSString*>(this)->getPrimitiveNumber(exec, number, value);
     if (isSymbol())
         return static_cast<const Symbol*>(this)->getPrimitiveNumber(exec, number, value);
+    if (isBigInt())
+        return static_cast<const JSBigInt*>(this)->getPrimitiveNumber(exec, number, value);
     return static_cast<const JSObject*>(this)->getPrimitiveNumber(exec, number, value);
 }
 
 double JSCell::toNumber(ExecState* exec) const
-{ 
+{
     if (isString())
         return static_cast<const JSString*>(this)->toNumber(exec);
     if (isSymbol())
         return static_cast<const Symbol*>(this)->toNumber(exec);
+    if (isBigInt())
+        return static_cast<const JSBigInt*>(this)->toNumber(exec);
     return static_cast<const JSObject*>(this)->toNumber(exec);
 }
 
-JSObject* JSCell::toObject(ExecState* exec, JSGlobalObject* globalObject) const
+JSObject* JSCell::toObjectSlow(ExecState* exec, JSGlobalObject* globalObject) const
 {
+    ASSERT(!isObject());
     if (isString())
         return static_cast<const JSString*>(this)->toObject(exec, globalObject);
-    if (isSymbol())
-        return static_cast<const Symbol*>(this)->toObject(exec, globalObject);
-    ASSERT(isObject());
-    return jsCast<JSObject*>(const_cast<JSCell*>(this));
+    if (isBigInt())
+        return static_cast<const JSBigInt*>(this)->toObject(exec, globalObject);
+    ASSERT(isSymbol());
+    return static_cast<const Symbol*>(this)->toObject(exec, globalObject);
 }
 
 void slowValidateCell(JSCell* cell)
@@ -224,9 +239,9 @@ String JSCell::toStringName(const JSObject*, ExecState*)
     return String();
 }
 
-const char* JSCell::className() const
+const char* JSCell::className(VM& vm) const
 {
-    return classInfo()->className;
+    return classInfo(vm)->className;
 }
 
 void JSCell::getPropertyNames(JSObject*, ExecState*, PropertyNameArray&, EnumerationMode)
@@ -249,13 +264,13 @@ bool JSCell::defineOwnProperty(JSObject*, ExecState*, PropertyName, const Proper
 ArrayBuffer* JSCell::slowDownAndWasteMemory(JSArrayBufferView*)
 {
     RELEASE_ASSERT_NOT_REACHED();
-    return 0;
+    return nullptr;
 }
 
-PassRefPtr<ArrayBufferView> JSCell::getTypedArrayImpl(JSArrayBufferView*)
+RefPtr<ArrayBufferView> JSCell::getTypedArrayImpl(JSArrayBufferView*)
 {
     RELEASE_ASSERT_NOT_REACHED();
-    return 0;
+    return nullptr;
 }
 
 uint32_t JSCell::getEnumerableLength(ExecState*, JSObject*)
@@ -292,6 +307,18 @@ bool JSCell::setPrototype(JSObject*, ExecState*, JSValue, bool)
 JSValue JSCell::getPrototype(JSObject*, ExecState*)
 {
     RELEASE_ASSERT_NOT_REACHED();
+}
+
+void JSCellLock::lockSlow()
+{
+    Atomic<IndexingType>* lock = bitwise_cast<Atomic<IndexingType>*>(&m_indexingTypeAndMisc);
+    IndexingTypeLockAlgorithm::lockSlow(*lock);
+}
+
+void JSCellLock::unlockSlow()
+{
+    Atomic<IndexingType>* lock = bitwise_cast<Atomic<IndexingType>*>(&m_indexingTypeAndMisc);
+    IndexingTypeLockAlgorithm::unlockSlow(*lock);
 }
 
 } // namespace JSC

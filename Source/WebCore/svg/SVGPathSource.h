@@ -17,8 +17,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGPathSource_h
-#define SVGPathSource_h
+#pragma once
 
 #include "SVGPathSeg.h"
 
@@ -29,8 +28,8 @@ class FloatPoint;
 class SVGPathSource {
     WTF_MAKE_NONCOPYABLE(SVGPathSource); WTF_MAKE_FAST_ALLOCATED;
 public:
-    SVGPathSource() { }
-    virtual ~SVGPathSource() { }
+    SVGPathSource() = default;
+    virtual ~SVGPathSource() = default;
 
     virtual bool hasMoreData() const = 0;
     virtual bool moveToNextToken() = 0;
@@ -49,5 +48,3 @@ public:
 };
 
 } // namespace WebCore
-
-#endif // SVGPathSource_h

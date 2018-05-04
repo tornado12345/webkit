@@ -35,31 +35,32 @@ namespace WebCore {
 
 class MathMLScriptsElement;
 
+enum class ScriptType { Sub, Super, SubSup, Multiscripts, Under, Over, UnderOver };
+
 // Render a base with scripts.
 class RenderMathMLScripts : public RenderMathMLBlock {
+    WTF_MAKE_ISO_ALLOCATED(RenderMathMLScripts);
 public:
     RenderMathMLScripts(MathMLScriptsElement&, RenderStyle&&);
-    RenderMathMLOperator* unembellishedOperator() final;
+    RenderMathMLOperator* unembellishedOperator() const final;
 
 protected:
     bool isRenderMathMLScripts() const override { return true; }
     const char* renderName() const override { return "RenderMathMLScripts"; }
+    ScriptType scriptType() const;
     void computePreferredLogicalWidths() override;
     void layoutBlock(bool relayoutChildren, LayoutUnit pageLogicalHeight = 0) override;
 
-    enum ScriptsType { Sub, Super, SubSup, Multiscripts, Under, Over, UnderOver };
-    ScriptsType m_scriptType;
-
 private:
     MathMLScriptsElement& element() const;
-    Optional<int> firstLineBaseline() const final;
+    std::optional<int> firstLineBaseline() const final;
     struct ReferenceChildren {
         RenderBox* base;
         RenderBox* prescriptDelimiter;
         RenderBox* firstPostScript;
         RenderBox* firstPreScript;
     };
-    Optional<ReferenceChildren> validateAndGetReferenceChildren();
+    std::optional<ReferenceChildren> validateAndGetReferenceChildren();
     LayoutUnit spaceAfterScript();
     LayoutUnit italicCorrection(const ReferenceChildren&);
     struct VerticalParameters {

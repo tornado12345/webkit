@@ -26,17 +26,14 @@
 #include "config.h"
 #include "PageGroup.h"
 
-#include "Chrome.h"
-#include "ChromeClient.h"
 #include "DOMWrapperWorld.h"
 #include "Document.h"
-#include "MainFrame.h"
+#include "Frame.h"
 #include "Page.h"
 #include "PageCache.h"
-#include "SecurityOrigin.h"
 #include "StorageNamespace.h"
-#include <heap/HeapInlines.h>
-#include <runtime/StructureInlines.h>
+#include <JavaScriptCore/HeapInlines.h>
+#include <JavaScriptCore/StructureInlines.h>
 #include <wtf/StdLibExtras.h>
 
 #if ENABLE(VIDEO_TRACK)
@@ -69,9 +66,7 @@ PageGroup::PageGroup(Page& page)
     addPage(page);
 }
 
-PageGroup::~PageGroup()
-{
-}
+PageGroup::~PageGroup() = default;
 
 typedef HashMap<String, PageGroup*> PageGroupMap;
 static PageGroupMap* pageGroups = nullptr;

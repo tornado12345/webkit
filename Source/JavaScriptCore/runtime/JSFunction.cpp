@@ -1,7 +1,7 @@
 /*
  *  Copyright (C) 1999-2002 Harri Porten (porten@kde.org)
  *  Copyright (C) 2001 Peter Kelly (pmk@post.com)
- *  Copyright (C) 2003-2009, 2015-2016 Apple Inc. All rights reserved.
+ *  Copyright (C) 2003-2009, 2015-2017 Apple Inc. All rights reserved.
  *  Copyright (C) 2007 Cameron Zwarich (cwzwarich@uwaterloo.ca)
  *  Copyright (C) 2007 Maks Orlovich
  *  Copyright (C) 2015 Canon Inc. All rights reserved.
@@ -26,6 +26,9 @@
 #include "config.h"
 #include "JSFunction.h"
 
+#include "AsyncGeneratorPrototype.h"
+#include "BuiltinNames.h"
+#include "CatchScope.h"
 #include "ClonedArguments.h"
 #include "CodeBlock.h"
 #include "CommonIdentifiers.h"
@@ -52,19 +55,28 @@ EncodedJSValue JSC_HOST_CALL callHostFunctionAsConstructor(ExecState* exec)
 {
     VM& vm = exec->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
-    return throwVMError(exec, scope, createNotAConstructorError(exec, exec->callee()));
+    return throwVMError(exec, scope, createNotAConstructorError(exec, exec->jsCallee()));
 }
 
-const ClassInfo JSFunction::s_info = { "Function", &Base::s_info, 0, CREATE_METHOD_TABLE(JSFunction) };
+const ClassInfo JSFunction::s_info = { "Function", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(JSFunction) };
 
 bool JSFunction::isHostFunctionNonInline() const
 {
     return isHostFunction();
 }
 
+Structure* JSFunction::selectStructureForNewFuncExp(JSGlobalObject* globalObject, FunctionExecutable* executable)
+{
+    if (executable->isArrowFunction())
+        return globalObject->arrowFunctionStructure();
+    if (executable->isStrictMode())
+        return globalObject->strictFunctionStructure();
+    return globalObject->sloppyFunctionStructure();
+}
+
 JSFunction* JSFunction::create(VM& vm, FunctionExecutable* executable, JSScope* scope)
 {
-    return create(vm, executable, scope, scope->globalObject(vm)->functionStructure());
+    return create(vm, executable, scope, selectStructureForNewFuncExp(scope->globalObject(vm), executable));
 }
 
 JSFunction* JSFunction::create(VM& vm, FunctionExecutable* executable, JSScope* scope, Structure* structure)
@@ -74,20 +86,11 @@ JSFunction* JSFunction::create(VM& vm, FunctionExecutable* executable, JSScope* 
     return result;
 }
 
-#if ENABLE(WEBASSEMBLY)
-JSFunction* JSFunction::create(VM& vm, WebAssemblyExecutable* executable, JSScope* scope)
-{
-    JSFunction* function = new (NotNull, allocateCell<JSFunction>(vm.heap)) JSFunction(vm, executable, scope);
-    ASSERT(function->structure(vm)->globalObject());
-    function->finishCreation(vm);
-    return function;
-}
-#endif
-
 JSFunction* JSFunction::create(VM& vm, JSGlobalObject* globalObject, int length, const String& name, NativeFunction nativeFunction, Intrinsic intrinsic, NativeFunction nativeConstructor, const DOMJIT::Signature* signature)
 {
     NativeExecutable* executable = vm.getHostFunction(nativeFunction, intrinsic, nativeConstructor, signature, name);
-    JSFunction* function = new (NotNull, allocateCell<JSFunction>(vm.heap)) JSFunction(vm, globalObject, globalObject->functionStructure());
+    Structure* structure = globalObject->strictFunctionStructure();
+    JSFunction* function = new (NotNull, allocateCell<JSFunction>(vm.heap)) JSFunction(vm, globalObject, structure);
     // Can't do this during initialization because getHostFunction might do a GC allocation.
     function->finishCreation(vm, executable, length, name);
     return function;
@@ -99,31 +102,28 @@ JSFunction::JSFunction(VM& vm, JSGlobalObject* globalObject, Structure* structur
 {
 }
 
+
+void JSFunction::finishCreation(VM& vm)
+{
+    Base::finishCreation(vm);
+    ASSERT(jsDynamicCast<JSFunction*>(vm, this));
+    ASSERT(type() == JSFunctionType);
+    if (isBuiltinFunction() && jsExecutable()->name().isPrivateName()) {
+        // This is anonymous builtin function.
+        rareData(vm)->setHasReifiedName();
+    }
+}
+
 void JSFunction::finishCreation(VM& vm, NativeExecutable* executable, int length, const String& name)
 {
     Base::finishCreation(vm);
-    ASSERT(inherits(info()));
+    ASSERT(inherits(vm, info()));
+    ASSERT(type() == JSFunctionType);
     m_executable.set(vm, this, executable);
     // Some NativeExecutable functions, like JSBoundFunction, decide to lazily allocate their name string.
     if (!name.isNull())
-        putDirect(vm, vm.propertyNames->name, jsString(&vm, name), ReadOnly | DontEnum);
-    putDirect(vm, vm.propertyNames->length, jsNumber(length), ReadOnly | DontEnum);
-}
-
-JSFunction* JSFunction::createBuiltinFunction(VM& vm, FunctionExecutable* executable, JSGlobalObject* globalObject)
-{
-    JSFunction* function = create(vm, executable, globalObject);
-    function->putDirect(vm, vm.propertyNames->name, jsString(&vm, executable->name().string()), ReadOnly | DontEnum);
-    function->putDirect(vm, vm.propertyNames->length, jsNumber(executable->functionLength()), ReadOnly | DontEnum);
-    return function;
-}
-
-JSFunction* JSFunction::createBuiltinFunction(VM& vm, FunctionExecutable* executable, JSGlobalObject* globalObject, const String& name)
-{
-    JSFunction* function = create(vm, executable, globalObject);
-    function->putDirect(vm, vm.propertyNames->name, jsString(&vm, name), ReadOnly | DontEnum);
-    function->putDirect(vm, vm.propertyNames->length, jsNumber(executable->functionLength()), ReadOnly | DontEnum);
-    return function;
+        putDirect(vm, vm.propertyNames->name, jsString(&vm, name), PropertyAttribute::ReadOnly | PropertyAttribute::DontEnum);
+    putDirect(vm, vm.propertyNames->length, jsNumber(length), PropertyAttribute::ReadOnly | PropertyAttribute::DontEnum);
 }
 
 FunctionRareData* JSFunction::allocateRareData(VM& vm)
@@ -139,15 +139,28 @@ FunctionRareData* JSFunction::allocateRareData(VM& vm)
     return m_rareData.get();
 }
 
+JSObject* JSFunction::prototypeForConstruction(VM& vm, ExecState* exec)
+{
+    // This code assumes getting the prototype is not effectful. That's only
+    // true when we can use the allocation profile.
+    ASSERT(canUseAllocationProfile()); 
+    auto scope = DECLARE_CATCH_SCOPE(vm);
+    JSValue prototype = get(exec, vm.propertyNames->prototype);
+    scope.releaseAssertNoException();
+    if (prototype.isObject())
+        return asObject(prototype);
+
+    return globalObject(vm)->objectPrototype();
+}
+
 FunctionRareData* JSFunction::allocateAndInitializeRareData(ExecState* exec, size_t inlineCapacity)
 {
     ASSERT(!m_rareData);
+    ASSERT(canUseAllocationProfile());
     VM& vm = exec->vm();
-    JSObject* prototype = jsDynamicCast<JSObject*>(get(exec, vm.propertyNames->prototype));
-    if (!prototype)
-        prototype = globalObject(vm)->objectPrototype();
+    JSObject* prototype = prototypeForConstruction(vm, exec);
     FunctionRareData* rareData = FunctionRareData::create(vm);
-    rareData->initializeObjectAllocationProfile(vm, prototype, inlineCapacity);
+    rareData->initializeObjectAllocationProfile(vm, globalObject(vm), prototype, inlineCapacity, this);
 
     // A DFG compilation thread may be trying to read the rare data
     // We want to ensure that it sees it properly allocated
@@ -160,11 +173,10 @@ FunctionRareData* JSFunction::allocateAndInitializeRareData(ExecState* exec, siz
 FunctionRareData* JSFunction::initializeRareData(ExecState* exec, size_t inlineCapacity)
 {
     ASSERT(!!m_rareData);
+    ASSERT(canUseAllocationProfile());
     VM& vm = exec->vm();
-    JSObject* prototype = jsDynamicCast<JSObject*>(get(exec, vm.propertyNames->prototype));
-    if (!prototype)
-        prototype = globalObject(vm)->objectPrototype();
-    m_rareData->initializeObjectAllocationProfile(vm, prototype, inlineCapacity);
+    JSObject* prototype = prototypeForConstruction(vm, exec);
+    m_rareData->initializeObjectAllocationProfile(vm, globalObject(vm), prototype, inlineCapacity, this);
     return m_rareData.get();
 }
 
@@ -217,9 +229,15 @@ void JSFunction::visitChildren(JSCell* cell, SlotVisitor& visitor)
     ASSERT_GC_OBJECT_INHERITS(thisObject, info());
     Base::visitChildren(thisObject, visitor);
 
-    visitor.append(&thisObject->m_executable);
-    if (thisObject->m_rareData)
-        visitor.append(&thisObject->m_rareData);
+    visitor.append(thisObject->m_executable);
+    visitor.append(thisObject->m_rareData);
+}
+
+PropertyReificationResult JSFunction::reifyPropertyNameIfNeeded(JSCell* cell, ExecState* exec, PropertyName& propertyName)
+{
+    JSFunction* thisObject = jsCast<JSFunction*>(cell);
+    PropertyStatus propertyType = thisObject->reifyLazyPropertyIfNeeded(exec->vm(), exec, propertyName);
+    return isReified(propertyType) ? PropertyReificationResult::Something : PropertyReificationResult::Nothing;
 }
 
 CallType JSFunction::getCallData(JSCell* cell, CallData& callData)
@@ -237,7 +255,7 @@ CallType JSFunction::getCallData(JSCell* cell, CallData& callData)
 class RetrieveArgumentsFunctor {
 public:
     RetrieveArgumentsFunctor(JSFunction* functionObj)
-        : m_targetCallee(jsDynamicCast<JSObject*>(functionObj))
+        : m_targetCallee(functionObj)
         , m_result(jsNull())
     {
     }
@@ -246,7 +264,10 @@ public:
 
     StackVisitor::Status operator()(StackVisitor& visitor) const
     {
-        JSObject* callee = visitor->callee();
+        if (!visitor->callee().isCell())
+            return StackVisitor::Continue;
+
+        JSCell* callee = visitor->callee().asCell();
         if (callee != m_targetCallee)
             return StackVisitor::Continue;
 
@@ -277,7 +298,7 @@ EncodedJSValue JSFunction::argumentsGetter(ExecState* exec, EncodedJSValue thisV
 class RetrieveCallerFunctionFunctor {
 public:
     RetrieveCallerFunctionFunctor(JSFunction* functionObj)
-        : m_targetCallee(jsDynamicCast<JSObject*>(functionObj))
+        : m_targetCallee(functionObj)
         , m_hasFoundFrame(false)
         , m_hasSkippedToCallerFrame(false)
         , m_result(jsNull())
@@ -288,9 +309,12 @@ public:
 
     StackVisitor::Status operator()(StackVisitor& visitor) const
     {
-        JSObject* callee = visitor->callee();
+        if (!visitor->callee().isCell())
+            return StackVisitor::Continue;
 
-        if (callee && callee->inherits(JSBoundFunction::info()))
+        JSCell* callee = visitor->callee().asCell();
+
+        if (callee && callee->inherits<JSBoundFunction>(*callee->vm()))
             return StackVisitor::Continue;
 
         if (!m_hasFoundFrame && (callee != m_targetCallee))
@@ -331,16 +355,45 @@ EncodedJSValue JSFunction::callerGetter(ExecState* exec, EncodedJSValue thisValu
     JSValue caller = retrieveCallerFunction(exec, thisObj);
 
     // See ES5.1 15.3.5.4 - Function.caller may not be used to retrieve a strict caller.
-    if (!caller.isObject() || !asObject(caller)->inherits(JSFunction::info())) {
-        // It isn't a JSFunction, but if it is a JSCallee from a program or call eval, return null.
-        if (jsDynamicCast<JSCallee*>(caller))
+    if (!caller.isObject() || !asObject(caller)->inherits<JSFunction>(vm)) {
+        // It isn't a JSFunction, but if it is a JSCallee from a program or eval call or an internal constructor, return null.
+        if (jsDynamicCast<JSCallee*>(vm, caller) || jsDynamicCast<InternalFunction*>(vm, caller))
             return JSValue::encode(jsNull());
         return JSValue::encode(caller);
     }
     JSFunction* function = jsCast<JSFunction*>(caller);
-    if (function->isHostOrBuiltinFunction() || !function->jsExecutable()->isStrictMode())
-        return JSValue::encode(caller);
-    return JSValue::encode(throwTypeError(exec, scope, ASCIILiteral("Function.caller used to retrieve strict caller")));
+
+    // Firefox returns null for native code callers, so we match that behavior.
+    if (function->isHostOrBuiltinFunction())
+        return JSValue::encode(jsNull());
+    SourceParseMode parseMode = function->jsExecutable()->parseMode();
+    switch (parseMode) {
+    case SourceParseMode::GeneratorBodyMode:
+    case SourceParseMode::AsyncGeneratorBodyMode:
+        return JSValue::encode(throwTypeError(exec, scope, ASCIILiteral("Function.caller used to retrieve generator body")));
+    case SourceParseMode::AsyncFunctionBodyMode:
+    case SourceParseMode::AsyncArrowFunctionBodyMode:
+        return JSValue::encode(throwTypeError(exec, scope, ASCIILiteral("Function.caller used to retrieve async function body")));
+    case SourceParseMode::NormalFunctionMode:
+    case SourceParseMode::GeneratorWrapperFunctionMode:
+    case SourceParseMode::GetterMode:
+    case SourceParseMode::SetterMode:
+    case SourceParseMode::MethodMode:
+    case SourceParseMode::ArrowFunctionMode:
+    case SourceParseMode::AsyncFunctionMode:
+    case SourceParseMode::AsyncMethodMode:
+    case SourceParseMode::AsyncArrowFunctionMode:
+    case SourceParseMode::ProgramMode:
+    case SourceParseMode::ModuleAnalyzeMode:
+    case SourceParseMode::ModuleEvaluateMode:
+    case SourceParseMode::AsyncGeneratorWrapperFunctionMode:
+    case SourceParseMode::AsyncGeneratorWrapperMethodMode:
+    case SourceParseMode::GeneratorWrapperMethodMode:
+        if (!function->jsExecutable()->isStrictMode())
+            return JSValue::encode(caller);
+        return JSValue::encode(throwTypeError(exec, scope, ASCIILiteral("Function.caller used to retrieve strict caller")));
+    }
+    RELEASE_ASSERT_NOT_REACHED();
 }
 
 bool JSFunction::getOwnPropertySlot(JSObject* object, ExecState* exec, PropertyName propertyName, PropertySlot& slot)
@@ -348,46 +401,54 @@ bool JSFunction::getOwnPropertySlot(JSObject* object, ExecState* exec, PropertyN
     VM& vm = exec->vm();
     JSFunction* thisObject = jsCast<JSFunction*>(object);
     if (thisObject->isHostOrBuiltinFunction()) {
-        thisObject->reifyBoundNameIfNeeded(vm, exec, propertyName);
+        thisObject->reifyLazyPropertyForHostOrBuiltinIfNeeded(vm, exec, propertyName);
         return Base::getOwnPropertySlot(thisObject, exec, propertyName, slot);
     }
 
     if (propertyName == vm.propertyNames->prototype && thisObject->jsExecutable()->hasPrototypeProperty() && !thisObject->jsExecutable()->isClassConstructorFunction()) {
+        // NOTE: class constructors define the prototype property in bytecode using
+        // defineOwnProperty, which ends up calling into this code (see our defineOwnProperty
+        // implementation below). The bytecode will end up doing the proper definition
+        // with the property being non-writable/non-configurable. However, we must ignore
+        // the initial materialization of the property so that the defineOwnProperty call
+        // from bytecode succeeds. Otherwise, the materialization here would prevent the
+        // defineOwnProperty from being able to overwrite the property.
         unsigned attributes;
         PropertyOffset offset = thisObject->getDirectOffset(vm, propertyName, attributes);
         if (!isValidOffset(offset)) {
             JSObject* prototype = nullptr;
-            if (thisObject->jsExecutable()->parseMode() == SourceParseMode::GeneratorWrapperFunctionMode) {
+            if (isGeneratorWrapperParseMode(thisObject->jsExecutable()->parseMode())) {
                 // Unlike function instances, the object that is the value of the a GeneratorFunction's prototype
                 // property does not have a constructor property whose value is the GeneratorFunction instance.
                 // https://tc39.github.io/ecma262/#sec-generatorfunction-instances-prototype
                 prototype = constructEmptyObject(exec, thisObject->globalObject(vm)->generatorPrototype());
-            } else {
+            } else if (thisObject->jsExecutable()->parseMode() == SourceParseMode::AsyncGeneratorWrapperFunctionMode)
+                prototype = constructEmptyObject(exec, thisObject->globalObject(vm)->asyncGeneratorPrototype());
+            else {
                 prototype = constructEmptyObject(exec);
-                prototype->putDirect(vm, vm.propertyNames->constructor, thisObject, DontEnum);
+                prototype->putDirect(vm, vm.propertyNames->constructor, thisObject, static_cast<unsigned>(PropertyAttribute::DontEnum));
             }
 
-            thisObject->putDirect(vm, vm.propertyNames->prototype, prototype, DontDelete | DontEnum);
+            thisObject->putDirect(vm, vm.propertyNames->prototype, prototype, PropertyAttribute::DontDelete | PropertyAttribute::DontEnum);
             offset = thisObject->getDirectOffset(vm, vm.propertyNames->prototype, attributes);
             ASSERT(isValidOffset(offset));
         }
-
         slot.setValue(thisObject, attributes, thisObject->getDirect(offset), offset);
     }
 
-    if (propertyName == exec->propertyNames().arguments) {
+    if (propertyName == vm.propertyNames->arguments) {
         if (!thisObject->jsExecutable()->hasCallerAndArgumentsProperties())
             return Base::getOwnPropertySlot(thisObject, exec, propertyName, slot);
         
-        slot.setCacheableCustom(thisObject, ReadOnly | DontEnum | DontDelete, argumentsGetter);
+        slot.setCacheableCustom(thisObject, PropertyAttribute::ReadOnly | PropertyAttribute::DontEnum | PropertyAttribute::DontDelete, argumentsGetter);
         return true;
     }
 
-    if (propertyName == exec->propertyNames().caller) {
+    if (propertyName == vm.propertyNames->caller) {
         if (!thisObject->jsExecutable()->hasCallerAndArgumentsProperties())
             return Base::getOwnPropertySlot(thisObject, exec, propertyName, slot);
 
-        slot.setCacheableCustom(thisObject, ReadOnly | DontEnum | DontDelete, callerGetter);
+        slot.setCacheableCustom(thisObject, PropertyAttribute::ReadOnly | PropertyAttribute::DontEnum | PropertyAttribute::DontDelete, callerGetter);
         return true;
     }
 
@@ -399,22 +460,28 @@ bool JSFunction::getOwnPropertySlot(JSObject* object, ExecState* exec, PropertyN
 void JSFunction::getOwnNonIndexPropertyNames(JSObject* object, ExecState* exec, PropertyNameArray& propertyNames, EnumerationMode mode)
 {
     JSFunction* thisObject = jsCast<JSFunction*>(object);
-    if (!thisObject->isHostOrBuiltinFunction() && mode.includeDontEnumProperties()) {
-        VM& vm = exec->vm();
-        // Make sure prototype has been reified.
-        PropertySlot slot(thisObject, PropertySlot::InternalMethodType::VMInquiry);
-        thisObject->methodTable(vm)->getOwnPropertySlot(thisObject, exec, vm.propertyNames->prototype, slot);
+    VM& vm = exec->vm();
+    if (mode.includeDontEnumProperties()) {
+        if (!thisObject->isHostOrBuiltinFunction()) {
+            // Make sure prototype has been reified.
+            PropertySlot slot(thisObject, PropertySlot::InternalMethodType::VMInquiry);
+            thisObject->methodTable(vm)->getOwnPropertySlot(thisObject, exec, vm.propertyNames->prototype, slot);
 
-        if (thisObject->jsExecutable()->hasCallerAndArgumentsProperties()) {
-            propertyNames.add(vm.propertyNames->arguments);
-            propertyNames.add(vm.propertyNames->caller);
+            if (thisObject->jsExecutable()->hasCallerAndArgumentsProperties()) {
+                propertyNames.add(vm.propertyNames->arguments);
+                propertyNames.add(vm.propertyNames->caller);
+            }
+            if (!thisObject->hasReifiedLength())
+                propertyNames.add(vm.propertyNames->length);
+            if (!thisObject->hasReifiedName())
+                propertyNames.add(vm.propertyNames->name);
+        } else {
+            if (thisObject->isBuiltinFunction() && !thisObject->hasReifiedLength())
+                propertyNames.add(vm.propertyNames->length);
+            if ((thisObject->isBuiltinFunction() || thisObject->inherits<JSBoundFunction>(vm)) && !thisObject->hasReifiedName())
+                propertyNames.add(vm.propertyNames->name);
         }
-        if (!thisObject->hasReifiedLength())
-            propertyNames.add(vm.propertyNames->length);
-        if (!thisObject->hasReifiedName())
-            propertyNames.add(vm.propertyNames->name);
-    } else if (thisObject->isHostOrBuiltinFunction() && mode.includeDontEnumProperties() && thisObject->inherits(JSBoundFunction::info()) && !thisObject->hasReifiedName())
-        propertyNames.add(exec->vm().propertyNames->name);
+    }
     Base::getOwnNonIndexPropertyNames(thisObject, exec, propertyNames, mode);
 }
 
@@ -425,13 +492,16 @@ bool JSFunction::put(JSCell* cell, ExecState* exec, PropertyName propertyName, J
 
     JSFunction* thisObject = jsCast<JSFunction*>(cell);
 
-    if (UNLIKELY(isThisValueAltered(slot, thisObject)))
+    if (UNLIKELY(isThisValueAltered(slot, thisObject))) {
+        scope.release();
         return ordinarySetSlow(exec, thisObject, propertyName, value, slot.thisValue(), slot.isStrictMode());
+    }
 
     if (thisObject->isHostOrBuiltinFunction()) {
-        LazyPropertyType propType = thisObject->reifyBoundNameIfNeeded(vm, exec, propertyName);
-        if (propType == LazyPropertyType::IsLazyProperty)
+        PropertyStatus propertyType = thisObject->reifyLazyPropertyForHostOrBuiltinIfNeeded(vm, exec, propertyName);
+        if (isLazy(propertyType))
             slot.disableCaching();
+        scope.release();
         return Base::put(thisObject, exec, propertyName, value, slot);
     }
 
@@ -448,20 +518,15 @@ bool JSFunction::put(JSCell* cell, ExecState* exec, PropertyName propertyName, J
     }
 
     if (propertyName == vm.propertyNames->arguments || propertyName == vm.propertyNames->caller) {
-        slot.disableCaching();
         if (!thisObject->jsExecutable()->hasCallerAndArgumentsProperties()) {
-            // This will trigger the property to be reified, if this is not already the case!
-            // FIXME: Investigate if the `hasProperty()` call is even needed, as in the `!hasCallerAndArgumentsProperties()` case,
-            // these properties are not lazy and should not need to be reified. (https://bugs.webkit.org/show_bug.cgi?id=163579)
-            bool okay = thisObject->hasProperty(exec, propertyName);
-            ASSERT_UNUSED(okay, okay);
             scope.release();
             return Base::put(thisObject, exec, propertyName, value, slot);
         }
+        slot.disableCaching();
         return typeError(exec, scope, slot.isStrictMode(), ASCIILiteral(ReadonlyPropertyWriteError));
     }
-    LazyPropertyType propType = thisObject->reifyLazyPropertyIfNeeded(vm, exec, propertyName);
-    if (propType == LazyPropertyType::IsLazyProperty)
+    PropertyStatus propertyType = thisObject->reifyLazyPropertyIfNeeded(vm, exec, propertyName);
+    if (isLazy(propertyType))
         slot.disableCaching();
     scope.release();
     return Base::put(thisObject, exec, propertyName, value, slot);
@@ -469,18 +534,18 @@ bool JSFunction::put(JSCell* cell, ExecState* exec, PropertyName propertyName, J
 
 bool JSFunction::deleteProperty(JSCell* cell, ExecState* exec, PropertyName propertyName)
 {
+    VM& vm = exec->vm();
     JSFunction* thisObject = jsCast<JSFunction*>(cell);
     if (thisObject->isHostOrBuiltinFunction())
-        thisObject->reifyBoundNameIfNeeded(exec->vm(), exec, propertyName);
-    else if (exec->vm().deletePropertyMode() != VM::DeletePropertyMode::IgnoreConfigurable) {
+        thisObject->reifyLazyPropertyForHostOrBuiltinIfNeeded(vm, exec, propertyName);
+    else if (vm.deletePropertyMode() != VM::DeletePropertyMode::IgnoreConfigurable) {
         // For non-host functions, don't let these properties by deleted - except by DefineOwnProperty.
-        VM& vm = exec->vm();
         FunctionExecutable* executable = thisObject->jsExecutable();
         
-        if (propertyName == exec->propertyNames().caller || propertyName == exec->propertyNames().arguments)
-            return !executable->hasCallerAndArgumentsProperties();
+        if ((propertyName == vm.propertyNames->caller || propertyName == vm.propertyNames->arguments) && executable->hasCallerAndArgumentsProperties())
+            return false;
 
-        if (propertyName == exec->propertyNames().prototype && !executable->isArrowFunction())
+        if (propertyName == vm.propertyNames->prototype && !executable->isArrowFunction())
             return false;
 
         thisObject->reifyLazyPropertyIfNeeded(vm, exec, propertyName);
@@ -496,7 +561,8 @@ bool JSFunction::defineOwnProperty(JSObject* object, ExecState* exec, PropertyNa
 
     JSFunction* thisObject = jsCast<JSFunction*>(object);
     if (thisObject->isHostOrBuiltinFunction()) {
-        thisObject->reifyBoundNameIfNeeded(vm, exec, propertyName);
+        thisObject->reifyLazyPropertyForHostOrBuiltinIfNeeded(vm, exec, propertyName);
+        scope.release();
         return Base::defineOwnProperty(object, exec, propertyName, descriptor, throwException);
     }
 
@@ -507,36 +573,26 @@ bool JSFunction::defineOwnProperty(JSObject* object, ExecState* exec, PropertyNa
         thisObject->methodTable(vm)->getOwnPropertySlot(thisObject, exec, propertyName, slot);
         if (thisObject->m_rareData)
             thisObject->m_rareData->clear("Store to prototype property of a function");
+        scope.release();
         return Base::defineOwnProperty(object, exec, propertyName, descriptor, throwException);
     }
 
     bool valueCheck;
     if (propertyName == vm.propertyNames->arguments) {
         if (!thisObject->jsExecutable()->hasCallerAndArgumentsProperties()) {
-            if (thisObject->jsExecutable()->isClass()) {
-                thisObject->reifyLazyPropertyIfNeeded(vm, exec, propertyName);
-                return Base::defineOwnProperty(object, exec, propertyName, descriptor, throwException);
-            }
-            PropertySlot slot(thisObject, PropertySlot::InternalMethodType::VMInquiry);
-            if (!Base::getOwnPropertySlot(thisObject, exec, propertyName, slot))
-                thisObject->putDirectAccessor(exec, propertyName, thisObject->globalObject(vm)->throwTypeErrorArgumentsCalleeAndCallerGetterSetter(), DontDelete | DontEnum | Accessor);
+            scope.release();
             return Base::defineOwnProperty(object, exec, propertyName, descriptor, throwException);
         }
         valueCheck = !descriptor.value() || sameValue(exec, descriptor.value(), retrieveArguments(exec, thisObject));
     } else if (propertyName == vm.propertyNames->caller) {
         if (!thisObject->jsExecutable()->hasCallerAndArgumentsProperties()) {
-            if (thisObject->jsExecutable()->isClass()) {
-                thisObject->reifyLazyPropertyIfNeeded(vm, exec, propertyName);
-                return Base::defineOwnProperty(object, exec, propertyName, descriptor, throwException);
-            }
-            PropertySlot slot(thisObject, PropertySlot::InternalMethodType::VMInquiry);
-            if (!Base::getOwnPropertySlot(thisObject, exec, propertyName, slot))
-                thisObject->putDirectAccessor(exec, propertyName, thisObject->globalObject(vm)->throwTypeErrorArgumentsCalleeAndCallerGetterSetter(), DontDelete | DontEnum | Accessor);
+            scope.release();
             return Base::defineOwnProperty(object, exec, propertyName, descriptor, throwException);
         }
         valueCheck = !descriptor.value() || sameValue(exec, descriptor.value(), retrieveCallerFunction(exec, thisObject));
     } else {
         thisObject->reifyLazyPropertyIfNeeded(vm, exec, propertyName);
+        scope.release();
         return Base::defineOwnProperty(object, exec, propertyName, descriptor, throwException);
     }
      
@@ -576,9 +632,9 @@ ConstructType JSFunction::getConstructData(JSCell* cell, ConstructData& construc
 
 String getCalculatedDisplayName(VM& vm, JSObject* object)
 {
-    if (JSFunction* function = jsDynamicCast<JSFunction*>(object))
+    if (JSFunction* function = jsDynamicCast<JSFunction*>(vm, object))
         return function->calculatedDisplayName(vm);
-    if (InternalFunction* function = jsDynamicCast<InternalFunction*>(object))
+    if (InternalFunction* function = jsDynamicCast<InternalFunction*>(vm, object))
         return function->calculatedDisplayName(vm);
     return emptyString();
 }
@@ -617,12 +673,11 @@ void JSFunction::reifyLength(VM& vm)
 
     ASSERT(!hasReifiedLength());
     ASSERT(!isHostFunction());
-    JSValue initialValue = jsNumber(jsExecutable()->functionLength());
-    unsigned initialAttributes = DontEnum | ReadOnly;
+    JSValue initialValue = jsNumber(jsExecutable()->parameterCount());
+    unsigned initialAttributes = PropertyAttribute::DontEnum | PropertyAttribute::ReadOnly;
     const Identifier& identifier = vm.propertyNames->length;
-    putDirect(vm, identifier, initialValue, initialAttributes);
-
     rareData->setHasReifiedLength();
+    putDirect(vm, identifier, initialValue, initialAttributes);
 }
 
 void JSFunction::reifyName(VM& vm, ExecState* exec)
@@ -632,8 +687,8 @@ void JSFunction::reifyName(VM& vm, ExecState* exec)
     // https://tc39.github.io/ecma262/#sec-exports-runtime-semantics-evaluation
     // When the ident is "*default*", we need to set "default" for the ecma name.
     // This "*default*" name is never shown to users.
-    if (ecmaName == exec->propertyNames().builtinNames().starDefaultPrivateName())
-        name = exec->propertyNames().defaultKeyword.string();
+    if (ecmaName == vm.propertyNames->builtinNames().starDefaultPrivateName())
+        name = vm.propertyNames->defaultKeyword.string();
     else
         name = ecmaName.string();
     reifyName(vm, exec, name);
@@ -645,7 +700,7 @@ void JSFunction::reifyName(VM& vm, ExecState* exec, String name)
 
     ASSERT(!hasReifiedName());
     ASSERT(!isHostFunction());
-    unsigned initialAttributes = DontEnum | ReadOnly;
+    unsigned initialAttributes = PropertyAttribute::DontEnum | PropertyAttribute::ReadOnly;
     const Identifier& propID = vm.propertyNames->name;
 
     if (exec->lexicalGlobalObject()->needsSiteSpecificQuirks()) {
@@ -661,41 +716,77 @@ void JSFunction::reifyName(VM& vm, ExecState* exec, String name)
     else if (jsExecutable()->isSetter())
         name = makeString("set ", name);
 
-    putDirect(vm, propID, jsString(exec, name), initialAttributes);
     rareData->setHasReifiedName();
+    putDirect(vm, propID, jsString(exec, name), initialAttributes);
 }
 
-JSFunction::LazyPropertyType JSFunction::reifyLazyPropertyIfNeeded(VM& vm, ExecState* exec, PropertyName propertyName)
+JSFunction::PropertyStatus JSFunction::reifyLazyPropertyIfNeeded(VM& vm, ExecState* exec, PropertyName propertyName)
+{
+    if (isHostOrBuiltinFunction())
+        return PropertyStatus::Eager;
+    PropertyStatus lazyLength = reifyLazyLengthIfNeeded(vm, exec, propertyName);
+    if (isLazy(lazyLength))
+        return lazyLength;
+    PropertyStatus lazyName = reifyLazyNameIfNeeded(vm, exec, propertyName);
+    if (isLazy(lazyName))
+        return lazyName;
+    return PropertyStatus::Eager;
+}
+
+JSFunction::PropertyStatus JSFunction::reifyLazyPropertyForHostOrBuiltinIfNeeded(VM& vm, ExecState* exec, PropertyName propertyName)
+{
+    ASSERT(isHostOrBuiltinFunction());
+    if (isBuiltinFunction()) {
+        PropertyStatus lazyLength = reifyLazyLengthIfNeeded(vm, exec, propertyName);
+        if (isLazy(lazyLength))
+            return lazyLength;
+    }
+    return reifyLazyBoundNameIfNeeded(vm, exec, propertyName);
+}
+
+JSFunction::PropertyStatus JSFunction::reifyLazyLengthIfNeeded(VM& vm, ExecState*, PropertyName propertyName)
 {
     if (propertyName == vm.propertyNames->length) {
-        if (!hasReifiedLength())
+        if (!hasReifiedLength()) {
             reifyLength(vm);
-        return LazyPropertyType::IsLazyProperty;
-    } else if (propertyName == vm.propertyNames->name) {
-        if (!hasReifiedName())
-            reifyName(vm, exec);
-        return LazyPropertyType::IsLazyProperty;
+            return PropertyStatus::Reified;
+        }
+        return PropertyStatus::Lazy;
     }
-    return LazyPropertyType::NotLazyProperty;
+    return PropertyStatus::Eager;
 }
 
-JSFunction::LazyPropertyType JSFunction::reifyBoundNameIfNeeded(VM& vm, ExecState* exec, PropertyName propertyName)
+JSFunction::PropertyStatus JSFunction::reifyLazyNameIfNeeded(VM& vm, ExecState* exec, PropertyName propertyName)
+{
+    if (propertyName == vm.propertyNames->name) {
+        if (!hasReifiedName()) {
+            reifyName(vm, exec);
+            return PropertyStatus::Reified;
+        }
+        return PropertyStatus::Lazy;
+    }
+    return PropertyStatus::Eager;
+}
+
+JSFunction::PropertyStatus JSFunction::reifyLazyBoundNameIfNeeded(VM& vm, ExecState* exec, PropertyName propertyName)
 {
     const Identifier& nameIdent = vm.propertyNames->name;
     if (propertyName != nameIdent)
-        return LazyPropertyType::NotLazyProperty;
+        return PropertyStatus::Eager;
 
     if (hasReifiedName())
-        return LazyPropertyType::IsLazyProperty;
+        return PropertyStatus::Lazy;
 
-    if (this->inherits(JSBoundFunction::info())) {
+    if (isBuiltinFunction())
+        reifyName(vm, exec);
+    else if (this->inherits<JSBoundFunction>(vm)) {
         FunctionRareData* rareData = this->rareData(vm);
         String name = makeString("bound ", static_cast<NativeExecutable*>(m_executable.get())->name());
-        unsigned initialAttributes = DontEnum | ReadOnly;
-        putDirect(vm, nameIdent, jsString(exec, name), initialAttributes);
+        unsigned initialAttributes = PropertyAttribute::DontEnum | PropertyAttribute::ReadOnly;
         rareData->setHasReifiedName();
+        putDirect(vm, nameIdent, jsString(exec, name), initialAttributes);
     }
-    return LazyPropertyType::IsLazyProperty;
+    return PropertyStatus::Reified;
 }
 
 } // namespace JSC

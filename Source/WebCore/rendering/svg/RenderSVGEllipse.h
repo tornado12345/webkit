@@ -24,14 +24,14 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef RenderSVGEllipse_h
-#define RenderSVGEllipse_h
+#pragma once
 
 #include "RenderSVGShape.h"
 
 namespace WebCore {
 
 class RenderSVGEllipse final : public RenderSVGShape {
+    WTF_MAKE_ISO_ALLOCATED(RenderSVGEllipse);
 public:
     RenderSVGEllipse(SVGGraphicsElement&, RenderStyle&&);
     virtual ~RenderSVGEllipse();
@@ -54,6 +54,4 @@ private:
     bool m_usePathFallback;
 };
 
-}
-
-#endif
+} // namespace WebCore

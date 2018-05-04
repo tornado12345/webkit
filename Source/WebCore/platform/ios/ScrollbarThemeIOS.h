@@ -23,8 +23,9 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef ScrollbarThemeIOS_h
-#define ScrollbarThemeIOS_h
+#pragma once
+
+#if PLATFORM(IOS)
 
 #include "ScrollbarThemeComposite.h"
 
@@ -37,12 +38,12 @@ public:
 
     bool paint(Scrollbar&, GraphicsContext&, const IntRect& damageRect) override;
 
-    int scrollbarThickness(ScrollbarControlSize = RegularScrollbar) override;
+    int scrollbarThickness(ScrollbarControlSize = RegularScrollbar, ScrollbarExpansionState = ScrollbarExpansionState::Expanded) override;
     
     bool supportsControlTints() const override { return true; }
 
-    double initialAutoscrollTimerDelay() override;
-    double autoscrollTimerDelay() override;
+    Seconds initialAutoscrollTimerDelay() override;
+    Seconds autoscrollTimerDelay() override;
 
     ScrollbarButtonsPlacement buttonsPlacement() const override;
 
@@ -65,4 +66,4 @@ public:
 
 }
 
-#endif // ScrollbarThemeIOS_h
+#endif // PLATFORM(IOS)

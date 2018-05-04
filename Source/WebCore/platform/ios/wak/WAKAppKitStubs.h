@@ -177,10 +177,10 @@ typedef enum _NSSelectionAffinity {
 } NSSelectionAffinity;
 
 typedef enum _NSCellState {
-    NSMixedState = -1,
-    NSOffState   =  0,
-    NSOnState    =  1    
-} NSCellStateValue;
+    NSControlStateValueMixed = -1,
+    NSControlStateValueOff   =  0,
+    NSControlStateValueOn    =  1
+} NSControlStateValue;
 
 typedef enum _NSCompositingOperation {
     NSCompositeClear           = 0,
@@ -208,16 +208,6 @@ typedef enum _NSSelectionDirection {
 WEBCORE_EXPORT @interface NSCursor : NSObject
 + (void)setHiddenUntilMouseMoves:(BOOL)flag;
 @end
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-BOOL WKMouseInRect(CGPoint aPoint, CGRect aRect);
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // TARGET_OS_IPHONE
 

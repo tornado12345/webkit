@@ -66,9 +66,7 @@ RenderScrollbar::RenderScrollbar(ScrollableArea& scrollableArea, ScrollbarOrient
     setFrameRect(IntRect(0, 0, width, height));
 }
 
-RenderScrollbar::~RenderScrollbar()
-{
-}
+RenderScrollbar::~RenderScrollbar() = default;
 
 RenderBox* RenderScrollbar::owningRenderer() const
 {
@@ -102,7 +100,7 @@ void RenderScrollbar::styleChanged()
     updateScrollbarParts();
 }
 
-void RenderScrollbar::paint(GraphicsContext& context, const IntRect& damageRect)
+void RenderScrollbar::paint(GraphicsContext& context, const IntRect& damageRect, Widget::SecurityOriginPaintPolicy)
 {
     if (context.updatingControlTints()) {
         updateScrollbarParts();

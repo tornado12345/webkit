@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012, 2013 Apple Inc. All rights reserved.
+ * Copyright (C) 2012-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,8 +25,7 @@
 
 #pragma once
 
-#include "ConcurrentJITLock.h"
-#include "JSArray.h"
+#include "ConcurrentJSLock.h"
 #include "Structure.h"
 #include <wtf/SegmentedVector.h>
 
@@ -216,19 +215,20 @@ public:
         m_lastSeenStructureID = structure->id();
     }
     
-    void computeUpdatedPrediction(const ConcurrentJITLocker&, CodeBlock*);
-    void computeUpdatedPrediction(const ConcurrentJITLocker&, CodeBlock*, Structure* lastSeenStructure);
+    void computeUpdatedPrediction(const ConcurrentJSLocker&, CodeBlock*);
+    void computeUpdatedPrediction(const ConcurrentJSLocker&, CodeBlock*, Structure* lastSeenStructure);
     
-    ArrayModes observedArrayModes(const ConcurrentJITLocker&) const { return m_observedArrayModes; }
-    bool mayInterceptIndexedAccesses(const ConcurrentJITLocker&) const { return m_mayInterceptIndexedAccesses; }
+    void observeArrayMode(ArrayModes mode) { m_observedArrayModes |= mode; }
+    ArrayModes observedArrayModes(const ConcurrentJSLocker&) const { return m_observedArrayModes; }
+    bool mayInterceptIndexedAccesses(const ConcurrentJSLocker&) const { return m_mayInterceptIndexedAccesses; }
     
-    bool mayStoreToHole(const ConcurrentJITLocker&) const { return m_mayStoreToHole; }
-    bool outOfBounds(const ConcurrentJITLocker&) const { return m_outOfBounds; }
+    bool mayStoreToHole(const ConcurrentJSLocker&) const { return m_mayStoreToHole; }
+    bool outOfBounds(const ConcurrentJSLocker&) const { return m_outOfBounds; }
     
-    bool usesOriginalArrayStructures(const ConcurrentJITLocker&) const { return m_usesOriginalArrayStructures; }
+    bool usesOriginalArrayStructures(const ConcurrentJSLocker&) const { return m_usesOriginalArrayStructures; }
     
-    CString briefDescription(const ConcurrentJITLocker&, CodeBlock*);
-    CString briefDescriptionWithoutUpdating(const ConcurrentJITLocker&);
+    CString briefDescription(const ConcurrentJSLocker&, CodeBlock*);
+    CString briefDescriptionWithoutUpdating(const ConcurrentJSLocker&);
     
 private:
     friend class LLIntOffsetsExtractor;

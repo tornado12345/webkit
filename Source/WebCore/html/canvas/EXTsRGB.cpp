@@ -30,14 +30,12 @@
 
 namespace WebCore {
 
-EXTsRGB::EXTsRGB(WebGLRenderingContextBase* context)
+EXTsRGB::EXTsRGB(WebGLRenderingContextBase& context)
     : WebGLExtension(context)
 {
 }
 
-EXTsRGB::~EXTsRGB()
-{
-}
+EXTsRGB::~EXTsRGB() = default;
 
 WebGLExtension::ExtensionName EXTsRGB::getName() const
 {

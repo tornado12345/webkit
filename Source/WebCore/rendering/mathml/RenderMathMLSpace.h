@@ -33,6 +33,7 @@
 namespace WebCore {
 
 class RenderMathMLSpace final : public RenderMathMLBlock {
+    WTF_MAKE_ISO_ALLOCATED(RenderMathMLSpace);
 public:
     RenderMathMLSpace(MathMLSpaceElement&, RenderStyle&&);
     MathMLSpaceElement& element() const { return static_cast<MathMLSpaceElement&>(nodeForNonAnonymous()); }
@@ -43,7 +44,7 @@ private:
     bool isChildAllowed(const RenderObject&, const RenderStyle&) const final { return false; }
     void computePreferredLogicalWidths() final;
     void layoutBlock(bool relayoutChildren, LayoutUnit pageLogicalHeight = 0) final;
-    Optional<int> firstLineBaseline() const final;
+    std::optional<int> firstLineBaseline() const final;
 
     LayoutUnit spaceWidth() const;
     void getSpaceHeightAndDepth(LayoutUnit& height, LayoutUnit& depth) const;

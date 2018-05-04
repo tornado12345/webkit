@@ -75,9 +75,9 @@ class Lighttpd(http_server_base.HttpServerBase):
         if self._webkit_tests:
             self.VIRTUALCONFIG.extend(
                # Three mappings (one with SSL) for LayoutTests http tests
-               [{'port': 8000, 'docroot': self._webkit_tests},
-                {'port': 8080, 'docroot': self._webkit_tests},
-                {'port': 8443, 'docroot': self._webkit_tests,
+               [{'port': self.HTTP_SERVER_PORT, 'docroot': self._webkit_tests},
+                {'port': self.ALTERNATIVE_HTTP_SERVER_PORT, 'docroot': self._webkit_tests},
+                {'port': self.HTTPS_SERVER_PORT, 'docroot': self._webkit_tests,
                  'sslcert': self._pem_file}])
 
     def _prepare_config(self):
@@ -143,9 +143,9 @@ class Lighttpd(http_server_base.HttpServerBase):
 
                 # default set of ports as for LayoutTests but with a
                 # specified root.
-                mappings = [{'port': 8000, 'docroot': self._root},
-                            {'port': 8080, 'docroot': self._root},
-                            {'port': 8443, 'docroot': self._root,
+                mappings = [{'port': self.HTTP_SERVER_PORT, 'docroot': self._root},
+                            {'port': self.ALTERNATIVE_HTTP_SERVER_PORT, 'docroot': self._root},
+                            {'port': self.HTTPS_SERVER_PORT, 'docroot': self._root,
                              'sslcert': self._pem_file}]
         else:
             mappings = self.VIRTUALCONFIG
@@ -172,8 +172,7 @@ class Lighttpd(http_server_base.HttpServerBase):
                      '-m', module_path]
 
         if not self._run_background:
-            start_cmd.append(# Don't background
-                             '-D')
+            start_cmd.append('-D')  # Don't background.
 
         # Copy liblightcomp.dylib to /tmp/lighttpd/lib to work around the
         # bug that mod_alias.so loads it from the hard coded path.
@@ -194,7 +193,7 @@ class Lighttpd(http_server_base.HttpServerBase):
         for log_prefix in ('access.log-', 'error.log-'):
             try:
                 self._remove_log_files(self._output_dir, log_prefix)
-            except OSError, e:
+            except OSError as e:
                 _log.warning('Failed to remove old %s %s files' % (self._name, log_prefix))
 
     def _spawn_process(self):
@@ -223,7 +222,7 @@ class Lighttpd(http_server_base.HttpServerBase):
                 # parent, so we can't use executive.kill_process().
                 #
                 # If this is actually working, we should figure out a clean API.
-                self._executive.run_command(["taskkill.exe", "/f", "/t", "/pid", self._pid], error_handler=self._executive.ignore_error)
+                self._executive.run_command(["taskkill.exe", "/f", "/t", "/pid", self._pid], ignore_errors=True)
             else:
                 self._executive.kill_process(self._pid)
             return False

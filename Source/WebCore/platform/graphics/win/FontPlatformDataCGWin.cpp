@@ -27,7 +27,6 @@
 #if USE(CG)
 
 #include "SharedGDIObject.h"
-#include <ApplicationServices/ApplicationServices.h>
 #include <WebKitSystemInterface/WebKitSystemInterface.h>
 #include <wtf/HashMap.h>
 #include <wtf/RetainPtr.h>
@@ -127,6 +126,11 @@ FontPlatformData::FontPlatformData(GDIObject<HFONT> hfont, CGFontRef font, float
     , m_cgFont(font)
     , m_useGDI(useGDI)
 {
+}
+
+unsigned FontPlatformData::hash() const
+{
+    return m_font ? m_font->hash() : 0;
 }
 
 bool FontPlatformData::platformIsEqual(const FontPlatformData& other) const

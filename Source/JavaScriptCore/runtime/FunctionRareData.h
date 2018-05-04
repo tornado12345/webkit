@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,7 +26,7 @@
 #pragma once
 
 #include "InternalFunctionAllocationProfile.h"
-#include "JSCell.h"
+#include "JSCast.h"
 #include "ObjectAllocationProfile.h"
 #include "Watchpoint.h"
 
@@ -39,7 +39,7 @@ class SpeculativeJIT;
 class JITCompiler;
 }
 
-class FunctionRareData : public JSCell {
+class FunctionRareData final : public JSCell {
     friend class JIT;
     friend class DFG::SpeculativeJIT;
     friend class DFG::JITCompiler;
@@ -71,6 +71,7 @@ public:
     }
 
     Structure* objectAllocationStructure() { return m_objectAllocationProfile.structure(); }
+    JSObject* objectAllocationPrototype() { return m_objectAllocationProfile.prototype(); }
 
     InlineWatchpointSet& allocationProfileWatchpointSet()
     {
@@ -79,14 +80,18 @@ public:
 
     void clear(const char* reason);
 
-    void initializeObjectAllocationProfile(VM&, JSObject* prototype, size_t inlineCapacity);
+    void initializeObjectAllocationProfile(VM&, JSGlobalObject*, JSObject* prototype, size_t inlineCapacity, JSFunction* constructor);
 
     bool isObjectAllocationProfileInitialized() { return !m_objectAllocationProfile.isNull(); }
 
     Structure* internalFunctionAllocationStructure() { return m_internalFunctionAllocationProfile.structure(); }
-    Structure* createInternalFunctionAllocationStructureFromBase(VM& vm, JSObject* prototype, Structure* baseStructure)
+    Structure* createInternalFunctionAllocationStructureFromBase(VM& vm, JSGlobalObject* globalObject, JSObject* prototype, Structure* baseStructure)
     {
-        return m_internalFunctionAllocationProfile.createAllocationStructureFromBase(vm, this, prototype, baseStructure);
+        return m_internalFunctionAllocationProfile.createAllocationStructureFromBase(vm, globalObject, this, prototype, baseStructure);
+    }
+    void clearInternalFunctionAllocationProfile()
+    {
+        m_internalFunctionAllocationProfile.clear();
     }
 
     Structure* getBoundFunctionStructure() { return m_boundFunctionStructure.get(); }
@@ -97,11 +102,30 @@ public:
     bool hasReifiedName() const { return m_hasReifiedName; }
     void setHasReifiedName() { m_hasReifiedName = true; }
 
+    bool hasAllocationProfileClearingWatchpoint() const { return !!m_allocationProfileClearingWatchpoint; }
+    Watchpoint* createAllocationProfileClearingWatchpoint()
+    {
+        RELEASE_ASSERT(!hasAllocationProfileClearingWatchpoint());
+        m_allocationProfileClearingWatchpoint = std::make_unique<AllocationProfileClearingWatchpoint>(this);
+        return m_allocationProfileClearingWatchpoint.get();
+    }
+
 protected:
     FunctionRareData(VM&);
     ~FunctionRareData();
 
 private:
+
+    class AllocationProfileClearingWatchpoint : public Watchpoint {
+    public:
+        AllocationProfileClearingWatchpoint(FunctionRareData* rareData)
+            : m_rareData(rareData)
+        { }
+    protected:
+        void fireInternal(const FireDetail&) override;
+    private:
+        FunctionRareData* m_rareData;
+    };
 
     friend class LLIntOffsetsExtractor;
 
@@ -122,6 +146,7 @@ private:
     InlineWatchpointSet m_objectAllocationProfileWatchpoint;
     InternalFunctionAllocationProfile m_internalFunctionAllocationProfile;
     WriteBarrier<Structure> m_boundFunctionStructure;
+    std::unique_ptr<AllocationProfileClearingWatchpoint> m_allocationProfileClearingWatchpoint;
     bool m_hasReifiedLength { false };
     bool m_hasReifiedName { false };
 };

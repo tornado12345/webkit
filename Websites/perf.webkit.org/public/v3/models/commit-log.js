@@ -11,6 +11,9 @@ class CommitLog extends DataModelObject {
         this._remoteId = rawData.id;
         if (this._remoteId)
             this.ensureNamedStaticMap('remoteId')[this._remoteId] = this;
+        this._ownedCommits = null;
+        this._ownerCommit = null;
+        this._ownedCommitByOwnedRepository = new Map;
     }
 
     updateSingleton(rawData)
@@ -24,21 +27,32 @@ class CommitLog extends DataModelObject {
             this._rawData.authorName = rawData.authorName;
         if (rawData.message)
             this._rawData.message = rawData.message;
+        if (rawData.ownsCommits)
+            this._rawData.ownsCommits = rawData.ownsCommits;
+        if (rawData.order)
+            this._rawData.order = rawData.order;
     }
 
     repository() { return this._repository; }
     time() { return new Date(this._rawData['time']); }
+    hasCommitTime() { return this._rawData['time'] > 0 && this._rawData['time'] != null; }
     author() { return this._rawData['authorName']; }
     revision() { return this._rawData['revision']; }
     message() { return this._rawData['message']; }
     url() { return this._repository.urlForRevision(this._rawData['revision']); }
+    ownsCommits() { return this._rawData['ownsCommits']; }
+    ownedCommits() { return this._ownedCommits; }
+    ownerCommit() { return this._ownerCommit; }
+    order() { return this._rawData['order']; }
+    hasCommitOrder() { return this._rawData['order'] != null; }
+    setOwnerCommits(ownerCommit) { this._ownerCommit = ownerCommit; }
 
     label()
     {
-        var revision = this.revision();
+        const revision = this.revision();
         if (parseInt(revision) == revision) // e.g. r12345
             return 'r' + revision;
-        else if (revision.length == 40) // e.g. git hash
+        if (revision.length == 40) // e.g. git hash
             return revision.substring(0, 8);
         return revision;
     }
@@ -49,70 +63,127 @@ class CommitLog extends DataModelObject {
         if (this == previousCommit)
             previousCommit = null;
 
-        var repository = this._repository;
+        const repository = this._repository;
         if (!previousCommit)
-            return {from: null, to: this.revision(), repository: repository, label: this.label(), url: this.url()};
+            return {repository: repository, label: this.label(), url: this.url()};
 
-        var to = this.revision();
-        var from = previousCommit.revision();
-        var label = null;
-        if (parseInt(to) == to) { // e.g. r12345.
-            from = parseInt(from) + 1;
+        const to = this.revision();
+        const from = previousCommit.revision();
+        let label = null;
+        if (parseInt(from) == from)// e.g. r12345.
             label = `r${from}-r${this.revision()}`;
-        } else if (to.length == 40) { // e.g. git hash
+        else if (to.length == 40) // e.g. git hash
             label = `${from.substring(0, 8)}..${to.substring(0, 8)}`;
-        } else
+        else
             label = `${from} - ${to}`;
 
-        return {from: from, to: to, repository: repository, label: label, url: repository.urlForRevisionRange(from, to)};
+        return {repository: repository, label: label, url: repository.urlForRevisionRange(from, to)};
     }
 
-    static fetchBetweenRevisions(repository, from, to)
+    static fetchLatestCommitForPlatform(repository, platform)
     {
-        var params = [];
-        if (from && to) {
-            params.push(['from', from]);
-            params.push(['to', to]);
-        }
-
-        var url = '../api/commits/' + repository.id() + '/?' + params.map(function (keyValue) {
-            return encodeURIComponent(keyValue[0]) + '=' + encodeURIComponent(keyValue[1]);
-        }).join('&');
-
-
-        var cachedLogs = this._cachedCommitLogs(repository, from, to);
-        if (cachedLogs)
-            return new Promise(function (resolve) { resolve(cachedLogs); });
-
-        var self = this;
-        return RemoteAPI.getJSONWithStatus(url).then(function (data) {
-            var commits = data['commits'].map(function (rawData) {
-                rawData.repository = repository;
-                return CommitLog.ensureSingleton(rawData.id, rawData);
-            });
-            self._cacheCommitLogs(repository, from, to, commits);
-            return commits;
+        console.assert(repository instanceof Repository);
+        console.assert(platform instanceof Platform);
+        return this.cachedFetch(`/api/commits/${repository.id()}/latest`, {platform: platform.id()}).then((data) => {
+            const commits = data['commits'];
+            if (!commits || !commits.length)
+                return null;
+            const rawData = commits[0];
+            rawData.repository = repository;
+            return CommitLog.ensureSingleton(rawData.id, rawData);
         });
     }
 
-    static _cachedCommitLogs(repository, from, to)
+    static hasOrdering(firstCommit, secondCommit)
     {
-        if (!this._caches)
-            return null;
-        var cache = this._caches[repository.id()];
-        if (!cache)
-            return null;
-        // FIXME: Make each commit know of its parent, then we can do a better caching. 
-        return cache[from + '|' + to];
+        return (firstCommit.hasCommitTime() && secondCommit.hasCommitTime()) ||
+            (firstCommit.hasCommitOrder() && secondCommit.hasCommitOrder());
     }
 
-    static _cacheCommitLogs(repository, from, to, logs)
+    static orderTwoCommits(firstCommit, secondCommit)
     {
-        if (!this._caches)
-            this._caches = {};
-        if (!this._caches[repository.id()])
-            this._caches[repository.id()] = {};
-        this._caches[repository.id()][from + '|' + to] = logs;
+        console.assert(CommitLog.hasOrdering(firstCommit, secondCommit));
+        const firstCommitSmaller = firstCommit.hasCommitTime() && secondCommit.hasCommitTime() ?
+            firstCommit.time() < secondCommit.time() : firstCommit.order() < secondCommit.order();
+        return firstCommitSmaller ? [firstCommit, secondCommit] : [secondCommit, firstCommit];
+    }
+
+    ownedCommitForOwnedRepository(ownedRepository) { return this._ownedCommitByOwnedRepository.get(ownedRepository); }
+
+    fetchOwnedCommits()
+    {
+        if (!this.repository().ownedRepositories())
+            return Promise.reject();
+
+        if (!this.ownsCommits())
+            return Promise.reject();
+
+        if (this._ownedCommits)
+            return Promise.resolve(this._ownedCommits);
+
+        return CommitLog.cachedFetch(`../api/commits/${this.repository().id()}/owned-commits?owner-revision=${escape(this.revision())}`).then((data) => {
+            this._ownedCommits = CommitLog._constructFromRawData(data);
+            this._ownedCommits.forEach((ownedCommit) => {
+                ownedCommit.setOwnerCommits(this);
+                this._ownedCommitByOwnedRepository.set(ownedCommit.repository(), ownedCommit);
+            });
+            return this._ownedCommits;
+        });
+    }
+
+    _buildOwnedCommitMap()
+    {
+        const ownedCommitMap = new Map;
+        for (const commit of this._ownedCommits)
+            ownedCommitMap.set(commit.repository(), commit);
+        return ownedCommitMap;
+    }
+
+    static ownedCommitDifferenceForOwnerCommits(...commits)
+    {
+        console.assert(commits.length >= 2);
+
+        const ownedCommitRepositories = new Set;
+        const ownedCommitMapList = commits.map((commit) => {
+            console.assert(commit);
+            console.assert(commit._ownedCommits);
+            const ownedCommitMap = commit._buildOwnedCommitMap();
+            for (const repository of ownedCommitMap.keys())
+                ownedCommitRepositories.add(repository);
+            return ownedCommitMap;
+        });
+
+        const difference = new Map;
+        ownedCommitRepositories.forEach((ownedCommitRepository) => {
+            const ownedCommits = ownedCommitMapList.map((ownedCommitMap) => ownedCommitMap.get(ownedCommitRepository));
+            const uniqueOwnedCommits = new Set(ownedCommits);
+            if (uniqueOwnedCommits.size > 1)
+                difference.set(ownedCommitRepository, ownedCommits);
+        });
+        return difference;
+    }
+
+    static fetchBetweenRevisions(repository, precedingRevision, lastRevision)
+    {
+        // FIXME: The cache should be smarter about fetching a range within an already fetched range, etc...
+        // FIXME: We should evict some entires from the cache in cachedFetch.
+        return this.cachedFetch(`/api/commits/${repository.id()}/`, {precedingRevision, lastRevision})
+            .then((data) => this._constructFromRawData(data));
+    }
+
+    static fetchForSingleRevision(repository, revision)
+    {
+        return this.cachedFetch(`/api/commits/${repository.id()}/${revision}`).then((data) => {
+            return this._constructFromRawData(data);
+        });
+    }
+
+    static _constructFromRawData(data)
+    {
+        return data['commits'].map((rawData) => {
+            rawData.repository = Repository.findById(rawData.repository);
+            return CommitLog.ensureSingleton(rawData.id, rawData);
+        });
     }
 }
 

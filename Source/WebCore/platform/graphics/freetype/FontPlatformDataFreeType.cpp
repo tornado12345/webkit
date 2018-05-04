@@ -37,10 +37,6 @@
 #include <wtf/MathExtras.h>
 #include <wtf/text/WTFString.h>
 
-#if PLATFORM(GTK)
-#include <gdk/gdk.h>
-#endif
-
 namespace WebCore {
 
 static cairo_subpixel_order_t convertFontConfigSubpixelOrder(int fontConfigOrder)
@@ -106,18 +102,6 @@ static void setCairoFontOptionsFromFontConfigPattern(cairo_font_options_t* optio
         cairo_font_options_set_hint_style(options, CAIRO_HINT_STYLE_NONE);
 }
 
-static CairoUniquePtr<cairo_font_options_t> getDefaultCairoFontOptions()
-{
-#if PLATFORM(GTK)
-    if (GdkScreen* screen = gdk_screen_get_default()) {
-        const cairo_font_options_t* screenOptions = gdk_screen_get_font_options(screen);
-        if (screenOptions)
-            return CairoUniquePtr<cairo_font_options_t>(cairo_font_options_copy(screenOptions));
-    }
-#endif
-    return CairoUniquePtr<cairo_font_options_t>(cairo_font_options_create());
-}
-
 static FcPattern* getDefaultFontconfigOptions()
 {
     // Get some generic default settings from fontconfig for web fonts. Strategy
@@ -129,6 +113,7 @@ static FcPattern* getDefaultFontconfigOptions()
     std::call_once(flag, [](FcPattern*) {
         pattern = FcPatternCreate();
         FcConfigSubstitute(nullptr, pattern, FcMatchPattern);
+        cairo_ft_font_options_substitute(getDefaultCairoFontOptions(), pattern);
         FcDefaultSubstitute(pattern);
         FcPatternDel(pattern, FC_FAMILY);
         FcConfigSubstitute(nullptr, pattern, FcMatchFont);
@@ -149,7 +134,7 @@ FontPlatformData::FontPlatformData(FcPattern* pattern, const FontDescription& fo
         m_fixedWidth = true;
 
     bool descriptionAllowsSyntheticBold = fontDescription.fontSynthesis() & FontSynthesisWeight;
-    if (descriptionAllowsSyntheticBold && fontDescription.weight() >= FontWeightBold) {
+    if (descriptionAllowsSyntheticBold && isFontWeightBold(fontDescription.weight())) {
         // The FC_EMBOLDEN property instructs us to fake the boldness of the font.
         FcBool fontConfigEmbolden = FcFalse;
         if (FcPatternGetBool(pattern, FC_EMBOLDEN, 0, &fontConfigEmbolden) == FcResultMatch)
@@ -210,18 +195,15 @@ FontPlatformData& FontPlatformData::operator=(const FontPlatformData& other)
     m_fixedWidth = other.m_fixedWidth;
     m_pattern = other.m_pattern;
 
-    // This will be re-created on demand.
-    m_fallbacks = nullptr;
-
     m_scaledFont = other.m_scaledFont;
-    m_harfBuzzFace = other.m_harfBuzzFace;
+
+    // This will be re-created on demand.
+    m_harfBuzzFace = nullptr;
 
     return *this;
 }
 
-FontPlatformData::~FontPlatformData()
-{
-}
+FontPlatformData::~FontPlatformData() = default;
 
 FontPlatformData FontPlatformData::cloneWithOrientation(const FontPlatformData& source, FontOrientation orientation)
 {
@@ -255,29 +237,21 @@ FontPlatformData FontPlatformData::cloneWithSize(const FontPlatformData& source,
     return copy;
 }
 
-HarfBuzzFace* FontPlatformData::harfBuzzFace() const
+HarfBuzzFace& FontPlatformData::harfBuzzFace() const
 {
     if (!m_harfBuzzFace)
-        m_harfBuzzFace = HarfBuzzFace::create(const_cast<FontPlatformData*>(this), hash());
-
-    return m_harfBuzzFace.get();
-}
-
-FcFontSet* FontPlatformData::fallbacks() const
-{
-    if (m_fallbacks)
-        return m_fallbacks.get();
-
-    if (m_pattern) {
-        FcResult fontConfigResult;
-        m_fallbacks.reset(FcFontSort(nullptr, m_pattern.get(), FcTrue, nullptr, &fontConfigResult));
-    }
-    return m_fallbacks.get();
+        m_harfBuzzFace = std::make_unique<HarfBuzzFace>(const_cast<FontPlatformData&>(*this), hash());
+    return *m_harfBuzzFace;
 }
 
 bool FontPlatformData::isFixedPitch() const
 {
     return m_fixedWidth;
+}
+
+unsigned FontPlatformData::hash() const
+{
+    return PtrHash<cairo_scaled_font_t*>::hash(m_scaledFont.get());
 }
 
 bool FontPlatformData::platformIsEqual(const FontPlatformData& other) const
@@ -300,7 +274,7 @@ String FontPlatformData::description() const
 
 void FontPlatformData::buildScaledFont(cairo_font_face_t* fontFace)
 {
-    CairoUniquePtr<cairo_font_options_t> options = getDefaultCairoFontOptions();
+    CairoUniquePtr<cairo_font_options_t> options(cairo_font_options_copy(getDefaultCairoFontOptions()));
     FcPattern* optionsPattern = m_pattern ? m_pattern.get() : getDefaultFontconfigOptions();
     setCairoFontOptionsFromFontConfigPattern(options.get(), optionsPattern);
 
@@ -316,11 +290,11 @@ void FontPlatformData::buildScaledFont(cairo_font_face_t* fontFace)
     // These matrices may be stacked in the pattern, so it's our job to get them all and multiply them.
     for (int i = 0; FcPatternGetMatrix(optionsPattern, FC_MATRIX, i, &tempFontConfigMatrix) == FcResultMatch; i++)
         FcMatrixMultiply(&fontConfigMatrix, &fontConfigMatrix, tempFontConfigMatrix);
-    cairo_matrix_init(&fontMatrix, fontConfigMatrix.xx, -fontConfigMatrix.yx,
-        -fontConfigMatrix.xy, fontConfigMatrix.yy, 0, 0);
+
+    cairo_matrix_init(&fontMatrix, 1, -fontConfigMatrix.yx, -fontConfigMatrix.xy, 1, 0, 0);
 
     // The matrix from FontConfig does not include the scale. Scaling a font with width zero size leads
-    // to a failed cairo_scaled_font_t instantiations. Instead we scale we scale the font to a very tiny
+    // to a failed cairo_scaled_font_t instantiations. Instead we scale the font to a very tiny
     // size and just abort rendering later on.
     float realSize = m_size ? m_size : 1;
     cairo_matrix_scale(&fontMatrix, realSize, realSize);
@@ -369,16 +343,13 @@ RefPtr<SharedBuffer> FontPlatformData::openTypeTable(uint32_t table) const
     if (FT_Load_Sfnt_Table(freeTypeFace, tag, 0, 0, &tableSize))
         return nullptr;
 
-    RefPtr<SharedBuffer> buffer = SharedBuffer::create(tableSize);
-    if (buffer->size() != tableSize)
-        return nullptr;
-
+    Vector<char> data(tableSize);
     FT_ULong expectedTableSize = tableSize;
-    FT_Error error = FT_Load_Sfnt_Table(freeTypeFace, tag, 0, reinterpret_cast<FT_Byte*>(const_cast<char*>(buffer->data())), &tableSize);
+    FT_Error error = FT_Load_Sfnt_Table(freeTypeFace, tag, 0, reinterpret_cast<FT_Byte*>(data.data()), &tableSize);
     if (error || tableSize != expectedTableSize)
         return nullptr;
 
-    return buffer;
+    return SharedBuffer::create(WTFMove(data));
 }
 
 } // namespace WebCore

@@ -87,6 +87,27 @@ ANGLE_EXPORT EGLBoolean EGLAPIENTRY GetSyncValuesCHROMIUM(EGLDisplay dpy,
                                                           EGLuint64KHR *msc,
                                                           EGLuint64KHR *sbc);
 
+// EGL_EXT_swap_buffers_with_damage
+ANGLE_EXPORT EGLBoolean SwapBuffersWithDamageEXT(EGLDisplay dpy,
+                                                 EGLSurface surface,
+                                                 EGLint *rects,
+                                                 EGLint n_rects);
+
+//
+ANGLE_EXPORT EGLint EGLAPIENTRY ProgramCacheGetAttribANGLE(EGLDisplay dpy, EGLenum attrib);
+ANGLE_EXPORT void EGLAPIENTRY ProgramCacheQueryANGLE(EGLDisplay dpy,
+                                                     EGLint index,
+                                                     void *key,
+                                                     EGLint *keysize,
+                                                     void *binary,
+                                                     EGLint *binarysize);
+ANGLE_EXPORT void EGLAPIENTRY ProgramCachePopulateANGLE(EGLDisplay dpy,
+                                                        const void *key,
+                                                        EGLint keysize,
+                                                        const void *binary,
+                                                        EGLint binarysize);
+ANGLE_EXPORT EGLint EGLAPIENTRY ProgramCacheResizeANGLE(EGLDisplay dpy, EGLint limit, EGLenum mode);
+
 }  // namespace egl
 
 #endif // LIBGLESV2_ENTRYPOINTSEGLEXT_H_

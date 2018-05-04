@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013, 2016 Apple, Inc. All rights reserved.
+ * Copyright (C) 2013-2017 Apple, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,13 +31,13 @@
 
 namespace JSC {
 
-const ClassInfo JSSetIterator::s_info = { "Set Iterator", &Base::s_info, 0, CREATE_METHOD_TABLE(JSSetIterator) };
+const ClassInfo JSSetIterator::s_info = { "Set Iterator", nullptr, nullptr, nullptr, CREATE_METHOD_TABLE(JSSetIterator) };
 
 void JSSetIterator::finishCreation(VM& vm, JSSet* iteratedObject)
 {
     Base::finishCreation(vm);
     m_set.set(vm, this, iteratedObject);
-    setIterator(vm, m_set->impl()->head());
+    setIterator(vm, m_set->head());
 }
 
 void JSSetIterator::visitChildren(JSCell* cell, SlotVisitor& visitor)
@@ -45,8 +45,8 @@ void JSSetIterator::visitChildren(JSCell* cell, SlotVisitor& visitor)
     JSSetIterator* thisObject = jsCast<JSSetIterator*>(cell);
     ASSERT_GC_OBJECT_INHERITS(thisObject, info());
     Base::visitChildren(thisObject, visitor);
-    visitor.append(&thisObject->m_set);
-    visitor.append(&thisObject->m_iter);
+    visitor.append(thisObject->m_set);
+    visitor.append(thisObject->m_iter);
 }
 
 JSValue JSSetIterator::createPair(CallFrame* callFrame, JSValue key, JSValue value)
@@ -54,16 +54,9 @@ JSValue JSSetIterator::createPair(CallFrame* callFrame, JSValue key, JSValue val
     MarkedArgumentBuffer args;
     args.append(key);
     args.append(value);
-    JSGlobalObject* globalObject = callFrame->callee()->globalObject();
+    ASSERT(!args.hasOverflowed());
+    JSGlobalObject* globalObject = callFrame->jsCallee()->globalObject();
     return constructArray(callFrame, 0, globalObject, args);
-}
-
-JSSetIterator* JSSetIterator::clone(ExecState* exec)
-{
-    VM& vm = exec->vm();
-    auto clone = JSSetIterator::create(vm, exec->callee()->globalObject()->setIteratorStructure(), m_set.get(), m_kind);
-    clone->setIterator(vm, m_iter.get());
-    return clone;
 }
 
 }

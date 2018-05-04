@@ -1,13 +1,15 @@
 'use strict';
 
-let assert = require('assert');
-let childProcess = require('child_process');
-let fs = require('fs');
-let path = require('path');
+const assert = require('assert');
+const childProcess = require('child_process');
+const fs = require('fs');
+const path = require('path');
 
-let Config = require('../../tools/js/config.js');
-let Database = require('../../tools/js/database.js');
-let RemoteAPI = require('../../tools/js/remote.js').RemoteAPI;
+const Config = require('../../tools/js/config.js');
+const Database = require('../../tools/js/database.js');
+const RemoteAPI = require('../../tools/js/remote.js').RemoteAPI;
+const BrowserPrivilegedAPI = require('../../public/v3/privileged-api.js').PrivilegedAPI;
+const NodePrivilegedAPI = require('../../tools/js/privileged-api').PrivilegedAPI;
 
 class TestServer {
     constructor()
@@ -76,6 +78,10 @@ class TestServer {
                 'password': Config.value('database.password'),
                 'name': Config.value('testDatabaseName'),
             },
+            'uploadFileLimitInMB': 2,
+            'uploadUserQuotaInMB': 5,
+            'uploadTotalQuotaInMB': 6,
+            'uploadDirectory': Config.value('dataDirectory') + '/uploaded',
             'universalSlavePassword': null,
             'maintenanceMode': false,
             'clusterStart': [2000, 1, 1, 0, 0],
@@ -96,20 +102,26 @@ class TestServer {
         } else if (fs.existsSync(backupPath)) // Assume this is a backup from the last failed run
             this._backupDataPath = backupPath;
         fs.mkdirSync(this._dataDirectory, 0o755);
+        fs.mkdirSync(path.resolve(this._dataDirectory, 'uploaded'), 0o755);
     }
 
     _restoreDataDirectory()
     {
         childProcess.execFileSync('rm', ['-rf', this._dataDirectory]);
         if (this._backupDataPath)
-            fs.rename(this._backupDataPath, this._dataDirectory);
+            fs.renameSync(this._backupDataPath, this._dataDirectory);
     }
 
     cleanDataDirectory()
     {
         let fileList = fs.readdirSync(this._dataDirectory);
+        for (let filename of fileList) {
+            if (filename != 'uploaded')
+                fs.unlinkSync(path.resolve(this._dataDirectory, filename));
+        }
+        fileList = fs.readdirSync(path.resolve(this._dataDirectory, 'uploaded'));
         for (let filename of fileList)
-            fs.unlinkSync(path.resolve(this._dataDirectory, filename));
+            fs.unlinkSync(path.resolve(this._dataDirectory, 'uploaded', filename));
     }
 
     _ensureTestDatabase()
@@ -160,6 +172,7 @@ class TestServer {
         let port = Config.value('testServer.port');
         let errorLog = Config.path('testServer.httpdErrorLog');
         let mutexFile = Config.path('testServer.httpdMutexDir');
+        let phpVersion = childProcess.execFileSync('php', ['-v'], {stdio: ['pipe', 'pipe', 'ignore']}).toString().includes('PHP 5') ? 'PHP5' : 'PHP7';
 
         if (!fs.existsSync(mutexFile))
             fs.mkdirSync(mutexFile, 0o755);
@@ -171,7 +184,8 @@ class TestServer {
             '-c', `PidFile ${pidFile}`,
             '-c', `ErrorLog ${errorLog}`,
             '-c', `Mutex file:${mutexFile}`,
-            '-c', `DocumentRoot ${Config.serverRoot()}`];
+            '-c', `DocumentRoot ${Config.serverRoot()}`,
+            '-D', phpVersion];
 
         if (this._shouldLog)
             console.log(args);
@@ -182,7 +196,7 @@ class TestServer {
             scheme: 'http',
             host: 'localhost',
             port: port,
-        }
+        };
         this._pidWaitStart = Date.now();
         this._pidFile = pidFile;
 
@@ -203,6 +217,7 @@ class TestServer {
 
         childProcess.execFileSync('kill', ['-TERM', pid]);
 
+        this._pidWaitStart = Date.now();
         return new Promise(this._waitForPid.bind(this, false));
     }
 
@@ -218,15 +233,18 @@ class TestServer {
         resolve();
     }
 
-    inject()
+    inject(privilegedAPIType='browser')
     {
-        let self = this;
+        console.assert(privilegedAPIType === 'browser' || privilegedAPIType === 'node');
+        const useNodePrivilegedAPI = privilegedAPIType === 'node';
+        const self = this;
         before(function () {
             this.timeout(10000);
             return self.start();
         });
 
         let originalRemote;
+        let originalPrivilegedAPI;
 
         beforeEach(function () {
             this.timeout(10000);
@@ -236,7 +254,10 @@ class TestServer {
             global.RemoteAPI = self._remote;
             self._remote.clearCookies();
 
-            if (global.PrivilegedAPI) {
+            originalPrivilegedAPI = global.PrivilegedAPI;
+            global.PrivilegedAPI = useNodePrivilegedAPI ? NodePrivilegedAPI : BrowserPrivilegedAPI;
+
+            if (!useNodePrivilegedAPI) {
                 global.PrivilegedAPI._token = null;
                 global.PrivilegedAPI._expiration = null;
             }
@@ -245,6 +266,7 @@ class TestServer {
         after(function () {
             this.timeout(10000);
             global.RemoteAPI = originalRemote;
+            global.PrivilegedAPI = originalPrivilegedAPI;
             return self.stop();
         });
     }

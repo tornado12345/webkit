@@ -1,7 +1,7 @@
 {"domains":[
 {
     "domain": "ApplicationCache",
-    "availability": "web",
+    "availability": ["web"],
     "types": [
         {
             "id": "ApplicationCacheResource",
@@ -90,7 +90,7 @@
 {
     "domain": "CSS",
     "description": "This domain exposes CSS read/write operations. All CSS objects, like stylesheets, rules, and styles, have an associated <code>id</code> used in subsequent operations on the related object. Each object type has a specific <code>id</code> structure, and those are not interchangeable between objects of different kinds. CSS objects can be loaded using the <code>get*ForNode()</code> calls (which accept a DOM node id). Alternatively, a client can discover all the existing stylesheets with the <code>getAllStyleSheets()</code> method and subsequently load the required stylesheet contents using the <code>getStyleSheet[Text]()</code> methods.",
-    "availability": "web",
+    "availability": ["web"],
     "types": [
         {
             "id": "StyleSheetId",
@@ -638,7 +638,7 @@
 {
     "domain": "DOM",
     "description": "This domain exposes DOM read/write operations. Each DOM Node is represented with its mirror object that has an <code>id</code>. This <code>id</code> can be used to get additional information on the Node, resolve it into the JavaScript object wrapper, etc. It is important that client receives DOM events only for the nodes that are known to the client. Backend keeps track of the nodes that were sent to the client and never sends the same node twice. It is client's responsibility to collect information about the nodes that were sent to the client.<p>Note that <code>iframe</code> owner elements will return corresponding document elements as their child nodes.</p>",
-    "availability": "web",
+    "availability": ["web"],
     "types": [
         {
             "id": "NodeId",
@@ -1192,83 +1192,9 @@
 }
 ,
 {
-    "domain": "DOMDebugger",
-    "description": "DOM debugging allows setting breakpoints on particular DOM operations and events. JavaScript execution will stop on these operations as if there was a regular breakpoint set.",
-    "availability": "web",
-    "types": [
-        {
-            "id": "DOMBreakpointType",
-            "type": "string",
-            "enum": ["subtree-modified", "attribute-modified", "node-removed"],
-            "description": "DOM breakpoint type."
-        }
-    ],
-    "commands": [
-        {
-            "name": "setDOMBreakpoint",
-            "parameters": [
-                { "name": "nodeId", "$ref": "DOM.NodeId", "description": "Identifier of the node to set breakpoint on." },
-                { "name": "type", "$ref": "DOMBreakpointType", "description": "Type of the operation to stop upon." }
-            ],
-            "description": "Sets breakpoint on particular operation with DOM."
-        },
-        {
-            "name": "removeDOMBreakpoint",
-            "parameters": [
-                { "name": "nodeId", "$ref": "DOM.NodeId", "description": "Identifier of the node to remove breakpoint from." },
-                { "name": "type", "$ref": "DOMBreakpointType", "description": "Type of the breakpoint to remove." }
-            ],
-            "description": "Removes DOM breakpoint that was set using <code>setDOMBreakpoint</code>."
-        },
-        {
-            "name": "setEventListenerBreakpoint",
-            "parameters": [
-                { "name": "eventName", "type": "string", "description": "DOM Event name to stop on (any DOM event will do)." }
-            ],
-            "description": "Sets breakpoint on particular DOM event."
-        },
-        {
-            "name": "removeEventListenerBreakpoint",
-            "parameters": [
-                { "name": "eventName", "type": "string", "description": "Event name." }
-            ],
-            "description": "Removes breakpoint on particular DOM event."
-        },
-        {
-            "name": "setInstrumentationBreakpoint",
-            "parameters": [
-                { "name": "eventName", "type": "string", "description": "Instrumentation name to stop on." }
-            ],
-            "description": "Sets breakpoint on particular native event."
-        },
-        {
-            "name": "removeInstrumentationBreakpoint",
-            "parameters": [
-                { "name": "eventName", "type": "string", "description": "Instrumentation name to stop on." }
-            ],
-            "description": "Sets breakpoint on particular native event."
-        },
-        {
-            "name": "setXHRBreakpoint",
-            "parameters": [
-                { "name": "url", "type": "string", "description": "Resource URL substring. All XHRs having this substring in the URL will get stopped upon." }
-            ],
-            "description": "Sets breakpoint on XMLHttpRequest."
-        },
-        {
-            "name": "removeXHRBreakpoint",
-            "parameters": [
-                { "name": "url", "type": "string", "description": "Resource URL substring." }
-            ],
-            "description": "Removes breakpoint from XMLHttpRequest."
-        }
-    ]
-}
-,
-{
     "domain": "DOMStorage",
     "description": "Query and modify DOM storage.",
-    "availability": "web",
+    "availability": ["web"],
     "types": [
         {
             "id": "StorageId",
@@ -1356,7 +1282,7 @@
 ,
 {
     "domain": "Database",
-    "availability": "web",
+    "availability": ["web"],
     "types": [
         {
             "id": "DatabaseId",
@@ -1783,7 +1709,7 @@
 {
     "domain": "IndexedDB",
     "featureGuard": "ENABLE(INDEXED_DATABASE)",
-    "availability": "web",
+    "availability": ["web"],
     "types": [
         {
             "id": "DatabaseWithObjectStores",
@@ -1958,29 +1884,18 @@
             ]
         },
         {
-            "name": "detached",
-            "description": "Fired when remote debugging connection is about to be terminated. Contains detach reason.",
-            "parameters": [
-                { "name": "reason", "type": "string", "description": "The reason why connection has been terminated." }
-            ]
-        },
-        {
             "name": "activateExtraDomains",
             "description": "Fired when the backend has alternate domains that need to be activated.",
             "parameters": [
                 { "name": "domains", "type": "array", "items": { "type": "string" }, "description": "Domain names that need activation" }
             ]
-        },
-        {
-            "name": "targetCrashed",
-            "description": "Fired when debugging target has crashed"
         }
     ]
 }
 ,
 {
     "domain": "LayerTree",
-    "availability": "web",
+    "availability": ["web"],
     "types": [
         {
             "id": "LayerId",
@@ -2096,7 +2011,7 @@
 {
     "domain": "Network",
     "description": "Network domain allows tracking network activities of the page. It exposes information about http, file, data and other requests and responses, their headers, bodies, timing, etc.",
-    "availability": "web",
+    "availability": ["web"],
     "types": [
         {
             "id": "LoaderId",
@@ -2266,13 +2181,6 @@
         {
             "name": "clearBrowserCookies",
             "description": "Clears browser cookies."
-        },
-        {
-            "name": "setCacheDisabled",
-            "parameters": [
-                { "name": "cacheDisabled", "type": "boolean", "description": "Cache disabled state." }
-            ],
-            "description": "Toggles ignoring cache for each request. If <code>true</code>, cache will not be used."
         },
         {
             "name": "loadResource",
@@ -2563,7 +2471,7 @@
 {
     "domain": "Page",
     "description": "Actions and events related to the inspected page belong to the page domain.",
-    "availability": "web",
+    "availability": ["web"],
     "types": [
         {
             "id": "ResourceType",
@@ -2638,11 +2546,6 @@
                 { "name": "secure", "type": "boolean", "description": "True if cookie is secure." },
                 { "name": "session", "type": "boolean", "description": "True in case of session cookie." }
             ]
-        },
-        {
-            "id": "ScriptIdentifier",
-            "type": "string",
-            "description": "Unique script identifier."
         }
     ],
     "commands": [
@@ -2653,21 +2556,6 @@
         {
             "name": "disable",
             "description": "Disables page domain notifications."
-        },
-        {
-            "name": "addScriptToEvaluateOnLoad",
-            "parameters": [
-                { "name": "scriptSource", "type": "string" }
-            ],
-            "returns": [
-                { "name": "identifier", "$ref": "ScriptIdentifier", "description": "Identifier of the added script." }
-            ]
-        },
-        {
-            "name": "removeScriptToEvaluateOnLoad",
-            "parameters": [
-                { "name": "identifier", "$ref": "ScriptIdentifier" }
-            ]
         },
         {
             "name": "reload",
@@ -2774,13 +2662,6 @@
             ]
         },
         {
-            "name": "setTouchEmulationEnabled",
-            "parameters": [
-                { "name": "enabled", "type": "boolean", "description": "Whether the touch event emulation should be enabled." }
-            ],
-            "description": "Toggles mouse event-based touch event emulation."
-        },
-        {
             "name": "setEmulatedMedia",
             "parameters": [
                 { "name": "media", "type": "string", "description": "Media type to emulate. Empty string disables the override." }
@@ -2823,14 +2704,6 @@
             ],
             "returns": [
                 { "name": "dataURL", "type": "string", "description": "Base64-encoded image data (PNG)." }
-            ]
-        },
-        {
-            "name": "handleJavaScriptDialog",
-            "description": "Accepts or dismisses a JavaScript initiated dialog (alert, confirm, prompt, or onbeforeunload).",
-            "parameters": [
-                { "name": "accept", "type": "boolean", "description": "Whether to accept or dismiss the dialog." },
-                { "name": "promptText", "type": "string", "optional": true, "description": "The text to enter into the dialog prompt before accepting. Used only if this is a prompt dialog." }
             ]
         },
         {
@@ -3278,7 +3151,7 @@
 {
     "domain": "Timeline",
     "description": "Timeline provides its clients with instrumentation records that are generated during the page runtime. Timeline instrumentation can be started and stopped using corresponding commands. While timeline is started, it is generating timeline event records.",
-    "availability": "web",
+    "availability": ["web"],
     "types": [
         {
             "id": "EventType",
@@ -3405,7 +3278,7 @@
 {
     "domain": "Worker",
     "types": [],
-    "availability": "web",
+    "availability": ["web"],
     "commands": [
         {
             "name": "enable"

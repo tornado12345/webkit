@@ -36,14 +36,13 @@
 
 namespace WebCore {
 
-const int DragController::LinkDragBorderInset = 2;
 const int DragController::MaxOriginalImageArea = 1500 * 1500;
 const int DragController::DragIconRightInset = 7;
 const int DragController::DragIconBottomInset = 3;
 
 const float DragController::DragImageAlpha = 0.75f;
 
-DragOperation DragController::dragOperation(DragData& dragData)
+DragOperation DragController::dragOperation(const DragData& dragData)
 {
     //FIXME: to match the macos behaviour we should return DragOperationNone
     //if we are a modal window, we are the drag source, or the window is an attached sheet
@@ -52,7 +51,7 @@ DragOperation DragController::dragOperation(DragData& dragData)
     return dragData.containsURL() && !m_didInitiateDrag ? DragOperationCopy : DragOperationNone;
 }
 
-bool DragController::isCopyKeyDown(DragData&)
+bool DragController::isCopyKeyDown(const DragData&)
 {
     return ::GetAsyncKeyState(VK_CONTROL);
 }
@@ -67,12 +66,6 @@ const IntSize& DragController::maxDragImageSize()
 void DragController::cleanupAfterSystemDrag()
 {
 }
-
-#if ENABLE(ATTACHMENT_ELEMENT)
-void DragController::declareAndWriteAttachment(DataTransfer&, Element&, const URL&)
-{
-}
-#endif
 
 void DragController::declareAndWriteDragImage(DataTransfer& dataTransfer, Element& element, const URL& url, const String& label)
 {

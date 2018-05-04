@@ -27,8 +27,7 @@
  * SUCH DAMAGE.
  */
 
-#ifndef ClipPathOperation_h
-#define ClipPathOperation_h
+#pragma once
 
 #include "BasicShapes.h"
 #include "Path.h"
@@ -47,7 +46,7 @@ public:
         Box
     };
 
-    virtual ~ClipPathOperation() { }
+    virtual ~ClipPathOperation() = default;
 
     virtual bool operator==(const ClipPathOperation&) const = 0;
     bool operator!=(const ClipPathOperation& o) const { return !(*this == o); }
@@ -172,5 +171,3 @@ SPECIALIZE_TYPE_TRAITS_END()
 SPECIALIZE_TYPE_TRAITS_CLIP_PATH_OPERATION(ReferenceClipPathOperation, ClipPathOperation::Reference)
 SPECIALIZE_TYPE_TRAITS_CLIP_PATH_OPERATION(ShapeClipPathOperation, ClipPathOperation::Shape)
 SPECIALIZE_TYPE_TRAITS_CLIP_PATH_OPERATION(BoxClipPathOperation, ClipPathOperation::Box)
-
-#endif // ClipPathOperation_h

@@ -1,9 +1,9 @@
-//@ runMiscFTLNoCJITTest("--createPreHeaders=false")
+//@ runFTLNoCJIT("--createPreHeaders=false")
 
 function foo(object, predicate) {
     var result = 0;
     var i = 0;
-    if (DFGTrue())
+    if ($vm.dfgTrue())
         predicate = 42;
     while (predicate >= 42) {
         result += object.array[i++];

@@ -29,7 +29,6 @@
 
 #include "VideoTrackList.h"
 
-#include "EventNames.h"
 #include "VideoTrack.h"
 
 using namespace WebCore;
@@ -39,9 +38,7 @@ VideoTrackList::VideoTrackList(HTMLMediaElement* element, ScriptExecutionContext
 {
 }
 
-VideoTrackList::~VideoTrackList()
-{
-}
+VideoTrackList::~VideoTrackList() = default;
 
 void VideoTrackList::append(Ref<VideoTrack>&& track)
 {

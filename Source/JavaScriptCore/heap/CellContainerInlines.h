@@ -26,7 +26,7 @@
 #pragma once
 
 #include "CellContainer.h"
-#include "JSCell.h"
+#include "JSCast.h"
 #include "LargeAllocation.h"
 #include "MarkedBlock.h"
 #include "VM.h"
@@ -63,6 +63,14 @@ inline void CellContainer::noteMarked()
 {
     if (!isLargeAllocation())
         markedBlock().noteMarked();
+}
+
+inline void CellContainer::assertValidCell(VM& vm, HeapCell* cell) const
+{
+    if (isLargeAllocation())
+        largeAllocation().assertValidCell(vm, cell);
+    else
+        markedBlock().assertValidCell(vm, cell);
 }
 
 inline size_t CellContainer::cellSize() const

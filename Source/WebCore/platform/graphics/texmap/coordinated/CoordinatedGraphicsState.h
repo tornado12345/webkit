@@ -1,6 +1,7 @@
 /*
  * Copyright (C) 2013 Nokia Corporation and/or its subsidiary(-ies)
  * Copyright (C) 2013 Company 100, Inc. All rights reserved.
+ * Copyright (C) 2017 Sony Interactive Entertainment Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,22 +36,16 @@
 #include "FloatSize.h"
 #include "IntRect.h"
 #include "IntSize.h"
+#include "NicosiaBuffer.h"
 #include "SurfaceUpdateInfo.h"
 #include "TextureMapperAnimation.h"
 #include "TransformationMatrix.h"
-
-#if USE(GRAPHICS_SURFACE)
-#include "GraphicsSurface.h"
-#include "GraphicsSurfaceToken.h"
-#endif
 
 #if USE(COORDINATED_GRAPHICS_THREADED)
 #include "TextureMapperPlatformLayerProxy.h"
 #endif
 
 namespace WebCore {
-
-class CoordinatedSurface;
 
 typedef uint32_t CoordinatedLayerID;
 enum { InvalidCoordinatedLayerID = 0 };
@@ -69,6 +64,21 @@ struct TileCreationInfo {
     float scale;
 };
 
+struct DebugVisuals {
+    DebugVisuals()
+        : showDebugBorders(false)
+        , showRepaintCounter(false) { }
+    Color debugBorderColor;
+    float debugBorderWidth { 0 };
+    union {
+        struct {
+            bool showDebugBorders : 1;
+            bool showRepaintCounter : 1;
+        };
+        unsigned flags;
+    };
+};
+
 struct CoordinatedGraphicsLayerState {
     union {
         struct {
@@ -80,8 +90,7 @@ struct CoordinatedGraphicsLayerState {
             bool contentsRectChanged: 1;
             bool opacityChanged: 1;
             bool solidColorChanged: 1;
-            bool debugBorderColorChanged: 1;
-            bool debugBorderWidthChanged: 1;
+            bool debugVisualsChanged: 1;
             bool replicaChanged: 1;
             bool maskChanged: 1;
             bool imageChanged: 1;
@@ -91,9 +100,9 @@ struct CoordinatedGraphicsLayerState {
             bool childrenChanged: 1;
             bool repaintCountChanged : 1;
             bool platformLayerChanged: 1;
+            bool platformLayerUpdated: 1;
             bool platformLayerShouldSwapBuffers: 1;
             bool isScrollableChanged: 1;
-            bool committedScrollOffsetChanged: 1;
             bool contentsTilingChanged: 1;
         };
         unsigned changeMask;
@@ -106,9 +115,6 @@ struct CoordinatedGraphicsLayerState {
             bool backfaceVisible : 1;
             bool masksToBounds : 1;
             bool preserves3D : 1;
-            bool fixedToViewport : 1;
-            bool showDebugBorders : 1;
-            bool showRepaintCounter : 1;
             bool isScrollable: 1;
         };
         unsigned flags;
@@ -122,18 +128,12 @@ struct CoordinatedGraphicsLayerState {
         , backfaceVisible(true)
         , masksToBounds(false)
         , preserves3D(false)
-        , fixedToViewport(false)
-        , showDebugBorders(false)
-        , showRepaintCounter(false)
         , isScrollable(false)
         , opacity(0)
-        , debugBorderWidth(0)
         , replica(InvalidCoordinatedLayerID)
         , mask(InvalidCoordinatedLayerID)
         , imageID(InvalidCoordinatedImageBackingID)
-#if USE(GRAPHICS_SURFACE)
-        , platformLayerFrontBuffer(0)
-#endif
+        , repaintCount(0)
 #if USE(COORDINATED_GRAPHICS_THREADED)
         , platformLayerProxy(0)
 #endif
@@ -150,8 +150,6 @@ struct CoordinatedGraphicsLayerState {
     FloatSize contentsTileSize;
     float opacity;
     Color solidColor;
-    Color debugBorderColor;
-    float debugBorderWidth;
     FilterOperations filters;
     TextureMapperAnimations animations;
     Vector<uint32_t> children;
@@ -160,22 +158,14 @@ struct CoordinatedGraphicsLayerState {
     CoordinatedLayerID replica;
     CoordinatedLayerID mask;
     CoordinatedImageBackingID imageID;
+    DebugVisuals debugVisuals;
 
     unsigned repaintCount;
     Vector<TileUpdateInfo> tilesToUpdate;
 
-#if USE(GRAPHICS_SURFACE)
-    IntSize platformLayerSize;
-    GraphicsSurfaceToken platformLayerToken;
-    uint32_t platformLayerFrontBuffer;
-    GraphicsSurface::Flags platformLayerSurfaceFlags;
-#endif
-
 #if USE(COORDINATED_GRAPHICS_THREADED)
     RefPtr<TextureMapperPlatformLayerProxy> platformLayerProxy;
 #endif
-
-    IntSize committedScrollOffset;
 
     bool hasPendingChanges() const
     {
@@ -185,21 +175,15 @@ struct CoordinatedGraphicsLayerState {
 
 struct CoordinatedGraphicsState {
     uint32_t rootCompositingLayer;
-    FloatPoint scrollPosition;
-    IntSize contentsSize;
-    IntRect coveredRect;
 
     Vector<CoordinatedLayerID> layersToCreate;
-    Vector<std::pair<CoordinatedLayerID, CoordinatedGraphicsLayerState> > layersToUpdate;
+    Vector<std::pair<CoordinatedLayerID, CoordinatedGraphicsLayerState>> layersToUpdate;
     Vector<CoordinatedLayerID> layersToRemove;
 
     Vector<CoordinatedImageBackingID> imagesToCreate;
     Vector<CoordinatedImageBackingID> imagesToRemove;
-    Vector<std::pair<CoordinatedImageBackingID, RefPtr<CoordinatedSurface> > > imagesToUpdate;
+    Vector<std::pair<CoordinatedImageBackingID, RefPtr<Nicosia::Buffer>>> imagesToUpdate;
     Vector<CoordinatedImageBackingID> imagesToClear;
-
-    Vector<std::pair<uint32_t /* atlasID */, RefPtr<CoordinatedSurface> > > updateAtlasesToCreate;
-    Vector<uint32_t /* atlasID */> updateAtlasesToRemove;
 };
 
 } // namespace WebCore

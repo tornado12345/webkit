@@ -18,8 +18,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGSetElement_h
-#define SVGSetElement_h
+#pragma once
 
 #include "SVGAnimateElementBase.h"
 
@@ -27,6 +26,7 @@ namespace WebCore {
 
 // SVGAnimateElement implements superset of the functionality.
 class SVGSetElement final : public SVGAnimateElementBase {
+    WTF_MAKE_ISO_ALLOCATED(SVGSetElement);
 public:
     static Ref<SVGSetElement> create(const QualifiedName&, Document&);
 
@@ -36,5 +36,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif

@@ -18,8 +18,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef RenderSVGTransformableContainer_h
-#define RenderSVGTransformableContainer_h
+#pragma once
 
 #include "RenderSVGContainer.h"
 #include "SVGGraphicsElement.h"
@@ -28,6 +27,7 @@ namespace WebCore {
     
 class SVGGraphicsElement;
 class RenderSVGTransformableContainer final : public RenderSVGContainer {
+    WTF_MAKE_ISO_ALLOCATED(RenderSVGTransformableContainer);
 public:
     RenderSVGTransformableContainer(SVGGraphicsElement&, RenderStyle&&);
     SVGGraphicsElement& graphicsElement() { return downcast<SVGGraphicsElement>(RenderSVGContainer::element()); }
@@ -51,5 +51,3 @@ private:
 } // namespace WebCore
 
 SPECIALIZE_TYPE_TRAITS_RENDER_OBJECT(RenderSVGTransformableContainer, isSVGTransformableContainer())
-
-#endif // RenderSVGTransformableContainer_h

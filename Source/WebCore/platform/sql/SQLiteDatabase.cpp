@@ -29,6 +29,7 @@
 
 #include "DatabaseAuthorizer.h"
 #include "Logging.h"
+#include "MemoryRelease.h"
 #include "SQLiteFileSystem.h"
 #include "SQLiteStatement.h"
 #include <mutex>
@@ -104,7 +105,7 @@ bool SQLiteDatabase::open(const String& filename, bool forWebSQLDatabase)
     }
 
     if (isOpen())
-        m_openingThread = currentThread();
+        m_openingThread = &Thread::current();
     else
         m_openErrorMessage = "sqlite_open returned null";
 
@@ -128,7 +129,7 @@ void SQLiteDatabase::close()
 {
     if (m_db) {
         // FIXME: This is being called on the main thread during JS GC. <rdar://problem/5739818>
-        // ASSERT(currentThread() == m_openingThread);
+        // ASSERT(m_openingThread == &Thread::current());
         sqlite3* db = m_db;
         {
             LockHolder locker(m_databaseClosingMutex);
@@ -137,7 +138,7 @@ void SQLiteDatabase::close()
         sqlite3_close(db);
     }
 
-    m_openingThread = 0;
+    m_openingThread = nullptr;
     m_openError = SQLITE_ERROR;
     m_openErrorMessage = CString();
 }
@@ -454,7 +455,7 @@ int SQLiteDatabase::authorizerFunction(void* userData, int actionCode, const cha
     }
 }
 
-void SQLiteDatabase::setAuthorizer(PassRefPtr<DatabaseAuthorizer> auth)
+void SQLiteDatabase::setAuthorizer(DatabaseAuthorizer& authorizer)
 {
     if (!m_db) {
         LOG_ERROR("Attempt to set an authorizer on a non-open SQL database");
@@ -464,7 +465,7 @@ void SQLiteDatabase::setAuthorizer(PassRefPtr<DatabaseAuthorizer> auth)
 
     LockHolder locker(m_authorizerLock);
 
-    m_authorizer = auth;
+    m_authorizer = &authorizer;
     
     enableAuthorizer(true);
 }
@@ -514,19 +515,19 @@ bool SQLiteDatabase::turnOnIncrementalAutoVacuum()
 
 static void destroyCollationFunction(void* arg)
 {
-    auto f = static_cast<std::function<int(int, const void*, int, const void*)>*>(arg);
+    auto f = static_cast<WTF::Function<int(int, const void*, int, const void*)>*>(arg);
     delete f;
 }
 
 static int callCollationFunction(void* arg, int aLength, const void* a, int bLength, const void* b)
 {
-    auto f = static_cast<std::function<int(int, const void*, int, const void*)>*>(arg);
+    auto f = static_cast<WTF::Function<int(int, const void*, int, const void*)>*>(arg);
     return (*f)(aLength, a, bLength, b);
 }
 
-void SQLiteDatabase::setCollationFunction(const String& collationName, std::function<int(int, const void*, int, const void*)> collationFunction)
+void SQLiteDatabase::setCollationFunction(const String& collationName, WTF::Function<int(int, const void*, int, const void*)>&& collationFunction)
 {
-    auto functionObject = new std::function<int(int, const void*, int, const void*)>(collationFunction);
+    auto functionObject = new WTF::Function<int(int, const void*, int, const void*)>(WTFMove(collationFunction));
     sqlite3_create_collation_v2(m_db, collationName.utf8().data(), SQLITE_UTF8, functionObject, callCollationFunction, destroyCollationFunction);
 }
 

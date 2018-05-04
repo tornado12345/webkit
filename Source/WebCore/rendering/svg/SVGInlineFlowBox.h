@@ -18,8 +18,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGInlineFlowBox_h
-#define SVGInlineFlowBox_h
+#pragma once
 
 #include "InlineFlowBox.h"
 #include "RenderSVGInline.h"
@@ -29,6 +28,7 @@ namespace WebCore {
 class RenderSVGInlineText;
 
 class SVGInlineFlowBox final : public InlineFlowBox {
+    WTF_MAKE_ISO_ALLOCATED(SVGInlineFlowBox);
 public:
     SVGInlineFlowBox(RenderSVGInline& renderer)
         : InlineFlowBox(renderer)
@@ -54,5 +54,3 @@ private:
 } // namespace WebCore
 
 SPECIALIZE_TYPE_TRAITS_INLINE_BOX(SVGInlineFlowBox, isSVGInlineFlowBox())
-
-#endif // SVGInlineFlowBox_h

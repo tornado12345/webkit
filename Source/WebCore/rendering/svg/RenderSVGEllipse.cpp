@@ -29,9 +29,11 @@
 
 #include "SVGCircleElement.h"
 #include "SVGEllipseElement.h"
-#include "SVGNames.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(RenderSVGEllipse);
 
 RenderSVGEllipse::RenderSVGEllipse(SVGGraphicsElement& element, RenderStyle&& style)
     : RenderSVGShape(element, WTFMove(style))
@@ -39,9 +41,7 @@ RenderSVGEllipse::RenderSVGEllipse(SVGGraphicsElement& element, RenderStyle&& st
 {
 }
 
-RenderSVGEllipse::~RenderSVGEllipse()
-{
-}
+RenderSVGEllipse::~RenderSVGEllipse() = default;
 
 void RenderSVGEllipse::updateShapeFromElement()
 {
@@ -104,7 +104,7 @@ void RenderSVGEllipse::fillShape(GraphicsContext& context) const
 
 void RenderSVGEllipse::strokeShape(GraphicsContext& context) const
 {
-    if (!style().svgStyle().hasVisibleStroke())
+    if (!style().hasVisibleStroke())
         return;
     if (m_usePathFallback) {
         RenderSVGShape::strokeShape(context);

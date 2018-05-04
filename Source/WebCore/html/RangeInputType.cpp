@@ -33,8 +33,8 @@
 #include "RangeInputType.h"
 
 #include "AXObjectCache.h"
+#include "ElementChildIterator.h"
 #include "EventNames.h"
-#include "ExceptionCodePlaceholder.h"
 #include "HTMLInputElement.h"
 #include "HTMLParserIdioms.h"
 #include "InputTypeNames.h"
@@ -134,22 +134,24 @@ bool RangeInputType::isSteppable() const
 }
 
 #if !PLATFORM(IOS)
+
 void RangeInputType::handleMouseDownEvent(MouseEvent& event)
 {
-    if (element().isDisabledOrReadOnly())
+    if (element().isDisabledFormControl())
         return;
 
-    Node* targetNode = event.target()->toNode();
-    if (event.button() != LeftButton || !targetNode)
+    if (event.button() != LeftButton || !is<Node>(event.target()))
         return;
     ASSERT(element().shadowRoot());
-    if (targetNode != &element() && !targetNode->isDescendantOf(element().userAgentShadowRoot()))
+    auto& targetNode = downcast<Node>(*event.target());
+    if (&targetNode != &element() && !targetNode.isDescendantOf(element().userAgentShadowRoot().get()))
         return;
-    SliderThumbElement& thumb = typedSliderThumbElement();
-    if (targetNode == &thumb)
+    auto& thumb = typedSliderThumbElement();
+    if (&targetNode == &thumb)
         return;
     thumb.dragFrom(event.absoluteLocation());
 }
+
 #endif
 
 #if ENABLE(TOUCH_EVENTS)
@@ -158,7 +160,7 @@ void RangeInputType::handleTouchEvent(TouchEvent& event)
 #if PLATFORM(IOS)
     typedSliderThumbElement().handleTouchEvent(event);
 #elif ENABLE(TOUCH_SLIDER)
-    if (element().isDisabledOrReadOnly())
+    if (element().isDisabledFormControl())
         return;
 
     if (event.type() == eventNames().touchendEvent) {
@@ -166,7 +168,7 @@ void RangeInputType::handleTouchEvent(TouchEvent& event)
         return;
     }
 
-    TouchList* touches = event.targetTouches();
+    RefPtr<TouchList> touches = event.targetTouches();
     if (touches->length() == 1) {
         typedSliderThumbElement().setPositionFromPoint(touches->item(0)->absoluteLocation());
         event.setDefaultHandled();
@@ -182,18 +184,16 @@ bool RangeInputType::hasTouchEventHandler() const
     return true;
 }
 #endif
+#endif // ENABLE(TOUCH_EVENTS)
 
-#if PLATFORM(IOS)
 void RangeInputType::disabledAttributeChanged()
 {
     typedSliderThumbElement().disabledAttributeChanged();
 }
-#endif
-#endif // ENABLE(TOUCH_EVENTS)
 
 void RangeInputType::handleKeydownEvent(KeyboardEvent& event)
 {
-    if (element().isDisabledOrReadOnly())
+    if (element().isDisabledFormControl())
         return;
 
     const String& key = event.keyIdentifier();
@@ -268,7 +268,15 @@ HTMLElement* RangeInputType::sliderTrackElement() const
     ASSERT(element().userAgentShadowRoot()->firstChild()->isHTMLElement());
     ASSERT(element().userAgentShadowRoot()->firstChild()->firstChild()); // track
 
-    return downcast<HTMLElement>(element().userAgentShadowRoot()->firstChild()->firstChild());
+    RefPtr<ShadowRoot> root = element().userAgentShadowRoot();
+    if (!root)
+        return nullptr;
+    
+    auto* container = childrenOfType<SliderContainerElement>(*root).first();
+    if (!container)
+        return nullptr;
+
+    return childrenOfType<HTMLElement>(*container).first();
 }
 
 SliderThumbElement& RangeInputType::typedSliderThumbElement() const
@@ -354,7 +362,7 @@ bool RangeInputType::shouldRespectListAttribute()
 void RangeInputType::listAttributeTargetChanged()
 {
     m_tickMarkValuesDirty = true;
-    HTMLElement* sliderTrackElement = this->sliderTrackElement();
+    RefPtr<HTMLElement> sliderTrackElement = this->sliderTrackElement();
     if (sliderTrackElement->renderer())
         sliderTrackElement->renderer()->setNeedsLayout();
 }
@@ -365,13 +373,13 @@ void RangeInputType::updateTickMarkValues()
         return;
     m_tickMarkValues.clear();
     m_tickMarkValuesDirty = false;
-    HTMLDataListElement* dataList = element().dataList();
+    auto dataList = element().dataList();
     if (!dataList)
         return;
     Ref<HTMLCollection> options = dataList->options();
     m_tickMarkValues.reserveCapacity(options->length());
     for (unsigned i = 0; i < options->length(); ++i) {
-        Node* node = options->item(i);
+        RefPtr<Node> node = options->item(i);
         HTMLOptionElement& optionElement = downcast<HTMLOptionElement>(*node);
         String optionValue = optionElement.value();
         if (!element().isValidValue(optionValue))
@@ -382,11 +390,11 @@ void RangeInputType::updateTickMarkValues()
     std::sort(m_tickMarkValues.begin(), m_tickMarkValues.end());
 }
 
-Optional<Decimal> RangeInputType::findClosestTickMarkValue(const Decimal& value)
+std::optional<Decimal> RangeInputType::findClosestTickMarkValue(const Decimal& value)
 {
     updateTickMarkValues();
     if (!m_tickMarkValues.size())
-        return Nullopt;
+        return std::nullopt;
 
     size_t left = 0;
     size_t right = m_tickMarkValues.size();
@@ -409,8 +417,8 @@ Optional<Decimal> RangeInputType::findClosestTickMarkValue(const Decimal& value)
             right = middle;
     }
 
-    Optional<Decimal> closestLeft = middle ? makeOptional(m_tickMarkValues[middle - 1]) : Nullopt;
-    Optional<Decimal> closestRight = middle != m_tickMarkValues.size() ? makeOptional(m_tickMarkValues[middle]) : Nullopt;
+    std::optional<Decimal> closestLeft = middle ? std::make_optional(m_tickMarkValues[middle - 1]) : std::nullopt;
+    std::optional<Decimal> closestRight = middle != m_tickMarkValues.size() ? std::make_optional(m_tickMarkValues[middle]) : std::nullopt;
 
     if (!closestLeft)
         return closestRight;

@@ -28,10 +28,9 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef MemoryInfo_h
-#define MemoryInfo_h
+#pragma once
 
-#include "JSDOMWindow.h"
+#include "CommonVM.h"
 #include <wtf/RefCounted.h>
 
 namespace WebCore {
@@ -45,8 +44,8 @@ public:
 
 private:
     MemoryInfo()
-        : m_usedJSHeapSize(JSDOMWindow::commonVM().heap.size())
-        , m_totalJSHeapSize(JSDOMWindow::commonVM().heap.capacity())
+        : m_usedJSHeapSize(commonVM().heap.size())
+        , m_totalJSHeapSize(commonVM().heap.capacity())
     {
     }
 
@@ -55,5 +54,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif // MemoryInfo_h

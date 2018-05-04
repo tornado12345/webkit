@@ -25,7 +25,7 @@
 
 #pragma once
 
-#if PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 101100
+#if PLATFORM(MAC)
 
 #include "WheelEventDeltaFilter.h"
 #include <wtf/RetainPtr.h>
@@ -44,9 +44,9 @@ public:
 
 private:
     RetainPtr<_NSScrollingPredominantAxisFilter> m_predominantAxisFilter;
-    double m_beginFilteringDeltasTime { 0 };
+    MonotonicTime m_beginFilteringDeltasTime;
 };
 
 } // namespace WebCore
 
-#endif // PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 101100
+#endif // PLATFORM(MAC)

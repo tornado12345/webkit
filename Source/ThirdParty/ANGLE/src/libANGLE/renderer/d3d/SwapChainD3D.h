@@ -22,6 +22,16 @@
 #define ANGLE_FORCE_VSYNC_OFF 0
 #endif
 
+namespace gl
+{
+class Context;
+}  // namespace gl
+
+namespace egl
+{
+class Display;
+}  // namespace egl
+
 namespace rx
 {
 class RenderTargetD3D;
@@ -29,18 +39,24 @@ class RenderTargetD3D;
 class SwapChainD3D : angle::NonCopyable
 {
   public:
-    SwapChainD3D(HANDLE shareHandle, GLenum backBufferFormat, GLenum depthBufferFormat)
-        : mOffscreenRenderTargetFormat(backBufferFormat),
-          mDepthBufferFormat(depthBufferFormat),
-          mShareHandle(shareHandle)
-    {
-    }
+    SwapChainD3D(HANDLE shareHandle,
+                 IUnknown *d3dTexture,
+                 GLenum backBufferFormat,
+                 GLenum depthBufferFormat);
+    virtual ~SwapChainD3D();
 
-    virtual ~SwapChainD3D() {};
-
-    virtual EGLint resize(EGLint backbufferWidth, EGLint backbufferSize) = 0;
-    virtual EGLint reset(EGLint backbufferWidth, EGLint backbufferHeight, EGLint swapInterval) = 0;
-    virtual EGLint swapRect(EGLint x, EGLint y, EGLint width, EGLint height) = 0;
+    virtual EGLint resize(const gl::Context *context,
+                          EGLint backbufferWidth,
+                          EGLint backbufferSize) = 0;
+    virtual EGLint reset(const gl::Context *context,
+                         EGLint backbufferWidth,
+                         EGLint backbufferHeight,
+                         EGLint swapInterval) = 0;
+    virtual EGLint swapRect(const gl::Context *context,
+                            EGLint x,
+                            EGLint y,
+                            EGLint width,
+                            EGLint height) = 0;
     virtual void recreate() = 0;
 
     virtual RenderTargetD3D *getColorRenderTarget() = 0;
@@ -59,7 +75,8 @@ class SwapChainD3D : angle::NonCopyable
     const GLenum mDepthBufferFormat;
 
     HANDLE mShareHandle;
+    IUnknown *mD3DTexture;
 };
 
-}
+}  // namespace rx
 #endif // LIBANGLE_RENDERER_D3D_SWAPCHAIND3D_H_

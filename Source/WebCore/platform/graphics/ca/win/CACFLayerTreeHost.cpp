@@ -31,10 +31,10 @@
 #include "CACFLayerTreeHostClient.h"
 #include "DebugPageOverlays.h"
 #include "DefWndProcWindowClass.h"
+#include "Frame.h"
 #include "FrameView.h"
 #include "LayerChangesFlusher.h"
 #include "Logging.h"
-#include "MainFrame.h"
 #include "PlatformCALayerWin.h"
 #include "PlatformLayer.h"
 #include "TiledBacking.h"
@@ -42,8 +42,8 @@
 #include "WebCoreInstanceHandle.h"
 #include <limits.h>
 #include <QuartzCore/CABase.h>
-#include <wtf/CurrentTime.h>
 #include <wtf/StdLibExtras.h>
+#include <wtf/UniqueArray.h>
 #include <wtf/win/GDIObject.h>
 
 #ifdef DEBUG_ALL
@@ -107,6 +107,12 @@ bool CACFLayerTreeHost::acceleratedCompositingAvailable()
     }
 
     RefPtr<CACFLayerTreeHost> host = CACFLayerTreeHost::create();
+
+    if (!host) {
+        available = false;
+        return available;
+    }
+
     host->setWindow(testWindow);
     available = host->createRenderer();
     host->setWindow(0);
@@ -115,7 +121,7 @@ bool CACFLayerTreeHost::acceleratedCompositingAvailable()
     return available;
 }
 
-PassRefPtr<CACFLayerTreeHost> CACFLayerTreeHost::create()
+RefPtr<CACFLayerTreeHost> CACFLayerTreeHost::create()
 {
     if (!acceleratedCompositingAvailable())
         return nullptr;
@@ -125,7 +131,7 @@ PassRefPtr<CACFLayerTreeHost> CACFLayerTreeHost::create()
         return nullptr;
     }
     host->initialize();
-    return host.release();
+    return host;
 }
 
 CACFLayerTreeHost::CACFLayerTreeHost()
@@ -202,9 +208,9 @@ PlatformCALayer* CACFLayerTreeHost::rootLayer() const
     return m_rootLayer.get();
 }
 
-void CACFLayerTreeHost::addPendingAnimatedLayer(PassRefPtr<PlatformCALayer> layer)
+void CACFLayerTreeHost::addPendingAnimatedLayer(PlatformCALayer& layer)
 {
-    m_pendingAnimatedLayers.add(layer);
+    m_pendingAnimatedLayers.add(&layer);
 }
 
 void CACFLayerTreeHost::setRootChildLayer(PlatformCALayer* layer)
@@ -256,7 +262,7 @@ static void getDirtyRects(HWND window, Vector<CGRect>& outRects)
     }
 
     DWORD dataSize = ::GetRegionData(region.get(), 0, 0);
-    auto regionDataBuffer = std::make_unique<unsigned char[]>(dataSize);
+    auto regionDataBuffer = makeUniqueArray<unsigned char>(dataSize);
     RGNDATA* regionData = reinterpret_cast<RGNDATA*>(regionDataBuffer.get());
     if (!::GetRegionData(region.get(), dataSize, regionData))
         return;
@@ -318,7 +324,7 @@ void CACFLayerTreeHost::notifyAnimationsStarted()
     // Send currentTime to the pending animations. This function is called by CACF in a callback
     // which occurs after the drawInContext calls. So currentTime is very close to the time
     // the animations actually start
-    double currentTime = monotonicallyIncreasingTime();
+    MonotonicTime currentTime = MonotonicTime::now();
 
     HashSet<RefPtr<PlatformCALayer> >::iterator end = m_pendingAnimatedLayers.end();
     for (HashSet<RefPtr<PlatformCALayer> >::iterator it = m_pendingAnimatedLayers.begin(); it != end; ++it)

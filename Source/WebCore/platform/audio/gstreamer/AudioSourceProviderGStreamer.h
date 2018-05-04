@@ -23,6 +23,7 @@
 
 #include "AudioSourceProvider.h"
 #include "GRefPtrGStreamer.h"
+#include "MainThreadNotifier.h"
 #include <gst/gst.h>
 #include <wtf/Forward.h>
 #include <wtf/Noncopyable.h>
@@ -40,8 +41,8 @@ public:
 
     void configureAudioBin(GstElement* audioBin, GstElement* teePredecessor);
 
-    void provideInput(AudioBus*, size_t framesToProcess);
-    void setClient(AudioSourceProviderClient*);
+    void provideInput(AudioBus*, size_t framesToProcess) override;
+    void setClient(AudioSourceProviderClient*) override;
     const AudioSourceProviderClient* client() const { return m_client; }
 
     void handleNewDeinterleavePad(GstPad*);
@@ -53,6 +54,10 @@ public:
     void clearAdapters();
 
 private:
+    enum MainThreadNotification {
+        DeinterleavePadsConfigured = 1 << 0,
+    };
+    Ref<MainThreadNotifier<MainThreadNotification>> m_notifier;
     GRefPtr<GstElement> m_audioSinkBin;
     AudioSourceProviderClient* m_client;
     int m_deinterleaveSourcePads;
@@ -61,7 +66,7 @@ private:
     unsigned long m_deinterleavePadAddedHandlerId;
     unsigned long m_deinterleaveNoMorePadsHandlerId;
     unsigned long m_deinterleavePadRemovedHandlerId;
-    GMutex m_adapterMutex;
+    Lock m_adapterMutex;
 };
 
 }

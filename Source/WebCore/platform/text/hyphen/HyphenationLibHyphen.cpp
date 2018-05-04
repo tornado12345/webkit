@@ -31,17 +31,16 @@
 
 #include "FileSystem.h"
 #include <hyphen.h>
+#include <limits>
+#include <stdlib.h>
 #include <wtf/HashMap.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/TinyLRUCache.h>
+#include <wtf/glib/GLibUtilities.h>
+#include <wtf/glib/GUniquePtr.h>
 #include <wtf/text/AtomicStringHash.h>
 #include <wtf/text/CString.h>
 #include <wtf/text/StringView.h>
-
-#if PLATFORM(GTK)
-#include "GtkUtilities.h"
-#include <wtf/glib/GUniquePtr.h>
-#endif
 
 namespace WebCore {
 
@@ -54,16 +53,22 @@ static String extractLocaleFromDictionaryFilePath(const String& filePath)
 {
     // Dictionary files always have the form "hyph_<locale name>.dic"
     // so we strip everything except the locale.
-    String fileName = pathGetFileName(filePath);
+    String fileName = FileSystem::pathGetFileName(filePath);
     static const int prefixLength = 5;
     static const int suffixLength = 4;
     return fileName.substring(prefixLength, fileName.length() - prefixLength - suffixLength);
 }
 
-static void scanDirectoryForDicionaries(const char* directoryPath, HashMap<AtomicString, Vector<String>>& availableLocales)
+static void scanDirectoryForDictionaries(const char* directoryPath, HashMap<AtomicString, Vector<String>>& availableLocales)
 {
-    for (const auto& filePath : listDirectory(directoryPath, "hyph_*.dic")) {
+    for (auto& filePath : FileSystem::listDirectory(directoryPath, "hyph_*.dic")) {
         String locale = extractLocaleFromDictionaryFilePath(filePath).convertToASCIILowercase();
+
+        char normalizedPath[PATH_MAX];
+        if (!realpath(FileSystem::fileSystemRepresentation(filePath).data(), normalizedPath))
+            continue;
+
+        filePath = FileSystem::stringFromFileSystemRepresentation(normalizedPath);
         availableLocales.add(locale, Vector<String>()).iterator->value.append(filePath);
 
         String localeReplacingUnderscores = String(locale);
@@ -80,6 +85,30 @@ static void scanDirectoryForDicionaries(const char* directoryPath, HashMap<Atomi
 }
 
 #if ENABLE(DEVELOPER_MODE)
+static CString topLevelPath()
+{
+    if (const char* topLevelDirectory = g_getenv("WEBKIT_TOP_LEVEL"))
+        return topLevelDirectory;
+
+    // If the environment variable wasn't provided then assume we were built into
+    // WebKitBuild/Debug or WebKitBuild/Release. Obviously this will fail if the build
+    // directory is non-standard, but we can't do much more about this.
+    GUniquePtr<char> parentPath(g_path_get_dirname(getCurrentExecutablePath().data()));
+    GUniquePtr<char> layoutTestsPath(g_build_filename(parentPath.get(), "..", "..", "..", nullptr));
+    GUniquePtr<char> absoluteTopLevelPath(realpath(layoutTestsPath.get(), 0));
+    return absoluteTopLevelPath.get();
+}
+
+static CString webkitBuildDirectory()
+{
+    const char* webkitOutputDir = g_getenv("WEBKIT_OUTPUTDIR");
+    if (webkitOutputDir)
+        return webkitOutputDir;
+
+    GUniquePtr<char> outputDir(g_build_filename(topLevelPath().data(), "WebKitBuild", nullptr));
+    return outputDir.get();
+}
+
 static void scanTestDictionariesDirectoryIfNecessary(HashMap<AtomicString, Vector<String>>& availableLocales)
 {
     // It's unfortunate that we need to look for the dictionaries this way, but
@@ -89,15 +118,17 @@ static void scanTestDictionariesDirectoryIfNecessary(HashMap<AtomicString, Vecto
     CString buildDirectory = webkitBuildDirectory();
     GUniquePtr<char> dictionariesPath(g_build_filename(buildDirectory.data(), "DependenciesGTK", "Root", "webkitgtk-test-dicts", nullptr));
     if (g_file_test(dictionariesPath.get(), static_cast<GFileTest>(G_FILE_TEST_IS_DIR))) {
-        scanDirectoryForDicionaries(dictionariesPath.get(), availableLocales);
+        scanDirectoryForDictionaries(dictionariesPath.get(), availableLocales);
         return;
     }
 
     // Try alternative dictionaries path for people not using JHBuild.
     dictionariesPath.reset(g_build_filename(buildDirectory.data(), "webkitgtk-test-dicts", nullptr));
-    scanDirectoryForDicionaries(dictionariesPath.get(), availableLocales);
+    scanDirectoryForDictionaries(dictionariesPath.get(), availableLocales);
 #elif defined(TEST_HYPHENATAION_PATH)
-    scanDirectoryForDicionaries(TEST_HYPHENATAION_PATH, availableLocales);
+    scanDirectoryForDictionaries(TEST_HYPHENATAION_PATH, availableLocales);
+#else
+    UNUSED_PARAM(availableLocales);
 #endif
 }
 #endif
@@ -109,7 +140,7 @@ static HashMap<AtomicString, Vector<String>>& availableLocales()
 
     if (!scannedLocales) {
         for (size_t i = 0; i < WTF_ARRAY_LENGTH(gDictionaryDirectories); i++)
-            scanDirectoryForDicionaries(gDictionaryDirectories[i], availableLocales);
+            scanDirectoryForDictionaries(gDictionaryDirectories[i], availableLocales);
 
 #if ENABLE(DEVELOPER_MODE)
         scanTestDictionariesDirectoryIfNecessary(availableLocales);
@@ -136,7 +167,8 @@ class HyphenationDictionary : public RefCounted<HyphenationDictionary> {
 public:
     typedef std::unique_ptr<HyphenDict, void(*)(HyphenDict*)> HyphenDictUniquePtr;
 
-    virtual ~HyphenationDictionary() { }
+    virtual ~HyphenationDictionary() = default;
+
     static RefPtr<HyphenationDictionary> createNull()
     {
         return adoptRef(new HyphenationDictionary());
@@ -174,9 +206,9 @@ template<>
 class TinyLRUCachePolicy<AtomicString, RefPtr<WebCore::HyphenationDictionary>>
 {
 public:
-    static TinyLRUCache<AtomicString, RefPtr<WebCore::HyphenationDictionary>>& cache()
+    static TinyLRUCache<AtomicString, RefPtr<WebCore::HyphenationDictionary>, 32>& cache()
     {
-        static NeverDestroyed<TinyLRUCache<AtomicString, RefPtr<WebCore::HyphenationDictionary>>> cache;
+        static NeverDestroyed<TinyLRUCache<AtomicString, RefPtr<WebCore::HyphenationDictionary>, 32>> cache;
         return cache;
     }
 
@@ -192,7 +224,7 @@ public:
 
     static RefPtr<WebCore::HyphenationDictionary> createValueForKey(const AtomicString& dictionaryPath)
     {
-        return WebCore::HyphenationDictionary::create(WebCore::fileSystemRepresentation(dictionaryPath.string()));
+        return WebCore::HyphenationDictionary::create(WebCore::FileSystem::fileSystemRepresentation(dictionaryPath.string()));
     }
 };
 
@@ -239,7 +271,11 @@ size_t lastHyphenLocation(StringView string, size_t beforeIndex, const AtomicStr
     char* hyphenArrayData = hyphenArray.data();
 
     String lowercaseLocaleIdentifier = AtomicString(localeIdentifier.string().convertToASCIILowercase());
-    ASSERT(availableLocales().contains(lowercaseLocaleIdentifier));
+
+    // Web content may specify strings for locales which do not exist or that we do not have.
+    if (!availableLocales().contains(lowercaseLocaleIdentifier))
+        return 0;
+
     for (const auto& dictionaryPath : availableLocales().get(lowercaseLocaleIdentifier)) {
         RefPtr<HyphenationDictionary> dictionary = WTF::TinyLRUCachePolicy<AtomicString, RefPtr<HyphenationDictionary>>::cache().get(AtomicString(dictionaryPath));
 

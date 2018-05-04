@@ -200,8 +200,6 @@ AccessibilityUIElement AccessibilityUIElement::titleUIElement()
         return nullptr;
 
     COMPtr<IAccessible> titleElement(Query, value.punkVal);
-    if (value.punkVal)
-        value.punkVal->Release();
 
     return titleElement;
 }
@@ -881,6 +879,18 @@ bool AccessibilityUIElement::isCollapsed() const
 }
 
 bool AccessibilityUIElement::isIgnored() const
+{
+    // FIXME: implement
+    return false;
+}
+
+bool AccessibilityUIElement::isSingleLine() const
+{
+    // FIXME: implement
+    return false;
+}
+
+bool AccessibilityUIElement::isMultiLine() const
 {
     // FIXME: implement
     return false;

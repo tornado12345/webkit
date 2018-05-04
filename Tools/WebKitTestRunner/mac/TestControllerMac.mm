@@ -66,6 +66,8 @@ void TestController::platformInitialize()
 {
     poseAsClass("WebKitTestRunnerPasteboard", "NSPasteboard");
     poseAsClass("WebKitTestRunnerEvent", "NSEvent");
+    
+    cocoaPlatformInitialize();
 
     [NSSound _setAlertType:0];
 
@@ -104,7 +106,7 @@ void TestController::platformResetStateToConsistentValues()
 {
     cocoaResetStateToConsistentValues();
 
-    while ([NSApp nextEventMatchingMask:NSEventMaskGesture | NSEventTypeScrollWheel untilDate:nil inMode:NSDefaultRunLoopMode dequeue:YES]) {
+    while ([NSApp nextEventMatchingMask:NSEventMaskGesture | NSEventMaskScrollWheel untilDate:nil inMode:NSDefaultRunLoopMode dequeue:YES]) {
         // Clear out (and ignore) any pending gesture and scroll wheel events.
     }
 }
@@ -131,7 +133,15 @@ void TestController::platformConfigureViewForTest(const TestInvocation& test)
         return;
     
     __block bool doneCompiling = false;
-    [[_WKUserContentExtensionStore defaultStore] compileContentExtensionForIdentifier:@"TestContentExtensions" encodedContentExtension:contentExtensionString completionHandler:^(_WKUserContentFilter *filter, NSError *error)
+
+    NSURL *tempDir;
+    if (const char* dumpRenderTreeTemp = libraryPathForTesting()) {
+        String temporaryFolder = String::fromUTF8(dumpRenderTreeTemp);
+        tempDir = [NSURL fileURLWithPath:[(NSString*)temporaryFolder stringByAppendingPathComponent:@"ContentExtensions"] isDirectory:YES];
+    } else
+        tempDir = [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:@"ContentExtensions"] isDirectory:YES];
+
+    [[_WKUserContentExtensionStore storeWithURL:tempDir] compileContentExtensionForIdentifier:@"TestContentExtensions" encodedContentExtension:contentExtensionString completionHandler:^(_WKUserContentFilter *filter, NSError *error)
     {
         if (!error)
             [mainWebView()->platformView().configuration.userContentController _addUserContentFilter:filter];
@@ -139,11 +149,10 @@ void TestController::platformConfigureViewForTest(const TestInvocation& test)
             NSLog(@"%@", [error helpAnchor]);
         doneCompiling = true;
     }];
-    platformRunUntil(doneCompiling, 0);
+    platformRunUntil(doneCompiling, noTimeout);
 #endif
 }
 
-#if ENABLE(PLATFORM_FONT_LOOKUP)
 static NSSet *allowedFontFamilySet()
 {
     static NSSet *fontFamilySet = [[NSSet setWithObjects:
@@ -221,6 +230,7 @@ static NSSet *allowedFontFamilySet()
         @"Kokonor",
         @"Krungthep",
         @"KufiStandardGK",
+        @"LastResort",
         @"LiHei Pro",
         @"LiSong Pro",
         @"Lucida Grande",
@@ -233,6 +243,7 @@ static NSSet *allowedFontFamilySet()
         @"New Peninim MT",
         @"Optima",
         @"Osaka",
+        @"Palatino",
         @"Papyrus",
         @"PCMyungjo",
         @"PilGi",
@@ -298,7 +309,6 @@ static WKRetainPtr<WKArrayRef> generateWhitelist()
 
     return adoptWK(result);
 }
-#endif
 
 void TestController::platformInitializeContext()
 {
@@ -311,9 +321,7 @@ void TestController::platformInitializeContext()
                                           diskPath:nil]);
     [NSURLCache setSharedURLCache:sharedCache.get()];
 
-#if ENABLE(PLATFORM_FONT_LOOKUP)
     WKContextSetFontWhitelist(m_context.get(), generateWhitelist().get());
-#endif
 }
 
 void TestController::setHidden(bool hidden)

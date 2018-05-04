@@ -40,7 +40,7 @@ typedef id PlatformUIElement;
 #else
 typedef struct objc_object* PlatformUIElement;
 #endif
-#elif HAVE(ACCESSIBILITY) && (PLATFORM(GTK) || PLATFORM(EFL))
+#elif HAVE(ACCESSIBILITY) && PLATFORM(GTK)
 #include "AccessibilityNotificationHandlerAtk.h"
 #include <atk/atk.h>
 #include <wtf/glib/GRefPtr.h>
@@ -97,6 +97,16 @@ public:
     void decrement();
     void showMenu();
     void press();
+    bool dismiss();
+#if PLATFORM(MAC)
+    void syncPress();
+    void asyncIncrement();
+    void asyncDecrement();
+#else
+    void syncPress() { press(); }
+    void asyncIncrement() { }
+    void asyncDecrement() { };
+#endif
 
     // Attributes - platform-independent implementations
     JSRetainPtr<JSStringRef> stringAttributeValue(JSStringRef attribute);
@@ -110,6 +120,7 @@ public:
     bool isPressActionSupported();
     bool isIncrementActionSupported();
     bool isDecrementActionSupported();
+    void setValue(JSStringRef);
     JSRetainPtr<JSStringRef> role();
     JSRetainPtr<JSStringRef> subrole();
     JSRetainPtr<JSStringRef> roleDescription();
@@ -155,6 +166,8 @@ public:
     bool isOffScreen() const;
     bool isCollapsed() const;
     bool isIgnored() const;
+    bool isSingleLine() const;
+    bool isMultiLine() const;
     bool hasPopup() const;
     int hierarchicalLevel() const;
     double clickPointX();
@@ -165,7 +178,7 @@ public:
     JSRetainPtr<JSStringRef> classList() const;
 
     // CSS3-speech properties.
-    JSRetainPtr<JSStringRef> speak();
+    JSRetainPtr<JSStringRef> speakAs();
     
     // Table-specific attributes
     JSRetainPtr<JSStringRef> attributesOfColumnHeaders();
@@ -192,6 +205,35 @@ public:
     RefPtr<AccessibilityUIElement> ariaOwnsElementAtIndex(unsigned);
     RefPtr<AccessibilityUIElement> ariaFlowToElementAtIndex(unsigned);
     RefPtr<AccessibilityUIElement> ariaControlsElementAtIndex(unsigned);
+#if PLATFORM(MAC) || PLATFORM(GTK)
+    RefPtr<AccessibilityUIElement> ariaDetailsElementAtIndex(unsigned);
+    RefPtr<AccessibilityUIElement> ariaErrorMessageElementAtIndex(unsigned);
+#else
+    RefPtr<AccessibilityUIElement> ariaDetailsElementAtIndex(unsigned) { return nullptr; }
+    RefPtr<AccessibilityUIElement> ariaErrorMessageElementAtIndex(unsigned) { return nullptr; }
+#endif
+
+#if PLATFORM(GTK)
+    RefPtr<AccessibilityUIElement> ariaLabelledByElementAtIndex(unsigned);
+    RefPtr<AccessibilityUIElement> ariaDescribedByElementAtIndex(unsigned);
+    RefPtr<AccessibilityUIElement> ariaOwnsReferencingElementAtIndex(unsigned);
+    RefPtr<AccessibilityUIElement> ariaFlowToReferencingElementAtIndex(unsigned);
+    RefPtr<AccessibilityUIElement> ariaControlsReferencingElementAtIndex(unsigned);
+    RefPtr<AccessibilityUIElement> ariaLabelledByReferencingElementAtIndex(unsigned);
+    RefPtr<AccessibilityUIElement> ariaDescribedByReferencingElementAtIndex(unsigned);
+    RefPtr<AccessibilityUIElement> ariaDetailsReferencingElementAtIndex(unsigned);
+    RefPtr<AccessibilityUIElement> ariaErrorMessageReferencingElementAtIndex(unsigned);
+#else
+    RefPtr<AccessibilityUIElement> ariaLabelledByElementAtIndex(unsigned) { return nullptr; }
+    RefPtr<AccessibilityUIElement> ariaDescribedByElementAtIndex(unsigned) { return nullptr; }
+    RefPtr<AccessibilityUIElement> ariaOwnsReferencingElementAtIndex(unsigned) { return nullptr; }
+    RefPtr<AccessibilityUIElement> ariaFlowToReferencingElementAtIndex(unsigned) { return nullptr; }
+    RefPtr<AccessibilityUIElement> ariaControlsReferencingElementAtIndex(unsigned) { return nullptr; }
+    RefPtr<AccessibilityUIElement> ariaLabelledByReferencingElementAtIndex(unsigned) { return nullptr; }
+    RefPtr<AccessibilityUIElement> ariaDescribedByReferencingElementAtIndex(unsigned) { return nullptr; }
+    RefPtr<AccessibilityUIElement> ariaDetailsReferencingElementAtIndex(unsigned) { return nullptr; }
+    RefPtr<AccessibilityUIElement> ariaErrorMessageReferencingElementAtIndex(unsigned) { return nullptr; }
+#endif
 
     // ARIA Drag and Drop
     bool ariaIsGrabbed() const;
@@ -243,6 +285,8 @@ public:
     RefPtr<AccessibilityTextMarker> nextTextMarker(AccessibilityTextMarker*);
     RefPtr<AccessibilityUIElement> accessibilityElementForTextMarker(AccessibilityTextMarker*);
     JSRetainPtr<JSStringRef> stringForTextMarkerRange(AccessibilityTextMarkerRange*);
+    JSRetainPtr<JSStringRef> attributedStringForTextMarkerRange(AccessibilityTextMarkerRange*);
+    JSRetainPtr<JSStringRef> attributedStringForTextMarkerRangeWithOptions(AccessibilityTextMarkerRange*, bool);
     int textMarkerRangeLength(AccessibilityTextMarkerRange*);
     bool attributedStringForTextMarkerRangeContainsAttribute(JSStringRef, AccessibilityTextMarkerRange*);
     int indexForTextMarker(AccessibilityTextMarker*);
@@ -261,6 +305,7 @@ public:
     RefPtr<AccessibilityTextMarkerRange> sentenceTextMarkerRangeForTextMarker(AccessibilityTextMarker*);
     RefPtr<AccessibilityTextMarker> nextSentenceEndTextMarkerForTextMarker(AccessibilityTextMarker*);
     RefPtr<AccessibilityTextMarker> previousSentenceStartTextMarkerForTextMarker(AccessibilityTextMarker*);
+    RefPtr<AccessibilityTextMarkerRange> textMarkerRangeMatchesTextNearMarkers(JSStringRef, AccessibilityTextMarker*, AccessibilityTextMarker*);
 
     // Returns an ordered list of supported actions for an element.
     JSRetainPtr<JSStringRef> supportedActions() const;
@@ -315,12 +360,12 @@ private:
     void getUIElementsWithAttribute(JSStringRef, Vector<RefPtr<AccessibilityUIElement> >&) const;
 #endif
 
-#if PLATFORM(COCOA) || PLATFORM(GTK) || PLATFORM(EFL)
+#if PLATFORM(COCOA) || PLATFORM(GTK) || PLATFORM(WPE)
     void getChildren(Vector<RefPtr<AccessibilityUIElement> >&);
     void getChildrenWithRange(Vector<RefPtr<AccessibilityUIElement> >&, unsigned location, unsigned length);
 #endif
 
-#if PLATFORM(GTK) || PLATFORM(EFL)
+#if PLATFORM(GTK)
     RefPtr<AccessibilityNotificationHandler> m_notificationHandler;
 #endif
 #endif

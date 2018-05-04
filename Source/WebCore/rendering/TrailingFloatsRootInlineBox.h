@@ -23,14 +23,14 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef TrailingFloatsRootInlineBox_h
-#define TrailingFloatsRootInlineBox_h
+#pragma once
 
 #include "RootInlineBox.h"
 
 namespace WebCore {
 
 class TrailingFloatsRootInlineBox final : public RootInlineBox {
+    WTF_MAKE_ISO_ALLOCATED(TrailingFloatsRootInlineBox);
 public:
     explicit TrailingFloatsRootInlineBox(RenderBlockFlow& blockFlow)
         : RootInlineBox(blockFlow)
@@ -44,5 +44,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif // TrailingFloatsRootInlineBox_h

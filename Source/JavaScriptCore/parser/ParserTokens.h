@@ -25,7 +25,6 @@
 
 #pragma once
 
-#include "ParserModes.h"
 #include <limits.h>
 #include <stdint.h>
 
@@ -34,9 +33,17 @@ namespace JSC {
 class Identifier;
 
 enum {
-    UnaryOpTokenFlag = 64,
-    KeywordTokenFlag = 128,
-    BinaryOpTokenPrecedenceShift = 8,
+    // Token Bitfield: 0b000000000RTE000IIIIPPPPKUXXXXXXX
+    // R = right-associative bit
+    // T = unterminated error flag
+    // E = error flag
+    // I = binary operator allows 'in'
+    // P = binary operator precedence
+    // K = keyword flag
+    // U = unary operator flag
+    UnaryOpTokenFlag = 128,
+    KeywordTokenFlag = 256,
+    BinaryOpTokenPrecedenceShift = 9,
     BinaryOpTokenAllowsInPrecedenceAdditionalShift = 4,
     BinaryOpTokenPrecedenceMask = 15 << BinaryOpTokenPrecedenceShift,
     ErrorTokenFlag = 1 << (BinaryOpTokenAllowsInPrecedenceAdditionalShift + BinaryOpTokenPrecedenceShift + 7),
@@ -57,7 +64,6 @@ enum JSTokenType {
     FOR,
     NEW,
     VAR,
-    LET,
     CONSTTOKEN,
     CONTINUE,
     FUNCTION,
@@ -78,11 +84,21 @@ enum JSTokenType {
     ELSE,
     IMPORT,
     EXPORT,
-    YIELD,
     CLASSTOKEN,
     EXTENDS,
     SUPER,
+
+    // Contextual keywords
+    
+    LET,
+    YIELD,
     AWAIT,
+
+    FirstContextualKeywordToken = LET,
+    LastContextualKeywordToken = AWAIT,
+    FirstSafeContextualKeywordToken = AWAIT,
+    LastSafeContextualKeywordToken = LastContextualKeywordToken,
+
     OPENBRACE = 0,
     CLOSEBRACE,
     OPENPAREN,
@@ -91,8 +107,10 @@ enum JSTokenType {
     CLOSEBRACKET,
     COMMA,
     QUESTION,
+    BACKQUOTE,
     INTEGER,
     DOUBLE,
+    BIGINT,
     IDENT,
     STRING,
     TEMPLATE,
@@ -169,6 +187,7 @@ enum JSTokenType {
     UNTERMINATED_TEMPLATE_LITERAL_ERRORTOK = 13 | ErrorTokenFlag | UnterminatedErrorTokenFlag,
     UNTERMINATED_REGEXP_LITERAL_ERRORTOK = 14 | ErrorTokenFlag | UnterminatedErrorTokenFlag,
     INVALID_TEMPLATE_LITERAL_ERRORTOK = 15 | ErrorTokenFlag,
+    UNEXPECTED_ESCAPE_ERRORTOK = 16 | ErrorTokenFlag,
 };
 
 struct JSTextPosition {
@@ -195,7 +214,14 @@ union JSTokenData {
         uint32_t lineStartOffset;
     };
     double doubleValue;
-    const Identifier* ident;
+    struct {
+        const Identifier* ident;
+        bool escaped;
+    };
+    struct {
+        const Identifier* bigIntString;
+        uint8_t radix;
+    };
     struct {
         const Identifier* cooked;
         const Identifier* raw;

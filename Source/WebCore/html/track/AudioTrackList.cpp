@@ -30,7 +30,6 @@
 #include "AudioTrackList.h"
 
 #include "AudioTrack.h"
-#include "EventNames.h"
 
 using namespace WebCore;
 
@@ -39,9 +38,7 @@ AudioTrackList::AudioTrackList(HTMLMediaElement* element, ScriptExecutionContext
 {
 }
 
-AudioTrackList::~AudioTrackList()
-{
-}
+AudioTrackList::~AudioTrackList() = default;
 
 void AudioTrackList::append(Ref<AudioTrack>&& track)
 {

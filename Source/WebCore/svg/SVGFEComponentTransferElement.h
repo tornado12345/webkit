@@ -18,15 +18,14 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGFEComponentTransferElement_h
-#define SVGFEComponentTransferElement_h
+#pragma once
 
-#include "FEComponentTransfer.h"
 #include "SVGFilterPrimitiveStandardAttributes.h"
 
 namespace WebCore {
 
 class SVGFEComponentTransferElement final : public SVGFilterPrimitiveStandardAttributes {
+    WTF_MAKE_ISO_ALLOCATED(SVGFEComponentTransferElement);
 public:
     static Ref<SVGFEComponentTransferElement> create(const QualifiedName&, Document&);
 
@@ -43,5 +42,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif

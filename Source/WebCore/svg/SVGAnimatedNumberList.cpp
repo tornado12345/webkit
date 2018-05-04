@@ -1,5 +1,6 @@
 /*
  * Copyright (C) Research In Motion Limited 2011. All rights reserved.
+ * Copyright (C) 2018 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -32,14 +33,12 @@ SVGAnimatedNumberListAnimator::SVGAnimatedNumberListAnimator(SVGAnimationElement
 
 std::unique_ptr<SVGAnimatedType> SVGAnimatedNumberListAnimator::constructFromString(const String& string)
 {
-    auto animatedType = SVGAnimatedType::createNumberList(std::make_unique<SVGNumberList>());
-    animatedType->numberList().parse(string);
-    return animatedType;
+    return SVGAnimatedType::create(SVGPropertyTraits<SVGNumberListValues>::fromString(string));
 }
 
 std::unique_ptr<SVGAnimatedType> SVGAnimatedNumberListAnimator::startAnimValAnimation(const SVGElementAnimatedPropertyList& animatedTypes)
 {
-    return SVGAnimatedType::createNumberList(constructFromBaseValue<SVGAnimatedNumberList>(animatedTypes));
+    return constructFromBaseValue<SVGAnimatedNumberList>(animatedTypes);
 }
 
 void SVGAnimatedNumberListAnimator::stopAnimValAnimation(const SVGElementAnimatedPropertyList& animatedTypes)
@@ -49,7 +48,7 @@ void SVGAnimatedNumberListAnimator::stopAnimValAnimation(const SVGElementAnimate
 
 void SVGAnimatedNumberListAnimator::resetAnimValToBaseVal(const SVGElementAnimatedPropertyList& animatedTypes, SVGAnimatedType& type)
 {
-    resetFromBaseValue<SVGAnimatedNumberList>(animatedTypes, type, &SVGAnimatedType::numberList);
+    resetFromBaseValue<SVGAnimatedNumberList>(animatedTypes, type);
 }
 
 void SVGAnimatedNumberListAnimator::animValWillChange(const SVGElementAnimatedPropertyList& animatedTypes)
@@ -67,8 +66,8 @@ void SVGAnimatedNumberListAnimator::addAnimatedTypes(SVGAnimatedType* from, SVGA
     ASSERT(from->type() == AnimatedNumberList);
     ASSERT(from->type() == to->type());
 
-    const SVGNumberList& fromNumberList = from->numberList();
-    SVGNumberList& toNumberList = to->numberList();
+    const auto& fromNumberList = from->as<SVGNumberListValues>();
+    auto& toNumberList = to->as<SVGNumberListValues>();
 
     unsigned fromNumberListSize = fromNumberList.size();
     if (!fromNumberListSize || fromNumberListSize != toNumberList.size())
@@ -82,11 +81,11 @@ void SVGAnimatedNumberListAnimator::calculateAnimatedValue(float percentage, uns
 {
     ASSERT(m_animationElement);
 
-    const SVGNumberList& fromNumberList = m_animationElement->animationMode() == ToAnimation ? animated->numberList() : from->numberList();
-    const SVGNumberList& toNumberList = to->numberList();
-    const SVGNumberList& toAtEndOfDurationNumberList = toAtEndOfDuration->numberList();
-    SVGNumberList& animatedNumberList = animated->numberList();
-    if (!m_animationElement->adjustFromToListValues<SVGNumberList>(fromNumberList, toNumberList, animatedNumberList, percentage))
+    const auto& fromNumberList = (m_animationElement->animationMode() == ToAnimation ? animated : from)->as<SVGNumberListValues>();
+    const auto& toNumberList = to->as<SVGNumberListValues>();
+    const auto& toAtEndOfDurationNumberList = toAtEndOfDuration->as<SVGNumberListValues>();
+    auto& animatedNumberList = animated->as<SVGNumberListValues>();
+    if (!m_animationElement->adjustFromToListValues<SVGNumberListValues>(fromNumberList, toNumberList, animatedNumberList, percentage))
         return;
 
     unsigned fromNumberListSize = fromNumberList.size();
@@ -102,7 +101,7 @@ void SVGAnimatedNumberListAnimator::calculateAnimatedValue(float percentage, uns
 
 float SVGAnimatedNumberListAnimator::calculateDistance(const String&, const String&)
 {
-    // FIXME: Distance calculation is not possible for SVGNumberList right now. We need the distance for every single value.
+    // FIXME: Distance calculation is not possible for SVGNumberListValues right now. We need the distance for every single value.
     return -1;
 }
 

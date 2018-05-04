@@ -44,6 +44,7 @@ class URL;
 class ResourceHandle;
 class ResourceHandleClient;
 class ResourceRequest;
+class ThreadSafeDataBuffer;
 
 // BlobRegistryImpl is not thread-safe. It should only be called from main thread.
 class WEBCORE_EXPORT BlobRegistryImpl final : public BlobRegistry {
@@ -54,12 +55,13 @@ public:
     BlobData* getBlobDataFromURL(const URL&) const;
 
     Ref<ResourceHandle> createResourceHandle(const ResourceRequest&, ResourceHandleClient*);
+    void writeBlobToFilePath(const URL& blobURL, const String& path, Function<void(bool success)>&& completionHandler);
 
 private:
     void appendStorageItems(BlobData*, const BlobDataItemList&, long long offset, long long length);
 
     void registerFileBlobURL(const URL&, Ref<BlobDataFileReference>&&, const String& contentType) override;
-    void registerBlobURL(const URL&, Vector<BlobPart>, const String& contentType) override;
+    void registerBlobURL(const URL&, Vector<BlobPart>&&, const String& contentType) override;
     void registerBlobURL(const URL&, const URL& srcURL) override;
     void registerBlobURLOptionallyFileBacked(const URL&, const URL& srcURL, RefPtr<BlobDataFileReference>&&, const String& contentType) override;
     void registerBlobURLForSlice(const URL&, const URL& srcURL, long long start, long long end) override;
@@ -69,6 +71,13 @@ private:
     unsigned long long blobSize(const URL&) override;
 
     void writeBlobsToTemporaryFiles(const Vector<String>& blobURLs, Function<void (const Vector<String>& filePaths)>&& completionHandler) override;
+
+    struct BlobForFileWriting {
+        String blobURL;
+        Vector<std::pair<String, ThreadSafeDataBuffer>> filePathsOrDataBuffers;
+    };
+
+    bool populateBlobsForFileWriting(const Vector<String>& blobURLs, Vector<BlobForFileWriting>&);
 
     HashMap<String, RefPtr<BlobData>> m_blobs;
 };

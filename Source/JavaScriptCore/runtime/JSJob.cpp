@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
 #include "config.h"
 #include "JSJob.h"
 
+#include "CatchScope.h"
 #include "Error.h"
 #include "Exception.h"
 #include "JSCInlines.h"
@@ -70,8 +71,13 @@ void JSJobMicrotask::run(ExecState* exec)
     ASSERT(handlerCallType != CallType::None);
 
     MarkedArgumentBuffer handlerArguments;
-    for (unsigned index = 0, length = m_arguments->length(); index < length; ++index)
-        handlerArguments.append(m_arguments->JSArray::get(exec, index));
+    for (unsigned index = 0, length = m_arguments->length(); index < length; ++index) {
+        JSValue arg = m_arguments->JSArray::get(exec, index);
+        CLEAR_AND_RETURN_IF_EXCEPTION(scope, handlerArguments.overflowCheckNotNeeded());
+        handlerArguments.append(arg);
+    }
+    if (UNLIKELY(handlerArguments.hasOverflowed()))
+        return;
     profiledCall(exec, ProfilingReason::Microtask, m_job.get(), handlerCallType, handlerCallData, jsUndefined(), handlerArguments);
     scope.clearException();
 }

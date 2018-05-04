@@ -37,12 +37,12 @@
 #include "AudioSession.h"
 #include "FloatConversion.h"
 #include "Logging.h"
-#include "Page.h"
 #include "RuntimeApplicationChecks.h"
-#include "SoftLinking.h"
 #include <AudioToolbox/AudioServices.h>
+#include <pal/spi/cocoa/AudioToolboxSPI.h>
 #include <wtf/HashSet.h>
 #include <wtf/NeverDestroyed.h>
+#include <wtf/SoftLinking.h>
 
 SOFT_LINK_FRAMEWORK(AudioToolbox)
 SOFT_LINK(AudioToolbox, AudioComponentFindNext, AudioComponent, (AudioComponent inComponent, const AudioComponentDescription *inDesc), (inComponent, inDesc))

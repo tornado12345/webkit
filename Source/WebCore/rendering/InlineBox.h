@@ -18,12 +18,12 @@
  *
  */
 
-#ifndef InlineBox_h
-#define InlineBox_h
+#pragma once
 
 #include "RenderBoxModelObject.h"
 #include "RenderText.h"
 #include "TextFlags.h"
+#include <wtf/IsoMalloc.h>
 #include <wtf/TypeCasts.h>
 
 namespace WebCore {
@@ -35,7 +35,7 @@ class RootInlineBox;
 // InlineBox represents a rectangle that occurs on a line.  It corresponds to
 // some RenderObject (i.e., it represents a portion of that RenderObject).
 class InlineBox {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_ISO_ALLOCATED(InlineBox);
 public:
     virtual ~InlineBox();
 
@@ -77,8 +77,8 @@ public:
     void showNodeTreeForThis() const;
     void showLineTreeForThis() const;
     
-    virtual void showLineTreeAndMark(const InlineBox* markedBox, int depth) const;
-    virtual void showLineBox(bool mark, int depth) const;
+    virtual void outputLineTreeAndMark(WTF::TextStream&, const InlineBox* markedBox, int depth) const;
+    virtual void outputLineBox(WTF::TextStream&, bool mark, int depth) const;
     virtual const char* boxName() const;
 #endif
 
@@ -255,11 +255,11 @@ public:
         return nullptr;
     }
 
-    FloatPoint locationIncludingFlipping();
-    void flipForWritingMode(FloatRect&);
-    FloatPoint flipForWritingMode(const FloatPoint&);
-    void flipForWritingMode(LayoutRect&);
-    LayoutPoint flipForWritingMode(const LayoutPoint&);
+    FloatPoint locationIncludingFlipping() const;
+    void flipForWritingMode(FloatRect&) const;
+    FloatPoint flipForWritingMode(const FloatPoint&) const;
+    void flipForWritingMode(LayoutRect&) const;
+    LayoutPoint flipForWritingMode(const LayoutPoint&) const;
 
     bool knownToHaveNoOverflow() const { return m_bitfields.knownToHaveNoOverflow(); }
     void clearKnownToHaveNoOverflow();
@@ -280,17 +280,21 @@ public:
     }
     float expansion() const { return m_expansion; }
 
-private:
-    InlineBox* m_next; // The next element on the same line as us.
-    InlineBox* m_prev; // The previous element on the same line as us.
+    void setHasHyphen(bool hasHyphen) { m_bitfields.setHasEllipsisBoxOrHyphen(hasHyphen); }
+    void setCanHaveLeadingExpansion(bool canHaveLeadingExpansion) { m_bitfields.setHasSelectedChildrenOrCanHaveLeadingExpansion(canHaveLeadingExpansion); }
+    void setCanHaveTrailingExpansion(bool canHaveTrailingExpansion) { m_bitfields.setCanHaveTrailingExpansion(canHaveTrailingExpansion); }
+    void setForceTrailingExpansion() { m_bitfields.setForceTrailingExpansion(true); }
+    void setForceLeadingExpansion() { m_bitfields.setForceLeadingExpansion(true); }
 
-    InlineFlowBox* m_parent; // The box that contains us.
+private:
+    InlineBox* m_next { nullptr }; // The next element on the same line as us.
+    InlineBox* m_prev { nullptr }; // The previous element on the same line as us.
+
+    InlineFlowBox* m_parent { nullptr }; // The box that contains us.
 
     RenderObject& m_renderer;
 
-public:
-    FloatPoint m_topLeft;
-    float m_logicalWidth;
+    float m_expansion { 0 };
 
 #define ADD_BOOLEAN_BITFIELD(name, Name) \
     private:\
@@ -368,22 +372,11 @@ public:
     };
 #undef ADD_BOOLEAN_BITFIELD
 
-private:
-    float m_expansion;
     InlineBoxBitfields m_bitfields;
 
 protected:
     explicit InlineBox(RenderObject& renderer)
-        : m_next(nullptr)
-        , m_prev(nullptr)
-        , m_parent(nullptr)
-        , m_renderer(renderer)
-        , m_logicalWidth(0)
-        , m_expansion(0)
-#if !ASSERT_WITH_SECURITY_IMPLICATION_DISABLED
-        , m_deletionSentinel(deletionSentinelNotDeletedValue)
-        , m_hasBadParent(false)
-#endif
+        : m_renderer(renderer)
     {
     }
 
@@ -392,14 +385,9 @@ protected:
         , m_prev(prev)
         , m_parent(parent)
         , m_renderer(renderer)
+        , m_bitfields(firstLine, constructed, dirty, extracted, isHorizontal)
         , m_topLeft(topLeft)
         , m_logicalWidth(logicalWidth)
-        , m_expansion(0)
-        , m_bitfields(firstLine, constructed, dirty, extracted, isHorizontal)
-#if !ASSERT_WITH_SECURITY_IMPLICATION_DISABLED
-        , m_deletionSentinel(deletionSentinelNotDeletedValue)
-        , m_hasBadParent(false)
-#endif
     {
     }
 
@@ -413,25 +401,26 @@ protected:
 
     // For InlineTextBox
     bool hasHyphen() const { return m_bitfields.hasEllipsisBoxOrHyphen(); }
-    void setHasHyphen(bool hasHyphen) { m_bitfields.setHasEllipsisBoxOrHyphen(hasHyphen); }    
     bool canHaveLeadingExpansion() const { return m_bitfields.hasSelectedChildrenOrCanHaveLeadingExpansion(); }
-    void setCanHaveLeadingExpansion(bool canHaveLeadingExpansion) { m_bitfields.setHasSelectedChildrenOrCanHaveLeadingExpansion(canHaveLeadingExpansion); }
     bool canHaveTrailingExpansion() const { return m_bitfields.canHaveTrailingExpansion(); }
-    void setCanHaveTrailingExpansion(bool canHaveTrailingExpansion) { m_bitfields.setCanHaveTrailingExpansion(canHaveTrailingExpansion); }
-    void setForceTrailingExpansion() { m_bitfields.setForceTrailingExpansion(true); }
     bool forceTrailingExpansion() const { return m_bitfields.forceTrailingExpansion(); }
-    void setForceLeadingExpansion() { m_bitfields.setForceLeadingExpansion(true); }
     bool forceLeadingExpansion() const { return m_bitfields.forceLeadingExpansion(); }
     
     // For InlineFlowBox and InlineTextBox
     bool extracted() const { return m_bitfields.extracted(); }
 
+protected:
+    FloatPoint m_topLeft;
+    float m_logicalWidth { 0 };
+
 #if !ASSERT_WITH_SECURITY_IMPLICATION_DISABLED
 private:
-    static const unsigned deletionSentinelNotDeletedValue = 0xF0F0F0F0U;
-    static const unsigned deletionSentinelDeletedValue = 0xF0DEADF0U;
-    unsigned m_deletionSentinel;
-    bool m_hasBadParent;
+    static constexpr unsigned deletionSentinelNotDeletedValue = 0xF0F0F0F0U;
+    static constexpr unsigned deletionSentinelDeletedValue = 0xF0DEADF0U;
+    unsigned m_deletionSentinel { deletionSentinelNotDeletedValue };
+    bool m_hasBadParent { false };
+protected:
+    bool m_isEverInChildList { true };
 #endif
 };
 
@@ -455,9 +444,7 @@ SPECIALIZE_TYPE_TRAITS_BEGIN(WebCore::ToValueTypeName) \
 SPECIALIZE_TYPE_TRAITS_END()
 
 #if ENABLE(TREE_DEBUGGING)
-// Outside the WebCore namespace for ease of invocation from gdb.
+// Outside the WebCore namespace for ease of invocation from the debugger.
 void showNodeTree(const WebCore::InlineBox*);
 void showLineTree(const WebCore::InlineBox*);
 #endif
-
-#endif // InlineBox_h

@@ -25,6 +25,7 @@
 
 #include "config.h"
 #include "WKContentObservation.h"
+#include "WKContentObservationInternal.h"
 
 #if PLATFORM(IOS)
 
@@ -37,7 +38,6 @@ WKContentChange _WKContentChange                    = WKContentNoChange;
 bool            _WKObservingContentChanges          = false;
 bool            _WKObservingIndeterminateChanges    = false;
 
-using namespace WTF;
 
 bool WKObservingContentChanges(void)
 {

@@ -26,14 +26,17 @@
 #include "RenderSVGResource.h"
 #include "RenderSVGText.h"
 #include "SVGAltGlyphElement.h"
-#include "SVGLengthList.h"
+#include "SVGLengthListValues.h"
 #include "SVGNames.h"
-#include "SVGNumberList.h"
+#include "SVGNumberListValues.h"
 #include "SVGTRefElement.h"
 #include "SVGTSpanElement.h"
 #include "SVGTextElement.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(SVGTextPositioningElement);
 
 // Animated property definitions
 DEFINE_ANIMATED_LENGTH_LIST(SVGTextPositioningElement, SVGNames::xAttr, X, x)
@@ -60,7 +63,7 @@ SVGTextPositioningElement::SVGTextPositioningElement(const QualifiedName& tagNam
 void SVGTextPositioningElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
 {
     if (name == SVGNames::xAttr) {
-        SVGLengthList newList;
+        SVGLengthListValues newList;
         newList.parse(value, LengthModeWidth);
         detachAnimatedXListWrappers(newList.size());
         setXBaseValue(newList);
@@ -68,7 +71,7 @@ void SVGTextPositioningElement::parseAttribute(const QualifiedName& name, const 
     }
 
     if (name == SVGNames::yAttr) {
-        SVGLengthList newList;
+        SVGLengthListValues newList;
         newList.parse(value, LengthModeHeight);
         detachAnimatedYListWrappers(newList.size());
         setYBaseValue(newList);
@@ -76,7 +79,7 @@ void SVGTextPositioningElement::parseAttribute(const QualifiedName& name, const 
     }
 
     if (name == SVGNames::dxAttr) {
-        SVGLengthList newList;
+        SVGLengthListValues newList;
         newList.parse(value, LengthModeWidth);
         detachAnimatedDxListWrappers(newList.size());
         setDxBaseValue(newList);
@@ -84,7 +87,7 @@ void SVGTextPositioningElement::parseAttribute(const QualifiedName& name, const 
     }
 
     if (name == SVGNames::dyAttr) {
-        SVGLengthList newList;
+        SVGLengthListValues newList;
         newList.parse(value, LengthModeHeight);
         detachAnimatedDyListWrappers(newList.size());
         setDyBaseValue(newList);
@@ -92,7 +95,7 @@ void SVGTextPositioningElement::parseAttribute(const QualifiedName& name, const 
     }
 
     if (name == SVGNames::rotateAttr) {
-        SVGNumberList newList;
+        SVGNumberListValues newList;
         newList.parse(value);
         detachAnimatedRotateListWrappers(newList.size());
         setRotateBaseValue(newList);

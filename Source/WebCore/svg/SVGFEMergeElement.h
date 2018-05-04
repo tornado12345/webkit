@@ -18,15 +18,14 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGFEMergeElement_h
-#define SVGFEMergeElement_h
+#pragma once
 
-#include "FEMerge.h"
 #include "SVGFilterPrimitiveStandardAttributes.h"
 
 namespace WebCore {
 
 class SVGFEMergeElement final : public SVGFilterPrimitiveStandardAttributes {
+    WTF_MAKE_ISO_ALLOCATED(SVGFEMergeElement);
 public:
     static Ref<SVGFEMergeElement> create(const QualifiedName&, Document&);
 
@@ -37,5 +36,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif

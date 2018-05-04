@@ -27,14 +27,14 @@
 
 #if ENABLE(APPLE_PAY)
 
+#include "ApplePayPaymentMethod.h"
 #include "Event.h"
-#include "PaymentMethod.h"
 
 namespace WebCore {
 
 class PaymentMethod;
 
-class ApplePayPaymentMethodSelectedEvent final : public Event {
+class ApplePayPaymentMethodSelectedEvent : public Event {
 public:
     static Ref<ApplePayPaymentMethodSelectedEvent> create(const AtomicString& type, const PaymentMethod& paymentMethod)
     {
@@ -43,15 +43,16 @@ public:
 
     virtual ~ApplePayPaymentMethodSelectedEvent();
 
-    const PaymentMethod& paymentMethod() { return m_paymentMethod; }
+    const ApplePayPaymentMethod& paymentMethod() { return m_paymentMethod; }
 
-private:
+protected:
     ApplePayPaymentMethodSelectedEvent(const AtomicString& type, const PaymentMethod&);
 
     // Event.
     EventInterface eventInterface() const override;
 
-    const PaymentMethod m_paymentMethod;
+private:
+    const ApplePayPaymentMethod m_paymentMethod;
 };
 
 }

@@ -36,7 +36,6 @@
 #include "FileError.h"
 #include "FileReaderLoader.h"
 #include "FileReaderLoaderClient.h"
-#include <chrono>
 
 namespace JSC {
 class ArrayBuffer;
@@ -45,7 +44,6 @@ class ArrayBuffer;
 namespace WebCore {
 
 class Blob;
-class ScriptExecutionContext;
 
 class FileReader final : public RefCounted<FileReader>, public ActiveDOMObject, public EventTargetWithInlineData, private FileReaderLoaderClient {
 public:
@@ -70,8 +68,7 @@ public:
     ReadyState readyState() const { return m_state; }
     RefPtr<FileError> error() { return m_error; }
     FileReaderLoader::ReadType readType() const { return m_readType; }
-    RefPtr<JSC::ArrayBuffer> arrayBufferResult() const;
-    String stringResult();
+    std::optional<Variant<String, RefPtr<JSC::ArrayBuffer>>> result() const;
 
     using RefCounted::ref;
     using RefCounted::deref;
@@ -104,7 +101,7 @@ private:
     String m_encoding;
     std::unique_ptr<FileReaderLoader> m_loader;
     RefPtr<FileError> m_error;
-    std::chrono::steady_clock::time_point m_lastProgressNotificationTime;
+    MonotonicTime m_lastProgressNotificationTime { MonotonicTime::nan() };
 };
 
 } // namespace WebCore

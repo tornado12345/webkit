@@ -23,10 +23,9 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef StyleRelations_h
-#define StyleRelations_h
+#pragma once
 
-#include <wtf/Vector.h>
+#include <wtf/Forward.h>
 
 namespace WebCore {
 
@@ -45,9 +44,13 @@ struct Relation {
         AffectedByFocusWithin,
         AffectedByHover,
         AffectedByPreviousSibling,
+        DescendantsAffectedByPreviousSibling,
         // For AffectsNextSibling 'value' tells how many element siblings to mark starting with 'element'.
         AffectsNextSibling,
+        ChildrenAffectedByForwardPositionalRules,
+        DescendantsAffectedByForwardPositionalRules,
         ChildrenAffectedByBackwardPositionalRules,
+        DescendantsAffectedByBackwardPositionalRules,
         ChildrenAffectedByFirstChildRules,
         ChildrenAffectedByPropertyBasedBackwardPositionalRules,
         ChildrenAffectedByLastChildRules,
@@ -74,5 +77,3 @@ void commitRelations(std::unique_ptr<Relations>, Update&);
 
 }
 }
-
-#endif

@@ -28,8 +28,13 @@
 
 #import "CFURLExtras.h"
 #import "URLParser.h"
+#import "WebCoreNSURLExtras.h"
 #import <wtf/ObjcRuntimeExtras.h>
 #import <wtf/text/CString.h>
+
+@interface NSString (WebCoreNSURLExtras)
+- (BOOL)_web_looksLikeIPAddress;
+@end
 
 namespace WebCore {
 
@@ -43,11 +48,8 @@ URL::URL(NSURL *url)
     // FIXME: Why is it OK to ignore base URL here?
     CString urlBytes;
     getURLBytes(reinterpret_cast<CFURLRef>(url), urlBytes);
-    if (URLParser::enabled()) {
-        URLParser parser(urlBytes.data());
-        *this = parser.result();
-    } else
-        parse(urlBytes.data());
+    URLParser parser(urlBytes.data());
+    *this = parser.result();
 }
 
 URL::operator NSURL *() const
@@ -60,7 +62,7 @@ URL::operator NSURL *() const
 RetainPtr<CFURLRef> URL::createCFURL() const
 {
     if (isNull())
-        return 0;
+        return nullptr;
 
     if (isEmpty()) {
         // We use the toll-free bridge between NSURL and CFURL to create a CFURLRef supporting both empty and null values.
@@ -77,6 +79,9 @@ RetainPtr<CFURLRef> URL::createCFURL() const
     return createCFURLFromBuffer(buffer.data(), buffer.size());
 }
 
-
+bool URL::hostIsIPAddress(const String& host)
+{
+    return [host _web_looksLikeIPAddress];
+}
 
 }

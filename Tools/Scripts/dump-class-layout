@@ -23,16 +23,19 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
 # THE POSSIBILITY OF SUCH DAMAGE.
 
+import re
 import sys
 import getopt
 import argparse
 import os
-import subprocess;
+import subprocess
+from sets import Set
 
 
 framework = "WebCore"
 build_directory = ""
 config = "Release"
+arch = None
 
 def webkit_build_dir():
     scriptpath = os.path.dirname(os.path.realpath(__file__))
@@ -53,13 +56,10 @@ def import_lldb():
         print "Failed to import {} from {}".format(LLDB_MODULE_NAME, lldb_framework_path)
         sys.exit(1)
 
-def find_build_directory():
-    return
-
-
 def verify_type(target, type):
     typename = type.GetName()
-    (end_offset, padding) = verify_type_recursive(target, type, None, 0, 0, 0)
+    seenOffset = Set()
+    (end_offset, padding) = verify_type_recursive(target, type, None, 0, 0, 0, seenOffset)
     byte_size = type.GetByteSize()
     print 'Total byte size: %u' % (byte_size)
     print 'Total pad bytes: %u' % (padding)
@@ -67,7 +67,7 @@ def verify_type(target, type):
         print 'Padding percentage: %2.2f %%' % ((float(padding) / float(byte_size)) * 100.0)
     print
 
-def verify_type_recursive(target, type, member_name, depth, base_offset, padding):
+def verify_type_recursive(target, type, member_name, depth, base_offset, padding, seenOffset):
     prev_end_offset = base_offset
     typename = type.GetName()
     byte_size = type.GetByteSize()
@@ -87,6 +87,11 @@ def verify_type_recursive(target, type, member_name, depth, base_offset, padding
             member_total_offset = member_offset + base_offset
             member_byte_size = member_type.GetByteSize()
             member_is_class_or_struct = False
+
+            if (member_offset, member_name) in seenOffset:
+                continue
+            seenOffset.add((member_offset, member_name))
+
             if member_type_class == lldb.eTypeClassStruct or member_type_class == lldb.eTypeClassClass:
                 member_is_class_or_struct = True
             if member_idx == 0 and member_offset == target.GetAddressByteSize() and type.IsPolymorphicClass():
@@ -100,7 +105,7 @@ def verify_type_recursive(target, type, member_name, depth, base_offset, padding
                     print '%+4u <%3u> %s<PADDING>' % (prev_end_offset, member_padding, '    ' * (depth + 1))
 
             if member_is_class_or_struct:
-                (prev_end_offset, padding) = verify_type_recursive(target, member_canonical_type, member_name, depth + 1, member_total_offset, padding)
+                (prev_end_offset, padding) = verify_type_recursive(target, member_canonical_type, member_name, depth + 1, member_total_offset, padding, seenOffset)
             else:
                 prev_end_offset = member_total_offset + member_byte_size
                 member_typename = member_type.GetName()
@@ -122,22 +127,42 @@ def verify_type_recursive(target, type, member_name, depth, base_offset, padding
 
     return (prev_end_offset, padding)
 
-def dump_class(framework, classname):
+def get_first_file_architecture(framework_path):
+    p = re.compile('shared library +(\w+)$')
+    file_result = subprocess.check_output(["file", framework_path]).split('\n')
+    arches = []
+    for line in file_result:
+        match = p.search(line)
+        if match:
+            arches.append(match.group(1));
+
+    if len(arches) > 1:
+        print 'Found architectures %s, using %s' % (arches, arches[0])
+
+    if len(arches) > 0:
+        return arches[0]
+    
+    return lldb.LLDB_ARCH_DEFAULT
+
+def dump_class(framework_path, classname, architecture):
     debugger = lldb.SBDebugger.Create()
-    debugger.SetAsync (False)
-    target = debugger.CreateTargetWithFileAndArch(framework, lldb.LLDB_ARCH_DEFAULT)
+    debugger.SetAsync(False)
+    if not architecture:
+        architecture = get_first_file_architecture(framework_path)
+
+    target = debugger.CreateTargetWithFileAndArch(framework_path, architecture)
     if not target:
-        print "Failed to make target for " + framework;
+        print "Failed to make target for " + framework_path;
         sys.exit(1)
 
     module = target.GetModuleAtIndex(0)
     if not module:
-        print "Failed to get first module in " + framework;
+        print "Failed to get first module in " + framework_path;
         sys.exit(1)
 
     types = module.FindTypes(classname)
     if types.GetSize():
-        print 'Found %u types matching "%s" in "%s"' % (len(types), classname, module.file)
+        print 'Found %u types matching "%s" in "%s" for %s' % (len(types), classname, module.file, architecture)
         for type in types:
             verify_type(target, type)
     else:
@@ -158,6 +183,9 @@ def main():
     parser.add_argument('-c', '--configuration', dest='config', action='store',
         help='Configuration (Debug or Release)')
 
+    parser.add_argument('-a', '--architecture', dest='arch', action='store',
+        help='Architecture (i386, x86_64, armv7, armv7s, arm64). Uses the first architecture listed by \'file\' by default')
+
     args = parser.parse_args()
     build_dir = webkit_build_dir()
 
@@ -169,7 +197,7 @@ def main():
 
     target_path = os.path.join(build_dir, args.config, args.framework + ".framework", args.framework);
     import_lldb()
-    dump_class(target_path, args.classname)
+    dump_class(target_path, args.classname, args.arch)
 
 if __name__ == "__main__":
     main()

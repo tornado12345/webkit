@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2005, 2007, Google Inc. All rights reserved.
- * Copyright (C) 2005-2009, 2011, 2015-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2005-2017 Apple Inc. All rights reserved.
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -27,7 +27,6 @@
 #include "FastMalloc.h"
 
 #include "CheckedArithmetic.h"
-#include "CurrentTime.h"
 #include <limits>
 #include <string.h>
 #include <wtf/DataLog.h>
@@ -45,6 +44,35 @@
 #endif
 
 namespace WTF {
+
+#if !defined(NDEBUG)
+namespace {
+// We do not use std::numeric_limits<size_t>::max() here due to the edge case in VC++.
+// https://bugs.webkit.org/show_bug.cgi?id=173720
+static size_t maxSingleAllocationSize = SIZE_MAX;
+};
+
+void fastSetMaxSingleAllocationSize(size_t size)
+{
+    maxSingleAllocationSize = size;
+}
+
+#define ASSERT_IS_WITHIN_LIMIT(size) do { \
+        size_t size__ = (size); \
+        ASSERT_WITH_MESSAGE((size__) <= maxSingleAllocationSize, "Requested size (%zu) exceeds max single allocation size set for testing (%zu)", (size__), maxSingleAllocationSize); \
+    } while (false)
+
+#define FAIL_IF_EXCEEDS_LIMIT(size) do { \
+        if (UNLIKELY((size) > maxSingleAllocationSize)) \
+            return nullptr; \
+    } while (false)
+
+#else // !defined(NDEBUG)
+
+#define ASSERT_IS_WITHIN_LIMIT(size)
+#define FAIL_IF_EXCEEDS_LIMIT(size)
+
+#endif // !defined(NDEBUG)
 
 void* fastZeroedMalloc(size_t n) 
 {
@@ -74,6 +102,8 @@ TryMallocReturnValue tryFastZeroedMalloc(size_t n)
 
 #if defined(USE_SYSTEM_MALLOC) && USE_SYSTEM_MALLOC
 
+#include <wtf/OSAllocator.h>
+
 #if OS(WINDOWS)
 #include <malloc.h>
 #endif
@@ -98,11 +128,16 @@ size_t fastMallocGoodSize(size_t bytes)
 
 void* fastAlignedMalloc(size_t alignment, size_t size) 
 {
-    return _aligned_malloc(size, alignment);
+    ASSERT_IS_WITHIN_LIMIT(size);
+    void* p = _aligned_malloc(size, alignment);
+    if (UNLIKELY(!p))
+        CRASH();
+    return p;
 }
 
 void* tryFastAlignedMalloc(size_t alignment, size_t size) 
 {
+    FAIL_IF_EXCEEDS_LIMIT(size);
     return _aligned_malloc(size, alignment);
 }
 
@@ -115,13 +150,17 @@ void fastAlignedFree(void* p)
 
 void* fastAlignedMalloc(size_t alignment, size_t size) 
 {
+    ASSERT_IS_WITHIN_LIMIT(size);
     void* p = nullptr;
     posix_memalign(&p, alignment, size);
+    if (UNLIKELY(!p))
+        CRASH();
     return p;
 }
 
 void* tryFastAlignedMalloc(size_t alignment, size_t size) 
 {
+    FAIL_IF_EXCEEDS_LIMIT(size);
     void* p = nullptr;
     posix_memalign(&p, alignment, size);
     return p;
@@ -136,11 +175,13 @@ void fastAlignedFree(void* p)
 
 TryMallocReturnValue tryFastMalloc(size_t n) 
 {
+    FAIL_IF_EXCEEDS_LIMIT(n);
     return malloc(n);
 }
 
 void* fastMalloc(size_t n) 
 {
+    ASSERT_IS_WITHIN_LIMIT(n);
     void* result = malloc(n);
     if (!result)
         CRASH();
@@ -150,11 +191,13 @@ void* fastMalloc(size_t n)
 
 TryMallocReturnValue tryFastCalloc(size_t n_elements, size_t element_size)
 {
+    FAIL_IF_EXCEEDS_LIMIT(n_elements * element_size);
     return calloc(n_elements, element_size);
 }
 
 void* fastCalloc(size_t n_elements, size_t element_size)
 {
+    ASSERT_IS_WITHIN_LIMIT(n_elements * element_size);
     void* result = calloc(n_elements, element_size);
     if (!result)
         CRASH();
@@ -169,6 +212,7 @@ void fastFree(void* p)
 
 void* fastRealloc(void* p, size_t n)
 {
+    ASSERT_IS_WITHIN_LIMIT(n);
     void* result = realloc(p, n);
     if (!result)
         CRASH();
@@ -196,6 +240,16 @@ size_t fastMallocSize(const void* p)
 #endif
 }
 
+void fastCommitAlignedMemory(void* ptr, size_t size)
+{
+    OSAllocator::commit(ptr, size, true, false);
+}
+
+void fastDecommitAlignedMemory(void* ptr, size_t size)
+{
+    OSAllocator::decommit(ptr, size);
+}
+
 } // namespace WTF
 
 #else // defined(USE_SYSTEM_MALLOC) && USE_SYSTEM_MALLOC
@@ -211,11 +265,13 @@ bool isFastMallocEnabled()
 
 void* fastMalloc(size_t size)
 {
+    ASSERT_IS_WITHIN_LIMIT(size);
     return bmalloc::api::malloc(size);
 }
 
 void* fastCalloc(size_t numElements, size_t elementSize)
 {
+    ASSERT_IS_WITHIN_LIMIT(numElements * elementSize);
     Checked<size_t> checkedSize = elementSize;
     checkedSize *= numElements;
     void* result = fastZeroedMalloc(checkedSize.unsafeGet());
@@ -226,6 +282,7 @@ void* fastCalloc(size_t numElements, size_t elementSize)
 
 void* fastRealloc(void* object, size_t size)
 {
+    ASSERT_IS_WITHIN_LIMIT(size);
     return bmalloc::api::realloc(object, size);
 }
 
@@ -249,11 +306,13 @@ size_t fastMallocGoodSize(size_t size)
 
 void* fastAlignedMalloc(size_t alignment, size_t size) 
 {
+    ASSERT_IS_WITHIN_LIMIT(size);
     return bmalloc::api::memalign(alignment, size);
 }
 
 void* tryFastAlignedMalloc(size_t alignment, size_t size) 
 {
+    FAIL_IF_EXCEEDS_LIMIT(size);
     return bmalloc::api::tryMemalign(alignment, size);
 }
 
@@ -264,11 +323,13 @@ void fastAlignedFree(void* p)
 
 TryMallocReturnValue tryFastMalloc(size_t size)
 {
+    FAIL_IF_EXCEEDS_LIMIT(size);
     return bmalloc::api::tryMalloc(size);
 }
     
 TryMallocReturnValue tryFastCalloc(size_t numElements, size_t elementSize)
 {
+    FAIL_IF_EXCEEDS_LIMIT(numElements * elementSize);
     Checked<size_t, RecordOverflow> checkedSize = elementSize;
     checkedSize *= numElements;
     if (checkedSize.hasOverflowed())
@@ -310,6 +371,16 @@ FastMallocStatistics fastMallocStatistics()
 
 #endif // OS(WINDOWS)
     return statistics;
+}
+
+void fastCommitAlignedMemory(void* ptr, size_t size)
+{
+    bmalloc::api::commitAlignedPhysical(ptr, size);
+}
+
+void fastDecommitAlignedMemory(void* ptr, size_t size)
+{
+    bmalloc::api::decommitAlignedPhysical(ptr, size);
 }
 
 } // namespace WTF

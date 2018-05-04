@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004, 2006, 2007, 2008, 2009, 2010, 2011, 2012 Apple Inc. All rights reserved.
+ * Copyright (C) 2004-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,57 +28,37 @@
 
 #import "AuthenticationChallenge.h"
 #import "AuthenticationMac.h"
-#import "CFNetworkSPI.h"
+#import "CachedResourceLoader.h"
 #import "CookieStorage.h"
 #import "CredentialStorage.h"
-#import "CachedResourceLoader.h"
 #import "FormDataStreamMac.h"
 #import "Frame.h"
 #import "FrameLoader.h"
 #import "HTTPHeaderNames.h"
 #import "Logging.h"
 #import "MIMETypeRegistry.h"
-#import "NSURLConnectionSPI.h"
 #import "NetworkStorageSession.h"
 #import "NetworkingContext.h"
-#import "Page.h"
 #import "ResourceError.h"
 #import "ResourceResponse.h"
 #import "SharedBuffer.h"
 #import "SubresourceLoader.h"
-#import "WebCoreResourceHandleAsDelegate.h"
-#import "WebCoreResourceHandleAsOperationQueueDelegate.h"
 #import "SynchronousLoaderClient.h"
-#import "WebCoreSystemInterface.h"
+#import "WebCoreResourceHandleAsOperationQueueDelegate.h"
 #import "WebCoreURLResponse.h"
+#import <pal/spi/cf/CFNetworkSPI.h>
+#import <pal/spi/cocoa/NSURLConnectionSPI.h>
 #import <wtf/BlockObjCExceptions.h>
+#import <wtf/CompletionHandler.h>
+#import <wtf/ProcessPrivilege.h>
 #import <wtf/Ref.h>
 #import <wtf/SchedulePair.h>
 #import <wtf/text/Base64.h>
 #import <wtf/text/CString.h>
 
-#if USE(CFURLCONNECTION)
-#if USE(APPLE_INTERNAL_SDK)
-#import <CFNetwork/CFURLConnectionPriv.h>
-#endif
-typedef struct _CFURLConnection* CFURLConnectionRef;
-extern "C" {
-CFDictionaryRef _CFURLConnectionCopyTimingData(CFURLConnectionRef);
-}
-#endif // USE(CFURLCONNECTION)
-
 #if PLATFORM(IOS)
-#import "CFNetworkSPI.h"
 #import "RuntimeApplicationChecks.h"
 #import "WebCoreThreadRun.h"
-
-@interface NSURLRequest ()
-- (CFURLRequestRef) _CFURLRequest;
-@end
-#endif
-
-#if USE(QUICK_LOOK)
-#import "QuickLook.h"
 #endif
 
 using namespace WebCore;
@@ -88,8 +68,6 @@ using namespace WebCore;
 @end
 
 namespace WebCore {
-    
-#if !USE(CFURLCONNECTION)
     
 static void applyBasicAuthorizationHeader(ResourceRequest& request, const Credential& credential)
 {
@@ -124,18 +102,54 @@ ResourceHandle::~ResourceHandle()
 #if PLATFORM(IOS)
 static bool synchronousWillSendRequestEnabled()
 {
-    static bool disabled = [[NSUserDefaults standardUserDefaults] boolForKey:@"WebKitDisableSynchronousWillSendRequestPreferenceKey"];
+    static bool disabled = [[NSUserDefaults standardUserDefaults] boolForKey:@"WebKitDisableSynchronousWillSendRequestPreferenceKey"] || IOSApplication::isIBooks();
     return !disabled;
 }
 #endif
 
-#if !PLATFORM(IOS)
-void ResourceHandle::createNSURLConnection(id delegate, bool shouldUseCredentialStorage, bool shouldContentSniff, SchedulingBehavior schedulingBehavior)
+#if PLATFORM(COCOA)
+void ResourceHandle::applySniffingPoliciesAndStoragePartitionIfNeeded(NSURLRequest*& nsRequest, bool shouldContentSniff, bool shouldContentEncodingSniff)
+{
+#if !PLATFORM(MAC)
+    UNUSED_PARAM(shouldContentEncodingSniff);
+#elif __MAC_OS_X_VERSION_MIN_REQUIRED < 101302
+    shouldContentEncodingSniff = true;
+#endif
+#if HAVE(CFNETWORK_STORAGE_PARTITIONING)
+    String storagePartition = d->m_context->storageSession().cookieStoragePartition(firstRequest(), std::nullopt, std::nullopt);
 #else
-void ResourceHandle::createNSURLConnection(id delegate, bool shouldUseCredentialStorage, bool shouldContentSniff, SchedulingBehavior schedulingBehavior, NSDictionary *connectionProperties)
+    String storagePartition;
+#endif
+    if (shouldContentSniff && shouldContentEncodingSniff && storagePartition.isEmpty())
+        return;
+
+    auto mutableRequest = adoptNS([nsRequest mutableCopy]);
+
+#if PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 101302
+    if (!shouldContentEncodingSniff)
+        [mutableRequest _setProperty:@(YES) forKey:(NSString *)kCFURLRequestContentDecoderSkipURLCheck];
+#endif
+
+    if (!shouldContentSniff)
+        [mutableRequest _setProperty:@(NO) forKey:(NSString *)_kCFURLConnectionPropertyShouldSniff];
+
+#if HAVE(CFNETWORK_STORAGE_PARTITIONING)
+    if (!storagePartition.isEmpty())
+        [mutableRequest _setProperty:storagePartition forKey:@"__STORAGE_PARTITION_IDENTIFIER"];
+#endif
+
+    nsRequest = mutableRequest.autorelease();
+
+}
+#endif
+
+#if !PLATFORM(IOS)
+void ResourceHandle::createNSURLConnection(id delegate, bool shouldUseCredentialStorage, bool shouldContentSniff, bool shouldContentEncodingSniff, SchedulingBehavior schedulingBehavior)
+#else
+void ResourceHandle::createNSURLConnection(id delegate, bool shouldUseCredentialStorage, bool shouldContentSniff, bool shouldContentEncodingSniff, SchedulingBehavior schedulingBehavior, NSDictionary *connectionProperties)
 #endif
 {
-#if ENABLE(WEB_TIMING) && !HAVE(TIMINGDATAOPTIONS)
+#if !HAVE(TIMINGDATAOPTIONS)
     setCollectsTimingData();
 #endif
 
@@ -151,12 +165,12 @@ void ResourceHandle::createNSURLConnection(id delegate, bool shouldUseCredential
         if (d->m_user.isEmpty() && d->m_pass.isEmpty()) {
             // <rdar://problem/7174050> - For URLs that match the paths of those previously challenged for HTTP Basic authentication, 
             // try and reuse the credential preemptively, as allowed by RFC 2617.
-            d->m_initialCredential = d->m_context->storageSession().credentialStorage().get(firstRequest().url());
+            d->m_initialCredential = d->m_context->storageSession().credentialStorage().get(firstRequest().cachePartition(), firstRequest().url());
         } else {
             // If there is already a protection space known for the URL, update stored credentials before sending a request.
             // This makes it possible to implement logout by sending an XMLHttpRequest with known incorrect credentials, and aborting it immediately
             // (so that an authentication dialog doesn't pop up).
-            d->m_context->storageSession().credentialStorage().set(Credential(d->m_user, d->m_pass, CredentialPersistenceNone), firstRequest().url());
+            d->m_context->storageSession().credentialStorage().set(firstRequest().cachePartition(), Credential(d->m_user, d->m_pass, CredentialPersistenceNone), firstRequest().url());
         }
     }
         
@@ -166,23 +180,10 @@ void ResourceHandle::createNSURLConnection(id delegate, bool shouldUseCredential
     }
 
     NSURLRequest *nsRequest = firstRequest().nsURLRequest(UpdateHTTPBody);
-    if (!shouldContentSniff) {
-        NSMutableURLRequest *mutableRequest = [[nsRequest mutableCopy] autorelease];
-        [mutableRequest _setProperty:@(NO) forKey:(NSString *)_kCFURLConnectionPropertyShouldSniff];
-        nsRequest = mutableRequest;
-    }
-
-#if HAVE(CFNETWORK_STORAGE_PARTITIONING)
-    String storagePartition = cookieStoragePartition(firstRequest());
-    if (!storagePartition.isEmpty()) {
-        NSMutableURLRequest *mutableRequest = [[nsRequest mutableCopy] autorelease];
-        [mutableRequest _setProperty:storagePartition forKey:@"__STORAGE_PARTITION_IDENTIFIER"];
-        nsRequest = mutableRequest;
-    }
-#endif
+    applySniffingPoliciesAndStoragePartitionIfNeeded(nsRequest, shouldContentSniff, shouldContentEncodingSniff);
 
     if (d->m_storageSession)
-        nsRequest = [wkCopyRequestWithStorageSession(d->m_storageSession.get(), nsRequest) autorelease];
+        nsRequest = [copyRequestWithStorageSession(d->m_storageSession.get(), nsRequest) autorelease];
 
     ASSERT([NSURLConnection instancesRespondToSelector:@selector(_initWithRequest:delegate:usesCache:maxContentLength:startImmediately:connectionProperties:)]);
 
@@ -254,48 +255,23 @@ bool ResourceHandle::start()
 
 #if !PLATFORM(IOS)
     createNSURLConnection(
-        ResourceHandle::makeDelegate(shouldUseCredentialStorage),
+        ResourceHandle::makeDelegate(shouldUseCredentialStorage, nullptr),
         shouldUseCredentialStorage,
         d->m_shouldContentSniff || d->m_context->localFileContentSniffingEnabled(),
+        d->m_shouldContentEncodingSniff,
         schedulingBehavior);
 #else
     createNSURLConnection(
-        ResourceHandle::makeDelegate(shouldUseCredentialStorage),
+        ResourceHandle::makeDelegate(shouldUseCredentialStorage, nullptr),
         shouldUseCredentialStorage,
         d->m_shouldContentSniff || d->m_context->localFileContentSniffingEnabled(),
+        d->m_shouldContentEncodingSniff,
         schedulingBehavior,
         (NSDictionary *)client()->connectionProperties(this).get());
 #endif
 
-    bool scheduled = false;
-    if (SchedulePairHashSet* scheduledPairs = d->m_context->scheduledRunLoopPairs()) {
-        SchedulePairHashSet::iterator end = scheduledPairs->end();
-        for (SchedulePairHashSet::iterator it = scheduledPairs->begin(); it != end; ++it) {
-            if (NSRunLoop *runLoop = (*it)->nsRunLoop()) {
-                [connection() scheduleInRunLoop:runLoop forMode:(NSString *)(*it)->mode()];
-                scheduled = true;
-            }
-        }
-    }
-
-    if (d->m_usesAsyncCallbacks) {
-        ASSERT(!scheduled);
-        [connection() setDelegateQueue:operationQueueForAsyncClients()];
-        scheduled = true;
-    }
-#if PLATFORM(IOS)
-    else {
-        [connection() scheduleInRunLoop:WebThreadNSRunLoop() forMode:NSDefaultRunLoopMode];
-        scheduled = true;
-    }
-#endif
-
-    // Start the connection if we did schedule with at least one runloop.
-    // We can't start the connection until we have one runloop scheduled.
-    if (scheduled)
-        [connection() start];
-    else
-        d->m_startWhenScheduled = true;
+    [connection() setDelegateQueue:operationQueueForAsyncClients()];
+    [connection() start];
 
     LOG(Network, "Handle %p starting connection %p for %@", this, connection(), firstRequest().nsURLRequest(DoNotUpdateHTTPBody));
     
@@ -328,18 +304,12 @@ void ResourceHandle::platformSetDefersLoading(bool defers)
         [d->m_connection setDefersCallbacks:defers];
 }
 
-#if !USE(CFURLCONNECTION)
-
 void ResourceHandle::schedule(SchedulePair& pair)
 {
     NSRunLoop *runLoop = pair.nsRunLoop();
     if (!runLoop)
         return;
     [d->m_connection.get() scheduleInRunLoop:runLoop forMode:(NSString *)pair.mode()];
-    if (d->m_startWhenScheduled) {
-        [d->m_connection.get() start];
-        d->m_startWhenScheduled = false;
-    }
 }
 
 void ResourceHandle::unschedule(SchedulePair& pair)
@@ -348,20 +318,15 @@ void ResourceHandle::unschedule(SchedulePair& pair)
         [d->m_connection.get() unscheduleFromRunLoop:runLoop forMode:(NSString *)pair.mode()];
 }
 
-#endif
-
-id ResourceHandle::makeDelegate(bool shouldUseCredentialStorage)
+id ResourceHandle::makeDelegate(bool shouldUseCredentialStorage, MessageQueue<Function<void()>>* queue)
 {
     ASSERT(!d->m_delegate);
 
     id <NSURLConnectionDelegate> delegate;
-    if (d->m_usesAsyncCallbacks) {
-        if (shouldUseCredentialStorage)
-            delegate = [[WebCoreResourceHandleAsOperationQueueDelegate alloc] initWithHandle:this];
-        else
-            delegate = [[WebCoreResourceHandleWithCredentialStorageAsOperationQueueDelegate alloc] initWithHandle:this];
-    } else
-        delegate = [[WebCoreResourceHandleAsDelegate alloc] initWithHandle:this];
+    if (shouldUseCredentialStorage)
+        delegate = [[WebCoreResourceHandleAsOperationQueueDelegate alloc] initWithHandle:this messageQueue:queue];
+    else
+        delegate = [[WebCoreResourceHandleWithCredentialStorageAsOperationQueueDelegate alloc] initWithHandle:this messageQueue:queue];
 
     d->m_delegate = delegate;
     [delegate release];
@@ -372,7 +337,7 @@ id ResourceHandle::makeDelegate(bool shouldUseCredentialStorage)
 id ResourceHandle::delegate()
 {
     if (!d->m_delegate)
-        return makeDelegate(false);
+        return makeDelegate(false, nullptr);
     return d->m_delegate.get();
 }
 
@@ -394,16 +359,19 @@ CFStringRef ResourceHandle::synchronousLoadRunLoopMode()
     return CFSTR("WebCoreSynchronousLoaderRunLoopMode");
 }
 
-void ResourceHandle::platformLoadResourceSynchronously(NetworkingContext* context, const ResourceRequest& request, StoredCredentials storedCredentials, ResourceError& error, ResourceResponse& response, Vector<char>& data)
+void ResourceHandle::platformLoadResourceSynchronously(NetworkingContext* context, const ResourceRequest& request, StoredCredentialsPolicy storedCredentialsPolicy, ResourceError& error, ResourceResponse& response, Vector<char>& data)
 {
-    LOG(Network, "ResourceHandle::platformLoadResourceSynchronously:%@ allowStoredCredentials:%u", request.nsURLRequest(DoNotUpdateHTTPBody), storedCredentials);
+    LOG(Network, "ResourceHandle::platformLoadResourceSynchronously:%@ storedCredentialsPolicy:%u", request.nsURLRequest(DoNotUpdateHTTPBody), static_cast<unsigned>(storedCredentialsPolicy));
 
     ASSERT(!request.isEmpty());
     
     SynchronousLoaderClient client;
-    client.setAllowStoredCredentials(storedCredentials == AllowStoredCredentials);
+    client.setAllowStoredCredentials(storedCredentialsPolicy == StoredCredentialsPolicy::Use);
 
-    RefPtr<ResourceHandle> handle = adoptRef(new ResourceHandle(context, request, &client, false /*defersLoading*/, true /*shouldContentSniff*/));
+    bool defersLoading = false;
+    bool shouldContentSniff = true;
+    bool shouldContentEncodingSniff = true;
+    RefPtr<ResourceHandle> handle = adoptRef(new ResourceHandle(context, request, &client, defersLoading, shouldContentSniff, shouldContentEncodingSniff));
 
     handle->d->m_storageSession = context->storageSession().platformSession();
 
@@ -412,27 +380,31 @@ void ResourceHandle::platformLoadResourceSynchronously(NetworkingContext* contex
         return;
     }
 
-    bool shouldUseCredentialStorage = storedCredentials == AllowStoredCredentials;
+    bool shouldUseCredentialStorage = storedCredentialsPolicy == StoredCredentialsPolicy::Use;
 #if !PLATFORM(IOS)
     handle->createNSURLConnection(
-        handle->makeDelegate(shouldUseCredentialStorage),
+        handle->makeDelegate(shouldUseCredentialStorage, &client.messageQueue()),
         shouldUseCredentialStorage,
         handle->shouldContentSniff() || context->localFileContentSniffingEnabled(),
+        handle->shouldContentEncodingSniff(),
         SchedulingBehavior::Synchronous);
 #else
     handle->createNSURLConnection(
-        handle->makeDelegate(shouldUseCredentialStorage), // A synchronous request cannot turn into a download, so there is no need to proxy the delegate.
+        handle->makeDelegate(shouldUseCredentialStorage, &client.messageQueue()), // A synchronous request cannot turn into a download, so there is no need to proxy the delegate.
         shouldUseCredentialStorage,
         handle->shouldContentSniff() || (context && context->localFileContentSniffingEnabled()),
+        handle->shouldContentEncodingSniff(),
         SchedulingBehavior::Synchronous,
         (NSDictionary *)handle->client()->connectionProperties(handle.get()).get());
 #endif
 
-    [handle->connection() scheduleInRunLoop:[NSRunLoop currentRunLoop] forMode:(NSString *)synchronousLoadRunLoopMode()];
+    [handle->connection() setDelegateQueue:operationQueueForAsyncClients()];
     [handle->connection() start];
     
-    while (!client.isDone())
-        [[NSRunLoop currentRunLoop] runMode:(NSString *)synchronousLoadRunLoopMode() beforeDate:[NSDate distantFuture]];
+    do {
+        if (auto task = client.messageQueue().waitForMessage())
+            (*task)();
+    } while (!client.messageQueue().killed());
 
     error = client.error();
     
@@ -444,7 +416,7 @@ void ResourceHandle::platformLoadResourceSynchronously(NetworkingContext* contex
     data.swap(client.mutableData());
 }
 
-ResourceRequest ResourceHandle::willSendRequest(ResourceRequest&& request, ResourceResponse&& redirectResponse)
+void ResourceHandle::willSendRequest(ResourceRequest&& request, ResourceResponse&& redirectResponse, CompletionHandler<void(ResourceRequest&&)>&& completionHandler)
 {
     ASSERT(!redirectResponse.isNull());
 
@@ -482,7 +454,7 @@ ResourceRequest ResourceHandle::willSendRequest(ResourceRequest&& request, Resou
         // Only consider applying authentication credentials if this is actually a redirect and the redirect
         // URL didn't include credentials of its own.
         if (d->m_user.isEmpty() && d->m_pass.isEmpty() && !redirectResponse.isNull()) {
-            Credential credential = d->m_context->storageSession().credentialStorage().get(request.url());
+            Credential credential = d->m_context->storageSession().credentialStorage().get(request.cachePartition(), request.url());
             if (!credential.isEmpty()) {
                 d->m_initialCredential = credential;
                 
@@ -492,41 +464,12 @@ ResourceRequest ResourceHandle::willSendRequest(ResourceRequest&& request, Resou
         }
     }
 
-    if (d->m_usesAsyncCallbacks) {
-        client()->willSendRequestAsync(this, WTFMove(request), WTFMove(redirectResponse));
-        return { };
-    }
-
-    Ref<ResourceHandle> protectedThis(*this);
-    auto newRequest = client()->willSendRequest(this, WTFMove(request), WTFMove(redirectResponse));
-
-    // Client call may not preserve the session, especially if the request is sent over IPC.
-    if (!newRequest.isNull())
-        newRequest.setStorageSession(d->m_storageSession.get());
-    return newRequest;
-}
-
-void ResourceHandle::continueWillSendRequest(ResourceRequest&& newRequest)
-{
-    ASSERT(d->m_usesAsyncCallbacks);
-
-    // Client call may not preserve the session, especially if the request is sent over IPC.
-    if (!newRequest.isNull())
-        newRequest.setStorageSession(d->m_storageSession.get());
-    [(id)delegate() continueWillSendRequest:newRequest.nsURLRequest(UpdateHTTPBody)];
-}
-
-void ResourceHandle::continueDidReceiveResponse()
-{
-    ASSERT(d->m_usesAsyncCallbacks);
-
-    [delegate() continueDidReceiveResponse];
-}
-
-bool ResourceHandle::shouldUseCredentialStorage()
-{
-    ASSERT(!d->m_usesAsyncCallbacks);
-    return client() && client()->shouldUseCredentialStorage(this);
+    client()->willSendRequestAsync(this, WTFMove(request), WTFMove(redirectResponse), [this, protectedThis = makeRef(*this), completionHandler = WTFMove(completionHandler)] (ResourceRequest&& request) mutable {
+        // Client call may not preserve the session, especially if the request is sent over IPC.
+        if (!request.isNull())
+            request.setStorageSession(d->m_storageSession.get());
+        completionHandler(WTFMove(request));
+    });
 }
 
 void ResourceHandle::didReceiveAuthenticationChallenge(const AuthenticationChallenge& challenge)
@@ -553,6 +496,7 @@ void ResourceHandle::didReceiveAuthenticationChallenge(const AuthenticationChall
     // the keychain.  CFNetwork used to handle this until WebCore was changed to always
     // return NO to -connectionShouldUseCredentialStorage: for <rdar://problem/7704943>.
     if (!challenge.previousFailureCount() && challenge.protectionSpace().isProxy()) {
+        RELEASE_ASSERT(hasProcessPrivilege(ProcessPrivilege::CanAccessCredentials));
         NSURLAuthenticationChallenge *macChallenge = mac(challenge);
         if (NSURLCredential *credential = [[NSURLCredentialStorage sharedCredentialStorage] defaultCredentialForProtectionSpace:[macChallenge protectionSpace]]) {
             [challenge.sender() useCredential:credential forAuthenticationChallenge:macChallenge];
@@ -601,16 +545,16 @@ bool ResourceHandle::tryHandlePasswordBasedAuthentication(const AuthenticationCh
             // The stored credential wasn't accepted, stop using it.
             // There is a race condition here, since a different credential might have already been stored by another ResourceHandle,
             // but the observable effect should be very minor, if any.
-            d->m_context->storageSession().credentialStorage().remove(challenge.protectionSpace());
+            d->m_context->storageSession().credentialStorage().remove(d->m_partition, challenge.protectionSpace());
         }
 
         if (!challenge.previousFailureCount()) {
-            Credential credential = d->m_context->storageSession().credentialStorage().get(challenge.protectionSpace());
+            Credential credential = d->m_context->storageSession().credentialStorage().get(d->m_partition, challenge.protectionSpace());
             if (!credential.isEmpty() && credential != d->m_initialCredential) {
                 ASSERT(credential.persistence() == CredentialPersistenceNone);
                 if (challenge.failureResponse().httpStatusCode() == 401) {
                     // Store the credential back, possibly adding it as a default for this directory.
-                    d->m_context->storageSession().credentialStorage().set(credential, challenge.protectionSpace(), challenge.failureResponse().url());
+                    d->m_context->storageSession().credentialStorage().set(d->m_partition, credential, challenge.protectionSpace(), challenge.failureResponse().url());
                 }
                 [challenge.sender() useCredential:credential.nsCredential() forAuthenticationChallenge:mac(challenge)];
                 return true;
@@ -622,25 +566,12 @@ bool ResourceHandle::tryHandlePasswordBasedAuthentication(const AuthenticationCh
 }
 
 #if USE(PROTECTION_SPACE_AUTH_CALLBACK)
-bool ResourceHandle::canAuthenticateAgainstProtectionSpace(const ProtectionSpace& protectionSpace)
+void ResourceHandle::canAuthenticateAgainstProtectionSpace(const ProtectionSpace& protectionSpace, CompletionHandler<void(bool)>&& completionHandler)
 {
-    ResourceHandleClient* client = this->client();
-    if (d->m_usesAsyncCallbacks) {
-        if (client)
-            client->canAuthenticateAgainstProtectionSpaceAsync(this, protectionSpace);
-        else
-            continueCanAuthenticateAgainstProtectionSpace(false);
-        return false; // Ignored by caller.
-    }
-
-    return client && client->canAuthenticateAgainstProtectionSpace(this, protectionSpace);
-}
-
-void ResourceHandle::continueCanAuthenticateAgainstProtectionSpace(bool result)
-{
-    ASSERT(d->m_usesAsyncCallbacks);
-
-    [(id)delegate() continueCanAuthenticateAgainstProtectionSpace:result];
+    if (ResourceHandleClient* client = this->client())
+        client->canAuthenticateAgainstProtectionSpaceAsync(this, protectionSpace, WTFMove(completionHandler));
+    else
+        completionHandler(false);
 }
 #endif
 
@@ -665,7 +596,7 @@ void ResourceHandle::receivedCredential(const AuthenticationChallenge& challenge
         URL urlToStore;
         if (challenge.failureResponse().httpStatusCode() == 401)
             urlToStore = challenge.failureResponse().url();
-        d->m_context->storageSession().credentialStorage().set(webCredential, ProtectionSpace([d->m_currentMacChallenge protectionSpace]), urlToStore);
+        d->m_context->storageSession().credentialStorage().set(d->m_partition, webCredential, ProtectionSpace([d->m_currentMacChallenge protectionSpace]), urlToStore);
         [[d->m_currentMacChallenge sender] useCredential:webCredential.nsCredential() forAuthenticationChallenge:d->m_currentMacChallenge];
     } else
         [[d->m_currentMacChallenge sender] useCredential:credential.nsCredential() forAuthenticationChallenge:d->m_currentMacChallenge];
@@ -723,34 +654,9 @@ void ResourceHandle::receivedChallengeRejection(const AuthenticationChallenge& c
     clearAuthentication();
 }
 
-void ResourceHandle::continueWillCacheResponse(NSCachedURLResponse *response)
-{
-    ASSERT(d->m_usesAsyncCallbacks);
-
-    [(id)delegate() continueWillCacheResponse:response];
-}
-    
-#endif // !USE(CFURLCONNECTION)
-    
-#if ENABLE(WEB_TIMING)
-
-#if USE(CFURLCONNECTION)
-    
-void ResourceHandle::getConnectionTimingData(CFURLConnectionRef connection, NetworkLoadTiming& timing)
-{
-    copyTimingData((__bridge NSDictionary*)adoptCF(_CFURLConnectionCopyTimingData(connection)).get(), timing);
-}
-    
-#else
-    
-void ResourceHandle::getConnectionTimingData(NSURLConnection *connection, NetworkLoadTiming& timing)
+void ResourceHandle::getConnectionTimingData(NSURLConnection *connection, NetworkLoadMetrics& timing)
 {
     copyTimingData([connection _timingData], timing);
 }
-    
-#endif
-    
-#endif // ENABLE(WEB_TIMING)
 
 } // namespace WebCore
-

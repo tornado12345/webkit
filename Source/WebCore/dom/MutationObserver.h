@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2011 Google Inc. All rights reserved.
+ * Copyright (C) 2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -33,6 +34,7 @@
 #include "ExceptionOr.h"
 #include <wtf/Forward.h>
 #include <wtf/HashSet.h>
+#include <wtf/IsoMalloc.h>
 #include <wtf/Vector.h>
 
 namespace WebCore {
@@ -46,7 +48,8 @@ class Node;
 using MutationObserverOptions = unsigned char;
 using MutationRecordDeliveryOptions = unsigned char;
 
-class MutationObserver : public RefCounted<MutationObserver> {
+class MutationObserver final : public RefCounted<MutationObserver> {
+    WTF_MAKE_ISO_ALLOCATED(MutationObserver);
     friend class MutationObserverMicrotask;
 public:
     enum MutationType {
@@ -73,12 +76,12 @@ public:
 
     struct Init {
         bool childList;
-        Optional<bool> attributes;
-        Optional<bool> characterData;
+        std::optional<bool> attributes;
+        std::optional<bool> characterData;
         bool subtree;
-        Optional<bool> attributeOldValue;
-        Optional<bool> characterDataOldValue;
-        Optional<Vector<String>> attributeFilter;
+        std::optional<bool> attributeOldValue;
+        std::optional<bool> characterDataOldValue;
+        std::optional<Vector<String>> attributeFilter;
     };
 
     ExceptionOr<void> observe(Node&, const Init&);
@@ -92,6 +95,8 @@ public:
     bool canDeliver();
 
     HashSet<Node*> observedNodes() const;
+
+    MutationCallback& callback() const { return m_callback.get(); }
 
     static void enqueueSlotChangeEvent(HTMLSlotElement&);
 

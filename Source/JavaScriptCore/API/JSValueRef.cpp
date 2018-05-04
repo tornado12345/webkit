@@ -169,9 +169,10 @@ bool JSValueIsArray(JSContextRef ctx, JSValueRef value)
         return false;
     }
     ExecState* exec = toJS(ctx);
+    VM& vm = exec->vm();
     JSLockHolder locker(exec);
 
-    return toJS(exec, value).inherits(JSArray::info());
+    return toJS(exec, value).inherits<JSArray>(vm);
 }
 
 bool JSValueIsDate(JSContextRef ctx, JSValueRef value)
@@ -181,9 +182,10 @@ bool JSValueIsDate(JSContextRef ctx, JSValueRef value)
         return false;
     }
     ExecState* exec = toJS(ctx);
+    VM& vm = exec->vm();
     JSLockHolder locker(exec);
 
-    return toJS(exec, value).inherits(DateInstance::info());
+    return toJS(exec, value).inherits<DateInstance>(vm);
 }
 
 bool JSValueIsObjectOfClass(JSContextRef ctx, JSValueRef value, JSClassRef jsClass)
@@ -193,20 +195,21 @@ bool JSValueIsObjectOfClass(JSContextRef ctx, JSValueRef value, JSClassRef jsCla
         return false;
     }
     ExecState* exec = toJS(ctx);
+    VM& vm = exec->vm();
     JSLockHolder locker(exec);
 
     JSValue jsValue = toJS(exec, value);
     
     if (JSObject* o = jsValue.getObject()) {
-        if (o->inherits(JSProxy::info()))
+        if (o->inherits<JSProxy>(vm))
             o = jsCast<JSProxy*>(o)->target();
 
-        if (o->inherits(JSCallbackObject<JSGlobalObject>::info()))
+        if (o->inherits<JSCallbackObject<JSGlobalObject>>(vm))
             return jsCast<JSCallbackObject<JSGlobalObject>*>(o)->inherits(jsClass);
-        if (o->inherits(JSCallbackObject<JSDestructibleObject>::info()))
+        if (o->inherits<JSCallbackObject<JSDestructibleObject>>(vm))
             return jsCast<JSCallbackObject<JSDestructibleObject>*>(o)->inherits(jsClass);
 #if JSC_OBJC_API_ENABLED
-        if (o->inherits(JSCallbackObject<JSAPIWrapperObject>::info()))
+        if (o->inherits<JSCallbackObject<JSAPIWrapperObject>>(vm))
             return jsCast<JSCallbackObject<JSAPIWrapperObject>*>(o)->inherits(jsClass);
 #endif
     }
@@ -220,13 +223,15 @@ bool JSValueIsEqual(JSContextRef ctx, JSValueRef a, JSValueRef b, JSValueRef* ex
         return false;
     }
     ExecState* exec = toJS(ctx);
-    JSLockHolder locker(exec);
+    VM& vm = exec->vm();
+    JSLockHolder locker(vm);
+    auto scope = DECLARE_CATCH_SCOPE(vm);
 
     JSValue jsA = toJS(exec, a);
     JSValue jsB = toJS(exec, b);
 
     bool result = JSValue::equal(exec, jsA, jsB); // false if an exception is thrown
-    handleExceptionIfNeeded(exec, exception);
+    handleExceptionIfNeeded(scope, exec, exception);
     
     return result;
 }
@@ -253,7 +258,9 @@ bool JSValueIsInstanceOfConstructor(JSContextRef ctx, JSValueRef value, JSObject
         return false;
     }
     ExecState* exec = toJS(ctx);
-    JSLockHolder locker(exec);
+    VM& vm = exec->vm();
+    JSLockHolder locker(vm);
+    auto scope = DECLARE_CATCH_SCOPE(vm);
 
     JSValue jsValue = toJS(exec, value);
 
@@ -261,7 +268,7 @@ bool JSValueIsInstanceOfConstructor(JSContextRef ctx, JSValueRef value, JSObject
     if (!jsConstructor->structure()->typeInfo().implementsHasInstance())
         return false;
     bool result = jsConstructor->hasInstance(exec, jsValue); // false if an exception is thrown
-    handleExceptionIfNeeded(exec, exception);
+    handleExceptionIfNeeded(scope, exec, exception);
     return result;
 }
 
@@ -350,12 +357,15 @@ JSStringRef JSValueCreateJSONString(JSContextRef ctx, JSValueRef apiValue, unsig
         return 0;
     }
     ExecState* exec = toJS(ctx);
-    JSLockHolder locker(exec);
+    VM& vm = exec->vm();
+    JSLockHolder locker(vm);
+    auto scope = DECLARE_CATCH_SCOPE(vm);
+
     JSValue value = toJS(exec, apiValue);
     String result = JSONStringify(exec, value, indent);
     if (exception)
         *exception = 0;
-    if (handleExceptionIfNeeded(exec, exception) == ExceptionStatus::DidThrow)
+    if (handleExceptionIfNeeded(scope, exec, exception) == ExceptionStatus::DidThrow)
         return 0;
     return OpaqueJSString::create(result).leakRef();
 }
@@ -380,12 +390,14 @@ double JSValueToNumber(JSContextRef ctx, JSValueRef value, JSValueRef* exception
         return PNaN;
     }
     ExecState* exec = toJS(ctx);
-    JSLockHolder locker(exec);
+    VM& vm = exec->vm();
+    JSLockHolder locker(vm);
+    auto scope = DECLARE_CATCH_SCOPE(vm);
 
     JSValue jsValue = toJS(exec, value);
 
     double number = jsValue.toNumber(exec);
-    if (handleExceptionIfNeeded(exec, exception) == ExceptionStatus::DidThrow)
+    if (handleExceptionIfNeeded(scope, exec, exception) == ExceptionStatus::DidThrow)
         number = PNaN;
     return number;
 }
@@ -397,12 +409,14 @@ JSStringRef JSValueToStringCopy(JSContextRef ctx, JSValueRef value, JSValueRef* 
         return 0;
     }
     ExecState* exec = toJS(ctx);
-    JSLockHolder locker(exec);
+    VM& vm = exec->vm();
+    JSLockHolder locker(vm);
+    auto scope = DECLARE_CATCH_SCOPE(vm);
 
     JSValue jsValue = toJS(exec, value);
     
-    auto stringRef(OpaqueJSString::create(jsValue.toString(exec)->value(exec)));
-    if (handleExceptionIfNeeded(exec, exception) == ExceptionStatus::DidThrow)
+    auto stringRef(OpaqueJSString::create(jsValue.toWTFString(exec)));
+    if (handleExceptionIfNeeded(scope, exec, exception) == ExceptionStatus::DidThrow)
         stringRef = nullptr;
     return stringRef.leakRef();
 }
@@ -414,12 +428,14 @@ JSObjectRef JSValueToObject(JSContextRef ctx, JSValueRef value, JSValueRef* exce
         return 0;
     }
     ExecState* exec = toJS(ctx);
-    JSLockHolder locker(exec);
+    VM& vm = exec->vm();
+    JSLockHolder locker(vm);
+    auto scope = DECLARE_CATCH_SCOPE(vm);
 
     JSValue jsValue = toJS(exec, value);
     
     JSObjectRef objectRef = toRef(jsValue.toObject(exec));
-    if (handleExceptionIfNeeded(exec, exception) == ExceptionStatus::DidThrow)
+    if (handleExceptionIfNeeded(scope, exec, exception) == ExceptionStatus::DidThrow)
         objectRef = 0;
     return objectRef;
 }

@@ -27,18 +27,16 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import os
-import platform
-import sys
 
-from webkitpy.common.system import environment, executive, file_lock, filesystem, platforminfo, user, workspace
+from . import environment, executive, file_lock, filesystem, platforminfo, user, workspace
 
 
 class SystemHost(object):
     def __init__(self):
         self.executive = executive.Executive()
         self.filesystem = filesystem.FileSystem()
-        self.user = user.User()
-        self.platform = platforminfo.PlatformInfo(sys, platform, self.executive)
+        self.platform = platforminfo.PlatformInfo(executive=self.executive)
+        self.user = user.User(self.platform)
         self.workspace = workspace.Workspace(self.filesystem, self.executive)
 
     def copy_current_environment(self):
@@ -46,3 +44,6 @@ class SystemHost(object):
 
     def make_file_lock(self, path):
         return file_lock.FileLock(path)
+
+    def symbolicate_crash_log_if_needed(self, path):
+        return self.filesystem.read_text_file(path)

@@ -18,8 +18,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGGradientElement_h
-#define SVGGradientElement_h
+#pragma once
 
 #include "Gradient.h"
 #include "SVGAnimatedBoolean.h"
@@ -73,9 +72,8 @@ struct SVGPropertyTraits<SVGSpreadMethodType> {
     }
 };
 
-class SVGGradientElement : public SVGElement,
-                           public SVGURIReference,
-                           public SVGExternalResourcesRequired {
+class SVGGradientElement : public SVGElement, public SVGURIReference, public SVGExternalResourcesRequired {
+    WTF_MAKE_ISO_ALLOCATED(SVGGradientElement);
 public:
     enum {
         SVG_SPREADMETHOD_UNKNOWN = SVGSpreadMethodUnknown,
@@ -119,5 +117,3 @@ static bool isType(const WebCore::Node& node)
     return is<WebCore::SVGElement>(node) && isType(downcast<WebCore::SVGElement>(node));
 }
 SPECIALIZE_TYPE_TRAITS_END()
-
-#endif

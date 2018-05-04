@@ -30,14 +30,15 @@
 #include "IntRect.h"
 #include "ScrollTypes.h"
 #include "ScrollingCoordinator.h"
+#include "ScrollingStateNode.h"
 #include <wtf/RefCounted.h>
 #include <wtf/TypeCasts.h>
 
 namespace WebCore {
 
 class ScrollingStateFixedNode;
-class ScrollingStateNode;
 class ScrollingStateScrollingNode;
+class ScrollingTreeFrameScrollingNode;
 
 class ScrollingTreeNode : public RefCounted<ScrollingTreeNode> {
 public:
@@ -48,8 +49,8 @@ public:
     
     bool isFixedNode() const { return nodeType() == FixedNode; }
     bool isStickyNode() const { return nodeType() == StickyNode; }
-    bool isScrollingNode() const { return nodeType() == FrameScrollingNode || nodeType() == OverflowScrollingNode; }
-    bool isFrameScrollingNode() const { return nodeType() == FrameScrollingNode; }
+    bool isScrollingNode() const { return isFrameScrollingNode() || isOverflowScrollingNode(); }
+    bool isFrameScrollingNode() const { return nodeType() == MainFrameScrollingNode || nodeType() == SubframeScrollingNode; }
     bool isOverflowScrollingNode() const { return nodeType() == OverflowScrollingNode; }
 
     virtual void commitStateBeforeChildren(const ScrollingStateNode&) = 0;
@@ -60,17 +61,22 @@ public:
     ScrollingTreeNode* parent() const { return m_parent; }
     void setParent(ScrollingTreeNode* parent) { m_parent = parent; }
 
-    typedef Vector<RefPtr<ScrollingTreeNode>> ScrollingTreeChildrenVector;
-    ScrollingTreeChildrenVector* children() { return m_children.get(); }
-    
-    void appendChild(PassRefPtr<ScrollingTreeNode>);
-    void removeChild(ScrollingTreeNode*);
+    Vector<RefPtr<ScrollingTreeNode>>* children() { return m_children.get(); }
+
+    void appendChild(Ref<ScrollingTreeNode>&&);
+    void removeChild(ScrollingTreeNode&);
+
+    WEBCORE_EXPORT ScrollingTreeFrameScrollingNode* enclosingFrameNodeIncludingSelf();
+
+    WEBCORE_EXPORT void dump(WTF::TextStream&, ScrollingStateTreeAsTextBehavior) const;
 
 protected:
     ScrollingTreeNode(ScrollingTree&, ScrollingNodeType, ScrollingNodeID);
     ScrollingTree& scrollingTree() const { return m_scrollingTree; }
 
-    std::unique_ptr<ScrollingTreeChildrenVector> m_children;
+    std::unique_ptr<Vector<RefPtr<ScrollingTreeNode>>> m_children;
+
+    WEBCORE_EXPORT virtual void dumpProperties(WTF::TextStream&, ScrollingStateTreeAsTextBehavior) const;
 
 private:
     ScrollingTree& m_scrollingTree;

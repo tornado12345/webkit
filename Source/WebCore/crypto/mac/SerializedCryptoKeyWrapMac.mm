@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014, 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,9 +35,19 @@
 #include <wtf/text/Base64.h>
 #include <wtf/text/CString.h>
 #include <wtf/CryptographicUtilities.h>
+#include <wtf/ProcessPrivilege.h>
 #include <wtf/RetainPtr.h>
 
-#define USE_KEYCHAIN_ACCESS_CONTROL_LISTS (!PLATFORM(IOS))
+#if PLATFORM(IOS)
+#define USE_KEYCHAIN_ACCESS_CONTROL_LISTS 0
+#else
+#define USE_KEYCHAIN_ACCESS_CONTROL_LISTS 1
+#endif
+
+#if USE(KEYCHAIN_ACCESS_CONTROL_LISTS)
+#include <wtf/cf/TypeCastsCF.h>
+WTF_DECLARE_CF_TYPE_TRAIT(SecACL);
+#endif
 
 namespace WebCore {
 
@@ -71,6 +81,8 @@ static NSString* masterKeyAccountNameForCurrentApplication()
 
 static bool createAndStoreMasterKey(Vector<uint8_t>& masterKeyData)
 {
+    RELEASE_ASSERT(hasProcessPrivilege(ProcessPrivilege::CanAccessCredentials));
+
     masterKeyData.resize(masterKeySizeInBytes);
     int rc = CCRandomCopyBytes(kCCRandomDefault, masterKeyData.data(), masterKeyData.size());
     RELEASE_ASSERT(rc == kCCSuccess);
@@ -99,7 +111,7 @@ static bool createAndStoreMasterKey(Vector<uint8_t>& masterKeyData)
     RetainPtr<SecAccessRef> access = adoptCF(accessRef);
 
     RetainPtr<CFArrayRef> acls = adoptCF(SecAccessCopyMatchingACLList(accessRef, kSecACLAuthorizationExportClear));
-    SecACLRef acl = (SecACLRef)CFArrayGetValueAtIndex(acls.get(), 0);
+    SecACLRef acl = checked_cf_cast<SecACLRef>(CFArrayGetValueAtIndex(acls.get(), 0));
 
     SecTrustedApplicationRef trustedAppRef;
     status = SecTrustedApplicationCreateFromPath(0, &trustedAppRef);
@@ -142,6 +154,8 @@ static bool createAndStoreMasterKey(Vector<uint8_t>& masterKeyData)
 
 static bool findMasterKey(Vector<uint8_t>& masterKeyData)
 {
+    RELEASE_ASSERT(hasProcessPrivilege(ProcessPrivilege::CanAccessCredentials));
+
     NSDictionary *query = @{
         (id)kSecClass : (id)kSecClassGenericPassword,
         (id)kSecAttrAccount : masterKeyAccountNameForCurrentApplication(),
@@ -171,6 +185,8 @@ bool getDefaultWebCryptoMasterKey(Vector<uint8_t>& masterKey)
 
 bool deleteDefaultWebCryptoMasterKey()
 {
+    RELEASE_ASSERT(hasProcessPrivilege(ProcessPrivilege::CanAccessCredentials));
+
     NSDictionary *query = @{
         (id)kSecClass : (id)kSecClassGenericPassword,
         (id)kSecAttrAccount : masterKeyAccountNameForCurrentApplication(),
@@ -204,12 +220,15 @@ bool wrapSerializedCryptoKey(const Vector<uint8_t>& masterKey, const Vector<uint
     size_t tagLength = 16;
     uint8_t tag[tagLength];
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
     status = CCCryptorGCM(kCCEncrypt, kCCAlgorithmAES128, kek.data(), kek.size(),
         nullptr, 0, // iv
         nullptr, 0, // auth data
         key.data(), key.size(),
         encryptedKey.data(),
         tag, &tagLength);
+#pragma clang diagnostic pop
 
     if (status != kCCSuccess)
         return false;
@@ -270,12 +289,15 @@ bool unwrapSerializedCryptoKey(const Vector<uint8_t>& masterKey, const Vector<ui
     uint8_t actualTag[tagLength];
 
     key.resize(encryptedKey.size());
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
     status = CCCryptorGCM(kCCDecrypt, kCCAlgorithmAES128, kek.data(), kek.size(),
         nullptr, 0, // iv
         nullptr, 0, // auth data
         encryptedKey.data(), encryptedKey.size(),
         key.data(),
         actualTag, &tagLength);
+#pragma clang diagnostic pop
 
     if (status != kCCSuccess)
         return false;

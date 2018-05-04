@@ -81,8 +81,13 @@ EGLPlatformParameters OPENGL_NULL();
 
 EGLPlatformParameters OPENGLES();
 EGLPlatformParameters OPENGLES(EGLint major, EGLint minor);
+EGLPlatformParameters OPENGLES_NULL();
 
-} // namespace egl_platform
+EGLPlatformParameters OPENGL_OR_GLES(bool useNullDevice);
+
+EGLPlatformParameters VULKAN();
+
+}  // namespace egl_platform
 
 // ANGLE tests platforms
 PlatformParameters ES2_D3D9();
@@ -111,19 +116,19 @@ PlatformParameters ES3_D3D11();
 PlatformParameters ES3_D3D11_FL11_1();
 PlatformParameters ES3_D3D11_FL11_0();
 PlatformParameters ES3_D3D11_FL10_1();
-PlatformParameters ES3_D3D11_FL10_0();
+PlatformParameters ES31_D3D11();
+PlatformParameters ES31_D3D11_FL11_1();
+PlatformParameters ES31_D3D11_FL11_0();
 
 PlatformParameters ES3_D3D11_WARP();
 PlatformParameters ES3_D3D11_FL11_1_WARP();
 PlatformParameters ES3_D3D11_FL11_0_WARP();
 PlatformParameters ES3_D3D11_FL10_1_WARP();
-PlatformParameters ES3_D3D11_FL10_0_WARP();
 
 PlatformParameters ES3_D3D11_REFERENCE();
 PlatformParameters ES3_D3D11_FL11_1_REFERENCE();
 PlatformParameters ES3_D3D11_FL11_0_REFERENCE();
 PlatformParameters ES3_D3D11_FL10_1_REFERENCE();
-PlatformParameters ES3_D3D11_FL10_0_REFERENCE();
 
 PlatformParameters ES2_OPENGL();
 PlatformParameters ES2_OPENGL(EGLint major, EGLint minor);
@@ -139,6 +144,12 @@ PlatformParameters ES3_OPENGLES(EGLint major, EGLint minor);
 PlatformParameters ES31_OPENGLES();
 PlatformParameters ES31_OPENGLES(EGLint major, EGLint minor);
 
-} // namespace angle
+PlatformParameters ES2_NULL();
+PlatformParameters ES3_NULL();
+PlatformParameters ES31_NULL();
+
+PlatformParameters ES2_VULKAN();
+
+}  // namespace angle
 
 #endif // ANGLE_TEST_CONFIGS_H_

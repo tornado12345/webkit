@@ -26,8 +26,6 @@
 #include "config.h"
 #include "PageTransitionEvent.h"
 
-#include "EventNames.h"
-
 namespace WebCore {
 
 PageTransitionEvent::PageTransitionEvent(const AtomicString& type, bool persisted)
@@ -42,9 +40,7 @@ PageTransitionEvent::PageTransitionEvent(const AtomicString& type, const Init& i
 {
 }
 
-PageTransitionEvent::~PageTransitionEvent()
-{
-}
+PageTransitionEvent::~PageTransitionEvent() = default;
 
 EventInterface PageTransitionEvent::eventInterface() const
 {

@@ -13,21 +13,24 @@ if (window.testRunner)
 
 function onIframeLoaded() {
     iframeNavigator = iframe.contentWindow.navigator;
-    iframe.src = 'data:text/html,This frame should be visible when the test completes';
+    iframe.remove();
+    onIframeUnloaded();
 }
 
 function onIframeUnloaded() {
     var options = {audio: true, video: true};
-    iframeNavigator.webkitGetUserMedia(options, function (stream) {
-        testFailed('Success callback invoked unexpectedly');
-        finishJSTest();
-    }, function(e) {
-        testFailed('Error callback invoked unexpectedly');
-        finishJSTest();
-    });
+    iframeNavigator.mediaDevices.getUserMedia(options)
+        .then(stream => {
+            testFailed('Promise resolved unexpectedly.');
+            finishJSTest();
+        })
+        .catch(err => {
+            testPassed('Promise rejected as expected.');
+            finishJSTest();
+        });
 
     setTimeout(function() {
-        testPassed('No callbacks invoked');
+        testFailed('Timeout: promise resolve and reject functions not called.');
         finishJSTest();
     }, 100);
 }

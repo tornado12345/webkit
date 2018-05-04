@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,15 +28,16 @@
 
 #if ENABLE(LEGACY_ENCRYPTED_MEDIA) && ENABLE(MEDIA_SOURCE)
 
-#import "CDM.h"
 #import "CDMSessionAVContentKeySession.h"
 #import "CDMSessionAVStreamSession.h"
 #import "ContentType.h"
-#import "ExceptionCode.h"
+#import "LegacyCDM.h"
 #import "MediaPlayerPrivateMediaSourceAVFObjC.h"
-#import "WebCoreSystemInterface.h"
+#import <JavaScriptCore/RegularExpression.h>
 #import <wtf/NeverDestroyed.h>
-#import <yarr/RegularExpression.h>
+#import <wtf/text/StringView.h>
+
+#import "VideoToolboxSoftLink.h"
 
 using JSC::Yarr::RegularExpression;
 
@@ -44,7 +45,7 @@ namespace WebCore {
 
 static RegularExpression& validKeySystemRE()
 {
-    static NeverDestroyed<RegularExpression> keySystemRE("^com\\.apple\\.fps\\.[23]_\\d+(?:,\\d+)*$", TextCaseInsensitive);
+    static NeverDestroyed<RegularExpression> keySystemRE("^com\\.apple\\.fps\\.[23]_\\d+(?:,\\d+)*$", JSC::Yarr::TextCaseInsensitive);
     return keySystemRE;
 }
 
@@ -54,9 +55,18 @@ CDMPrivateMediaSourceAVFObjC::~CDMPrivateMediaSourceAVFObjC()
         session->invalidateCDM();
 }
 
+static bool queryDecoderAvailability()
+{
+    if (!canLoad_VideoToolbox_VTGetGVADecoderAvailability())
+        return false;
+    uint32_t totalInstanceCount = 0;
+    OSStatus status = VTGetGVADecoderAvailability(&totalInstanceCount, nullptr);
+    return status == noErr && totalInstanceCount;
+}
+
 bool CDMPrivateMediaSourceAVFObjC::supportsKeySystem(const String& keySystem)
 {
-    if (!wkQueryDecoderAvailability())
+    if (!queryDecoderAvailability())
         return false;
 
     if (!keySystem.isEmpty() && validKeySystemRE().match(keySystem) < 0)
@@ -82,7 +92,7 @@ bool CDMPrivateMediaSourceAVFObjC::supportsKeySystemAndMimeType(const String& ke
 
     MediaEngineSupportParameters parameters;
     parameters.isMediaSource = true;
-    parameters.type = mimeType;
+    parameters.type = ContentType(mimeType);
 
     return MediaPlayerPrivateMediaSourceAVFObjC::supportsType(parameters) != MediaPlayer::IsNotSupported;
 }
@@ -95,25 +105,23 @@ bool CDMPrivateMediaSourceAVFObjC::supportsMIMEType(const String& mimeType)
 
     MediaEngineSupportParameters parameters;
     parameters.isMediaSource = true;
-    parameters.type = mimeType;
+    parameters.type = ContentType(mimeType);
 
     return MediaPlayerPrivateMediaSourceAVFObjC::supportsType(parameters) != MediaPlayer::IsNotSupported;
 }
 
-std::unique_ptr<CDMSession> CDMPrivateMediaSourceAVFObjC::createSession(CDMSessionClient* client)
+std::unique_ptr<LegacyCDMSession> CDMPrivateMediaSourceAVFObjC::createSession(LegacyCDMSessionClient* client)
 {
-    String keySystem = m_cdm->keySystem();
+    String keySystem = m_cdm->keySystem(); // Local copy for StringView usage
+    StringView keySystemStringView { keySystem };
     ASSERT(validKeySystemRE().match(keySystem) >= 0);
 
-    Vector<String> protocolVersionsStrings;
-    keySystem.substring(16).split(',', false, protocolVersionsStrings);
-
     Vector<int> protocolVersions;
-    for (auto& protocolVersionString : protocolVersionsStrings)
+    for (StringView protocolVersionString : keySystemStringView.substring(16).split(','))
         protocolVersions.append(protocolVersionString.toInt());
 
     std::unique_ptr<CDMSessionMediaSourceAVFObjC> session;
-    if (keySystem.substring(14, 1).toInt() == 3 && CDMSessionAVContentKeySession::isAvailable())
+    if (keySystemStringView.substring(14, 1).toInt() == 3 && CDMSessionAVContentKeySession::isAvailable())
         session = std::make_unique<CDMSessionAVContentKeySession>(protocolVersions, *this, client);
     else
         session = std::make_unique<CDMSessionAVStreamSession>(protocolVersions, *this, client);

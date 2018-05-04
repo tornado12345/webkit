@@ -20,8 +20,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef CSSPropertyParser_h
-#define CSSPropertyParser_h
+#pragma once
 
 #include "CSSParserTokenRange.h"
 #include "StyleRule.h"
@@ -32,7 +31,8 @@ namespace WebCore {
 class CSSProperty;
 class CSSValue;
 class StylePropertyShorthand;
-
+class StyleSheetContents;
+    
 // Inputs: PropertyID, isImportant bool, CSSParserTokenRange.
 // Outputs: Vector of CSSProperties
 
@@ -47,8 +47,7 @@ public:
     static RefPtr<CSSValue> parseSingleValue(CSSPropertyID, const CSSParserTokenRange&, const CSSParserContext&);
 
 private:
-    CSSPropertyParser(const CSSParserTokenRange&, const CSSParserContext&,
-        Vector<CSSProperty, 256>*);
+    CSSPropertyParser(const CSSParserTokenRange&, const CSSParserContext&, Vector<CSSProperty, 256>*);
 
     // FIXME: Rename once the CSSParserValue-based parseValue is removed
     bool parseValueStart(CSSPropertyID, bool important);
@@ -81,6 +80,10 @@ private:
     bool consumeGridShorthand(bool important);
     bool consumeGridAreaShorthand(bool important);
 
+    bool consumePlaceContentShorthand(bool important);
+    bool consumePlaceItemsShorthand(bool important);
+    bool consumePlaceSelfShorthand(bool important);
+
     bool consumeFont(bool important);
     bool consumeFontVariantShorthand(bool important);
     bool consumeSystemFont(bool important);
@@ -101,13 +104,17 @@ private:
     // Inputs:
     CSSParserTokenRange m_range;
     const CSSParserContext& m_context;
+
     // Outputs:
     Vector<CSSProperty, 256>* m_parsedProperties;
 };
 
 CSSPropertyID cssPropertyID(StringView);
 CSSValueID cssValueKeywordID(StringView);
+bool isCustomPropertyName(const String&);
+
+#if PLATFORM(IOS)
+void cssPropertyNameIOSAliasing(const char* propertyName, const char*& propertyNameAlias, unsigned& newLength);
+#endif
 
 } // namespace WebCore
-
-#endif // CSSPropertyParser_h

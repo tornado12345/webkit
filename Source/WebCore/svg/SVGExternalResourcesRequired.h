@@ -18,8 +18,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGExternalResourcesRequired_h
-#define SVGExternalResourcesRequired_h
+#pragma once
 
 #include "QualifiedName.h"
 #include <wtf/HashSet.h>
@@ -35,7 +34,7 @@ class SVGElement;
 // FIXME: When implementing animVal support, make sure that animVal==baseVal for externalResourcesRequired
 class SVGExternalResourcesRequired {
 public:
-    virtual ~SVGExternalResourcesRequired() { }
+    virtual ~SVGExternalResourcesRequired() = default;
 
     void parseAttribute(const QualifiedName&, const AtomicString&);
 
@@ -60,5 +59,3 @@ protected:
 };
 
 } // namespace WebCore
-
-#endif

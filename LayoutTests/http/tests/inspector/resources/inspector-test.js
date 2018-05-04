@@ -88,17 +88,35 @@ function runTest()
         try {
             testFunction();
         } catch (e) {
-            // FIXME: the redirected console methods do not forward additional arguments.
-            console.error("Exception during test execution: " + e, e.stack || "(no stack trace)");
-            InspectorTest.completeTest();
+            // Using this instead of window.onerror will preserve the stack trace.
+            e.code = testFunction.toString();
+            InspectorTest.reportUncaughtException(e);
         }
     }
 
     let initializationCodeString = `(${runInitializationMethodsInFrontend.toString()})([${TestPage._initializers}]);`;
     let testFunctionCodeString = `(${runTestMethodInFrontend.toString()})(${testFunction.toString()});`;
 
-    testRunner.evaluateInWebInspector(initializationCodeString);
-    testRunner.evaluateInWebInspector(testFunctionCodeString);
+    TestPage.evaluateInWebInspector(initializationCodeString);
+    TestPage.evaluateInWebInspector(testFunctionCodeString);
+}
+
+function runTestHTTPS()
+{
+    if (window.testRunner) {
+        testRunner.dumpAsText();
+        testRunner.waitUntilDone();
+    }
+
+    let url = new URL(document.URL);
+    if (url.protocol !== "https:") {
+        url.protocol = "https:";
+        url.port = "8443";
+        window.location.href = url.toString();
+        return;
+    }
+
+    runTest();
 }
 
 TestPage.completeTest = function()
@@ -121,6 +139,20 @@ TestPage.debugLog = function(message)
     window.alert(message);
 }
 
+// Use this to dump evaluations that are sent from the TestPage to the InspectorTest page.
+TestPage.debug = function()
+{
+    this.dumpInspectorPageEvaluations = true;
+}
+
+TestPage.evaluateInWebInspector = function(code)
+{
+    if (this.dumpInspectorPageEvaluations)
+        this.debugLog(code);
+
+    testRunner.evaluateInWebInspector(code);
+}
+
 // Add and clear test output from the results window.
 TestPage.addResult = function(text)
 {
@@ -139,10 +171,12 @@ TestPage.addResult = function(text)
     this._resultElement.append(text, document.createElement("br"));
 }
 
+TestPage.log = TestPage.addResult;
+
 TestPage.dispatchEventToFrontend = function(eventName, data)
 {
     let dispatchEventCodeString = `InspectorTest.dispatchEventToListeners(${JSON.stringify(eventName)}, ${JSON.stringify(data)});`;
-    testRunner.evaluateInWebInspector(dispatchEventCodeString);
+    this.evaluateInWebInspector(dispatchEventCodeString);
 };
 
 TestPage.allowUncaughtExceptions = false;

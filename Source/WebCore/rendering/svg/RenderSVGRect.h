@@ -25,15 +25,15 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef RenderSVGRect_h
-#define RenderSVGRect_h
+#pragma once
 
-#include "RenderSVGPath.h"
+#include "RenderSVGShape.h"
 #include "SVGRectElement.h"
 
 namespace WebCore {
 
 class RenderSVGRect final : public RenderSVGShape {
+    WTF_MAKE_ISO_ALLOCATED(RenderSVGRect);
 public:
     RenderSVGRect(SVGRectElement&, RenderStyle&&);
     virtual ~RenderSVGRect();
@@ -59,6 +59,4 @@ private:
     bool m_usePathFallback;
 };
 
-}
-
-#endif
+} // namespace WebCore

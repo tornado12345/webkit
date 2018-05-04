@@ -32,8 +32,11 @@
 
 #include "MathMLNames.h"
 #include "RenderMathMLToken.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(MathMLTokenElement);
 
 using namespace MathMLNames;
 
@@ -77,15 +80,15 @@ bool MathMLTokenElement::childShouldCreateRenderer(const Node& child) const
     return isPhrasingContent(child) && StyledElement::childShouldCreateRenderer(child);
 }
 
-Optional<UChar32> MathMLTokenElement::convertToSingleCodePoint(StringView string)
+std::optional<UChar32> MathMLTokenElement::convertToSingleCodePoint(StringView string)
 {
     auto codePoints = stripLeadingAndTrailingWhitespace(string).codePoints();
     auto iterator = codePoints.begin();
     if (iterator == codePoints.end())
-        return Nullopt;
-    Optional<UChar32> character = *iterator;
+        return std::nullopt;
+    std::optional<UChar32> character = *iterator;
     ++iterator;
-    return iterator == codePoints.end() ? character : Nullopt;
+    return iterator == codePoints.end() ? character : std::nullopt;
 }
 
 }

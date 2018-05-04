@@ -28,16 +28,16 @@
 #import "Font.h"
 
 #import "Color.h"
-#import "CoreGraphicsSPI.h"
-#import "CoreTextSPI.h"
 #import "FloatRect.h"
 #import "FontCache.h"
 #import "FontCascade.h"
 #import "FontDescription.h"
 #import "OpenTypeCG.h"
 #import "SharedBuffer.h"
-#import "WebCoreSystemInterface.h"
+#import <CoreText/CoreText.h>
 #import <float.h>
+#import <pal/spi/cg/CoreGraphicsSPI.h>
+#import <pal/spi/cocoa/CoreTextSPI.h>
 #import <unicode/uchar.h>
 #import <wtf/Assertions.h>
 #import <wtf/RetainPtr.h>
@@ -45,10 +45,8 @@
 
 #if USE(APPKIT)
 #import <AppKit/AppKit.h>
-#import <ApplicationServices/ApplicationServices.h>
-#else
-#import <CoreText/CoreText.h>
 #endif
+
 
 #if USE(APPKIT)
 @interface NSFont (WebAppKitSecretAPI)
@@ -123,19 +121,12 @@ void Font::platformInit()
     m_syntheticBoldOffset = m_platformData.syntheticBold() ? 1.0f : 0.f;
 #endif
 
-#if PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED < 101100
-    // Work around <rdar://problem/19433490>
-    CGGlyph dummyGlyphs[] = {0, 0};
-    CGSize dummySize[] = { CGSizeMake(0, 0), CGSizeMake(0, 0) };
-    CTFontTransformGlyphs(m_platformData.ctFont(), dummyGlyphs, dummySize, 2, kCTFontTransformApplyPositioning | kCTFontTransformApplyShaping);
-#endif
-
     unsigned unitsPerEm = CTFontGetUnitsPerEm(m_platformData.font());
     float pointSize = m_platformData.size();
-    CGFloat capHeight = CTFontGetCapHeight(m_platformData.font());
-    CGFloat lineGap = CTFontGetLeading(m_platformData.font());
-    CGFloat ascent = m_platformData.size() ? CTFontGetAscent(m_platformData.font()) : 0;
-    CGFloat descent = m_platformData.size() ? CTFontGetDescent(m_platformData.font()) : 0;
+    CGFloat capHeight = pointSize ? CTFontGetCapHeight(m_platformData.font()) : 0;
+    CGFloat lineGap = pointSize ? CTFontGetLeading(m_platformData.font()) : 0;
+    CGFloat ascent = pointSize ? CTFontGetAscent(m_platformData.font()) : 0;
+    CGFloat descent = pointSize ? CTFontGetDescent(m_platformData.font()) : 0;
 
     // The Open Font Format describes the OS/2 USE_TYPO_METRICS flag as follows:
     // "If set, it is strongly recommended to use OS/2.sTypoAscender - OS/2.sTypoDescender+ OS/2.sTypoLineGap as a value for default line spacing for this font."
@@ -156,7 +147,7 @@ void Font::platformInit()
     // web standard. The AppKit adjustment of 20% is too big and is
     // incorrectly added to line spacing, so we use a 15% adjustment instead
     // and add it to the ascent.
-    if (!m_isCustomFont && needsAscentAdjustment(familyName.get()))
+    if (origin() == Origin::Local && needsAscentAdjustment(familyName.get()))
         ascent += std::round((ascent + descent) * 0.15f);
 #endif
 
@@ -183,7 +174,7 @@ void Font::platformInit()
     ascent = ceilf(ascent + adjustment);
     descent = ceilf(descent);
 
-    m_shouldNotBeUsedForArabic = fontFamilyShouldNotBeUsedForArabic(adoptCF(CTFontCopyFamilyName(m_platformData.font())).get());
+    m_shouldNotBeUsedForArabic = fontFamilyShouldNotBeUsedForArabic(familyName.get());
 #endif
 
     CGFloat xHeight = 0;
@@ -213,8 +204,7 @@ void Font::platformCharWidthInit()
 {
     m_avgCharWidth = 0;
     m_maxCharWidth = 0;
-    
-#if PLATFORM(MAC)
+
     auto os2Table = adoptCF(CTFontCopyTable(m_platformData.font(), kCTFontTableOS2, kCTFontTableOptionNoOptions));
     if (os2Table && CFDataGetLength(os2Table.get()) >= 4) {
         const UInt8* os2 = CFDataGetBytePtr(os2Table.get());
@@ -232,7 +222,6 @@ void Font::platformCharWidthInit()
         float diff = static_cast<float>(xMax - xMin);
         m_maxCharWidth = scaleEmToUnits(diff, m_fontMetrics.unitsPerEm()) * m_platformData.size();
     }
-#endif
 
     // Fallback to a cross-platform estimate, which will populate these values if they are non-positive.
     initCharWidths();
@@ -244,7 +233,7 @@ void Font::platformDestroy()
 
 bool Font::variantCapsSupportsCharacterForSynthesis(FontVariantCaps fontVariantCaps, UChar32 character) const
 {
-#if (PLATFORM(IOS) && TARGET_OS_IOS && __IPHONE_OS_VERSION_MIN_REQUIRED >= 100000) || (PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 101200)
+#if (PLATFORM(IOS) && TARGET_OS_IOS) || PLATFORM(MAC)
     Glyph glyph = glyphForCharacter(character);
     if (!glyph)
         return false;
@@ -286,7 +275,7 @@ bool Font::variantCapsSupportsCharacterForSynthesis(FontVariantCaps fontVariantC
 #endif
 }
 
-#if (PLATFORM(IOS) && TARGET_OS_IOS && __IPHONE_OS_VERSION_MIN_REQUIRED >= 100000) || (PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 101200)
+#if (PLATFORM(IOS) && TARGET_OS_IOS) || PLATFORM(MAC)
 static RetainPtr<CFDictionaryRef> smallCapsOpenTypeDictionary(CFStringRef key, int rawValue)
 {
     RetainPtr<CFNumberRef> value = adoptCF(CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &rawValue));
@@ -404,7 +393,7 @@ static inline bool isTrueTypeFeature(CFDictionaryRef feature)
     return CFDictionaryContainsKey(feature, kCTFontFeatureTypeIdentifierKey) && CFDictionaryContainsKey(feature, kCTFontFeatureSelectorIdentifierKey);
 }
 
-static inline Optional<CFStringRef> openTypeFeature(CFDictionaryRef feature)
+static inline std::optional<CFStringRef> openTypeFeature(CFDictionaryRef feature)
 {
     ASSERT(isOpenTypeFeature(feature));
     CFStringRef tag = static_cast<CFStringRef>(CFDictionaryGetValue(feature, kCTFontOpenTypeFeatureTag));
@@ -412,7 +401,7 @@ static inline Optional<CFStringRef> openTypeFeature(CFDictionaryRef feature)
     CFNumberRef value = static_cast<CFNumberRef>(CFDictionaryGetValue(feature, kCTFontOpenTypeFeatureValue));
     auto success = CFNumberGetValue(value, kCFNumberIntType, &rawValue);
     ASSERT_UNUSED(success, success);
-    return rawValue ? Optional<CFStringRef>(tag) : Nullopt;
+    return rawValue ? std::optional<CFStringRef>(tag) : std::nullopt;
 }
 
 static inline std::pair<int, int> trueTypeFeature(CFDictionaryRef feature)
@@ -591,37 +580,12 @@ FloatRect Font::platformBoundsForGlyph(Glyph glyph) const
     return boundingBox;
 }
 
-#if !((PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 101200) || (PLATFORM(IOS) && __IPHONE_OS_VERSION_MIN_REQUIRED >= 100000))
-static inline Optional<CGSize> advanceForColorBitmapFont(const FontPlatformData& platformData, Glyph glyph)
-{
-    CTFontRef font = platformData.font();
-    if (!font || !platformData.isColorBitmapFont())
-        return Nullopt;
-    CGSize advance;
-    CTFontGetAdvancesForGlyphs(font, kCTFontOrientationDefault, &glyph, &advance, 1);
-    return advance;
-}
-
-static inline bool canUseFastGlyphAdvanceGetter(const FontPlatformData& platformData, Glyph glyph, CGSize& advance, bool& populatedAdvance)
-{
-    if (platformData.isEmoji() || platformData.hasCustomTracking() || platformData.textRenderingMode() == OptimizeLegibility)
-        return false;
-    if (auto size = advanceForColorBitmapFont(platformData, glyph)) {
-        populatedAdvance = true;
-        advance = size.value();
-        return false;
-    }
-    return true;
-}
-#endif
-
 float Font::platformWidthForGlyph(Glyph glyph) const
 {
     CGSize advance = CGSizeZero;
     bool horizontal = platformData().orientation() == Horizontal;
     CGFontRenderingStyle style = kCGFontRenderingStyleAntialiasing | kCGFontRenderingStyleSubpixelPositioning | kCGFontRenderingStyleSubpixelQuantization | kCGFontAntialiasingStyleUnfiltered;
 
-#if (PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 101200) || (PLATFORM(IOS) && __IPHONE_OS_VERSION_MIN_REQUIRED >= 100000)
     if (platformData().size()) {
         CTFontOrientation orientation = horizontal || m_isBrokenIdeographFallback ? kCTFontOrientationHorizontal : kCTFontOrientationVertical;
         // FIXME: Remove this special-casing when <rdar://problem/28197291> and <rdar://problem/28662086> are fixed.
@@ -630,22 +594,6 @@ float Font::platformWidthForGlyph(Glyph glyph) const
         else
             CTFontGetUnsummedAdvancesForGlyphsAndStyle(m_platformData.ctFont(), orientation, style, &glyph, &advance, 1);
     }
-
-#else
-
-    bool populatedAdvance = false;
-    if ((horizontal || m_isBrokenIdeographFallback) && canUseFastGlyphAdvanceGetter(this->platformData(), glyph, advance, populatedAdvance)) {
-        float pointSize = platformData().size();
-        CGAffineTransform m = CGAffineTransformMakeScale(pointSize, pointSize);
-        if (!CGFontGetGlyphAdvancesForStyle(platformData().cgFont(), &m, style, &glyph, 1, &advance)) {
-            RetainPtr<CFStringRef> fullName = adoptCF(CGFontCopyFullName(platformData().cgFont()));
-            LOG_ERROR("Unable to cache glyph widths for %@ %f", fullName.get(), pointSize);
-            advance.width = 0;
-        }
-    } else if (!populatedAdvance && platformData().size())
-        CTFontGetAdvancesForGlyphs(m_platformData.ctFont(), horizontal ? kCTFontOrientationHorizontal : kCTFontOrientationVertical, &glyph, &advance, 1);
-#endif
-
     return advance.width + m_syntheticBoldOffset;
 }
 

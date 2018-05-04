@@ -22,8 +22,7 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef PluginViewBase_h
-#define PluginViewBase_h
+#pragma once
 
 #include "AudioHardwareListener.h"
 #include "BridgeJSC.h"
@@ -31,6 +30,10 @@
 #include "ScrollTypes.h"
 #include "Widget.h"
 #include <wtf/text/WTFString.h>
+
+#if PLATFORM(COCOA)
+typedef struct objc_object* id;
+#endif
 
 namespace JSC {
     class ExecState;
@@ -82,8 +85,12 @@ public:
 
     virtual RefPtr<JSC::Bindings::Instance> bindingInstance() { return nullptr; }
     
-    virtual void willDetatchRenderer() { }
+    virtual void willDetachRenderer() { }
 
+#if PLATFORM(COCOA)
+    virtual id accessibilityAssociatedPluginParentForElement(Element*) const { return nullptr; }
+#endif
+    
 protected:
     explicit PluginViewBase(PlatformWidget widget = 0) : Widget(widget) { }
 };
@@ -91,5 +98,3 @@ protected:
 } // namespace WebCore
 
 SPECIALIZE_TYPE_TRAITS_WIDGET(PluginViewBase, isPluginViewBase())
-
-#endif // PluginViewBase_h

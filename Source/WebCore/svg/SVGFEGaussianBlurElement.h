@@ -18,8 +18,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGFEGaussianBlurElement_h
-#define SVGFEGaussianBlurElement_h
+#pragma once
 
 #include "FEGaussianBlur.h"
 #include "SVGAnimatedEnumeration.h"
@@ -30,6 +29,7 @@
 namespace WebCore {
 
 class SVGFEGaussianBlurElement final : public SVGFilterPrimitiveStandardAttributes {
+    WTF_MAKE_ISO_ALLOCATED(SVGFEGaussianBlurElement);
 public:
     static Ref<SVGFEGaussianBlurElement> create(const QualifiedName&, Document&);
 
@@ -54,5 +54,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif

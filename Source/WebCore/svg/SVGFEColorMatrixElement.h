@@ -18,8 +18,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGFEColorMatrixElement_h
-#define SVGFEColorMatrixElement_h
+#pragma once
 
 #include "FEColorMatrix.h"
 #include "SVGAnimatedEnumeration.h"
@@ -66,6 +65,7 @@ struct SVGPropertyTraits<ColorMatrixType> {
 };
 
 class SVGFEColorMatrixElement final : public SVGFilterPrimitiveStandardAttributes {
+    WTF_MAKE_ISO_ALLOCATED(SVGFEColorMatrixElement);
 public:
     static Ref<SVGFEColorMatrixElement> create(const QualifiedName&, Document&);
 
@@ -85,5 +85,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif

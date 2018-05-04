@@ -49,6 +49,8 @@ public:
 
     void dumpBackForwardList(WTF::StringBuilder&);
 
+    static uint64_t responseHeaderCount(WKURLResponseRef);
+
 private:
     // Loader Client
     static void didStartProvisionalLoadForFrame(WKBundlePageRef, WKBundleFrameRef, WKTypeRef*, const void*);
@@ -171,7 +173,7 @@ private:
     void platformDidStartProvisionalLoadForFrame(WKBundleFrameRef);
     String platformResponseMimeType(WKURLResponseRef);
 
-    void frameDidChangeLocation(WKBundleFrameRef, bool shouldDump = false);
+    void frameDidChangeLocation(WKBundleFrameRef);
 
     WKBundlePageRef m_page;
     WKRetainPtr<WKBundleScriptWorldRef> m_world;

@@ -30,8 +30,11 @@
 #if ENABLE(MATHML)
 
 #include "RenderMathMLSpace.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(MathMLSpaceElement);
 
 using namespace MathMLNames;
 
@@ -63,11 +66,11 @@ const MathMLElement::Length& MathMLSpaceElement::depth()
 void MathMLSpaceElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
 {
     if (name == widthAttr)
-        m_width = Nullopt;
+        m_width = std::nullopt;
     else if (name == heightAttr)
-        m_height = Nullopt;
+        m_height = std::nullopt;
     else if (name == depthAttr)
-        m_depth = Nullopt;
+        m_depth = std::nullopt;
 
     MathMLPresentationElement::parseAttribute(name, value);
 }

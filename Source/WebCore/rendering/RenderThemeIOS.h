@@ -29,17 +29,20 @@
 
 #include "RenderThemeCocoa.h"
 
+#include <wtf/RetainPtr.h>
+
+OBJC_CLASS CIContext;
+
 namespace WebCore {
     
 class RenderStyle;
 class GraphicsContext;
+
 struct AttachmentLayout;
 
 class RenderThemeIOS final : public RenderThemeCocoa {
 public:
-    static Ref<RenderTheme> create();
-
-    LengthBox popupInternalPaddingBox(const RenderStyle&) const override;
+    friend NeverDestroyed<RenderThemeIOS>;
 
     static void adjustRoundBorderRadius(RenderStyle&, RenderBox&);
 
@@ -47,7 +50,13 @@ public:
 
     WEBCORE_EXPORT static void setContentSizeCategory(const String&);
 
+#if USE(SYSTEM_PREVIEW)
+    void paintSystemPreviewBadge(Image&, const PaintInfo&, const FloatRect&) override;
+#endif
+
 protected:
+    LengthBox popupInternalPaddingBox(const RenderStyle&) const override;
+    
     FontCascadeDescription& cachedSystemFontDescription(CSSValueID systemFontID) const override;
     void updateCachedSystemFontDescription(CSSValueID, FontCascadeDescription&) const override;
     int baselinePosition(const RenderBox&) const override;
@@ -81,9 +90,9 @@ protected:
     bool paintSliderThumbDecorations(const RenderObject&, const PaintInfo&, const IntRect&) override;
 
     // Returns the repeat interval of the animation for the progress bar.
-    double animationRepeatIntervalForProgressBar(RenderProgress&) const override;
+    Seconds animationRepeatIntervalForProgressBar(RenderProgress&) const override;
     // Returns the duration of the animation for the progress bar.
-    double animationDurationForProgressBar(RenderProgress&) const override;
+    Seconds animationDurationForProgressBar(RenderProgress&) const override;
 
     bool paintProgressBar(const RenderObject&, const PaintInfo&, const IntRect&) override;
 
@@ -107,7 +116,9 @@ protected:
 
 #if ENABLE(VIDEO)
     String mediaControlsStyleSheet() override;
+    String modernMediaControlsStyleSheet() override;
     String mediaControlsScript() override;
+    String mediaControlsBase64StringForIconNameAndType(const String&, const String&) override;
 #endif
 
 #if ENABLE(ATTACHMENT_ELEMENT)
@@ -116,19 +127,36 @@ protected:
     bool paintAttachment(const RenderObject&, const PaintInfo&, const IntRect&) override;
 #endif
 
+    bool shouldMockBoldSystemFontForAccessibility() const override { return m_shouldMockBoldSystemFontForAccessibility; }
+    void setShouldMockBoldSystemFontForAccessibility(bool shouldMockBoldSystemFontForAccessibility) override { m_shouldMockBoldSystemFontForAccessibility = shouldMockBoldSystemFontForAccessibility; }
+
 private:
     RenderThemeIOS();
-    virtual ~RenderThemeIOS() { }
+    virtual ~RenderThemeIOS() = default;
+
+    void purgeCaches() override;
+
+#if ENABLE(EXTRA_ZOOM_MODE)
+    String extraDefaultStyleSheet() final;
+#endif
 
     const Color& shadowColor() const;
     FloatRect addRoundedBorderClip(const RenderObject& box, GraphicsContext&, const IntRect&);
 
-    Color systemColor(CSSValueID) const override;
+    Color systemColor(CSSValueID, OptionSet<StyleColor::Options>) const override;
 
+    String m_legacyMediaControlsScript;
     String m_mediaControlsScript;
+    String m_legacyMediaControlsStyleSheet;
     String m_mediaControlsStyleSheet;
 
     mutable HashMap<int, Color> m_systemColorCache;
+
+#if USE(SYSTEM_PREVIEW)
+    RetainPtr<CIContext> m_ciContext;
+#endif
+
+    bool m_shouldMockBoldSystemFontForAccessibility { false };
 };
 
 }

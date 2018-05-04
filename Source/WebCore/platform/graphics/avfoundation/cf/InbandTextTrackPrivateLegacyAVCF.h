@@ -38,12 +38,12 @@ class MediaPlayerPrivateAVFoundationCF;
 
 class InbandTextTrackPrivateLegacyAVCF : public InbandTextTrackPrivateAVF {
 public:
-    static PassRefPtr<InbandTextTrackPrivateLegacyAVCF> create(MediaPlayerPrivateAVFoundationCF* player, AVCFPlayerItemTrackRef track)
+    static Ref<InbandTextTrackPrivateLegacyAVCF> create(MediaPlayerPrivateAVFoundationCF* player, AVCFPlayerItemTrackRef track)
     {
-        return adoptRef(new InbandTextTrackPrivateLegacyAVCF(player, track));
+        return adoptRef(*new InbandTextTrackPrivateLegacyAVCF(player, track));
     }
 
-    ~InbandTextTrackPrivateLegacyAVCF() { }
+    ~InbandTextTrackPrivateLegacyAVCF() = default;
 
     InbandTextTrackPrivate::Kind kind() const override;
     bool isClosedCaptions() const override;

@@ -19,7 +19,6 @@
  */
 
 #include "config.h"
-#if ENABLE(DETAILS_ELEMENT)
 #include "RenderDetailsMarker.h"
 
 #include "Element.h"
@@ -28,10 +27,13 @@
 #include "HTMLInputElement.h"
 #include "HTMLNames.h"
 #include "PaintInfo.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
 
 using namespace HTMLNames;
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(RenderDetailsMarker);
 
 RenderDetailsMarker::RenderDetailsMarker(DetailsMarkerControl& element, RenderStyle&& style)
     : RenderBlockFlow(element, WTFMove(style))
@@ -128,7 +130,7 @@ void RenderDetailsMarker::paint(PaintInfo& paintInfo, const LayoutPoint& paintOf
     if (!paintInfo.rect.intersects(snappedIntRect(overflowRect)))
         return;
 
-    const Color color(style().visitedDependentColor(CSSPropertyColor));
+    const Color color(style().visitedDependentColorWithColorFilter(CSSPropertyColor));
     paintInfo.context().setStrokeColor(color);
     paintInfo.context().setStrokeStyle(SolidStroke);
     paintInfo.context().setStrokeThickness(1.0f);
@@ -153,5 +155,3 @@ bool RenderDetailsMarker::isOpen() const
 }
 
 }
-
-#endif

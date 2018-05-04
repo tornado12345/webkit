@@ -26,6 +26,9 @@
 #import "config.h"
 #import "ColorMac.h"
 
+#if USE(APPKIT)
+
+#import "LocalCurrentGraphicsContext.h"
 #import <wtf/BlockObjCExceptions.h>
 #import <wtf/NeverDestroyed.h>
 #import <wtf/RetainPtr.h>
@@ -50,44 +53,63 @@ bool usesTestModeFocusRingColor()
     return useOldAquaFocusRingColor;
 }
 
-static RGBA32 makeRGBAFromNSColor(NSColor *c)
+static RGBA32 makeRGBAFromNSColor(NSColor *color)
 {
+    ASSERT_ARG(color, color);
+
     CGFloat redComponent;
     CGFloat greenComponent;
     CGFloat blueComponent;
     CGFloat alpha;
 
     BEGIN_BLOCK_OBJC_EXCEPTIONS;
-    NSColor *rgbColor = [c colorUsingColorSpaceName:NSDeviceRGBColorSpace];
-    if (!rgbColor)
-        return makeRGBA(0, 0, 0, 0);
+    NSColor *rgbColor = [color colorUsingColorSpace:NSColorSpace.deviceRGBColorSpace];
+    if (!rgbColor) {
+        // The color space conversion above can fail if the NSColor is in the NSPatternColorSpace.
+        // These colors are actually a repeating pattern, not just a solid color. To workaround
+        // this we simply draw a one pixel image of the color and use that pixel's color.
+        // FIXME: It might be better to use an average of the colors in the pattern instead.
+        RetainPtr<NSBitmapImageRep> offscreenRep = adoptNS([[NSBitmapImageRep alloc] initWithBitmapDataPlanes:nil pixelsWide:1 pixelsHigh:1
+            bitsPerSample:8 samplesPerPixel:4 hasAlpha:YES isPlanar:NO colorSpaceName:NSDeviceRGBColorSpace bytesPerRow:4 bitsPerPixel:32]);
+
+        GraphicsContext bitmapContext([NSGraphicsContext graphicsContextWithBitmapImageRep:offscreenRep.get()].CGContext);
+        LocalCurrentGraphicsContext localContext(bitmapContext);
+
+        [color drawSwatchInRect:NSMakeRect(0, 0, 1, 1)];
+
+        NSUInteger pixel[4];
+        [offscreenRep getPixel:pixel atX:0 y:0];
+
+        return makeRGBA(pixel[0], pixel[1], pixel[2], pixel[3]);
+    }
 
     [rgbColor getRed:&redComponent green:&greenComponent blue:&blueComponent alpha:&alpha];
     END_BLOCK_OBJC_EXCEPTIONS;
 
-    return makeRGBA(255 * redComponent, 255 * greenComponent, 255 * blueComponent, 255 * alpha);
+    static const double scaleFactor = nextafter(256.0, 0.0);
+    return makeRGBA(scaleFactor * redComponent, scaleFactor * greenComponent, scaleFactor * blueComponent, scaleFactor * alpha);
 }
 
-Color colorFromNSColor(NSColor *c)
+Color colorFromNSColor(NSColor *color)
 {
-    return Color(makeRGBAFromNSColor(c));
+    return Color(makeRGBAFromNSColor(color));
 }
 
 NSColor *nsColor(const Color& color)
 {
     if (!color.isValid()) {
         // Need this to avoid returning nil because cachedRGBAValues will default to 0.
-        static NeverDestroyed<NSColor *> clearColor = [[NSColor colorWithDeviceRed:0 green:0 blue:0 alpha:0] retain];
+        static NeverDestroyed<NSColor *> clearColor = [[NSColor colorWithSRGBRed:0 green:0 blue:0 alpha:0] retain];
         return clearColor;
     }
 
     if (Color::isBlackColor(color)) {
-        static NeverDestroyed<NSColor *> blackColor = [[NSColor colorWithDeviceRed:0 green:0 blue:0 alpha:1] retain];
+        static NeverDestroyed<NSColor *> blackColor = [[NSColor colorWithSRGBRed:0 green:0 blue:0 alpha:1] retain];
         return blackColor;
     }
 
     if (Color::isWhiteColor(color)) {
-        static NeverDestroyed<NSColor *> whiteColor = [[NSColor colorWithDeviceRed:1 green:1 blue:1 alpha:1] retain];
+        static NeverDestroyed<NSColor *> whiteColor = [[NSColor colorWithSRGBRed:1 green:1 blue:1 alpha:1] retain];
         return whiteColor;
     }
 
@@ -113,3 +135,5 @@ NSColor *nsColor(const Color& color)
 
 
 } // namespace WebCore
+
+#endif // USE(APPKIT)

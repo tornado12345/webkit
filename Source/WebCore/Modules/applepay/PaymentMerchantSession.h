@@ -41,20 +41,13 @@ namespace WebCore {
 
 class PaymentMerchantSession {
 public:
-    PaymentMerchantSession()
-    {
-    }
-
+    PaymentMerchantSession() = default;
     explicit PaymentMerchantSession(PKPaymentMerchantSession *pkPaymentMerchantSession)
         : m_pkPaymentMerchantSession(pkPaymentMerchantSession)
     {
     }
 
-    ~PaymentMerchantSession()
-    {
-    }
-
-    static Optional<PaymentMerchantSession> fromJS(JSC::ExecState&, JSC::JSValue, String& errorMessage);
+    static std::optional<PaymentMerchantSession> fromJS(JSC::ExecState&, JSC::JSValue, String& errorMessage);
 
     PKPaymentMerchantSession *pkPaymentMerchantSession() const { return m_pkPaymentMerchantSession.get(); }
 

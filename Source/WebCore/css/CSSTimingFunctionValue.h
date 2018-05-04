@@ -23,8 +23,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef CSSTimingFunctionValue_h
-#define CSSTimingFunctionValue_h
+#pragma once
 
 #include "CSSValue.h"
 
@@ -88,6 +87,29 @@ private:
     bool m_stepAtStart;
 };
 
+class CSSFramesTimingFunctionValue final : public CSSValue {
+public:
+    static Ref<CSSFramesTimingFunctionValue> create(unsigned frames)
+    {
+        return adoptRef(*new CSSFramesTimingFunctionValue(frames));
+    }
+
+    unsigned numberOfFrames() const { return m_frames; }
+
+    String customCSSText() const;
+
+    bool equals(const CSSFramesTimingFunctionValue&) const;
+
+private:
+    CSSFramesTimingFunctionValue(unsigned frames)
+        : CSSValue(FramesTimingFunctionClass)
+        , m_frames(frames)
+    {
+    }
+
+    unsigned m_frames;
+};
+
 class CSSSpringTimingFunctionValue final : public CSSValue {
 public:
     static Ref<CSSSpringTimingFunctionValue> create(double mass, double stiffness, double damping, double initialVelocity)
@@ -124,6 +146,5 @@ private:
 
 SPECIALIZE_TYPE_TRAITS_CSS_VALUE(CSSCubicBezierTimingFunctionValue, isCubicBezierTimingFunctionValue())
 SPECIALIZE_TYPE_TRAITS_CSS_VALUE(CSSStepsTimingFunctionValue, isStepsTimingFunctionValue())
+SPECIALIZE_TYPE_TRAITS_CSS_VALUE(CSSFramesTimingFunctionValue, isFramesTimingFunctionValue())
 SPECIALIZE_TYPE_TRAITS_CSS_VALUE(CSSSpringTimingFunctionValue, isSpringTimingFunctionValue())
-
-#endif // CSSTimingFunctionValue_h

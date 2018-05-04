@@ -8,10 +8,7 @@ set(GTEST_DIR "${THIRDPARTY_DIR}/gtest")
 set(GTEST_INCLUDE_DIRECTORIES
     "${GTEST_DIR}"
     "${GTEST_DIR}/include"
-    "${JAVASCRIPTCORE_DIR}"
-    "${DERIVED_SOURCES_DIR}"
-    "${DERIVED_SOURCES_JAVASCRIPTCORE_DIR}"
-    "${WTF_DIR}"
+    "${FORWARDING_HEADERS_DIR}"
 )
 
 set(GTEST_SOURCES
@@ -37,6 +34,9 @@ endif ()
 include_directories(${GTEST_INCLUDE_DIRECTORIES})
 add_definitions(-DGTEST_HAS_RTTI=0)
 
+WEBKIT_ADD_TARGET_CXX_FLAGS(gtest -Wno-undef
+                                  -Wno-suggest-attribute=format)
+
 # FIXME: This works around compatibility problems in the old version of the third-pary
 # googletest source code checkout. It should be removed once we upgrade to a newer version.
 if (COMPILER_IS_CLANG)
@@ -46,8 +46,11 @@ endif ()
 target_link_libraries(gtest
     WTF
 )
+add_dependencies(gtest JavaScriptCorePrivateForwardingHeaders)
 
 if (CMAKE_USE_PTHREADS_INIT)
     target_link_libraries(gtest ${CMAKE_THREAD_LIBS_INIT})
     add_definitions(-DGTEST_HAS_PTHREAD=1)
+else ()
+    add_definitions(-DGTEST_HAS_PTHREAD=0)
 endif ()

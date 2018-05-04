@@ -2,7 +2,7 @@
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2004-2017 Apple Inc. All rights reserved.
  * Copyright (C) 2012 Samsung Electronics. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
@@ -43,8 +43,8 @@ class Icon;
 class InputType;
 class ListAttributeTargetObserver;
 class RadioButtonGroups;
-class TextControlInnerTextElement;
 class URL;
+
 struct DateTimeChooserParameters;
 
 struct InputElementClickState {
@@ -55,6 +55,7 @@ struct InputElementClickState {
 };
 
 class HTMLInputElement : public HTMLTextFormControlElement {
+    WTF_MAKE_ISO_ALLOCATED(HTMLInputElement);
 public:
     static Ref<HTMLInputElement> create(const QualifiedName&, Document&, HTMLFormElement*, bool createdByParser);
     virtual ~HTMLInputElement();
@@ -85,7 +86,7 @@ public:
     StepRange createStepRange(AnyStepHandling) const;
 
 #if ENABLE(DATALIST_ELEMENT)
-    Optional<Decimal> findClosestTickMarkValue(const Decimal&);
+    std::optional<Decimal> findClosestTickMarkValue(const Decimal&);
 #endif
 
     WEBCORE_EXPORT ExceptionOr<void> stepUp(int = 1);
@@ -97,7 +98,7 @@ public:
     bool isTextButton() const;
 
     bool isRadioButton() const;
-    WEBCORE_EXPORT bool isTextField() const;
+    WEBCORE_EXPORT bool isTextField() const final;
     WEBCORE_EXPORT bool isSearchField() const;
     bool isInputTypeHidden() const;
     WEBCORE_EXPORT bool isPasswordField() const;
@@ -134,8 +135,8 @@ public:
 
     HTMLElement* containerElement() const;
     
-    TextControlInnerTextElement* innerTextElement() const final;
-    RenderStyle createInnerTextStyle(const RenderStyle&) const override;
+    RefPtr<TextControlInnerTextElement> innerTextElement() const final;
+    RenderStyle createInnerTextStyle(const RenderStyle&) override;
 
     HTMLElement* innerBlockElement() const;
     HTMLElement* innerSpinButtonElement() const;
@@ -213,6 +214,8 @@ public:
     void willDispatchEvent(Event&, InputElementClickState&);
     void didDispatchClickEvent(Event&, const InputElementClickState&);
 
+    void didBlur();
+
     int maxResults() const { return m_maxResults; }
 
     WEBCORE_EXPORT String defaultValue() const;
@@ -234,11 +237,17 @@ public:
     bool isAutoFilled() const { return m_isAutoFilled; }
     WEBCORE_EXPORT void setAutoFilled(bool = true);
 
-    AutoFillButtonType autoFillButtonType() const { return (AutoFillButtonType)m_autoFillButtonType; }
+    AutoFillButtonType lastAutoFillButtonType() const { return static_cast<AutoFillButtonType>(m_lastAutoFillButtonType); }
+    AutoFillButtonType autoFillButtonType() const { return static_cast<AutoFillButtonType>(m_autoFillButtonType); }
     WEBCORE_EXPORT void setShowAutoFillButton(AutoFillButtonType);
 
+    bool hasAutoFillStrongPasswordButton() const  { return autoFillButtonType() == AutoFillButtonType::StrongPassword || autoFillButtonType() == AutoFillButtonType::StrongConfirmationPassword; }
+
+    bool isAutoFillAvailable() const { return m_isAutoFillAvailable; }
+    void setAutoFillAvailable(bool autoFillAvailable) { m_isAutoFillAvailable = autoFillAvailable; }
+
     WEBCORE_EXPORT FileList* files();
-    WEBCORE_EXPORT void setFiles(PassRefPtr<FileList>);
+    WEBCORE_EXPORT void setFiles(RefPtr<FileList>&&);
 
 #if ENABLE(DRAG_SUPPORT)
     // Returns true if the given DragData has more than one dropped files.
@@ -246,9 +255,8 @@ public:
 #endif
 
     Icon* icon() const;
-#if PLATFORM(IOS)
     String displayString() const;
-#endif
+
     // These functions are used for rendering the input active during a
     // drag-and-drop operation.
     bool canReceiveDroppedFiles() const;
@@ -260,8 +268,8 @@ public:
     bool willRespondToMouseClickEvents() override;
 
 #if ENABLE(DATALIST_ELEMENT)
-    HTMLElement* list() const;
-    HTMLDataListElement* dataList() const;
+    RefPtr<HTMLElement> list() const;
+    RefPtr<HTMLDataListElement> dataList() const;
     void listAttributeTargetChanged();
 #endif
 
@@ -274,14 +282,14 @@ public:
     // Functions for InputType classes.
     void setValueInternal(const String&, TextFieldEventBehavior);
     bool isTextFormControlFocusable() const;
-    bool isTextFormControlKeyboardFocusable(KeyboardEvent&) const;
+    bool isTextFormControlKeyboardFocusable(KeyboardEvent*) const;
     bool isTextFormControlMouseFocusable() const;
     bool valueAttributeWasUpdatedAfterParsing() const { return m_valueAttributeWasUpdatedAfterParsing; }
 
     void cacheSelectionInResponseToSetValue(int caretOffset) { cacheSelection(caretOffset, caretOffset, SelectionHasNoDirection); }
 
     Color valueAsColor() const; // Returns transparent color if not type=color.
-    WEBCORE_EXPORT void selectColor(const Color&); // Does nothing if not type=color. Simulates user selection of color; intended for testing.
+    WEBCORE_EXPORT void selectColor(StringView); // Does nothing if not type=color. Simulates user selection of color; intended for testing.
 
     String defaultToolTip() const;
 
@@ -303,7 +311,8 @@ public:
 
     void endEditing();
 
-    void setSpellcheckEnabled(bool enabled) { m_isSpellCheckingEnabled = enabled; }
+    void setSpellcheckDisabledExceptTextReplacement(bool disabled) { m_isSpellcheckDisabledExceptTextReplacement = disabled; }
+    bool isSpellcheckDisabledExceptTextReplacement() const { return m_isSpellcheckDisabledExceptTextReplacement; }
 
     static Vector<FileChooserFileInfo> filesFromFileInputFormControlState(const FormControlState&);
 
@@ -322,6 +331,17 @@ public:
 
     bool shouldTruncateText(const RenderStyle&) const;
 
+    ExceptionOr<int> selectionStartForBindings() const;
+    ExceptionOr<void> setSelectionStartForBindings(int);
+
+    ExceptionOr<int> selectionEndForBindings() const;
+    ExceptionOr<void> setSelectionEndForBindings(int);
+
+    ExceptionOr<String> selectionDirectionForBindings() const;
+    ExceptionOr<void> setSelectionDirectionForBindings(const String&);
+
+    ExceptionOr<void> setSelectionRangeForBindings(int start, int end, const String& direction);
+
 protected:
     HTMLInputElement(const QualifiedName&, Document&, HTMLFormElement*, bool createdByParser);
 
@@ -330,25 +350,24 @@ protected:
 private:
     enum AutoCompleteSetting { Uninitialized, On, Off };
 
-    void didAddUserAgentShadowRoot(ShadowRoot*) final;
+    void didAddUserAgentShadowRoot(ShadowRoot&) final;
 
     void willChangeForm() final;
     void didChangeForm() final;
-    InsertionNotificationRequest insertedInto(ContainerNode&) final;
-    void finishedInsertingSubtree() final;
-    void removedFrom(ContainerNode&) final;
-    void didMoveToNewDocument(Document* oldDocument) final;
+    InsertedIntoAncestorResult insertedIntoAncestor(InsertionType, ContainerNode&) final;
+    void didFinishInsertingNode() final;
+    void removedFromAncestor(RemovalType, ContainerNode&) final;
+    void didMoveToNewDocument(Document& oldDocument, Document& newDocument) final;
 
     bool hasCustomFocusLogic() const final;
-    bool isKeyboardFocusable(KeyboardEvent&) const final;
+    bool isKeyboardFocusable(KeyboardEvent*) const final;
     bool isMouseFocusable() const final;
     bool isEnumeratable() const final;
     bool supportLabels() const final;
     void updateFocusAppearance(SelectionRestorationMode, SelectionRevealMode) final;
     bool shouldUseInputMethod() final;
-    bool isSpellCheckingEnabled() const final;
 
-    bool isTextFormControl() const final { return isTextField(); }
+    bool isInnerTextElementEditable() const final { return !hasAutoFillStrongPasswordButton() && HTMLTextFormControlElement::isInnerTextElementEditable(); }
 
     bool canTriggerImplicitSubmission() const final { return isTextField(); }
 
@@ -370,7 +389,7 @@ private:
 
     void copyNonAttributePropertiesFromElement(const Element&) final;
 
-    bool appendFormData(FormDataList&, bool) final;
+    bool appendFormData(DOMFormData&, bool) final;
 
     bool isSuccessfulSubmitButton() const final;
     bool matchesDefaultPseudoClass() const final;
@@ -428,7 +447,7 @@ private:
     AtomicString m_name;
     String m_valueIfDirty;
     unsigned m_size;
-    short m_maxResults;
+    short m_maxResults { -1 };
     bool m_isChecked : 1;
     bool m_reflectsCheckedAttribute : 1;
     bool m_isIndeterminate : 1;
@@ -436,7 +455,9 @@ private:
     bool m_isActivatedSubmit : 1;
     unsigned m_autocomplete : 2; // AutoCompleteSetting
     bool m_isAutoFilled : 1;
-    unsigned m_autoFillButtonType : 2; // AutoFillButtonType;
+    unsigned m_autoFillButtonType : 3; // AutoFillButtonType
+    unsigned m_lastAutoFillButtonType : 3; // AutoFillButtonType
+    bool m_isAutoFillAvailable : 1;
 #if ENABLE(DATALIST_ELEMENT)
     bool m_hasNonEmptyList : 1;
 #endif
@@ -448,8 +469,8 @@ private:
 #if ENABLE(TOUCH_EVENTS)
     bool m_hasTouchEventHandler : 1;
 #endif
-    bool m_isSpellCheckingEnabled : 1;
-    std::unique_ptr<InputType> m_inputType;
+    bool m_isSpellcheckDisabledExceptTextReplacement : 1;
+    RefPtr<InputType> m_inputType;
     // The ImageLoader must be owned by this element because the loader code assumes
     // that it lives as long as its owning element lives. If we move the loader into
     // the ImageInput object we may delete the loader while this element lives on.

@@ -33,13 +33,14 @@
 #include "Element.h"
 #include "FrameLoader.h"
 #include "HTTPHeaderValues.h"
+#include "ImageDecoder.h"
 #include "MemoryCache.h"
-#include "SecurityPolicy.h"
+#include "ServiceWorkerRegistrationData.h"
 #include <wtf/NeverDestroyed.h>
 
 namespace WebCore {
 
-CachedResourceRequest::CachedResourceRequest(ResourceRequest&& resourceRequest, const ResourceLoaderOptions& options, Optional<ResourceLoadPriority> priority, String&& charset)
+CachedResourceRequest::CachedResourceRequest(ResourceRequest&& resourceRequest, const ResourceLoaderOptions& options, std::optional<ResourceLoadPriority> priority, String&& charset)
     : m_resourceRequest(WTFMove(resourceRequest))
     , m_charset(WTFMove(charset))
     , m_options(options)
@@ -59,15 +60,17 @@ String CachedResourceRequest::splitFragmentIdentifierFromRequestURL(ResourceRequ
     return fragmentIdentifier;
 }
 
-void CachedResourceRequest::setInitiator(PassRefPtr<Element> element)
+void CachedResourceRequest::setInitiator(Element& element)
 {
-    ASSERT(!m_initiatorElement && m_initiatorName.isEmpty());
-    m_initiatorElement = element;
+    ASSERT(!m_initiatorElement);
+    ASSERT(m_initiatorName.isEmpty());
+    m_initiatorElement = &element;
 }
 
 void CachedResourceRequest::setInitiator(const AtomicString& name)
 {
-    ASSERT(!m_initiatorElement && m_initiatorName.isEmpty());
+    ASSERT(!m_initiatorElement);
+    ASSERT(m_initiatorName.isEmpty());
     m_initiatorName = name;
 }
 
@@ -78,33 +81,35 @@ const AtomicString& CachedResourceRequest::initiatorName() const
     if (!m_initiatorName.isEmpty())
         return m_initiatorName;
 
-    static NeverDestroyed<AtomicString> defaultName("resource", AtomicString::ConstructFromLiteral);
+    static NeverDestroyed<AtomicString> defaultName("other", AtomicString::ConstructFromLiteral);
     return defaultName;
 }
 
 void CachedResourceRequest::setAsPotentiallyCrossOrigin(const String& mode, Document& document)
 {
     ASSERT(m_options.mode == FetchOptions::Mode::NoCors);
-    ASSERT(document.securityOrigin());
 
-    m_origin = document.securityOrigin();
+    m_origin = &document.securityOrigin();
 
     if (mode.isNull())
         return;
-    m_options.mode = FetchOptions::Mode::Cors;
-    m_options.credentials = equalLettersIgnoringASCIICase(mode, "use-credentials") ? FetchOptions::Credentials::Include : FetchOptions::Credentials::SameOrigin;
-    m_options.allowCredentials = equalLettersIgnoringASCIICase(mode, "use-credentials") ? AllowStoredCredentials : DoNotAllowStoredCredentials;
 
-    WebCore::updateRequestForAccessControl(m_resourceRequest, *document.securityOrigin(), m_options.allowCredentials);
+    m_options.mode = FetchOptions::Mode::Cors;
+
+    FetchOptions::Credentials credentials = equalLettersIgnoringASCIICase(mode, "omit")
+        ? FetchOptions::Credentials::Omit : equalLettersIgnoringASCIICase(mode, "use-credentials")
+        ? FetchOptions::Credentials::Include : FetchOptions::Credentials::SameOrigin;
+    m_options.credentials = credentials;
+    m_options.storedCredentialsPolicy = credentials == FetchOptions::Credentials::Include ? StoredCredentialsPolicy::Use : StoredCredentialsPolicy::DoNotUse;
+    updateRequestForAccessControl(m_resourceRequest, document.securityOrigin(), m_options.storedCredentialsPolicy);
 }
 
 void CachedResourceRequest::updateForAccessControl(Document& document)
 {
     ASSERT(m_options.mode == FetchOptions::Mode::Cors);
-    ASSERT(document.securityOrigin());
 
-    m_origin = document.securityOrigin();
-    WebCore::updateRequestForAccessControl(m_resourceRequest, *m_origin, m_options.allowCredentials);
+    m_origin = &document.securityOrigin();
+    updateRequestForAccessControl(m_resourceRequest, *m_origin, m_options.storedCredentialsPolicy);
 }
 
 void upgradeInsecureResourceRequestIfNeeded(ResourceRequest& request, Document& document)
@@ -125,13 +130,15 @@ void CachedResourceRequest::upgradeInsecureRequestIfNeeded(Document& document)
     upgradeInsecureResourceRequestIfNeeded(m_resourceRequest, document);
 }
 
-#if ENABLE(CACHE_PARTITIONING)
 void CachedResourceRequest::setDomainForCachePartition(Document& document)
 {
-    ASSERT(document.topOrigin());
-    m_resourceRequest.setDomainForCachePartition(document.topOrigin()->domainForCachePartition());
+    m_resourceRequest.setDomainForCachePartition(document.domainForCachePartition());
 }
-#endif
+
+void CachedResourceRequest::setDomainForCachePartition(const String& domain)
+{
+    m_resourceRequest.setDomainForCachePartition(domain);
+}
 
 static inline String acceptHeaderValueFromType(CachedResource::Type type)
 {
@@ -139,6 +146,8 @@ static inline String acceptHeaderValueFromType(CachedResource::Type type)
     case CachedResource::Type::MainResource:
         return ASCIILiteral("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
     case CachedResource::Type::ImageResource:
+        if (ImageDecoder::supportsMediaType(ImageDecoder::MediaType::Video))
+            return ASCIILiteral("image/png,image/svg+xml,image/*;q=0.8,video/*;q=0.8,*/*;q=0.5");
         return ASCIILiteral("image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5");
     case CachedResource::Type::CSSStyleSheet:
         return ASCIILiteral("text/css,*/*;q=0.1");
@@ -205,54 +214,34 @@ void CachedResourceRequest::removeFragmentIdentifierIfNeeded()
 }
 
 #if ENABLE(CONTENT_EXTENSIONS)
-void CachedResourceRequest::applyBlockedStatus(const ContentExtensions::BlockedStatus& blockedStatus)
+
+void CachedResourceRequest::applyBlockedStatus(const ContentExtensions::BlockedStatus& blockedStatus, Page* page)
 {
-    ContentExtensions::applyBlockedStatusToRequest(blockedStatus, m_resourceRequest);
+    ContentExtensions::applyBlockedStatusToRequest(blockedStatus, page, m_resourceRequest);
 }
+
 #endif
 
-void CachedResourceRequest::updateReferrerOriginAndUserAgentHeaders(FrameLoader& frameLoader, ReferrerPolicy defaultPolicy)
+void CachedResourceRequest::updateReferrerPolicy(ReferrerPolicy defaultPolicy)
 {
-    // Implementing step 7 to 9 of https://fetch.spec.whatwg.org/#http-network-or-cache-fetch
+    if (m_options.referrerPolicy == ReferrerPolicy::EmptyString)
+        m_options.referrerPolicy = defaultPolicy;
+}
 
-    String outgoingOrigin;
-    String outgoingReferrer = m_resourceRequest.httpReferrer();
-    if (!outgoingReferrer.isNull())
+void CachedResourceRequest::updateReferrerOriginAndUserAgentHeaders(FrameLoader& frameLoader)
+{
+    // Implementing step 9 to 11 of https://fetch.spec.whatwg.org/#http-network-or-cache-fetch as of 16 March 2018
+    String outgoingReferrer = frameLoader.outgoingReferrer();
+    String outgoingOrigin = frameLoader.outgoingOrigin();
+    if (m_resourceRequest.hasHTTPReferrer()) {
+        outgoingReferrer = m_resourceRequest.httpReferrer();
         outgoingOrigin = SecurityOrigin::createFromString(outgoingReferrer)->toString();
-    else {
-        outgoingReferrer = frameLoader.outgoingReferrer();
-        outgoingOrigin = frameLoader.outgoingOrigin();
     }
+    updateRequestReferrer(m_resourceRequest, m_options.referrerPolicy, outgoingReferrer);
 
-    // FIXME: Refactor SecurityPolicy::generateReferrerHeader to align with new terminology used in https://w3c.github.io/webappsec-referrer-policy.
-    switch (m_options.referrerPolicy) {
-    case FetchOptions::ReferrerPolicy::EmptyString: {
-        outgoingReferrer = SecurityPolicy::generateReferrerHeader(defaultPolicy, m_resourceRequest.url(), outgoingReferrer);
-        break; }
-    case FetchOptions::ReferrerPolicy::NoReferrerWhenDowngrade:
-        outgoingReferrer = SecurityPolicy::generateReferrerHeader(ReferrerPolicy::Default, m_resourceRequest.url(), outgoingReferrer);
-        break;
-    case FetchOptions::ReferrerPolicy::NoReferrer:
-        outgoingReferrer = String();
-        break;
-    case FetchOptions::ReferrerPolicy::Origin:
-        outgoingReferrer = SecurityPolicy::generateReferrerHeader(ReferrerPolicy::Origin, m_resourceRequest.url(), outgoingReferrer);
-        break;
-    case FetchOptions::ReferrerPolicy::OriginWhenCrossOrigin:
-        if (isRequestCrossOrigin(m_origin.get(), m_resourceRequest.url(), m_options))
-            outgoingReferrer = SecurityPolicy::generateReferrerHeader(ReferrerPolicy::Origin, m_resourceRequest.url(), outgoingReferrer);
-        break;
-    case FetchOptions::ReferrerPolicy::UnsafeUrl:
-        break;
-    };
-
-    if (outgoingReferrer.isEmpty())
-        m_resourceRequest.clearHTTPReferrer();
-    else
-        m_resourceRequest.setHTTPReferrer(outgoingReferrer);
     FrameLoader::addHTTPOriginIfNeeded(m_resourceRequest, outgoingOrigin);
 
-    frameLoader.applyUserAgent(m_resourceRequest);
+    frameLoader.applyUserAgentIfNeeded(m_resourceRequest);
 }
 
 bool isRequestCrossOrigin(SecurityOrigin* origin, const URL& requestURL, const ResourceLoaderOptions& options)
@@ -270,5 +259,44 @@ bool isRequestCrossOrigin(SecurityOrigin* origin, const URL& requestURL, const R
 
     return !origin->canRequest(requestURL);
 }
+
+void CachedResourceRequest::setDestinationIfNotSet(FetchOptions::Destination destination)
+{
+    if (m_options.destination != FetchOptions::Destination::EmptyString)
+        return;
+    m_options.destination = destination;
+}
+
+#if ENABLE(SERVICE_WORKER)
+void CachedResourceRequest::setClientIdentifierIfNeeded(DocumentIdentifier clientIdentifier)
+{
+    if (!m_options.clientIdentifier)
+        m_options.clientIdentifier = clientIdentifier;
+}
+
+void CachedResourceRequest::setSelectedServiceWorkerRegistrationIdentifierIfNeeded(ServiceWorkerRegistrationIdentifier identifier)
+{
+    if (isNonSubresourceRequest(m_options.destination))
+        return;
+    if (isPotentialNavigationOrSubresourceRequest(m_options.destination))
+        return;
+
+    if (m_options.serviceWorkersMode == ServiceWorkersMode::None)
+        return;
+    if (m_options.serviceWorkerRegistrationIdentifier)
+        return;
+
+    m_options.serviceWorkerRegistrationIdentifier = identifier;
+}
+
+void CachedResourceRequest::setNavigationServiceWorkerRegistrationData(const std::optional<ServiceWorkerRegistrationData>& data)
+{
+    if (!data || !data->activeWorker) {
+        m_options.serviceWorkersMode = ServiceWorkersMode::None;
+        return;
+    }
+    m_options.serviceWorkerRegistrationIdentifier = data->identifier;
+}
+#endif
 
 } // namespace WebCore

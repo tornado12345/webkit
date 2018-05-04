@@ -17,10 +17,10 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGFontFaceSrcElement_h
-#define SVGFontFaceSrcElement_h
+#pragma once
 
 #if ENABLE(SVG_FONTS)
+
 #include "SVGElement.h"
 
 namespace WebCore {
@@ -28,6 +28,7 @@ namespace WebCore {
 class CSSValueList;
 
 class SVGFontFaceSrcElement final : public SVGElement {
+    WTF_MAKE_ISO_ALLOCATED(SVGFontFaceSrcElement);
 public:
     static Ref<SVGFontFaceSrcElement> create(const QualifiedName&, Document&);
 
@@ -43,6 +44,3 @@ private:
 } // namespace WebCore
 
 #endif // ENABLE(SVG_FONTS)
-#endif
-
-// vim:ts=4:noet

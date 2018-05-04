@@ -35,12 +35,12 @@ class PlatformCALayer;
 class AbstractCACFLayerTreeHost {
 public:
     virtual PlatformCALayer* rootLayer() const = 0;
-    virtual void addPendingAnimatedLayer(PassRefPtr<PlatformCALayer>) = 0;
+    virtual void addPendingAnimatedLayer(PlatformCALayer&) = 0;
     virtual void layerTreeDidChange() = 0;
     virtual void flushPendingLayerChangesNow() = 0;
 
 protected:
-    virtual ~AbstractCACFLayerTreeHost() { }
+    virtual ~AbstractCACFLayerTreeHost() = default;
 };
 
 }

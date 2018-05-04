@@ -33,7 +33,7 @@ namespace JSC {
 
 STATIC_ASSERT_IS_TRIVIALLY_DESTRUCTIBLE(ProxyRevoke);
 
-const ClassInfo ProxyRevoke::s_info = { "ProxyRevoke", &Base::s_info, 0, CREATE_METHOD_TABLE(ProxyRevoke) };
+const ClassInfo ProxyRevoke::s_info = { "ProxyRevoke", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(ProxyRevoke) };
 
 ProxyRevoke* ProxyRevoke::create(VM& vm, Structure* structure, ProxyObject* proxy)
 {
@@ -42,22 +42,24 @@ ProxyRevoke* ProxyRevoke::create(VM& vm, Structure* structure, ProxyObject* prox
     return revoke;
 }
 
+static EncodedJSValue JSC_HOST_CALL performProxyRevoke(ExecState*);
+
 ProxyRevoke::ProxyRevoke(VM& vm, Structure* structure)
-    : Base(vm, structure)
+    : Base(vm, structure, performProxyRevoke, nullptr)
 {
 }
 
 void ProxyRevoke::finishCreation(VM& vm, const char* name, ProxyObject* proxy)
 {
-    Base::finishCreation(vm, String(name));
+    Base::finishCreation(vm, String(name), NameVisibility::Anonymous);
     m_proxy.set(vm, this, proxy);
 
-    putDirect(vm, vm.propertyNames->length, jsNumber(0), ReadOnly | DontDelete | DontEnum);
+    putDirect(vm, vm.propertyNames->length, jsNumber(0), PropertyAttribute::ReadOnly | PropertyAttribute::DontEnum);
 }
 
 static EncodedJSValue JSC_HOST_CALL performProxyRevoke(ExecState* exec)
 {
-    ProxyRevoke* proxyRevoke = jsCast<ProxyRevoke*>(exec->callee());
+    ProxyRevoke* proxyRevoke = jsCast<ProxyRevoke*>(exec->jsCallee());
     JSValue proxyValue = proxyRevoke->proxy();
     if (proxyValue.isNull())
         return JSValue::encode(jsUndefined());
@@ -69,19 +71,13 @@ static EncodedJSValue JSC_HOST_CALL performProxyRevoke(ExecState* exec)
     return JSValue::encode(jsUndefined());
 }
 
-CallType ProxyRevoke::getCallData(JSCell*, CallData& callData)
-{
-    callData.native.function = performProxyRevoke;
-    return CallType::Host;
-}
-
 void ProxyRevoke::visitChildren(JSCell* cell, SlotVisitor& visitor)
 {
     ProxyRevoke* thisObject = jsCast<ProxyRevoke*>(cell);
     ASSERT_GC_OBJECT_INHERITS(thisObject, info());
     Base::visitChildren(thisObject, visitor);
 
-    visitor.append(&thisObject->m_proxy);
+    visitor.append(thisObject->m_proxy);
 }
 
 } // namespace JSC

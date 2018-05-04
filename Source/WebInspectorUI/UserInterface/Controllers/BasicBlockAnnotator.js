@@ -24,7 +24,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-WebInspector.BasicBlockAnnotator = class BasicBlockAnnotator extends WebInspector.Annotator
+WI.BasicBlockAnnotator = class BasicBlockAnnotator extends WI.Annotator
 {
     constructor(sourceCodeTextEditor, script)
     {
@@ -56,7 +56,7 @@ WebInspector.BasicBlockAnnotator = class BasicBlockAnnotator extends WebInspecto
         var sourceID = this._script.id;
         var startTime = Date.now();
 
-        RuntimeAgent.getBasicBlocks(sourceID, function(error, basicBlocks) {
+        this._script.target.RuntimeAgent.getBasicBlocks(sourceID, function(error, basicBlocks) {
             if (error) {
                 console.error("Error in getting basic block locations: " + error);
                 return;
@@ -108,7 +108,7 @@ WebInspector.BasicBlockAnnotator = class BasicBlockAnnotator extends WebInspecto
         if (this._isTextRangeOnlyClosingBrace(startPosition, endPosition))
             return null;
 
-        var marker = this.sourceCodeTextEditor.addStyleToTextRange(startPosition, endPosition, WebInspector.BasicBlockAnnotator.HasNotExecutedClassName);
+        var marker = this.sourceCodeTextEditor.addStyleToTextRange(startPosition, endPosition, WI.BasicBlockAnnotator.HasNotExecutedClassName);
         return marker;
     }
 
@@ -128,4 +128,4 @@ WebInspector.BasicBlockAnnotator = class BasicBlockAnnotator extends WebInspecto
     }
 };
 
-WebInspector.BasicBlockAnnotator.HasNotExecutedClassName = "basic-block-has-not-executed";
+WI.BasicBlockAnnotator.HasNotExecutedClassName = "basic-block-has-not-executed";

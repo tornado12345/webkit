@@ -21,12 +21,16 @@
 #include "config.h"
 #include "SVGFETileElement.h"
 
+#include "FETile.h"
 #include "FilterEffect.h"
 #include "SVGFilterBuilder.h"
 #include "SVGNames.h"
 #include "SVGRenderStyle.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(SVGFETileElement);
 
 // Animated property definitions
 DEFINE_ANIMATED_STRING(SVGFETileElement, SVGNames::inAttr, In1, in1)
@@ -71,7 +75,7 @@ void SVGFETileElement::svgAttributeChanged(const QualifiedName& attrName)
 
 RefPtr<FilterEffect> SVGFETileElement::build(SVGFilterBuilder* filterBuilder, Filter& filter)
 {
-    FilterEffect* input1 = filterBuilder->getEffectById(in1());
+    auto input1 = filterBuilder->getEffectById(in1());
 
     if (!input1)
         return nullptr;

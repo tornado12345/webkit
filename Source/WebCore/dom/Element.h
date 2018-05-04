@@ -3,7 +3,7 @@
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Peter Kelly (pmk@post.com)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2003-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2003-2017 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -28,7 +28,7 @@
 #include "Document.h"
 #include "ElementData.h"
 #include "HTMLNames.h"
-#include "RegionOversetState.h"
+#include "KeyframeAnimationOptions.h"
 #include "ScrollToOptions.h"
 #include "ScrollTypes.h"
 #include "ShadowRootMode.h"
@@ -37,11 +37,10 @@
 
 namespace WebCore {
 
-class ClientRect;
-class ClientRectList;
 class CustomElementReactionQueue;
 class DatasetDOMStringMap;
-class Dictionary;
+class DOMRect;
+class DOMRectList;
 class DOMTokenList;
 class ElementRareData;
 class HTMLDocument;
@@ -53,7 +52,6 @@ class PlatformKeyboardEvent;
 class PlatformMouseEvent;
 class PlatformWheelEvent;
 class PseudoElement;
-class RenderNamedFlowFragment;
 class RenderTreePosition;
 class WebAnimation;
 struct ElementStyle;
@@ -71,6 +69,7 @@ enum class SelectionRevealMode {
 };
 
 class Element : public ContainerNode {
+    WTF_MAKE_ISO_ALLOCATED(Element);
 public:
     static Ref<Element> create(const QualifiedName&, Document&);
     virtual ~Element();
@@ -140,7 +139,7 @@ public:
 
     void scrollBy(const ScrollToOptions&);
     void scrollBy(double x, double y);
-    virtual void scrollTo(const ScrollToOptions&);
+    virtual void scrollTo(const ScrollToOptions&, ScrollClamping = ScrollClamping::Clamped);
     void scrollTo(double x, double y);
 
     WEBCORE_EXPORT void scrollByLines(int lines);
@@ -174,8 +173,10 @@ public:
 
     WEBCORE_EXPORT IntRect boundsInRootViewSpace();
 
-    Ref<ClientRectList> getClientRects();
-    Ref<ClientRect> getBoundingClientRect();
+    WEBCORE_EXPORT FloatRect boundingClientRect();
+
+    WEBCORE_EXPORT Ref<DOMRectList> getClientRects();
+    Ref<DOMRect> getBoundingClientRect();
 
     // Returns the absolute bounding box translated into client coordinates.
     WEBCORE_EXPORT IntRect clientRect() const;
@@ -198,8 +199,6 @@ public:
     Ref<Attr> ensureAttr(const QualifiedName&);
 
     const Vector<RefPtr<Attr>>& attrNodeList();
-
-    virtual CSSStyleDeclaration* cssomStyle();
 
     const QualifiedName& tagQName() const { return m_tagName; }
 #if ENABLE(JIT)
@@ -245,6 +244,9 @@ public:
     // Only called by the parser immediately after element construction.
     void parserSetAttributes(const Vector<Attribute>&);
 
+    bool isEventHandlerAttribute(const Attribute&) const;
+    bool isJavaScriptURLAttribute(const Attribute&) const;
+
     // Remove attributes that might introduce scripting from the vector leaving the element unchanged.
     void stripScriptingAttributes(Vector<Attribute>&) const;
 
@@ -259,6 +261,8 @@ public:
 
     // Clones all attribute-derived data, including subclass specifics (through copyNonAttributeProperties.)
     void cloneDataFromElement(const Element&);
+
+    virtual void didMoveToNewDocument(Document& oldDocument, Document& newDocument);
 
     bool hasEquivalentAttributes(const Element* other) const;
 
@@ -275,7 +279,7 @@ public:
     };
     ExceptionOr<ShadowRoot&> attachShadow(const ShadowRootInit&);
 
-    ShadowRoot* userAgentShadowRoot() const;
+    RefPtr<ShadowRoot> userAgentShadowRoot() const;
     WEBCORE_EXPORT ShadowRoot& ensureUserAgentShadowRoot();
 
     void setIsDefinedCustomElement(JSCustomElementInterface&);
@@ -301,20 +305,20 @@ public:
     bool tabIndexSetExplicitly() const;
     virtual bool supportsFocus() const;
     virtual bool isFocusable() const;
-    virtual bool isKeyboardFocusable(KeyboardEvent&) const;
+    virtual bool isKeyboardFocusable(KeyboardEvent*) const;
     virtual bool isMouseFocusable() const;
 
     virtual bool shouldUseInputMethod();
 
     virtual int tabIndex() const;
     WEBCORE_EXPORT void setTabIndex(int);
-    virtual Element* focusDelegate();
+    virtual RefPtr<Element> focusDelegate();
+
+    ExceptionOr<void> insertAdjacentHTML(const String& where, const String& html, NodeVector* addedNodes);
 
     WEBCORE_EXPORT ExceptionOr<Element*> insertAdjacentElement(const String& where, Element& newChild);
     WEBCORE_EXPORT ExceptionOr<void> insertAdjacentHTML(const String& where, const String& html);
     WEBCORE_EXPORT ExceptionOr<void> insertAdjacentText(const String& where, const String& text);
-
-    bool ieForbidsInsertHTML() const;
 
     const RenderStyle* computedStyle(PseudoId = NOPSEUDO) override;
 
@@ -324,11 +328,15 @@ public:
     bool styleAffectedByActive() const { return hasRareData() && rareDataStyleAffectedByActive(); }
     bool styleAffectedByEmpty() const { return hasRareData() && rareDataStyleAffectedByEmpty(); }
     bool styleAffectedByFocusWithin() const { return hasRareData() && rareDataStyleAffectedByFocusWithin(); }
+    bool descendantsAffectedByPreviousSibling() const { return getFlag(DescendantsAffectedByPreviousSiblingFlag); }
     bool childrenAffectedByHover() const { return getFlag(ChildrenAffectedByHoverRulesFlag); }
     bool childrenAffectedByDrag() const { return hasRareData() && rareDataChildrenAffectedByDrag(); }
     bool childrenAffectedByFirstChildRules() const { return getFlag(ChildrenAffectedByFirstChildRulesFlag); }
     bool childrenAffectedByLastChildRules() const { return getFlag(ChildrenAffectedByLastChildRulesFlag); }
+    bool childrenAffectedByForwardPositionalRules() const { return hasRareData() && rareDataChildrenAffectedByForwardPositionalRules(); }
+    bool descendantsAffectedByForwardPositionalRules() const { return hasRareData() && rareDataDescendantsAffectedByForwardPositionalRules(); }
     bool childrenAffectedByBackwardPositionalRules() const { return hasRareData() && rareDataChildrenAffectedByBackwardPositionalRules(); }
+    bool descendantsAffectedByBackwardPositionalRules() const { return hasRareData() && rareDataDescendantsAffectedByBackwardPositionalRules(); }
     bool childrenAffectedByPropertyBasedBackwardPositionalRules() const { return hasRareData() && rareDataChildrenAffectedByPropertyBasedBackwardPositionalRules(); }
     bool affectsNextSiblingElementStyle() const { return getFlag(AffectsNextSiblingElementStyle); }
     unsigned childIndex() const { return hasRareData() ? rareDataChildIndex() : 0; }
@@ -337,21 +345,22 @@ public:
 
     void setStyleAffectedByEmpty();
     void setStyleAffectedByFocusWithin();
+    void setDescendantsAffectedByPreviousSibling() const { return setFlag(DescendantsAffectedByPreviousSiblingFlag); }
     void setChildrenAffectedByHover() { setFlag(ChildrenAffectedByHoverRulesFlag); }
     void setStyleAffectedByActive();
     void setChildrenAffectedByDrag();
     void setChildrenAffectedByFirstChildRules() { setFlag(ChildrenAffectedByFirstChildRulesFlag); }
     void setChildrenAffectedByLastChildRules() { setFlag(ChildrenAffectedByLastChildRulesFlag); }
+    void setChildrenAffectedByForwardPositionalRules();
+    void setDescendantsAffectedByForwardPositionalRules();
     void setChildrenAffectedByBackwardPositionalRules();
+    void setDescendantsAffectedByBackwardPositionalRules();
     void setChildrenAffectedByPropertyBasedBackwardPositionalRules();
     void setAffectsNextSiblingElementStyle() { setFlag(AffectsNextSiblingElementStyle); }
     void setStyleIsAffectedByPreviousSibling() { setFlag(StyleIsAffectedByPreviousSibling); }
     void setChildIndex(unsigned);
 
-    void setRegionOversetState(RegionOversetState);
-    RegionOversetState regionOversetState() const;
-
-    AtomicString computeInheritedLanguage() const;
+    WEBCORE_EXPORT AtomicString computeInheritedLanguage() const;
     Locale& locale() const;
 
     virtual void accessKeyAction(bool /*sendToAnyEvent*/) { }
@@ -368,8 +377,8 @@ public:
     virtual String target() const { return String(); }
 
     static AXTextStateChangeIntent defaultFocusTextStateChangeIntent() { return AXTextStateChangeIntent(AXTextStateChangeTypeSelectionMove, AXTextSelection { AXTextSelectionDirectionDiscontiguous, AXTextSelectionGranularityUnknown, true }); }
-    void updateFocusAppearanceAfterAttachIfNeeded();
     virtual void focus(bool restorePreviousSelection = true, FocusDirection = FocusDirectionNone);
+    virtual RefPtr<Element> focusAppearanceUpdateTarget();
     virtual void updateFocusAppearance(SelectionRestorationMode, SelectionRevealMode = SelectionRevealMode::Reveal);
     virtual void blur();
 
@@ -403,9 +412,6 @@ public:
     virtual void didBecomeFullscreenElement() { }
     virtual void willStopBeingFullscreenElement() { }
 
-    // Use Document::registerForVisibilityStateChangedCallbacks() to subscribe to this.
-    virtual void visibilityStateChanged() { }
-
 #if ENABLE(VIDEO_TRACK)
     virtual void captionPreferencesChanged() { }
 #endif
@@ -438,12 +444,15 @@ public:
 
     virtual bool isFormControlElement() const { return false; }
     virtual bool isSpinButtonElement() const { return false; }
-    virtual bool isTextFormControl() const { return false; }
+    virtual bool isTextFormControlElement() const { return false; }
+    virtual bool isTextField() const { return false; }
     virtual bool isOptionalFormControl() const { return false; }
     virtual bool isRequiredFormControl() const { return false; }
     virtual bool isInRange() const { return false; }
     virtual bool isOutOfRange() const { return false; }
     virtual bool isFrameElementBase() const { return false; }
+    virtual bool isUploadButton() const { return false; }
+    virtual bool isSliderContainerElement() const { return false; }
 
     bool canContainRangeEndPoint() const override;
 
@@ -458,18 +467,14 @@ public:
     void clearHasPendingResources();
     virtual void buildPendingResource() { };
 
+    bool hasCSSAnimation() const;
+    void setHasCSSAnimation();
+    void clearHasCSSAnimation();
+
 #if ENABLE(FULLSCREEN_API)
-    enum {
-        ALLOW_KEYBOARD_INPUT = 1 << 0,
-        LEGACY_MOZILLA_REQUEST = 1 << 1,
-    };
-    
-    WEBCORE_EXPORT void webkitRequestFullScreen(unsigned short flags);
     WEBCORE_EXPORT bool containsFullScreenElement() const;
     void setContainsFullScreenElement(bool);
     void setContainsFullScreenElementOnAncestorsCrossingFrameBoundaries(bool);
-
-    // W3C API
     WEBCORE_EXPORT void webkitRequestFullscreen();
 #endif
 
@@ -477,21 +482,7 @@ public:
     WEBCORE_EXPORT void requestPointerLock();
 #endif
 
-#if ENABLE(INDIE_UI)
-    void setUIActions(const AtomicString&);
-    const AtomicString& UIActions() const;
-#endif
-    
-    virtual bool isSpellCheckingEnabled() const;
-
-    RenderNamedFlowFragment* renderNamedFlowFragment() const;
-
-#if ENABLE(CSS_REGIONS)
-    virtual bool shouldMoveToFlowThread(const RenderStyle&) const;
-    
-    WEBCORE_EXPORT const AtomicString& webkitRegionOverset() const;
-    Vector<RefPtr<Range>> webkitGetRegionFlowRanges() const;
-#endif
+    bool isSpellCheckingEnabled() const;
 
     bool hasID() const;
     bool hasClass() const;
@@ -509,26 +500,29 @@ public:
     void dispatchFocusOutEvent(const AtomicString& eventType, RefPtr<Element>&& newFocusedElement);
     virtual void dispatchFocusEvent(RefPtr<Element>&& oldFocusedElement, FocusDirection);
     virtual void dispatchBlurEvent(RefPtr<Element>&& newFocusedElement);
+    void dispatchWebKitImageReadyEventForTesting();
 
     WEBCORE_EXPORT bool dispatchMouseForceWillBegin();
 
-    virtual bool willRecalcStyle(Style::Change);
+    virtual void willRecalcStyle(Style::Change);
     virtual void didRecalcStyle(Style::Change);
     virtual void willResetComputedStyle();
     virtual void willAttachRenderers();
     virtual void didAttachRenderers();
     virtual void willDetachRenderers();
     virtual void didDetachRenderers();
-    virtual Optional<ElementStyle> resolveCustomStyle(const RenderStyle& parentStyle, const RenderStyle* shadowHostStyle);
+    virtual std::optional<ElementStyle> resolveCustomStyle(const RenderStyle& parentStyle, const RenderStyle* shadowHostStyle);
 
     LayoutRect absoluteEventHandlerBounds(bool& includesFixedPositionElements) override;
+
+    const RenderStyle* existingComputedStyle() const;
 
     void setBeforePseudoElement(Ref<PseudoElement>&&);
     void setAfterPseudoElement(Ref<PseudoElement>&&);
     void clearBeforePseudoElement();
     void clearAfterPseudoElement();
     void resetComputedStyle();
-    void clearStyleDerivedDataBeforeDetachingRenderer();
+    void resetStyleRelations();
     void clearHoverAndActiveStatusBeforeDetachingRenderer();
 
     WEBCORE_EXPORT URL absoluteLinkURL() const;
@@ -560,33 +554,28 @@ public:
     // Elements newly added to the tree are also in this state.
     void invalidateStyleAndRenderersForSubtree();
 
-    bool hasDisplayContents() const;
-    void setHasDisplayContents(bool);
+    void invalidateStyleInternal();
+    void invalidateStyleForSubtreeInternal();
 
-    virtual void isVisibleInViewportChanged() { }
+    bool hasDisplayContents() const;
+    void storeDisplayContentsStyle(std::unique_ptr<RenderStyle>);
 
     using ContainerNode::setAttributeEventListener;
     void setAttributeEventListener(const AtomicString& eventType, const QualifiedName& attributeName, const AtomicString& value);
 
-    bool isNamedFlowContentElement() const { return hasRareData() && rareDataIsNamedFlowContentElement(); }
-    void setIsNamedFlowContentElement();
-    void clearIsNamedFlowContentElement();
-
-#if ENABLE(WEB_ANIMATIONS)
-    Vector<WebAnimation*> getAnimations();
-#endif
-
     Element* findAnchorElementForLink(String& outAnchorName);
+
+    ExceptionOr<Ref<WebAnimation>> animate(JSC::ExecState&, JSC::Strong<JSC::JSObject>&&, std::optional<Variant<double, KeyframeAnimationOptions>>&&);
+    Vector<RefPtr<WebAnimation>> getAnimations();
 
 protected:
     Element(const QualifiedName&, Document&, ConstructionType);
 
-    InsertionNotificationRequest insertedInto(ContainerNode&) override;
-    void removedFrom(ContainerNode&) override;
+    InsertedIntoAncestorResult insertedIntoAncestor(InsertionType, ContainerNode&) override;
+    void removedFromAncestor(RemovalType, ContainerNode&) override;
     void childrenChanged(const ChildChange&) override;
     void removeAllEventListeners() final;
     virtual void parserDidSetAttributes();
-    void didMoveToNewDocument(Document*) override;
 
     void clearTabIndexExplicitlyIfNeeded();
     void setTabIndexExplicitly(int);
@@ -608,8 +597,7 @@ private:
     bool isUserActionElementFocused() const;
     bool isUserActionElementHovered() const;
 
-    virtual void didAddUserAgentShadowRoot(ShadowRoot*) { }
-    virtual bool alwaysCreateUserAgentShadowRoot() const { return false; }
+    virtual void didAddUserAgentShadowRoot(ShadowRoot&) { }
 
     // FIXME: Remove the need for Attr to call willModifyAttribute/didModifyAttribute.
     friend class Attr;
@@ -654,31 +642,29 @@ private:
     void formatForDebugger(char* buffer, unsigned length) const override;
 #endif
 
-    void cancelFocusAppearanceUpdate();
-
     // The cloneNode function is private so that non-virtual cloneElementWith/WithoutChildren are used instead.
     Ref<Node> cloneNodeInternal(Document&, CloningOperation) override;
     virtual Ref<Element> cloneElementWithoutAttributesAndChildren(Document&);
 
     void removeShadowRoot();
 
-    const RenderStyle* existingComputedStyle();
     const RenderStyle& resolveComputedStyle();
+    const RenderStyle& resolvePseudoElementStyle(PseudoId);
 
     bool rareDataStyleAffectedByEmpty() const;
     bool rareDataStyleAffectedByFocusWithin() const;
-    bool rareDataIsNamedFlowContentElement() const;
     bool rareDataChildrenAffectedByHover() const;
     bool rareDataStyleAffectedByActive() const;
     bool rareDataChildrenAffectedByDrag() const;
     bool rareDataChildrenAffectedByLastChildRules() const;
+    bool rareDataChildrenAffectedByForwardPositionalRules() const;
+    bool rareDataDescendantsAffectedByForwardPositionalRules() const;
     bool rareDataChildrenAffectedByBackwardPositionalRules() const;
+    bool rareDataDescendantsAffectedByBackwardPositionalRules() const;
     bool rareDataChildrenAffectedByPropertyBasedBackwardPositionalRules() const;
     unsigned rareDataChildIndex() const;
 
     SpellcheckAttributeState spellcheckAttributeState() const;
-
-    void unregisterNamedFlowContentElement();
 
     void createUniqueElementData();
 
@@ -688,10 +674,10 @@ private:
     void detachAllAttrNodesFromElement();
     void detachAttrNodeFromElementWithValue(Attr*, const AtomicString& value);
 
-    bool isJavaScriptURLAttribute(const Attribute&) const;
-
     // Anyone thinking of using this should call document instead of ownerDocument.
     void ownerDocument() const = delete;
+    
+    void attachAttributeNodeIfNeeded(Attr&);
 
     QualifiedName m_tagName;
     RefPtr<ElementData> m_elementData;
@@ -715,7 +701,7 @@ inline Element* Node::parentElement() const
 
 inline const Element* Element::rootElement() const
 {
-    if (inDocument())
+    if (isConnected())
         return document().documentElement();
 
     const Element* highest = this;
@@ -732,12 +718,11 @@ inline bool Element::hasAttributeWithoutSynchronization(const QualifiedName& nam
 
 inline const AtomicString& Element::attributeWithoutSynchronization(const QualifiedName& name) const
 {
-    ASSERT(fastAttributeLookupAllowed(name));
     if (elementData()) {
         if (const Attribute* attribute = findAttributeByName(name))
             return attribute->value();
     }
-    return nullAtom;
+    return nullAtom();
 }
 
 inline bool Element::hasAttributesWithoutUpdate() const
@@ -747,21 +732,21 @@ inline bool Element::hasAttributesWithoutUpdate() const
 
 inline const AtomicString& Element::idForStyleResolution() const
 {
-    return hasID() ? elementData()->idForStyleResolution() : nullAtom;
+    return hasID() ? elementData()->idForStyleResolution() : nullAtom();
 }
 
 inline const AtomicString& Element::getIdAttribute() const
 {
     if (hasID())
         return elementData()->findAttributeByName(HTMLNames::idAttr)->value();
-    return nullAtom;
+    return nullAtom();
 }
 
 inline const AtomicString& Element::getNameAttribute() const
 {
     if (hasName())
         return elementData()->findAttributeByName(HTMLNames::nameAttr)->value();
-    return nullAtom;
+    return nullAtom();
 }
 
 inline void Element::setIdAttribute(const AtomicString& value)
@@ -834,4 +819,5 @@ inline void Element::setHasFocusWithin(bool flag)
 
 SPECIALIZE_TYPE_TRAITS_BEGIN(WebCore::Element)
     static bool isType(const WebCore::Node& node) { return node.isElementNode(); }
+    static bool isType(const WebCore::EventTarget& target) { return is<WebCore::Node>(target) && isType(downcast<WebCore::Node>(target)); }
 SPECIALIZE_TYPE_TRAITS_END()

@@ -54,7 +54,7 @@ public:
 
         struct KeyValue {
             String key;
-            Optional<HTTPHeaderName> keyAsHTTPHeaderName;
+            std::optional<HTTPHeaderName> keyAsHTTPHeaderName;
             String value;
         };
 
@@ -99,7 +99,7 @@ public:
             if (it == m_table.uncommonHeaders().end())
                 return false;
             m_keyValue.key = it->key;
-            m_keyValue.keyAsHTTPHeaderName = Nullopt;
+            m_keyValue.keyAsHTTPHeaderName = std::nullopt;
             m_keyValue.value = it->value;
             return true;
         }
@@ -114,7 +114,7 @@ public:
     WEBCORE_EXPORT HTTPHeaderMap();
 
     // Gets a copy of the data suitable for passing to another thread.
-    HTTPHeaderMap isolatedCopy() const;
+    WEBCORE_EXPORT HTTPHeaderMap isolatedCopy() const;
 
     bool isEmpty() const { return m_commonHeaders.isEmpty() && m_uncommonHeaders.isEmpty(); }
     int size() const { return m_commonHeaders.size() + m_uncommonHeaders.size(); }
@@ -142,7 +142,7 @@ public:
     void set(HTTPHeaderName, const String& value);
     void add(HTTPHeaderName, const String& value);
     bool addIfNotPresent(HTTPHeaderName, const String&);
-    bool contains(HTTPHeaderName) const;
+    WEBCORE_EXPORT bool contains(HTTPHeaderName) const;
     WEBCORE_EXPORT bool remove(HTTPHeaderName);
 
     // Instead of passing a string literal to any of these functions, just use a HTTPHeaderName instead.

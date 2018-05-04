@@ -37,16 +37,22 @@
 #import "EditorClient.h"
 #import "Element.h"
 #import "File.h"
+#import "Frame.h"
 #import "FrameView.h"
 #import "HTMLAttachmentElement.h"
-#import "MainFrame.h"
 #import "Page.h"
 #import "Pasteboard.h"
+#import "PasteboardStrategy.h"
+#import "PlatformStrategies.h"
 #import "Range.h"
+#import "RuntimeEnabledFeatures.h"
+#import "UTIUtilities.h"
+
+#if ENABLE(DATA_INTERACTION)
+#import <MobileCoreServices/MobileCoreServices.h>
+#endif
 
 namespace WebCore {
-
-const int DragController::LinkDragBorderInset = -2;
 
 const int DragController::MaxOriginalImageArea = 1500 * 1500;
 const int DragController::DragIconRightInset = 7;
@@ -54,14 +60,23 @@ const int DragController::DragIconBottomInset = 3;
 
 const float DragController::DragImageAlpha = 0.75f;
 
-bool DragController::isCopyKeyDown(DragData& dragData)
+bool DragController::isCopyKeyDown(const DragData& dragData)
 {
     return dragData.flags() & DragApplicationIsCopyKeyDown;
 }
     
-DragOperation DragController::dragOperation(DragData& dragData)
+DragOperation DragController::dragOperation(const DragData& dragData)
 {
-    if ((dragData.flags() & DragApplicationIsModal) || !dragData.containsURL())
+    if (dragData.flags() & DragApplicationIsModal)
+        return DragOperationNone;
+
+    bool mayContainURL;
+    if (canLoadDataFromDraggingPasteboard())
+        mayContainURL = dragData.containsURL();
+    else
+        mayContainURL = dragData.containsURLTypeIdentifier();
+
+    if (!mayContainURL && !dragData.containsPromise())
         return DragOperationNone;
 
     if (!m_documentUnderMouse || (!(dragData.flags() & (DragApplicationHasAttachedSheet | DragApplicationIsSource))))
@@ -77,8 +92,17 @@ const IntSize& DragController::maxDragImageSize()
     return maxDragImageSize;
 }
 
+String DragController::platformContentTypeForBlobType(const String& type) const
+{
+    auto utiType = UTIFromMIMEType(type);
+    if (!utiType.isEmpty())
+        return utiType;
+    return type;
+}
+
 void DragController::cleanupAfterSystemDrag()
 {
+#if PLATFORM(MAC)
     // Drag has ended, dragEnded *should* have been called, however it is possible
     // for the UIDelegate to take over the drag, and fail to send the appropriate
     // drag termination event.  As dragEnded just resets drag variables, we just
@@ -87,16 +111,49 @@ void DragController::cleanupAfterSystemDrag()
     // is asynchronous.
     if (m_page.mainFrame().view()->platformWidget())
         dragEnded();
+#endif
 }
 
-#if ENABLE(ATTACHMENT_ELEMENT)
-void DragController::declareAndWriteAttachment(DataTransfer& dataTransfer, Element& element, const URL& url)
+#if ENABLE(DATA_INTERACTION)
+
+DragOperation DragController::platformGenericDragOperation()
 {
-    const HTMLAttachmentElement& attachment = downcast<HTMLAttachmentElement>(element);
-    m_client.declareAndWriteAttachment(dataTransfer.pasteboard().name(), element, url, attachment.file()->path(), element.document().frame());
+    // On iOS, UIKit skips the -performDrop invocation altogether if MOVE is forbidden.
+    // Thus, if MOVE is not allowed in the drag source operation mask, fall back to only other allowable action, COPY.
+    return DragOperationCopy;
 }
+
+void DragController::updateSupportedTypeIdentifiersForDragHandlingMethod(DragHandlingMethod dragHandlingMethod, const DragData& dragData) const
+{
+    Vector<String> supportedTypes;
+    switch (dragHandlingMethod) {
+    case DragHandlingMethod::PageLoad:
+        supportedTypes.append(kUTTypeURL);
+        break;
+    case DragHandlingMethod::EditPlainText:
+        supportedTypes.append(kUTTypeURL);
+        supportedTypes.append(kUTTypePlainText);
+        break;
+    case DragHandlingMethod::EditRichText:
+        if (RuntimeEnabledFeatures::sharedFeatures().attachmentElementEnabled()) {
+            supportedTypes.append(WebArchivePboardType);
+            supportedTypes.append(kUTTypeContent);
+            supportedTypes.append(kUTTypeItem);
+        } else {
+            for (NSString *type in Pasteboard::supportedWebContentPasteboardTypes())
+                supportedTypes.append(type);
+        }
+        break;
+    default:
+        for (NSString *type in Pasteboard::supportedFileUploadPasteboardTypes())
+            supportedTypes.append(type);
+        break;
+    }
+    platformStrategies()->pasteboardStrategy()->updateSupportedTypeIdentifiers(supportedTypes, dragData.pasteboardName());
+}
+
 #endif
-    
+
 void DragController::declareAndWriteDragImage(DataTransfer& dataTransfer, Element& element, const URL& url, const String& label)
 {
     m_client.declareAndWriteDragImage(dataTransfer.pasteboard().name(), element, url, label, element.document().frame());

@@ -23,14 +23,14 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef InlineElementBox_h
-#define InlineElementBox_h
+#pragma once
 
 #include "InlineBox.h"
 
 namespace WebCore {
 
 class InlineElementBox : public InlineBox {
+    WTF_MAKE_ISO_ALLOCATED(InlineElementBox);
 public:
     explicit InlineElementBox(RenderBoxModelObject& renderer)
         : InlineBox(renderer)
@@ -58,5 +58,3 @@ private:
 } // namespace WebCore
 
 SPECIALIZE_TYPE_TRAITS_INLINE_BOX(InlineElementBox, isInlineElementBox())
-
-#endif // InlineElementBox_h

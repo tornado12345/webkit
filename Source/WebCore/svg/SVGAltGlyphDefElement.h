@@ -17,16 +17,17 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGAltGlyphDefElement_h
-#define SVGAltGlyphDefElement_h
+#pragma once
 
 #if ENABLE(SVG_FONTS)
+
 #include "SVGElement.h"
-#include <wtf/Vector.h>
+#include <wtf/Forward.h>
 
 namespace WebCore {
 
 class SVGAltGlyphDefElement final : public SVGElement {
+    WTF_MAKE_ISO_ALLOCATED(SVGAltGlyphDefElement);
 public:
     static Ref<SVGAltGlyphDefElement> create(const QualifiedName&, Document&);
 
@@ -38,7 +39,6 @@ private:
     bool rendererIsNeeded(const RenderStyle&) final { return false; }
 };
 
-}
+} // namespace WebCore
 
-#endif
-#endif
+#endif // ENABLE(SVG_FONTS)

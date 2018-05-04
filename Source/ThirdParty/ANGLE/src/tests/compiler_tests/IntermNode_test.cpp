@@ -7,11 +7,14 @@
 //   Unit tests for the AST node classes.
 //
 
-#include "angle_gl.h"
-#include "gtest/gtest.h"
-#include "compiler/translator/InfoSink.h"
 #include "compiler/translator/IntermNode.h"
+#include "angle_gl.h"
+#include "compiler/translator/InfoSink.h"
 #include "compiler/translator/PoolAlloc.h"
+#include "compiler/translator/SymbolTable.h"
+#include "gtest/gtest.h"
+
+using namespace sh;
 
 class IntermNodeTest : public testing::Test
 {
@@ -38,7 +41,11 @@ class IntermNodeTest : public testing::Test
         TString symbolName = symbolNameOut.c_str();
         ++mUniqueIndex;
 
-        TIntermSymbol *node = new TIntermSymbol(0, symbolName, type);
+        // We're using a dummy symbol table here, don't need to assign proper symbol ids to these
+        // nodes.
+        TSymbolTable symbolTable;
+
+        TIntermSymbol *node = new TIntermSymbol(symbolTable.nextUniqueId(), symbolName, type);
         node->setLine(createUniqueSourceLoc());
         node->setInternal(true);
         node->getTypePointer()->setQualifier(EvqTemporary);
@@ -115,7 +122,11 @@ class IntermNodeTest : public testing::Test
 TEST_F(IntermNodeTest, DeepCopySymbolNode)
 {
     TType type(EbtInt, EbpHigh);
-    TIntermSymbol *original = new TIntermSymbol(0, TString("name"), type);
+
+    // We're using a dummy symbol table here, don't need to assign proper symbol ids to these nodes.
+    TSymbolTable symbolTable;
+
+    TIntermSymbol *original = new TIntermSymbol(symbolTable.nextUniqueId(), TString("name"), type);
     original->setLine(getTestSourceLoc());
     original->setInternal(true);
     TIntermTyped *copy = original->deepCopy();
@@ -182,14 +193,14 @@ TEST_F(IntermNodeTest, DeepCopyUnaryNode)
 // original. Child nodes also need to be copies with the same attributes as the original children.
 TEST_F(IntermNodeTest, DeepCopyAggregateNode)
 {
-    TType type(EbtFloat, EbpHigh);
-
-    TIntermAggregate *original = new TIntermAggregate(EOpMix);
+    TIntermSequence *originalSeq = new TIntermSequence();
+    originalSeq->push_back(createTestSymbol());
+    originalSeq->push_back(createTestSymbol());
+    originalSeq->push_back(createTestSymbol());
+    TIntermAggregate *original =
+        TIntermAggregate::Create(originalSeq->at(0)->getAsTyped()->getType(), EOpMix, originalSeq);
     original->setLine(getTestSourceLoc());
-    TIntermSequence *originalSeq = original->getSequence();
-    originalSeq->push_back(createTestSymbol());
-    originalSeq->push_back(createTestSymbol());
-    originalSeq->push_back(createTestSymbol());
+
     TIntermTyped *copyTyped = original->deepCopy();
     TIntermAggregate *copy = copyTyped->getAsAggregate();
     ASSERT_NE(nullptr, copy);
@@ -201,7 +212,7 @@ TEST_F(IntermNodeTest, DeepCopyAggregateNode)
     TIntermSequence::size_type i = 0;
     for (auto *copyChild : *copy->getSequence())
     {
-        TIntermNode *originalChild = originalSeq->at(i);
+        TIntermNode *originalChild = original->getSequence()->at(i);
         checkSymbolCopy(originalChild, copyChild);
         ++i;
     }

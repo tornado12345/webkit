@@ -26,8 +26,7 @@
 #ifndef WTF_Lock_h
 #define WTF_Lock_h
 
-#include <wtf/Atomics.h>
-#include <wtf/Compiler.h>
+#include <wtf/LockAlgorithm.h>
 #include <wtf/Locker.h>
 #include <wtf/Noncopyable.h>
 
@@ -36,6 +35,8 @@ struct LockInspector;
 };
 
 namespace WTF {
+
+typedef LockAlgorithm<uint8_t, 1, 2> DefaultLockAlgorithm;
 
 // This is a fully adaptive mutex that only requires 1 byte of storage. It has fast paths that are
 // competetive to a spinlock (uncontended locking is inlined and is just a CAS, microcontention is
@@ -47,29 +48,21 @@ namespace WTF {
 // at worst one call to unlock() per millisecond will do a direct hand-off to the thread that is at
 // the head of the queue. When there are collisions, each collision increases the fair unlock delay
 // by one millisecond in the worst case.
+class Lock {
+    WTF_MAKE_NONCOPYABLE(Lock);
+    WTF_MAKE_FAST_ALLOCATED;
+public:
+    constexpr Lock() = default;
 
-// This is a struct without a constructor or destructor so that it can be statically initialized.
-// Use Lock in instance variables.
-struct LockBase {
     void lock()
     {
-        if (LIKELY(m_byte.compareExchangeWeak(0, isHeldBit, std::memory_order_acquire))) {
-            // Lock acquired!
-            return;
-        }
-
-        lockSlow();
+        if (UNLIKELY(!DefaultLockAlgorithm::lockFastAssumingZero(m_byte)))
+            lockSlow();
     }
 
     bool tryLock()
     {
-        for (;;) {
-            uint8_t currentByteValue = m_byte.load();
-            if (currentByteValue & isHeldBit)
-                return false;
-            if (m_byte.compareExchangeWeak(currentByteValue, currentByteValue | isHeldBit))
-                return true;
-        }
+        return DefaultLockAlgorithm::tryLock(m_byte);
     }
 
     // Need this version for std::unique_lock.
@@ -88,12 +81,8 @@ struct LockBase {
     // guarantees that long critical sections always get a fair lock.
     void unlock()
     {
-        if (LIKELY(m_byte.compareExchangeWeak(isHeldBit, 0, std::memory_order_release))) {
-            // Lock released and nobody was waiting!
-            return;
-        }
-
-        unlockSlow();
+        if (UNLIKELY(!DefaultLockAlgorithm::unlockFastAssumingZero(m_byte)))
+            unlockSlow();
     }
 
     // This is like unlock() but it guarantees that we unlock the lock fairly. For short critical
@@ -103,17 +92,19 @@ struct LockBase {
     // want.
     void unlockFairly()
     {
-        if (LIKELY(m_byte.compareExchangeWeak(isHeldBit, 0, std::memory_order_release))) {
-            // Lock released and nobody was waiting!
-            return;
-        }
-
-        unlockFairlySlow();
+        if (UNLIKELY(!DefaultLockAlgorithm::unlockFastAssumingZero(m_byte)))
+            unlockFairlySlow();
+    }
+    
+    void safepoint()
+    {
+        if (UNLIKELY(!DefaultLockAlgorithm::safepointFast(m_byte)))
+            safepointSlow();
     }
 
     bool isHeld() const
     {
-        return m_byte.load(std::memory_order_acquire) & isHeldBit;
+        return DefaultLockAlgorithm::isLocked(m_byte);
     }
 
     bool isLocked() const
@@ -121,26 +112,16 @@ struct LockBase {
         return isHeld();
     }
 
-protected:
+private:
     friend struct TestWebKitAPI::LockInspector;
     
     static const uint8_t isHeldBit = 1;
     static const uint8_t hasParkedBit = 2;
-
+    
     WTF_EXPORT_PRIVATE void lockSlow();
     WTF_EXPORT_PRIVATE void unlockSlow();
     WTF_EXPORT_PRIVATE void unlockFairlySlow();
-    
-    enum Fairness {
-        Fair,
-        Unfair
-    };
-    void unlockSlowImpl(Fairness);
-    
-    enum Token {
-        BargingOpportunity,
-        DirectHandoff
-    };
+    WTF_EXPORT_PRIVATE void safepointSlow();
 
     // Method used for testing only.
     bool isFullyReset() const
@@ -148,27 +129,15 @@ protected:
         return !m_byte.load();
     }
 
-    Atomic<uint8_t> m_byte;
+    Atomic<uint8_t> m_byte { 0 };
 };
 
-class Lock : public LockBase {
-    WTF_MAKE_NONCOPYABLE(Lock);
-    WTF_MAKE_FAST_ALLOCATED;
-public:
-    Lock()
-    {
-        m_byte.store(0, std::memory_order_relaxed);
-    }
-};
-
-typedef LockBase StaticLock;
-typedef Locker<LockBase> LockHolder;
+using LockHolder = Locker<Lock>;
 
 } // namespace WTF
 
 using WTF::Lock;
 using WTF::LockHolder;
-using WTF::StaticLock;
 
 #endif // WTF_Lock_h
 

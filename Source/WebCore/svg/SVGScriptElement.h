@@ -1,6 +1,7 @@
 /*
  * Copyright (C) 2004, 2005, 2008 Nikolas Zimmermann <zimmermann@kde.org>
  * Copyright (C) 2004, 2005, 2007 Rob Buis <buis@kde.org>
+ * Copyright (C) 2008-2017 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -18,8 +19,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGScriptElement_h
-#define SVGScriptElement_h
+#pragma once
 
 #include "SVGAnimatedBoolean.h"
 #include "SVGAnimatedString.h"
@@ -30,19 +30,20 @@
 
 namespace WebCore {
 
-class SVGScriptElement final : public SVGElement
-                             , public SVGURIReference
-                             , public SVGExternalResourcesRequired
-                             , public ScriptElement {
+class SVGScriptElement final : public SVGElement, public SVGURIReference, public SVGExternalResourcesRequired, public ScriptElement {
+    WTF_MAKE_ISO_ALLOCATED(SVGScriptElement);
 public:
     static Ref<SVGScriptElement> create(const QualifiedName&, Document&, bool wasInsertedByParser);
+
+    using SVGElement::ref;
+    using SVGElement::deref;
 
 private:
     SVGScriptElement(const QualifiedName&, Document&, bool wasInsertedByParser, bool alreadyStarted);
 
     void parseAttribute(const QualifiedName&, const AtomicString&) final;
-    InsertionNotificationRequest insertedInto(ContainerNode&) final;
-    void finishedInsertingSubtree() final;
+    InsertedIntoAncestorResult insertedIntoAncestor(InsertionType, ContainerNode&) final;
+    void didFinishInsertingNode() final;
     void childrenChanged(const ChildChange&) final;
 
     void svgAttributeChanged(const QualifiedName&) final;
@@ -59,8 +60,9 @@ private:
     String languageAttributeValue() const final;
     String forAttributeValue() const final;
     String eventAttributeValue() const final;
-    bool asyncAttributeValue() const final;
-    bool deferAttributeValue() const final;
+    bool hasAsyncAttribute() const final;
+    bool hasDeferAttribute() const final;
+    bool hasNoModuleAttribute() const final;
     bool hasSourceAttribute() const final;
 
     void dispatchLoadEvent() final { SVGExternalResourcesRequired::dispatchLoadEvent(this); }
@@ -87,5 +89,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif

@@ -45,7 +45,7 @@ class LayoutTestFinder(object):
 
     def find_tests(self, options, args):
         paths = self._strip_test_dir_prefixes(args)
-        if options.test_list:
+        if options and options.test_list:
             paths += self._strip_test_dir_prefixes(self._read_test_names_from_file(options.test_list, self._port.TEST_PATH_SEPARATOR))
         test_files = self._port.tests(paths)
         return (paths, test_files)
@@ -99,7 +99,7 @@ class LayoutTestFinder(object):
                     line = self._strip_comments(line)
                     if line:
                         tests.append(line)
-            except IOError, e:
+            except IOError as e:
                 if e.errno == errno.ENOENT:
                     _log.critical('')
                     _log.critical('--test-list file "%s" not found' % file)

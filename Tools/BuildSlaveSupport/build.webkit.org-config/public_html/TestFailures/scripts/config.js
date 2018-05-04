@@ -57,7 +57,7 @@ config.kPlatforms = {
             return encodeURIComponent('r' + revision + ' (' + buildNumber + ')');
         },
         _builderApplies: function(builderName) {
-            return builderName.indexOf('Apple') != -1;
+            return builderName.indexOf('Apple') !== -1;
         },
     },
     'gtk' : {
@@ -66,7 +66,6 @@ config.kPlatforms = {
         layoutTestResultsURL: 'https://build.webkit.org/results',
         waterfallURL: 'https://build.webkit.org/waterfall',
         builders: {
-            'GTK Linux 32-bit Release' : {version: '32-bit release'},
             'GTK Linux 64-bit Release (Tests)' : {version: '64-bit release'},
             'GTK Linux 64-bit Debug (Tests)' : {version: '64-bit debug', debug: true},
         },
@@ -80,16 +79,16 @@ config.kPlatforms = {
             return encodeURIComponent('r' + revision + ' (' + buildNumber + ')');
         },
         _builderApplies: function(builderName) {
-            return builderName.indexOf('GTK') != -1;
+            return builderName.indexOf('GTK') !== -1;
         },
     },
-    'efl' : {
-        label : 'EFL',
+    'wpe' : {
+        label : 'WPE',
         buildConsoleURL: 'https://build.webkit.org',
         layoutTestResultsURL: 'https://build.webkit.org/results',
         waterfallURL: 'https://build.webkit.org/waterfall',
         builders: {
-            'EFL Linux 64-bit Release WK2' : {version: '64-bit WK2'},
+            'WPE Linux 64-bit Release (Tests)' : {version: '64-bit release'},
         },
         haveBuilderAccumulatedResults : false,
         useDirectoryListingForOldBuilds: false,
@@ -101,7 +100,7 @@ config.kPlatforms = {
             return encodeURIComponent('r' + revision + ' (' + buildNumber + ')');
         },
         _builderApplies: function(builderName) {
-            return builderName.indexOf('EFL') != -1;
+            return builderName.indexOf('WPE') !== -1;
         },
     },
 };

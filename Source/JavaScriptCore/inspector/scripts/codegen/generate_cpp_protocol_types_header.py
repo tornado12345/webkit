@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Copyright (c) 2014, 2016 Apple Inc. All rights reserved.
+# Copyright (c) 2014-2018 Apple Inc. All rights reserved.
 # Copyright (c) 2014 University of Washington. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -40,8 +40,8 @@ log = logging.getLogger('global')
 
 
 class CppProtocolTypesHeaderGenerator(CppGenerator):
-    def __init__(self, model, input_filepath):
-        CppGenerator.__init__(self, model, input_filepath)
+    def __init__(self, *args, **kwargs):
+        CppGenerator.__init__(self, *args, **kwargs)
 
     def output_filename(self):
         return "%sProtocolObjects.h" % self.protocol_name()
@@ -50,13 +50,8 @@ class CppProtocolTypesHeaderGenerator(CppGenerator):
         domains = self.domains_to_generate()
         self.calculate_types_requiring_shape_assertions(domains)
 
-        headers = set([
-            '<inspector/InspectorProtocolTypes.h>',
-            '<wtf/Assertions.h>',
-        ])
-
         header_args = {
-            'includes': '\n'.join(['#include ' + header for header in sorted(headers)]),
+            'includes': self._generate_secondary_header_includes(),
             'typedefs': '',
         }
 
@@ -79,11 +74,19 @@ class CppProtocolTypesHeaderGenerator(CppGenerator):
 
     # FIXME: move builders out of classes, uncomment forward declaration
 
+    def _generate_secondary_header_includes(self):
+        header_includes = [
+            (["JavaScriptCore", "WebKit"], ("JavaScriptCore", "inspector/InspectorProtocolTypes.h")),
+            (["JavaScriptCore", "WebKit"], ("WTF", "wtf/Assertions.h"))
+        ]
+
+        return '\n'.join(self.generate_includes_from_entries(header_includes))
+
     def _generate_forward_declarations(self, domains):
         sections = []
 
         for domain in domains:
-            declaration_types = [decl.type for decl in domain.type_declarations]
+            declaration_types = [decl.type for decl in self.type_declarations_for_domain(domain)]
             object_types = filter(lambda _type: isinstance(_type, ObjectType), declaration_types)
             enum_types = filter(lambda _type: isinstance(_type, EnumType), declaration_types)
             sorted(object_types, key=methodcaller('raw_name'))
@@ -121,8 +124,9 @@ class CppProtocolTypesHeaderGenerator(CppGenerator):
 // End of typedefs.""" % '\n\n'.join(sections)
 
     def _generate_typedefs_for_domain(self, domain):
-        primitive_declarations = filter(lambda decl: isinstance(decl.type, AliasedType), domain.type_declarations)
-        array_declarations = filter(lambda decl: isinstance(decl.type, ArrayType), domain.type_declarations)
+        type_declarations = self.type_declarations_for_domain(domain)
+        primitive_declarations = filter(lambda decl: isinstance(decl.type, AliasedType), type_declarations)
+        array_declarations = filter(lambda decl: isinstance(decl.type, ArrayType), type_declarations)
         if len(primitive_declarations) == 0 and len(array_declarations) == 0:
             return ''
 
@@ -140,7 +144,7 @@ class CppProtocolTypesHeaderGenerator(CppGenerator):
             typedef_lines = []
             if len(declaration.description) > 0:
                 typedef_lines.append('/* %s */' % declaration.description)
-            typedef_lines.append('typedef Inspector::Protocol::Array<%s> %s;' % (element_type, declaration.type_name))
+            typedef_lines.append('typedef JSON::ArrayOf<%s> %s;' % (element_type, declaration.type_name))
             sections.append('\n'.join(typedef_lines))
 
         lines = []
@@ -175,7 +179,8 @@ class CppProtocolTypesHeaderGenerator(CppGenerator):
     def _generate_builders_for_domain(self, domain):
         sections = []
 
-        for type_declaration in domain.type_declarations:
+        type_declarations = self.type_declarations_for_domain(domain)
+        for type_declaration in type_declarations:
             if isinstance(type_declaration.type, EnumType):
                 sections.append(self._generate_struct_for_enum_declaration(type_declaration))
             elif isinstance(type_declaration.type, ObjectType):
@@ -203,7 +208,7 @@ class CppProtocolTypesHeaderGenerator(CppGenerator):
         lines = []
         if len(type_declaration.description) > 0:
             lines.append('/* %s */' % type_declaration.description)
-        base_class = 'Inspector::InspectorObject'
+        base_class = 'JSON::Object'
         if not Generator.type_has_open_fields(type_declaration.type):
             base_class = base_class + 'Base'
         lines.append('class %s : public %s {' % (object_name, base_class))
@@ -234,7 +239,8 @@ class CppProtocolTypesHeaderGenerator(CppGenerator):
         if Generator.type_has_open_fields(type_declaration.type):
             lines.append('')
             lines.append('    // Property names for type generated as open.')
-            for type_member in type_declaration.type_members:
+            open_members = Generator.open_fields(type_declaration)
+            for type_member in open_members:
                 export_macro = self.model().framework.setting('export_macro', None)
                 lines.append('    %s static const char* %s;' % (export_macro, ucfirst(type_member.member_name)))
 
@@ -323,11 +329,11 @@ class CppProtocolTypesHeaderGenerator(CppGenerator):
         lines.append('    void set%(camelName)s(%(parameterType)s value)' % setter_args)
         lines.append('    {')
         if isinstance(type_member.type, EnumType):
-            lines.append('        InspectorObjectBase::%(keyedSet)s(ASCIILiteral("%(name)s"), Inspector::Protocol::%(helpersNamespace)s::getEnumConstantValue(value));' % setter_args)
+            lines.append('        JSON::ObjectBase::%(keyedSet)s(ASCIILiteral("%(name)s"), Inspector::Protocol::%(helpersNamespace)s::getEnumConstantValue(value));' % setter_args)
         elif CppGenerator.should_use_references_for_type(type_member.type):
-            lines.append('        InspectorObjectBase::%(keyedSet)s(ASCIILiteral("%(name)s"), WTFMove(value));' % setter_args)
+            lines.append('        JSON::ObjectBase::%(keyedSet)s(ASCIILiteral("%(name)s"), WTFMove(value));' % setter_args)
         else:
-            lines.append('        InspectorObjectBase::%(keyedSet)s(ASCIILiteral("%(name)s"), value);' % setter_args)
+            lines.append('        JSON::ObjectBase::%(keyedSet)s(ASCIILiteral("%(name)s"), value);' % setter_args)
         lines.append('    }')
         return '\n'.join(lines)
 
@@ -336,7 +342,8 @@ class CppProtocolTypesHeaderGenerator(CppGenerator):
         type_arguments = []
 
         for domain in self.domains_to_generate():
-            declarations_to_generate = filter(lambda decl: self.type_needs_shape_assertions(decl.type), domain.type_declarations)
+            type_declarations = self.type_declarations_for_domain(domain)
+            declarations_to_generate = filter(lambda decl: self.type_needs_shape_assertions(decl.type), type_declarations)
 
             for type_declaration in declarations_to_generate:
                 for type_member in type_declaration.type_members:
@@ -357,10 +364,8 @@ class CppProtocolTypesHeaderGenerator(CppGenerator):
         for argument in type_arguments:
             lines.append('template<> %s BindingTraits<%s> {' % (' '.join(struct_keywords), argument[0]))
             if argument[1]:
-                lines.append('static RefPtr<%s> runtimeCast(RefPtr<Inspector::InspectorValue>&& value);' % argument[0])
-            lines.append('#if !ASSERT_DISABLED')
-            lines.append('%s assertValueHasExpectedType(Inspector::InspectorValue*);' % ' '.join(function_keywords))
-            lines.append('#endif // !ASSERT_DISABLED')
+                lines.append('static RefPtr<%s> runtimeCast(RefPtr<JSON::Value>&& value);' % argument[0])
+            lines.append('%s assertValueHasExpectedType(JSON::Value*);' % ' '.join(function_keywords))
             lines.append('};')
         return '\n'.join(lines)
 
@@ -370,11 +375,11 @@ class CppProtocolTypesHeaderGenerator(CppGenerator):
             'namespace %s {' % self.helpers_namespace(),
             '',
             'template<typename ProtocolEnumType>',
-            'Optional<ProtocolEnumType> parseEnumValueFromString(const String&);',
+            'std::optional<ProtocolEnumType> parseEnumValueFromString(const String&);',
         ]))
 
         def return_type_with_export_macro(cpp_protocol_type):
-            enum_return_type = 'Optional<%s>' % cpp_protocol_type
+            enum_return_type = 'std::optional<%s>' % cpp_protocol_type
             result_terms = [enum_return_type]
             export_macro = self.model().framework.setting('export_macro', None)
             if export_macro is not None:
@@ -385,7 +390,8 @@ class CppProtocolTypesHeaderGenerator(CppGenerator):
             return isinstance(type_member.type, EnumType) and type_member.type.is_anonymous
 
         for domain in self.domains_to_generate():
-            declaration_types = [decl.type for decl in domain.type_declarations]
+            type_declarations = self.type_declarations_for_domain(domain)
+            declaration_types = [decl.type for decl in type_declarations]
             object_types = filter(lambda _type: isinstance(_type, ObjectType), declaration_types)
             enum_types = filter(lambda _type: isinstance(_type, EnumType), declaration_types)
             if len(object_types) + len(enum_types) == 0:

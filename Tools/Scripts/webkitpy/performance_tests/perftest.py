@@ -122,12 +122,12 @@ class PerfTest(object):
     def prepare(self, time_out_ms):
         return True
 
-    def _create_driver(self):
-        return self._port.create_driver(worker_number=0, no_timeout=True)
+    def _create_driver(self, no_timeout):
+        return self._port.create_driver(worker_number=0, no_timeout=no_timeout)
 
-    def run(self, time_out_ms):
+    def run(self, time_out_ms, no_timeout=False):
         for _ in xrange(self._test_runner_count):
-            driver = self._create_driver()
+            driver = self._create_driver(no_timeout)
             try:
                 if not self._run_with_driver(driver, time_out_ms):
                     return None
@@ -218,17 +218,16 @@ class PerfTest(object):
         return driver.run_test(DriverInput(test_path, time_out_ms, image_hash=None, should_run_pixel_test=should_run_pixel_test), stop_when_done=False)
 
     def run_failed(self, output):
-        if output.text == None or output.error:
+        if output.text == None:
             pass
+        elif output.error:
+            _log.error('error: %s\n%s' % (self.test_name(), output.error))
         elif output.timeout:
             _log.error('timeout: %s' % self.test_name())
         elif output.crash:
             _log.error('crash: %s' % self.test_name())
         else:
             return False
-
-        if output.error:
-            _log.error('error: %s\n%s' % (self.test_name(), output.error))
 
         return True
 
@@ -241,7 +240,13 @@ class PerfTest(object):
                 return True
         return False
 
-    _lines_to_ignore_in_parser_result = [
+    @staticmethod
+    def filter_ignored_lines(regexps, text):
+        lines = re.split('\n', text)
+        filtered_lines = [line for line in lines if not PerfTest._should_ignore_line(regexps, line)]
+        return '\n'.join(filtered_lines)
+
+    _lines_to_ignore = [
         re.compile("^\s+$"),
         # Following are for handle existing test like Dromaeo
         re.compile(re.escape("""main frame - has 1 onunload handler(s)""")),
@@ -251,27 +256,23 @@ class PerfTest(object):
         re.compile(re.escape("""Blocked access to external URL http://www.whatwg.org/specs/web-apps/current-work/""")),
         re.compile(r"CONSOLE MESSAGE: (line \d+: )?Blocked script execution in '[A-Za-z0-9\-\.:]+' because the document's frame is sandboxed and the 'allow-scripts' permission is not set."),
         re.compile(r"CONSOLE MESSAGE: (line \d+: )?Not allowed to load local resource"),
-        # DoYouEvenBench
-        re.compile(re.escape("CONSOLE MESSAGE: line 140: Miss the info bar? Run TodoMVC from a server to avoid a cross-origin error.")),
-        re.compile(re.escape("CONSOLE MESSAGE: line 315: TypeError: Attempted to assign to readonly property.")),
-        re.compile(re.escape("CONSOLE MESSAGE: line 3285: DEBUG: -------------------------------")),
-        re.compile(re.escape("CONSOLE MESSAGE: line 3285: DEBUG: Ember      : 1.3.1")),
-        re.compile(re.escape("CONSOLE MESSAGE: line 3285: DEBUG: Ember Data : 1.0.0-beta.6")),
-        re.compile(re.escape("CONSOLE MESSAGE: line 3285: DEBUG: Handlebars : 1.3.0")),
-        re.compile(re.escape("CONSOLE MESSAGE: line 3285: DEBUG: jQuery     : 2.1.0")),
-        re.compile(re.escape("CONSOLE MESSAGE: line 3285: DEPRECATION: Namespaces should not begin with lowercase")),
-        re.compile(re.escape("processAllNamespaces@app.js:2:40")),
-        re.compile(re.escape("processAllNamespaces@jquery.js:3380:17")),
-        re.compile(re.escape("CONSOLE MESSAGE: line 124: Booting in DEBUG mode")),
-        re.compile(re.escape("CONSOLE MESSAGE: line 125: You can configure event logging with DEBUG.events.logAll()/logNone()/logByName()/logByAction()")),
-        re.compile(re.escape("CONSOLE MESSAGE: line 3285: Ember Views require jQuery 1.7, 1.8, 1.9, 1.10, or 2.0")),
-        re.compile(re.escape("CONSOLE MESSAGE: line 3285: DEPRECATION: Namespaces should not begin with lowercase.")),
-        re.compile(re.escape("CONSOLE MESSAGE: line 208: Miss the info bar? Run TodoMVC from a server to avoid a cross-origin error."))
+        # Speedometer 2.0
+        re.compile(r'CONSOLE MESSAGE: line \d+: DEBUG: -------------------------------'),
+        re.compile(r'CONSOLE MESSAGE: line \d+: DEBUG: Ember\s+: (\d\.)+'),
+        re.compile(r'CONSOLE MESSAGE: line \d+: DEBUG: jQuery\s+: (\d\.)+'),
+    ]
+
+    _errors_to_ignore_in_sierra = [
+        # GC errors on macOS 10.12.6
+        re.compile(r'WebKitTestRunner\[\d+\] <Error>: CGContext\w+: invalid context 0x0\. If you want to see the backtrace, please set CG_CONTEXT_SHOW_BACKTRACE environmental variable.'),
     ]
 
     def _filter_output(self, output):
         if output.text:
-            output.text = '\n'.join([line for line in re.split('\n', output.text) if not self._should_ignore_line(self._lines_to_ignore_in_parser_result, line)])
+            output.text = self.filter_ignored_lines(self._lines_to_ignore, output.text)
+        if output.error:
+            if self._port.name().startswith('mac-sierra'):
+                output.error = self.filter_ignored_lines(self._errors_to_ignore_in_sierra, output.error)
 
 
 class SingleProcessPerfTest(PerfTest):

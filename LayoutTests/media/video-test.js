@@ -394,13 +394,16 @@ function setCaptionDisplayMode(mode)
         consoleWrite("<br><b>** This test only works in DRT! **<" + "/b><br>");
 }
 
-function runWithKeyDown(fn) 
+function runWithKeyDown(fn, preventDefault) 
 {
     // FIXME: WKTR does not yet support the keyDown() message.  Do a mouseDown here
     // instead until keyDown support is added.
     var eventName = !window.testRunner || eventSender.keyDown ? 'keypress' : 'mousedown'
 
-    function thunk() {
+    function thunk(event) {
+        if (preventDefault)
+            event.preventDefault();
+
         document.removeEventListener(eventName, thunk, false);
         if (typeof fn === 'function')
             fn();
@@ -411,8 +414,38 @@ function runWithKeyDown(fn)
 
     if (window.testRunner) {
         if (eventSender.keyDown)
-            eventSender.keyDown(" ", []);
+            eventSender.keyDown("a", []);
         else
             eventSender.mouseDown();
     }
+}
+
+function shouldResolve(promise) {
+    return new Promise((resolve, reject) => {
+        promise.then(result => {
+            logResult(Success, 'Promise resolved');
+            resolve(result);
+        }).catch((error) => {
+            logResult(Failed, 'Promise rejected');
+            reject(error);
+        });
+    });
+}
+
+function shouldReject(promise) {
+    return new Promise((resolve, reject) => {
+        promise.then(result => {
+            logResult(Failed, 'Promise resolved incorrectly');
+            reject(result);
+        }).catch((error) => {
+            logResult(Success, 'Promise rejected correctly');
+            resolve(error);
+        });
+    });
+
+}
+
+function handlePromise(promise) {
+    function handle() { }
+    return promise.then(handle, handle);
 }

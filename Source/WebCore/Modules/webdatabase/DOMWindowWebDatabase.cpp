@@ -31,7 +31,6 @@
 #include "Database.h"
 #include "DatabaseManager.h"
 #include "Document.h"
-#include "ExceptionCode.h"
 #include "SecurityOrigin.h"
 
 namespace WebCore {
@@ -42,21 +41,20 @@ ExceptionOr<RefPtr<Database>> DOMWindowWebDatabase::openDatabase(DOMWindow& wind
         return RefPtr<Database> { nullptr };
     auto& manager = DatabaseManager::singleton();
     if (!manager.isAvailable())
-        return Exception { SECURITY_ERR };
+        return Exception { SecurityError };
     auto* document = window.document();
     if (!document)
-        return Exception { SECURITY_ERR };
-    auto* securityOrigin = document->securityOrigin();
-    if (!securityOrigin)
-        return Exception { SECURITY_ERR };
-    if (!securityOrigin->canAccessDatabase(document->topOrigin()))
-        return Exception { SECURITY_ERR };
-    auto error = DatabaseError::None;
-    auto database = manager.openDatabase(window.document(), name, version, displayName, estimatedSize, WTFMove(creationCallback), error);
-    if (error != DatabaseError::None)
-        return Exception { DatabaseManager::exceptionCodeForDatabaseError(error) };
-    ASSERT(database);
-    return WTFMove(database);
+        return Exception { SecurityError };
+    auto& securityOrigin = document->securityOrigin();
+    if (!securityOrigin.canAccessDatabase(document->topOrigin()))
+        return Exception { SecurityError };
+    auto result = manager.openDatabase(*window.document(), name, version, displayName, estimatedSize, WTFMove(creationCallback));
+    if (result.hasException()) {
+        // FIXME: To preserve our past behavior, this discards the error string in the exception.
+        // At a later time we may decide that we want to use the error strings, and if so we can just return the exception as is.
+        return Exception { result.releaseException().code() };
+    }
+    return RefPtr<Database> { result.releaseReturnValue() };
 }
 
 } // namespace WebCore

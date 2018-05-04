@@ -44,12 +44,12 @@
 
 namespace WebCore {
 
-static std::unique_ptr<char[]> createCopy(const char* data, int length)
+static UniqueArray<char> createCopy(const char* data, int length)
 {
-    std::unique_ptr<char[]> copy(new char[length]);
+    auto copy = makeUniqueArray<char>(length);
     memcpy(copy.get(), data, length);
 
-    return WTFMove(copy);
+    return copy;
 }
 
 SocketStreamHandleImpl::SocketStreamHandleImpl(const URL& url, SocketStreamHandleClient& client)
@@ -66,7 +66,7 @@ SocketStreamHandleImpl::~SocketStreamHandleImpl()
     ASSERT(!m_workerThread);
 }
 
-Optional<size_t> SocketStreamHandleImpl::platformSend(const char* data, size_t length)
+std::optional<size_t> SocketStreamHandleImpl::platformSendInternal(const uint8_t* data, size_t length)
 {
     LOG(Network, "SocketStreamHandle %p platformSend", this);
 
@@ -74,7 +74,7 @@ Optional<size_t> SocketStreamHandleImpl::platformSend(const char* data, size_t l
 
     startThread();
 
-    auto copy = createCopy(data, length);
+    auto copy = createCopy(reinterpret_cast<const char*>(data), length);
 
     std::lock_guard<Lock> lock(m_mutexSend);
     m_sendData.append(SocketData { WTFMove(copy), length });
@@ -88,6 +88,10 @@ void SocketStreamHandleImpl::platformClose()
 
     ASSERT(isMainThread());
 
+    if (m_closed)
+        return;
+
+    m_closed = true;
     stopThread();
 
     m_client.didCloseSocketStream(*this);
@@ -98,12 +102,12 @@ bool SocketStreamHandleImpl::readData(CURL* curlHandle)
     ASSERT(!isMainThread());
 
     const size_t bufferSize = 1024;
-    std::unique_ptr<char[]> data(new char[bufferSize]);
+    auto data = makeUniqueArray<char>(bufferSize);
     size_t bytesRead = 0;
 
     CURLcode ret = curl_easy_recv(curlHandle, data.get(), bufferSize, &bytesRead);
 
-    if (ret == CURLE_OK && bytesRead >= 0) {
+    if (ret == CURLE_OK) {
         m_mutexReceive.lock();
         m_receiveData.append(SocketData { WTFMove(data), bytesRead });
         m_mutexReceive.unlock();
@@ -164,19 +168,19 @@ bool SocketStreamHandleImpl::sendData(CURL* curlHandle)
     return true;
 }
 
-bool SocketStreamHandleImpl::waitForAvailableData(CURL* curlHandle, std::chrono::milliseconds selectTimeout)
+bool SocketStreamHandleImpl::waitForAvailableData(CURL* curlHandle, Seconds selectTimeout)
 {
     ASSERT(!isMainThread());
 
-    std::chrono::microseconds usec = std::chrono::duration_cast<std::chrono::microseconds>(selectTimeout);
+    int64_t usec = selectTimeout.microsecondsAs<int64_t>();
 
     struct timeval timeout;
-    if (usec <= std::chrono::microseconds(0)) {
+    if (usec <= 0) {
         timeout.tv_sec = 0;
         timeout.tv_usec = 0;
     } else {
-        timeout.tv_sec = usec.count() / 1000000;
-        timeout.tv_usec = usec.count() % 1000000;
+        timeout.tv_sec = usec / 1000000;
+        timeout.tv_usec = usec % 1000000;
     }
 
     long socket;
@@ -199,7 +203,7 @@ void SocketStreamHandleImpl::startThread()
 
     ref(); // stopThread() will call deref().
 
-    m_workerThread = createThread("WebSocket thread", [this] {
+    m_workerThread = Thread::create("WebSocket thread", [this] {
 
         ASSERT(!isMainThread());
 
@@ -233,7 +237,7 @@ void SocketStreamHandleImpl::startThread()
             sendData(curlHandle);
 
             // Wait until socket has available data
-            if (waitForAvailableData(curlHandle, std::chrono::milliseconds(20)))
+            if (waitForAvailableData(curlHandle, 20_ms))
                 readData(curlHandle);
         }
 
@@ -249,8 +253,8 @@ void SocketStreamHandleImpl::stopThread()
         return;
 
     m_stopThread = true;
-    waitForThreadCompletion(m_workerThread);
-    m_workerThread = 0;
+    m_workerThread->waitForCompletion();
+    m_workerThread = nullptr;
     deref();
 }
 
@@ -268,7 +272,7 @@ void SocketStreamHandleImpl::didReceiveData()
         if (socketData.size > 0) {
             if (state() == Open)
                 m_client.didReceiveSocketStreamData(*this, socketData.data.get(), socketData.size);
-        } else
+        } else if (!m_closed)
             platformClose();
     }
 }

@@ -29,10 +29,9 @@
 #pragma once
 
 #include "AudioArray.h"
+#include <JavaScriptCore/Float32Array.h>
 #include <memory>
-#include <runtime/Float32Array.h>
 #include <wtf/RefCounted.h>
-#include <wtf/RefPtr.h>
 #include <wtf/Vector.h>
 
 namespace WebCore {

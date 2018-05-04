@@ -23,8 +23,11 @@
 
 #include "SVGNames.h"
 #include "SVGParserUtilities.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(SVGFETurbulenceElement);
 
 // Animated property definitions
 DEFINE_ANIMATED_NUMBER_MULTIPLE_WRAPPERS(SVGFETurbulenceElement, SVGNames::baseFrequencyAttr, baseFrequencyXIdentifier(), BaseFrequencyX, baseFrequencyX)
@@ -48,7 +51,7 @@ inline SVGFETurbulenceElement::SVGFETurbulenceElement(const QualifiedName& tagNa
     : SVGFilterPrimitiveStandardAttributes(tagName, document)
     , m_numOctaves(1)
     , m_stitchTiles(SVG_STITCHTYPE_NOSTITCH)
-    , m_type(FETURBULENCE_TYPE_TURBULENCE)
+    , m_type(TurbulenceType::Turbulence)
 {
     ASSERT(hasTagName(SVGNames::feTurbulenceTag));
     registerAnimatedPropertiesForSVGFETurbulenceElement();
@@ -75,7 +78,7 @@ void SVGFETurbulenceElement::parseAttribute(const QualifiedName& name, const Ato
 {
     if (name == SVGNames::typeAttr) {
         TurbulenceType propertyValue = SVGPropertyTraits<TurbulenceType>::fromString(value);
-        if (propertyValue > 0)
+        if (propertyValue != TurbulenceType::Unknown)
             setTypeBaseValue(propertyValue);
         return;
     }

@@ -26,7 +26,7 @@
 #include "config.h"
 #include "ScrollingTreeIOS.h"
 
-#if ENABLE(ASYNC_SCROLLING)
+#if ENABLE(ASYNC_SCROLLING) && PLATFORM(IOS)
 
 #include "AsyncScrollingCoordinator.h"
 #include "PlatformWheelEvent.h"
@@ -40,13 +40,13 @@
 
 namespace WebCore {
 
-Ref<ScrollingTreeIOS> ScrollingTreeIOS::create(AsyncScrollingCoordinator* scrollingCoordinator)
+Ref<ScrollingTreeIOS> ScrollingTreeIOS::create(AsyncScrollingCoordinator& scrollingCoordinator)
 {
     return adoptRef(*new ScrollingTreeIOS(scrollingCoordinator));
 }
 
-ScrollingTreeIOS::ScrollingTreeIOS(AsyncScrollingCoordinator* scrollingCoordinator)
-    : m_scrollingCoordinator(scrollingCoordinator)
+ScrollingTreeIOS::ScrollingTreeIOS(AsyncScrollingCoordinator& scrollingCoordinator)
+    : m_scrollingCoordinator(&scrollingCoordinator)
 {
 }
 
@@ -70,7 +70,7 @@ void ScrollingTreeIOS::invalidate()
     });
 }
 
-void ScrollingTreeIOS::scrollingTreeNodeDidScroll(ScrollingNodeID nodeID, const FloatPoint& scrollPosition, const Optional<FloatPoint>& layoutViewportOrigin, SetOrSyncScrollingLayerPosition scrollingLayerPositionAction)
+void ScrollingTreeIOS::scrollingTreeNodeDidScroll(ScrollingNodeID nodeID, const FloatPoint& scrollPosition, const std::optional<FloatPoint>& layoutViewportOrigin, ScrollingLayerPositionAction scrollingLayerPositionAction)
 {
     if (!m_scrollingCoordinator)
         return;
@@ -83,20 +83,22 @@ void ScrollingTreeIOS::scrollingTreeNodeDidScroll(ScrollingNodeID nodeID, const 
     });
 }
 
-PassRefPtr<ScrollingTreeNode> ScrollingTreeIOS::createScrollingTreeNode(ScrollingNodeType nodeType, ScrollingNodeID nodeID)
+Ref<ScrollingTreeNode> ScrollingTreeIOS::createScrollingTreeNode(ScrollingNodeType nodeType, ScrollingNodeID nodeID)
 {
     switch (nodeType) {
-    case FrameScrollingNode:
-        return ScrollingTreeFrameScrollingNodeIOS::create(*this, nodeID);
+    case MainFrameScrollingNode:
+    case SubframeScrollingNode:
+        return ScrollingTreeFrameScrollingNodeIOS::create(*this, nodeType, nodeID);
     case OverflowScrollingNode:
         ASSERT_NOT_REACHED();
-        return nullptr;
+        break;
     case FixedNode:
         return ScrollingTreeFixedNode::create(*this, nodeID);
     case StickyNode:
         return ScrollingTreeStickyNode::create(*this, nodeID);
     }
-    return nullptr;
+    ASSERT_NOT_REACHED();
+    return ScrollingTreeFixedNode::create(*this, nodeID);
 }
 
 FloatRect ScrollingTreeIOS::fixedPositionRect()
@@ -119,4 +121,4 @@ void ScrollingTreeIOS::currentSnapPointIndicesDidChange(WebCore::ScrollingNodeID
 
 } // namespace WebCore
 
-#endif // ENABLE(ASYNC_SCROLLING)
+#endif // ENABLE(ASYNC_SCROLLING) && PLATFORM(IOS)

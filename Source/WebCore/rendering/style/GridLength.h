@@ -29,10 +29,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef GridLength_h
-#define GridLength_h
-
-#if ENABLE(CSS_GRID_LAYOUT)
+#pragma once
 
 #include "Length.h"
 
@@ -87,7 +84,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif /* ENABLE(CSS_GRID_LAYOUT) */
-
-#endif // GridLength_h

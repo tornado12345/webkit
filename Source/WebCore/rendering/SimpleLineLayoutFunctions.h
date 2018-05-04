@@ -23,10 +23,8 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef SimpleLineLayoutFunctions_h
-#define SimpleLineLayoutFunctions_h
+#pragma once
 
-#include "LayoutRect.h"
 #include "RenderBlockFlow.h"
 #include "RenderText.h"
 #include <wtf/text/WTFString.h>
@@ -40,10 +38,12 @@ class RenderBlockFlow;
 struct PaintInfo;
 
 namespace SimpleLineLayout {
+class FlowContents;
 
 LayoutUnit computeFlowHeight(const RenderBlockFlow&, const Layout&);
 LayoutUnit computeFlowFirstLineBaseline(const RenderBlockFlow&, const Layout&);
 LayoutUnit computeFlowLastLineBaseline(const RenderBlockFlow&, const Layout&);
+FloatRect computeOverflow(const RenderBlockFlow&, const FloatRect&);
 
 void paintFlow(const RenderBlockFlow&, const Layout&, PaintInfo&, const LayoutPoint& paintOffset);
 bool hitTestFlow(const RenderBlockFlow&, const Layout&, const HitTestRequest&, HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, HitTestAction);
@@ -58,12 +58,21 @@ IntPoint computeFirstRunLocation(const RenderObject&, const Layout&);
 
 Vector<IntRect> collectAbsoluteRects(const RenderObject&, const Layout&, const LayoutPoint& accumulatedOffset);
 Vector<FloatQuad> collectAbsoluteQuads(const RenderObject&, const Layout&, bool* wasFixed);
+unsigned textOffsetForPoint(const LayoutPoint&, const RenderText&, const Layout&);
+Vector<FloatQuad> collectAbsoluteQuadsForRange(const RenderObject&, unsigned start, unsigned end, const Layout&, bool* wasFixed);
 
 LayoutUnit lineHeightFromFlow(const RenderBlockFlow&);
 LayoutUnit baselineFromFlow(const RenderBlockFlow&);
 
+bool canUseForLineBoxTree(RenderBlockFlow&, const Layout&);
+void generateLineBoxTree(RenderBlockFlow&, const Layout&);
+
+const RenderObject& rendererForPosition(const FlowContents&, unsigned);
+
+void simpleLineLayoutWillBeDeleted(const Layout&);
+
 #if ENABLE(TREE_DEBUGGING)
-void showLineLayoutForFlow(const RenderBlockFlow&, const Layout&, int depth);
+void outputLineLayoutForFlow(WTF::TextStream&, const RenderBlockFlow&, const Layout&, int depth);
 #endif
 
 }
@@ -72,7 +81,12 @@ namespace SimpleLineLayout {
 
 inline LayoutUnit computeFlowHeight(const RenderBlockFlow& flow, const Layout& layout)
 {
-    return lineHeightFromFlow(flow) * layout.lineCount();
+    auto flowHeight = lineHeightFromFlow(flow) * layout.lineCount();
+    if (!layout.hasLineStruts())
+        return flowHeight;
+    for (auto& strutEntry : layout.struts())
+        flowHeight += strutEntry.offset;
+    return flowHeight;
 }
 
 inline LayoutUnit computeFlowFirstLineBaseline(const RenderBlockFlow& flow, const Layout& layout)
@@ -97,7 +111,7 @@ inline unsigned findCaretMinimumOffset(const RenderText&, const Layout& layout)
 inline unsigned findCaretMaximumOffset(const RenderText& renderer, const Layout& layout)
 {
     if (!layout.runCount())
-        return renderer.textLength();
+        return renderer.text().length();
     auto& last = layout.runAt(layout.runCount() - 1);
     return last.end;
 }
@@ -136,5 +150,3 @@ inline LayoutUnit baselineFromFlow(const RenderBlockFlow& flow)
 
 }
 }
-
-#endif

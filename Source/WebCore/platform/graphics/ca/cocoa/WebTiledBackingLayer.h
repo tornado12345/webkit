@@ -23,8 +23,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef WebTiledBackingLayer_h
-#define WebTiledBackingLayer_h
+#pragma once
 
 #import <QuartzCore/QuartzCore.h>
 
@@ -43,6 +42,11 @@ class TiledBacking;
 - (WebCore::TiledBacking*)tiledBacking;
 - (void)invalidate;
 
+- (void)setWantsDeepColorBackingStore:(BOOL)wantsDeepColor;
+- (BOOL)wantsDeepColorBackingStore;
+
+- (void)setSupportsSubpixelAntialiasedText:(BOOL)supportsSubpixelAntialiasedText;
+- (BOOL)supportsSubpixelAntialiasedText;
+
 @end
 
-#endif // WebTiledBackingLayer_h

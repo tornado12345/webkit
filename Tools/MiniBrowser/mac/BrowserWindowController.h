@@ -35,16 +35,14 @@
     IBOutlet NSTextField *urlText;
     IBOutlet NSView *containerView;
     IBOutlet NSButton *toggleUseShrinkToFitButton;
-    
-    IBOutlet NSWindow *findPanelWindow;
 
     BOOL _zoomTextOnly;
+    BOOL _editable;
 }
 
 - (void)loadURLString:(NSString *)urlString;
+- (void)loadHTMLString:(NSString *)HTMLString;
 - (NSString *)addProtocolIfNecessary:(NSString *)address;
-
-- (void)applicationTerminating;
 
 - (IBAction)openLocation:(id)sender;
 
@@ -73,7 +71,8 @@
 - (IBAction)toggleShrinkToFit:(id)sender;
 
 - (IBAction)dumpSourceToConsole:(id)sender;
-- (IBAction)find:(id)sender;
+
+- (IBAction)showHideWebInspector:(id)sender;
 
 - (void)didChangeSettings;
 
@@ -81,6 +80,9 @@
 - (NSView *)mainContentView;
 
 - (CGFloat)pageScaleForMenuItemTag:(NSInteger)tag;
+
+@property (nonatomic, assign, getter=isEditable) BOOL editable;
+- (IBAction)toggleEditable:(id)sender;
 
 @end
 

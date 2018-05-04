@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,45 +27,32 @@
 
 #if ENABLE(APPLE_PAY)
 
-#include <WebCore/ExceptionCode.h>
 #include <wtf/Forward.h>
 #include <wtf/RetainPtr.h>
 
-namespace JSC {
-class ExecState;
-class JSValue;
-}
-
-OBJC_CLASS NSDictionary;
 OBJC_CLASS PKContact;
 
 namespace WebCore {
 
-class PaymentContact {
-public:
-    PaymentContact()
-    {
-    }
+struct ApplePayPaymentContact;
 
+class WEBCORE_EXPORT PaymentContact {
+public:
+    PaymentContact() = default;
     explicit PaymentContact(PKContact *pkContact)
         : m_pkContact(pkContact)
     {
     }
+    virtual ~PaymentContact() = default;
 
-    ~PaymentContact()
-    {
-    }
-
-    static Optional<PaymentContact> fromJS(JSC::ExecState&, JSC::JSValue, String& errorMessage);
-    JSC::JSValue toJS(JSC::ExecState&) const;
+    static PaymentContact fromApplePayPaymentContact(unsigned version, const ApplePayPaymentContact&);
+    virtual ApplePayPaymentContact toApplePayPaymentContact(unsigned version) const;
 
     PKContact *pkContact() const { return m_pkContact.get(); }
 
 private:
     RetainPtr<PKContact> m_pkContact;
 };
-
-RetainPtr<NSDictionary> toDictionary(PKContact *);
 
 }
 

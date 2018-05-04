@@ -83,10 +83,8 @@
 #include <time.h>
 #include <wtf/ASCIICType.h>
 #include <wtf/Assertions.h>
-#include <wtf/CurrentTime.h>
 #include <wtf/MathExtras.h>
 #include <wtf/StdLibExtras.h>
-#include <wtf/StringExtras.h>
 
 #if HAVE(ERRNO_H)
 #include <errno.h>

@@ -12,45 +12,6 @@
 
 namespace sh
 {
-TLayoutQualifier JoinLayoutQualifiers(TLayoutQualifier leftQualifier,
-                                      TLayoutQualifier rightQualifier,
-                                      const TSourceLoc &rightQualifierLocation,
-                                      TDiagnostics *diagnostics)
-{
-    TLayoutQualifier joinedQualifier = leftQualifier;
-
-    if (rightQualifier.location != -1)
-    {
-        joinedQualifier.location = rightQualifier.location;
-        ++joinedQualifier.locationsSpecified;
-    }
-    if (rightQualifier.matrixPacking != EmpUnspecified)
-    {
-        joinedQualifier.matrixPacking = rightQualifier.matrixPacking;
-    }
-    if (rightQualifier.blockStorage != EbsUnspecified)
-    {
-        joinedQualifier.blockStorage = rightQualifier.blockStorage;
-    }
-
-    for (size_t i = 0u; i < rightQualifier.localSize.size(); ++i)
-    {
-        if (rightQualifier.localSize[i] != -1)
-        {
-            if (joinedQualifier.localSize[i] != -1 &&
-                joinedQualifier.localSize[i] != rightQualifier.localSize[i])
-            {
-                diagnostics->error(rightQualifierLocation,
-                                   "Cannot have multiple different work group size specifiers",
-                                   getWorkGroupSizeString(i), "");
-            }
-            joinedQualifier.localSize[i] = rightQualifier.localSize[i];
-        }
-    }
-
-    return joinedQualifier;
-}
-}  // namespace sh
 
 namespace
 {
@@ -63,7 +24,6 @@ bool AreTypeQualifierChecksRelaxed(int shaderVersion)
     return shaderVersion >= 310;
 }
 
-#if defined(ANGLE_ENABLE_ASSERTS)
 bool IsScopeQualifier(TQualifier qualifier)
 {
     return qualifier == EvqGlobal || qualifier == EvqTemporary;
@@ -86,7 +46,6 @@ bool IsInvariantCorrect(const TTypeQualifierBuilder::QualifierSequence &qualifie
     // The first qualifier always tells the scope.
     return qualifiers.size() >= 1 && IsScopeQualifierWrapper(qualifiers[0]);
 }
-#endif
 
 // Returns true if there are qualifiers which have been specified multiple times
 // If areQualifierChecksRelaxed is set to true, then layout qualifier repetition is allowed.
@@ -191,6 +150,31 @@ bool HasRepeatingQualifiers(const TTypeQualifierBuilder::QualifierSequence &qual
                 }
                 break;
             }
+            case QtMemory:
+            {
+                // Go over all of the memory qualifiers up until the current one and check for
+                // repetitions.
+                // Having both readonly and writeonly in a sequence is valid.
+                // GLSL ES 3.10 Revision 4, 4.9 Memory Access Qualifiers
+                TQualifier currentQualifier =
+                    static_cast<const TMemoryQualifierWrapper *>(qualifiers[i])->getQualifier();
+                for (size_t j = 1; j < i; ++j)
+                {
+                    if (qualifiers[j]->getType() == QtMemory)
+                    {
+                        const TMemoryQualifierWrapper *previousQualifierWrapper =
+                            static_cast<const TMemoryQualifierWrapper *>(qualifiers[j]);
+                        TQualifier previousQualifier = previousQualifierWrapper->getQualifier();
+                        if (currentQualifier == previousQualifier)
+                        {
+                            *errorMessage = previousQualifierWrapper->getQualifierString().c_str();
+                            *errorMessage += " specified multiple times";
+                            return true;
+                        }
+                    }
+                }
+                break;
+            }
             default:
                 UNREACHABLE();
         }
@@ -263,6 +247,13 @@ bool AreQualifiersInOrder(const TTypeQualifierBuilder::QualifierSequence &qualif
                 }
                 foundStorage = true;
                 break;
+            case QtMemory:
+                if (foundPrecision)
+                {
+                    *errorMessage = "Precision qualifiers have to be after memory qualifiers.";
+                    return false;
+                }
+                break;
             case QtPrecision:
                 foundPrecision = true;
                 break;
@@ -317,9 +308,11 @@ bool JoinVariableStorageQualifier(TQualifier *joinedQualifier, TQualifier storag
                     *joinedQualifier = EvqCentroid;
                     break;
                 case EvqVertexOut:
+                case EvqGeometryOut:
                     *joinedQualifier = EvqSmoothOut;
                     break;
                 case EvqFragmentIn:
+                case EvqGeometryIn:
                     *joinedQualifier = EvqSmoothIn;
                     break;
                 default:
@@ -335,9 +328,11 @@ bool JoinVariableStorageQualifier(TQualifier *joinedQualifier, TQualifier storag
                     *joinedQualifier = EvqFlat;
                     break;
                 case EvqVertexOut:
+                case EvqGeometryOut:
                     *joinedQualifier = EvqFlatOut;
                     break;
                 case EvqFragmentIn:
+                case EvqGeometryIn:
                     *joinedQualifier = EvqFlatIn;
                     break;
                 default:
@@ -350,9 +345,11 @@ bool JoinVariableStorageQualifier(TQualifier *joinedQualifier, TQualifier storag
             switch (storageQualifier)
             {
                 case EvqVertexOut:
+                case EvqGeometryOut:
                     *joinedQualifier = EvqCentroidOut;
                     break;
                 case EvqFragmentIn:
+                case EvqGeometryIn:
                     *joinedQualifier = EvqCentroidIn;
                     break;
                 default:
@@ -388,6 +385,34 @@ bool JoinParameterStorageQualifier(TQualifier *joinedQualifier, TQualifier stora
         }
         default:
             return false;
+    }
+    return true;
+}
+
+bool JoinMemoryQualifier(TMemoryQualifier *joinedMemoryQualifier, TQualifier memoryQualifier)
+{
+    switch (memoryQualifier)
+    {
+        case EvqReadOnly:
+            joinedMemoryQualifier->readonly = true;
+            break;
+        case EvqWriteOnly:
+            joinedMemoryQualifier->writeonly = true;
+            break;
+        case EvqCoherent:
+            joinedMemoryQualifier->coherent = true;
+            break;
+        case EvqRestrict:
+            joinedMemoryQualifier->restrictQualifier = true;
+            break;
+        case EvqVolatile:
+            // Variables having the volatile qualifier are automatcally treated as coherent as well.
+            // GLSL ES 3.10, Revision 4, 4.9 Memory Access Qualifiers
+            joinedMemoryQualifier->volatileQualifier = true;
+            joinedMemoryQualifier->coherent          = true;
+            break;
+        default:
+            UNREACHABLE();
     }
     return true;
 }
@@ -445,6 +470,11 @@ TTypeQualifier GetVariableTypeQualifierFromSortedSequence(
                     static_cast<const TPrecisionQualifierWrapper *>(qualifier)->getQualifier();
                 ASSERT(typeQualifier.precision != EbpUndefined);
                 break;
+            case QtMemory:
+                isQualifierValid = JoinMemoryQualifier(
+                    &typeQualifier.memoryQualifier,
+                    static_cast<const TMemoryQualifierWrapper *>(qualifier)->getQualifier());
+                break;
             default:
                 UNREACHABLE();
         }
@@ -452,7 +482,7 @@ TTypeQualifier GetVariableTypeQualifierFromSortedSequence(
         {
             const TString &qualifierString = qualifier->getQualifierString();
             diagnostics->error(qualifier->getLine(), "invalid qualifier combination",
-                               qualifierString.c_str(), "");
+                               qualifierString.c_str());
             break;
         }
     }
@@ -474,6 +504,11 @@ TTypeQualifier GetParameterTypeQualifierFromSortedSequence(
             case QtInterpolation:
             case QtLayout:
                 break;
+            case QtMemory:
+                isQualifierValid = JoinMemoryQualifier(
+                    &typeQualifier.memoryQualifier,
+                    static_cast<const TMemoryQualifierWrapper *>(qualifier)->getQualifier());
+                break;
             case QtStorage:
                 isQualifierValid = JoinParameterStorageQualifier(
                     &typeQualifier.qualifier,
@@ -492,7 +527,7 @@ TTypeQualifier GetParameterTypeQualifierFromSortedSequence(
         {
             const TString &qualifierString = qualifier->getQualifierString();
             diagnostics->error(qualifier->getLine(), "invalid parameter qualifier",
-                               qualifierString.c_str(), "");
+                               qualifierString.c_str());
             break;
         }
     }
@@ -513,11 +548,108 @@ TTypeQualifier GetParameterTypeQualifierFromSortedSequence(
             break;
         default:
             diagnostics->error(sortedSequence[0]->getLine(), "Invalid parameter qualifier ",
-                               getQualifierString(typeQualifier.qualifier), "");
+                               getQualifierString(typeQualifier.qualifier));
     }
     return typeQualifier;
 }
 }  // namespace
+
+TLayoutQualifier JoinLayoutQualifiers(TLayoutQualifier leftQualifier,
+                                      TLayoutQualifier rightQualifier,
+                                      const TSourceLoc &rightQualifierLocation,
+                                      TDiagnostics *diagnostics)
+{
+    TLayoutQualifier joinedQualifier = leftQualifier;
+
+    if (rightQualifier.location != -1)
+    {
+        joinedQualifier.location = rightQualifier.location;
+        ++joinedQualifier.locationsSpecified;
+    }
+    if (rightQualifier.yuv != false)
+    {
+        joinedQualifier.yuv = rightQualifier.yuv;
+    }
+    if (rightQualifier.binding != -1)
+    {
+        joinedQualifier.binding = rightQualifier.binding;
+    }
+    if (rightQualifier.offset != -1)
+    {
+        joinedQualifier.offset = rightQualifier.offset;
+    }
+    if (rightQualifier.matrixPacking != EmpUnspecified)
+    {
+        joinedQualifier.matrixPacking = rightQualifier.matrixPacking;
+    }
+    if (rightQualifier.blockStorage != EbsUnspecified)
+    {
+        joinedQualifier.blockStorage = rightQualifier.blockStorage;
+    }
+
+    for (size_t i = 0u; i < rightQualifier.localSize.size(); ++i)
+    {
+        if (rightQualifier.localSize[i] != -1)
+        {
+            if (joinedQualifier.localSize[i] != -1 &&
+                joinedQualifier.localSize[i] != rightQualifier.localSize[i])
+            {
+                diagnostics->error(rightQualifierLocation,
+                                   "Cannot have multiple different work group size specifiers",
+                                   getWorkGroupSizeString(i));
+            }
+            joinedQualifier.localSize[i] = rightQualifier.localSize[i];
+        }
+    }
+
+    if (rightQualifier.numViews != -1)
+    {
+        joinedQualifier.numViews = rightQualifier.numViews;
+    }
+
+    if (rightQualifier.imageInternalFormat != EiifUnspecified)
+    {
+        joinedQualifier.imageInternalFormat = rightQualifier.imageInternalFormat;
+    }
+
+    if (rightQualifier.primitiveType != EptUndefined)
+    {
+        if (joinedQualifier.primitiveType != EptUndefined &&
+            joinedQualifier.primitiveType != rightQualifier.primitiveType)
+        {
+            diagnostics->error(rightQualifierLocation,
+                               "Cannot have multiple different primitive specifiers",
+                               getGeometryShaderPrimitiveTypeString(rightQualifier.primitiveType));
+        }
+        joinedQualifier.primitiveType = rightQualifier.primitiveType;
+    }
+
+    if (rightQualifier.invocations != 0)
+    {
+        if (joinedQualifier.invocations != 0 &&
+            joinedQualifier.invocations != rightQualifier.invocations)
+        {
+            diagnostics->error(rightQualifierLocation,
+                               "Cannot have multiple different invocations specifiers",
+                               "invocations");
+        }
+        joinedQualifier.invocations = rightQualifier.invocations;
+    }
+
+    if (rightQualifier.maxVertices != -1)
+    {
+        if (joinedQualifier.maxVertices != -1 &&
+            joinedQualifier.maxVertices != rightQualifier.maxVertices)
+        {
+            diagnostics->error(rightQualifierLocation,
+                               "Cannot have multiple different max_vertices specifiers",
+                               "max_vertices");
+        }
+        joinedQualifier.maxVertices = rightQualifier.maxVertices;
+    }
+
+    return joinedQualifier;
+}
 
 unsigned int TInvariantQualifierWrapper::getRank() const
 {
@@ -548,13 +680,19 @@ unsigned int TStorageQualifierWrapper::getRank() const
     }
 }
 
+unsigned int TMemoryQualifierWrapper::getRank() const
+{
+    return 4u;
+}
+
 unsigned int TPrecisionQualifierWrapper::getRank() const
 {
     return 5u;
 }
 
 TTypeQualifier::TTypeQualifier(TQualifier scope, const TSourceLoc &loc)
-    : layoutQualifier(TLayoutQualifier::create()),
+    : layoutQualifier(TLayoutQualifier::Create()),
+      memoryQualifier(TMemoryQualifier::Create()),
       precision(EbpUndefined),
       qualifier(scope),
       invariant(false),
@@ -582,15 +720,13 @@ bool TTypeQualifierBuilder::checkSequenceIsValid(TDiagnostics *diagnostics) cons
     std::string errorMessage;
     if (HasRepeatingQualifiers(mQualifiers, areQualifierChecksRelaxed, &errorMessage))
     {
-        diagnostics->error(mQualifiers[0]->getLine(), "qualifier sequence", errorMessage.c_str(),
-                           "");
+        diagnostics->error(mQualifiers[0]->getLine(), errorMessage.c_str(), "qualifier sequence");
         return false;
     }
 
     if (!areQualifierChecksRelaxed && !AreQualifiersInOrder(mQualifiers, &errorMessage))
     {
-        diagnostics->error(mQualifiers[0]->getLine(), "qualifier sequence", errorMessage.c_str(),
-                           "");
+        diagnostics->error(mQualifiers[0]->getLine(), errorMessage.c_str(), "qualifier sequence");
         return false;
     }
 
@@ -644,3 +780,5 @@ TTypeQualifier TTypeQualifierBuilder::getVariableTypeQualifier(TDiagnostics *dia
     }
     return GetVariableTypeQualifierFromSortedSequence(mQualifiers, diagnostics);
 }
+
+}  // namespace sh

@@ -18,14 +18,15 @@ PASS innerHTML 15 &gt;
 PASS innerHTML 16 " 
 PASS innerHTML 17 <style><&></style> 
 PASS innerHTML 18 <script type="test"><&></script> 
-PASS innerHTML 19 <xmp><&></xmp> 
-FAIL innerHTML 20 <iframe><&></iframe> assert_equals: expected "<iframe><&></iframe>" but got "<iframe>&lt;&amp;&gt;</iframe>"
-FAIL innerHTML 21 <noembed><&></noembed> assert_equals: expected "<noembed><&></noembed>" but got "<noembed>&lt;&amp;&gt;</noembed>"
-FAIL innerHTML 22 <noframes><&></noframes> assert_equals: expected "<noframes><&></noframes>" but got "<noframes>&lt;&amp;&gt;</noframes>"
-FAIL innerHTML 23 <noscript><&></noscript> assert_equals: expected "<noscript><&></noscript>" but got "<noscript>&lt;&amp;&gt;</noscript>"
-FAIL innerHTML 24 <!--data--> assert_equals: expected "<!--data-->" but got "<!-- data -->"
-PASS innerHTML 25 <a><b><c></c></b><d>e</d><f><g>h</g></f></a> 
-PASS innerHTML 26  
+PASS innerHTML 19 <&> 
+PASS innerHTML 20 <xmp><&></xmp> 
+FAIL innerHTML 21 <iframe><&></iframe> assert_equals: expected "<iframe><&></iframe>" but got "<iframe>&lt;&amp;&gt;</iframe>"
+FAIL innerHTML 22 <noembed><&></noembed> assert_equals: expected "<noembed><&></noembed>" but got "<noembed>&lt;&amp;&gt;</noembed>"
+FAIL innerHTML 23 <noframes><&></noframes> assert_equals: expected "<noframes><&></noframes>" but got "<noframes>&lt;&amp;&gt;</noframes>"
+FAIL innerHTML 24 <noscript><&></noscript> assert_equals: expected "<noscript><&></noscript>" but got "<noscript>&lt;&amp;&gt;</noscript>"
+PASS innerHTML 25 <!--data--> 
+PASS innerHTML 26 <a><b><c></c></b><d>e</d><f><g>h</g></f></a> 
+PASS innerHTML 27  
 PASS outerHTML 0 <span></span> 
 PASS outerHTML 1 <span><a></a></span> 
 PASS outerHTML 2 <span><a b="c"></a></span> 
@@ -45,14 +46,15 @@ PASS outerHTML 15 <span>&gt;</span>
 PASS outerHTML 16 <span>"</span> 
 PASS outerHTML 17 <span><style><&></style></span> 
 PASS outerHTML 18 <span><script type="test"><&></script></span> 
-PASS outerHTML 19 <span><xmp><&></xmp></span> 
-FAIL outerHTML 20 <span><iframe><&></iframe></span> assert_equals: expected "<span><iframe><&></iframe></span>" but got "<span><iframe>&lt;&amp;&gt;</iframe></span>"
-FAIL outerHTML 21 <span><noembed><&></noembed></span> assert_equals: expected "<span><noembed><&></noembed></span>" but got "<span><noembed>&lt;&amp;&gt;</noembed></span>"
-FAIL outerHTML 22 <span><noframes><&></noframes></span> assert_equals: expected "<span><noframes><&></noframes></span>" but got "<span><noframes>&lt;&amp;&gt;</noframes></span>"
-FAIL outerHTML 23 <span><noscript><&></noscript></span> assert_equals: expected "<span><noscript><&></noscript></span>" but got "<span><noscript>&lt;&amp;&gt;</noscript></span>"
-FAIL outerHTML 24 <span><!--data--></span> assert_equals: expected "<span><!--data--></span>" but got "<span><!-- data --></span>"
-PASS outerHTML 25 <span><a><b><c></c></b><d>e</d><f><g>h</g></f></a></span> 
-PASS outerHTML 26 <span b="c"></span> 
+PASS outerHTML 19 <script type="test"><&></script> 
+PASS outerHTML 20 <span><xmp><&></xmp></span> 
+FAIL outerHTML 21 <span><iframe><&></iframe></span> assert_equals: expected "<span><iframe><&></iframe></span>" but got "<span><iframe>&lt;&amp;&gt;</iframe></span>"
+FAIL outerHTML 22 <span><noembed><&></noembed></span> assert_equals: expected "<span><noembed><&></noembed></span>" but got "<span><noembed>&lt;&amp;&gt;</noembed></span>"
+FAIL outerHTML 23 <span><noframes><&></noframes></span> assert_equals: expected "<span><noframes><&></noframes></span>" but got "<span><noframes>&lt;&amp;&gt;</noframes></span>"
+FAIL outerHTML 24 <span><noscript><&></noscript></span> assert_equals: expected "<span><noscript><&></noscript></span>" but got "<span><noscript>&lt;&amp;&gt;</noscript></span>"
+PASS outerHTML 25 <span><!--data--></span> 
+PASS outerHTML 26 <span><a><b><c></c></b><d>e</d><f><g>h</g></f></a></span> 
+PASS outerHTML 27 <span b="c"></span> 
 PASS innerHTML Attribute in the XML namespace 
 PASS innerHTML Attribute in the XML namespace with the prefix not set to xml: 
 PASS innerHTML Non-'xmlns' attribute in the xmlns namespace 
@@ -102,7 +104,6 @@ PASS innerHTML Void context node img
 PASS innerHTML Void context node input 
 PASS innerHTML Void context node keygen 
 PASS innerHTML Void context node link 
-FAIL innerHTML Void context node menuitem assert_equals: expected "" but got "<a><!--abc--></a><b><c>abc</c></b>"
 PASS innerHTML Void context node meta 
 PASS innerHTML Void context node param 
 PASS innerHTML Void context node source 
@@ -121,7 +122,6 @@ PASS innerHTML void as first child with following siblings img
 PASS innerHTML void as first child with following siblings input 
 PASS innerHTML void as first child with following siblings keygen 
 PASS innerHTML void as first child with following siblings link 
-FAIL innerHTML void as first child with following siblings menuitem assert_equals: expected "<menuitem><a>test</a><b></b>" but got "<menuitem><a><!--abc--></a><b><c>abc</c></b></menuitem><a>test</a><b></b>"
 PASS innerHTML void as first child with following siblings meta 
 PASS innerHTML void as first child with following siblings param 
 PASS innerHTML void as first child with following siblings source 
@@ -140,7 +140,6 @@ PASS innerHTML void as second child with following siblings img
 PASS innerHTML void as second child with following siblings input 
 PASS innerHTML void as second child with following siblings keygen 
 PASS innerHTML void as second child with following siblings link 
-FAIL innerHTML void as second child with following siblings menuitem assert_equals: expected "<a>test</a><menuitem><b></b>" but got "<a>test</a><menuitem><a><!--abc--></a><b><c>abc</c></b></menuitem><b></b>"
 PASS innerHTML void as second child with following siblings meta 
 PASS innerHTML void as second child with following siblings param 
 PASS innerHTML void as second child with following siblings source 
@@ -159,7 +158,6 @@ PASS innerHTML void as last child with preceding siblings img
 PASS innerHTML void as last child with preceding siblings input 
 PASS innerHTML void as last child with preceding siblings keygen 
 PASS innerHTML void as last child with preceding siblings link 
-FAIL innerHTML void as last child with preceding siblings menuitem assert_equals: expected "<a>test</a><b></b><menuitem>" but got "<a>test</a><b></b><menuitem><a><!--abc--></a><b><c>abc</c></b></menuitem>"
 PASS innerHTML void as last child with preceding siblings meta 
 PASS innerHTML void as last child with preceding siblings param 
 PASS innerHTML void as last child with preceding siblings source 
@@ -178,7 +176,6 @@ PASS outerHTML Void context node img
 PASS outerHTML Void context node input 
 PASS outerHTML Void context node keygen 
 PASS outerHTML Void context node link 
-FAIL outerHTML Void context node menuitem assert_equals: expected "<menuitem>" but got "<menuitem><a><!--abc--></a><b><c>abc</c></b></menuitem>"
 PASS outerHTML Void context node meta 
 PASS outerHTML Void context node param 
 PASS outerHTML Void context node source 
@@ -197,7 +194,6 @@ PASS outerHTML void as first child with following siblings img
 PASS outerHTML void as first child with following siblings input 
 PASS outerHTML void as first child with following siblings keygen 
 PASS outerHTML void as first child with following siblings link 
-FAIL outerHTML void as first child with following siblings menuitem assert_equals: expected "<span><menuitem><a>test</a><b></b></span>" but got "<span><menuitem><a><!--abc--></a><b><c>abc</c></b></menuitem><a>test</a><b></b></span>"
 PASS outerHTML void as first child with following siblings meta 
 PASS outerHTML void as first child with following siblings param 
 PASS outerHTML void as first child with following siblings source 
@@ -216,7 +212,6 @@ PASS outerHTML void as second child with following siblings img
 PASS outerHTML void as second child with following siblings input 
 PASS outerHTML void as second child with following siblings keygen 
 PASS outerHTML void as second child with following siblings link 
-FAIL outerHTML void as second child with following siblings menuitem assert_equals: expected "<span><a>test</a><menuitem><b></b></span>" but got "<span><a>test</a><menuitem><a><!--abc--></a><b><c>abc</c></b></menuitem><b></b></span>"
 PASS outerHTML void as second child with following siblings meta 
 PASS outerHTML void as second child with following siblings param 
 PASS outerHTML void as second child with following siblings source 
@@ -235,7 +230,6 @@ PASS outerHTML void as last child with preceding siblings img
 PASS outerHTML void as last child with preceding siblings input 
 PASS outerHTML void as last child with preceding siblings keygen 
 PASS outerHTML void as last child with preceding siblings link 
-FAIL outerHTML void as last child with preceding siblings menuitem assert_equals: expected "<span><a>test</a><b></b><menuitem></span>" but got "<span><a>test</a><b></b><menuitem><a><!--abc--></a><b><c>abc</c></b></menuitem></span>"
 PASS outerHTML void as last child with preceding siblings meta 
 PASS outerHTML void as last child with preceding siblings param 
 PASS outerHTML void as last child with preceding siblings source 

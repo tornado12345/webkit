@@ -26,8 +26,10 @@
 #include "config.h"
 #include "TileControllerMemoryHandlerIOS.h"
 
-#include "MemoryPressureHandler.h"
+#if PLATFORM(IOS)
+
 #include "TileController.h"
+#include <wtf/MemoryPressureHandler.h>
 #include <wtf/NeverDestroyed.h>
 
 namespace WebCore {
@@ -85,3 +87,5 @@ TileControllerMemoryHandler& tileControllerMemoryHandler()
 }
 
 }
+
+#endif // PLATFORM(IOS)

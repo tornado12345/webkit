@@ -23,6 +23,7 @@
 #include "HTMLImageLoader.h"
 
 #include "CachedImage.h"
+#include "CommonVM.h"
 #include "DOMWindow.h"
 #include "Element.h"
 #include "Event.h"
@@ -34,8 +35,8 @@
 #include "Settings.h"
 
 #include "JSDOMWindowBase.h"
-#include <runtime/JSCInlines.h>
-#include <runtime/JSLock.h>
+#include <JavaScriptCore/JSCInlines.h>
+#include <JavaScriptCore/JSLock.h>
 
 namespace WebCore {
 
@@ -44,9 +45,7 @@ HTMLImageLoader::HTMLImageLoader(Element& element)
 {
 }
 
-HTMLImageLoader::~HTMLImageLoader()
-{
-}
+HTMLImageLoader::~HTMLImageLoader() = default;
 
 void HTMLImageLoader::dispatchLoadEvent()
 {
@@ -65,8 +64,7 @@ void HTMLImageLoader::dispatchLoadEvent()
 String HTMLImageLoader::sourceURI(const AtomicString& attr) const
 {
 #if ENABLE(DASHBOARD_SUPPORT)
-    Settings* settings = element().document().settings();
-    if (settings && settings->usesDashboardBackwardCompatibilityMode() && attr.length() > 7 && attr.startsWith("url(\"") && attr.endsWith("\")"))
+    if (element().document().settings().usesDashboardBackwardCompatibilityMode() && attr.length() > 7 && attr.startsWith("url(\"") && attr.endsWith("\")"))
         return attr.string().substring(5, attr.length() - 7);
 #endif
 
@@ -83,8 +81,8 @@ void HTMLImageLoader::notifyFinished(CachedResource&)
 
     bool loadError = cachedImage.errorOccurred() || cachedImage.response().httpStatusCode() >= 400;
     if (!loadError) {
-        if (!element().inDocument()) {
-            JSC::VM& vm = JSDOMWindowBase::commonVM();
+        if (!element().isConnected()) {
+            JSC::VM& vm = commonVM();
             JSC::JSLockHolder lock(vm);
             // FIXME: Adopt reportExtraMemoryVisited, and switch to reportExtraMemoryAllocated.
             // https://bugs.webkit.org/show_bug.cgi?id=142595

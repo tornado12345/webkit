@@ -28,8 +28,11 @@
 #include "PaintInfo.h"
 #include "RootInlineBox.h"
 #include "TextRun.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(EllipsisBox);
 
 EllipsisBox::EllipsisBox(RenderBlockFlow& renderer, const AtomicString& ellipsisStr, InlineFlowBox* parent, int width, int height, int y, bool firstLine, bool isHorizontal, InlineBox* markupBox)
     : InlineElementBox(renderer, FloatPoint(0, y), width, firstLine, true, false, false, isHorizontal, 0, 0, parent)
@@ -38,19 +41,22 @@ EllipsisBox::EllipsisBox(RenderBlockFlow& renderer, const AtomicString& ellipsis
     , m_str(ellipsisStr)
     , m_selectionState(RenderObject::SelectionNone)
 {
+#if !ASSERT_WITH_SECURITY_IMPLICATION_DISABLED
+    m_isEverInChildList = false;
+#endif
 }
 
 void EllipsisBox::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset, LayoutUnit lineTop, LayoutUnit lineBottom)
 {
     GraphicsContext& context = paintInfo.context();
     const RenderStyle& lineStyle = this->lineStyle();
-    Color textColor = lineStyle.visitedDependentColor(CSSPropertyWebkitTextFillColor);
+    Color textColor = lineStyle.visitedDependentColorWithColorFilter(CSSPropertyWebkitTextFillColor);
     if (textColor != context.fillColor())
         context.setFillColor(textColor);
     bool setShadow = false;
     if (lineStyle.textShadow()) {
-        context.setShadow(LayoutSize(lineStyle.textShadow()->x(), lineStyle.textShadow()->y()),
-            lineStyle.textShadow()->radius(), lineStyle.textShadow()->color());
+        Color shadowColor = lineStyle.colorByApplyingColorFilter(lineStyle.textShadow()->color());
+        context.setShadow(LayoutSize(lineStyle.textShadow()->x(), lineStyle.textShadow()->y()), lineStyle.textShadow()->radius(), shadowColor);
         setShadow = true;
     }
 
@@ -121,9 +127,9 @@ IntRect EllipsisBox::selectionRect()
 
 void EllipsisBox::paintSelection(GraphicsContext& context, const LayoutPoint& paintOffset, const RenderStyle& style, const FontCascade& font)
 {
-    Color textColor = style.visitedDependentColor(CSSPropertyColor);
+    Color textColor = style.visitedDependentColorWithColorFilter(CSSPropertyColor);
     Color c = blockFlow().selectionBackgroundColor();
-    if (!c.isValid() || !c.alpha())
+    if (!c.isVisible())
         return;
 
     // If the text color ends up being the same as the selection background, invert the selection
@@ -158,7 +164,7 @@ bool EllipsisBox::nodeAtPoint(const HitTestRequest& request, HitTestResult& resu
     LayoutRect boundsRect(adjustedLocation, LayoutSize(m_logicalWidth, m_height));
     if (visibleToHitTesting() && boundsRect.intersects(HitTestLocation::rectForPoint(locationInContainer.point(), 0, 0, 0, 0))) {
         blockFlow().updateHitTestResult(result, locationInContainer.point() - toLayoutSize(adjustedLocation));
-        if (!result.addNodeToRectBasedTestResult(blockFlow().element(), request, locationInContainer, boundsRect))
+        if (result.addNodeToListBasedTestResult(blockFlow().element(), request, locationInContainer, boundsRect) == HitTestProgress::Stop)
             return true;
     }
 

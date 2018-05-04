@@ -18,8 +18,8 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGAnimateMotionElement_h
-#define SVGAnimateMotionElement_h
+#pragma once
+
 #include "Path.h"
 #include "SVGAnimationElement.h"
 
@@ -28,6 +28,7 @@ namespace WebCore {
 class AffineTransform;
             
 class SVGAnimateMotionElement final : public SVGAnimationElement {
+    WTF_MAKE_ISO_ALLOCATED(SVGAnimateMotionElement);
 public:
     static Ref<SVGAnimateMotionElement> create(const QualifiedName&, Document&);
     void updateAnimationPath();
@@ -71,5 +72,3 @@ private:
 };
     
 } // namespace WebCore
-
-#endif // SVGAnimateMotionElement_h

@@ -27,9 +27,11 @@
 
 #include "CSSParserMode.h"
 #include "CSSStyleDeclaration.h"
+#include "DeprecatedCSSOMValue.h"
 #include <memory>
 #include <wtf/HashMap.h>
 #include <wtf/RefPtr.h>
+#include <wtf/WeakPtr.h>
 
 namespace WebCore {
 
@@ -42,7 +44,9 @@ class StyledElement;
 
 class PropertySetCSSStyleDeclaration : public CSSStyleDeclaration {
 public:
-    PropertySetCSSStyleDeclaration(MutableStyleProperties* propertySet) : m_propertySet(propertySet) { }
+    explicit PropertySetCSSStyleDeclaration(MutableStyleProperties& propertySet)
+        : m_propertySet(&propertySet)
+    { }
 
     virtual void clearParentElement() { ASSERT_NOT_REACHED(); }
 
@@ -54,7 +58,7 @@ protected:
     virtual CSSParserContext cssParserContext() const;
 
     MutableStyleProperties* m_propertySet;
-    std::unique_ptr<HashMap<CSSValue*, RefPtr<CSSValue>>> m_cssomCSSValueClones;
+    std::unique_ptr<HashMap<CSSValue*, WeakPtr<DeprecatedCSSOMValue>>> m_cssomValueWrappers;
 
 private:
     void ref() override;
@@ -63,7 +67,7 @@ private:
     CSSRule* parentRule() const override { return nullptr; }
     unsigned length() const final;
     String item(unsigned index) const final;
-    RefPtr<CSSValue> getPropertyCSSValue(const String& propertyName) final;
+    RefPtr<DeprecatedCSSOMValue> getPropertyCSSValue(const String& propertyName) final;
     String getPropertyValue(const String& propertyName) final;
     String getPropertyPriority(const String& propertyName) final;
     String getPropertyShorthand(const String& propertyName) final;
@@ -78,7 +82,7 @@ private:
     
     Ref<MutableStyleProperties> copyProperties() const final;
 
-    CSSValue* cloneAndCacheForCSSOM(CSSValue*);
+    RefPtr<DeprecatedCSSOMValue> wrapForDeprecatedCSSOM(CSSValue*);
     
     virtual bool willMutate() WARN_UNUSED_RETURN { return true; }
     virtual void didMutate(MutationType) { }
@@ -116,9 +120,9 @@ private:
 
 class InlineCSSStyleDeclaration final : public PropertySetCSSStyleDeclaration {
 public:
-    InlineCSSStyleDeclaration(MutableStyleProperties* propertySet, StyledElement* parentElement)
+    InlineCSSStyleDeclaration(MutableStyleProperties& propertySet, StyledElement& parentElement)
         : PropertySetCSSStyleDeclaration(propertySet)
-        , m_parentElement(parentElement) 
+        , m_parentElement(&parentElement)
     {
     }
 

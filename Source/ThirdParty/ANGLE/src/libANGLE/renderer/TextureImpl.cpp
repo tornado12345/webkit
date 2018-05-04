@@ -19,18 +19,31 @@ TextureImpl::~TextureImpl()
 {
 }
 
-gl::Error TextureImpl::copyTexture(GLenum internalFormat,
+gl::Error TextureImpl::onDestroy(const gl::Context *context)
+{
+    return gl::NoError();
+}
+
+gl::Error TextureImpl::copyTexture(const gl::Context *context,
+                                   GLenum target,
+                                   size_t level,
+                                   GLenum internalFormat,
                                    GLenum type,
+                                   size_t sourceLevel,
                                    bool unpackFlipY,
                                    bool unpackPremultiplyAlpha,
                                    bool unpackUnmultiplyAlpha,
                                    const gl::Texture *source)
 {
     UNREACHABLE();
-    return gl::Error(GL_INVALID_OPERATION, "CHROMIUM_copy_texture exposed but not implemented.");
+    return gl::InternalError() << "CHROMIUM_copy_texture exposed but not implemented.";
 }
 
-gl::Error TextureImpl::copySubTexture(const gl::Offset &destOffset,
+gl::Error TextureImpl::copySubTexture(const gl::Context *context,
+                                      GLenum target,
+                                      size_t level,
+                                      const gl::Offset &destOffset,
+                                      size_t sourceLevel,
                                       const gl::Rectangle &sourceArea,
                                       bool unpackFlipY,
                                       bool unpackPremultiplyAlpha,
@@ -38,13 +51,13 @@ gl::Error TextureImpl::copySubTexture(const gl::Offset &destOffset,
                                       const gl::Texture *source)
 {
     UNREACHABLE();
-    return gl::Error(GL_INVALID_OPERATION, "CHROMIUM_copy_texture exposed but not implemented.");
+    return gl::InternalError() << "CHROMIUM_copy_texture exposed but not implemented.";
 }
 
-gl::Error TextureImpl::copyCompressedTexture(const gl::Texture *source)
+gl::Error TextureImpl::copyCompressedTexture(const gl::Context *context, const gl::Texture *source)
 {
     UNREACHABLE();
-    return gl::Error(GL_INVALID_OPERATION,
-                     "CHROMIUM_copy_compressed_texture exposed but not implemented.");
+    return gl::InternalError() << "CHROMIUM_copy_compressed_texture exposed but not implemented.";
 }
-}
+
+}  // namespace rx

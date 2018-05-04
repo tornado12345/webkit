@@ -29,15 +29,17 @@
 
 #include <wtf/Deque.h>
 #include <wtf/HashMap.h>
+#include <wtf/HashSet.h>
 #include <wtf/RetainPtr.h>
 #include <wtf/Vector.h>
 
 #if PLATFORM(GTK)
 #include <WebCore/GUniquePtrGtk.h>
 #include <gdk/gdk.h>
-#include <wtf/HashSet.h>
-#elif PLATFORM(EFL)
-#include "EWebKit2.h"
+#endif
+
+#if PLATFORM(WPE)
+#include <wpe/wpe.h>
 #endif
 
 #if PLATFORM(COCOA)
@@ -50,8 +52,6 @@ class TestController;
 
 #if PLATFORM(GTK)
 struct WTREventQueueItem;
-#elif PLATFORM(EFL)
-struct WTREvent;
 #endif
 
 class EventSenderProxy {
@@ -71,7 +71,6 @@ public:
     void mouseMoveTo(double x, double y);
     void mouseScrollBy(int x, int y);
     void mouseScrollByWithWheelAndMomentumPhases(int x, int y, int phase, int momentum);
-    void swipeGestureWithWheelAndMomentumPhases(int x, int y, int phase, int momentum);
     void continuousMouseScrollBy(int x, int y, bool paged);
 
     void leapForward(int milliseconds);
@@ -99,7 +98,7 @@ private:
     double currentEventTime() { return m_time; }
     void updateClickCountForButton(int button);
 
-#if PLATFORM(GTK) || PLATFORM(EFL)
+#if PLATFORM(GTK)
     void replaySavedEvents();
 #endif
 
@@ -117,12 +116,12 @@ private:
     GdkEvent* createMouseButtonEvent(GdkEventType, unsigned button, WKEventModifiers);
     GUniquePtr<GdkEvent> createTouchEvent(GdkEventType, int id);
     void sendUpdatedTouchEvents();
-#elif PLATFORM(EFL)
-    void sendOrQueueEvent(const WTREvent&);
-    void dispatchEvent(const WTREvent&);
-#if ENABLE(TOUCH_EVENTS)
-    void sendTouchEvent(Ewk_Touch_Event_Type);
 #endif
+
+#if PLATFORM(WPE)
+    Vector<struct wpe_input_touch_event_raw> getUpdatedTouchEvents();
+    void removeUpdatedTouchEvents();
+    void prepareAndDispatchTouchEvent(enum wpe_input_touch_event_type);
 #endif
 
     double m_time;
@@ -136,15 +135,14 @@ private:
     int eventNumber;
 #elif PLATFORM(GTK)
     Deque<WTREventQueueItem> m_eventQueue;
-    unsigned m_mouseButtonCurrentlyDown;
+    unsigned m_mouseButtonsCurrentlyDown { 0 };
     Vector<GUniquePtr<GdkEvent>> m_touchEvents;
     HashSet<int> m_updatedTouchEvents;
-#elif PLATFORM(EFL)
-    Deque<WTREvent> m_eventQueue;
-    WKEventMouseButton m_mouseButton;
-#if ENABLE(TOUCH_EVENTS)
-    Eina_List* m_touchPoints;
-#endif
+#elif PLATFORM(WPE)
+    struct wpe_view_backend* m_viewBackend;
+    uint32_t m_buttonState;
+    Vector<struct wpe_input_touch_event_raw> m_touchEvents;
+    HashSet<unsigned, DefaultHash<unsigned>::Hash, WTF::UnsignedWithZeroKeyHashTraits<unsigned>> m_updatedTouchEvents;
 #endif
 };
 

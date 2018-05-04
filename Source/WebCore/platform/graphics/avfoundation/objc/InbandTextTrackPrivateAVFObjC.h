@@ -38,12 +38,12 @@ namespace WebCore {
 
 class InbandTextTrackPrivateAVFObjC : public InbandTextTrackPrivateAVF {
 public:
-    static PassRefPtr<InbandTextTrackPrivateAVFObjC> create(AVFInbandTrackParent* player,  AVMediaSelectionOption *selection, InbandTextTrackPrivate::CueFormat format)
+    static Ref<InbandTextTrackPrivateAVFObjC> create(AVFInbandTrackParent* player,  AVMediaSelectionOption *selection, InbandTextTrackPrivate::CueFormat format)
     {
-        return adoptRef(new InbandTextTrackPrivateAVFObjC(player, selection, format));
+        return adoptRef(*new InbandTextTrackPrivateAVFObjC(player, selection, format));
     }
 
-    ~InbandTextTrackPrivateAVFObjC() { }
+    ~InbandTextTrackPrivateAVFObjC() = default;
 
     InbandTextTrackPrivate::Kind kind() const override;
     bool isClosedCaptions() const override;

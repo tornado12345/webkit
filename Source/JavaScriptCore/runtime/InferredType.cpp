@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,11 +26,10 @@
 #include "config.h"
 #include "InferredType.h"
 
+#include "IsoCellSetInlines.h"
 #include "JSCInlines.h"
 
 namespace JSC {
-
-namespace {
 
 class InferredTypeFireDetail : public FireDetail {
 public:
@@ -64,9 +63,7 @@ private:
     JSValue m_offendingValue;
 };
 
-} // anonymous namespace
-
-const ClassInfo InferredType::s_info = { "InferredType", 0, 0, CREATE_METHOD_TABLE(InferredType) };
+const ClassInfo InferredType::s_info = { "InferredType", nullptr, nullptr, nullptr, CREATE_METHOD_TABLE(InferredType) };
 
 InferredType* InferredType::create(VM& vm)
 {
@@ -89,9 +86,8 @@ Structure* InferredType::createStructure(VM& vm, JSGlobalObject* globalObject, J
 void InferredType::visitChildren(JSCell* cell, SlotVisitor& visitor)
 {
     InferredType* inferredType = jsCast<InferredType*>(cell);
-
     if (inferredType->m_structure)
-        visitor.addUnconditionalFinalizer(&inferredType->m_structure->m_finalizer);
+        visitor.vm().inferredTypesWithFinalizers.add(inferredType);
 }
 
 InferredType::Kind InferredType::kindForFlags(PutByIdFlags flags)
@@ -149,6 +145,8 @@ InferredType::Descriptor InferredType::Descriptor::forValue(JSValue value)
             return String;
         if (cell->isSymbol())
             return Symbol;
+        if (cell->isBigInt())
+            return BigInt;
         if (cell->isObject()) {
             if (cell->structure()->transitionWatchpointSetIsStillValid())
                 return Descriptor(ObjectWithStructure, cell->structure());
@@ -188,6 +186,7 @@ PutByIdFlags InferredType::Descriptor::putByIdFlags() const
         return static_cast<PutByIdFlags>(PutByIdPrimaryTypeSecondary | PutByIdSecondaryTypeSymbol);
     case Object:
         return static_cast<PutByIdFlags>(PutByIdPrimaryTypeSecondary | PutByIdSecondaryTypeObject);
+    case BigInt:
     case ObjectOrOther:
         return static_cast<PutByIdFlags>(PutByIdPrimaryTypeSecondary | PutByIdSecondaryTypeObjectOrOther);
     case Top:
@@ -218,6 +217,7 @@ void InferredType::Descriptor::merge(const Descriptor& other)
     case Boolean:
     case String:
     case Symbol:
+    case BigInt:
         *this = Top;
         return;
     case Other:
@@ -366,7 +366,7 @@ InferredType::~InferredType()
 {
 }
 
-bool InferredType::canWatch(const ConcurrentJITLocker& locker, const Descriptor& expected)
+bool InferredType::canWatch(const ConcurrentJSLocker& locker, const Descriptor& expected)
 {
     if (expected.kind() == Top)
         return false;
@@ -376,11 +376,11 @@ bool InferredType::canWatch(const ConcurrentJITLocker& locker, const Descriptor&
 
 bool InferredType::canWatch(const Descriptor& expected)
 {
-    ConcurrentJITLocker locker(m_lock);
+    ConcurrentJSLocker locker(m_lock);
     return canWatch(locker, expected);
 }
 
-void InferredType::addWatchpoint(const ConcurrentJITLocker& locker, Watchpoint* watchpoint)
+void InferredType::addWatchpoint(const ConcurrentJSLocker& locker, Watchpoint* watchpoint)
 {
     RELEASE_ASSERT(descriptor(locker).kind() != Top);
 
@@ -389,7 +389,7 @@ void InferredType::addWatchpoint(const ConcurrentJITLocker& locker, Watchpoint* 
 
 void InferredType::addWatchpoint(Watchpoint* watchpoint)
 {
-    ConcurrentJITLocker locker(m_lock);
+    ConcurrentJSLocker locker(m_lock);
     addWatchpoint(locker, watchpoint);
 }
 
@@ -404,7 +404,7 @@ bool InferredType::willStoreValueSlow(VM& vm, PropertyName propertyName, JSValue
     Descriptor myType;
     bool result;
     {
-        ConcurrentJITLocker locker(m_lock);
+        ConcurrentJSLocker locker(m_lock);
         oldType = descriptor(locker);
         myType = Descriptor::forValue(value);
 
@@ -427,7 +427,7 @@ void InferredType::makeTopSlow(VM& vm, PropertyName propertyName)
 {
     Descriptor oldType;
     {
-        ConcurrentJITLocker locker(m_lock);
+        ConcurrentJSLocker locker(m_lock);
         oldType = descriptor(locker);
         if (!set(locker, vm, Top))
             return;
@@ -437,14 +437,8 @@ void InferredType::makeTopSlow(VM& vm, PropertyName propertyName)
     m_watchpointSet.fireAll(vm, detail);
 }
 
-bool InferredType::set(const ConcurrentJITLocker& locker, VM& vm, Descriptor newDescriptor)
+bool InferredType::set(const ConcurrentJSLocker& locker, VM& vm, Descriptor newDescriptor)
 {
-    // We will trigger write barriers while holding our lock. Currently, write barriers don't GC, but that
-    // could change. If it does, we don't want to deadlock. Note that we could have used
-    // GCSafeConcurrentJITLocker in the caller, but the caller is on a fast path so maybe that wouldn't be
-    // a good idea.
-    DeferGCForAWhile deferGC(vm.heap);
-    
     // Be defensive: if we're not really changing the type, then we don't have to do anything.
     if (descriptor(locker) == newDescriptor)
         return false;
@@ -472,19 +466,13 @@ bool InferredType::set(const ConcurrentJITLocker& locker, VM& vm, Descriptor new
         shouldFireWatchpointSet = true;
     }
 
-    // Remove the old InferredStructure object if we no longer need it.
     if (!newDescriptor.structure())
         m_structure = nullptr;
-
-    // Add a new InferredStructure object if we need one now.
-    if (newDescriptor.structure()) {
-        if (m_structure) {
-            // We should agree on the structures if we get here.
-            ASSERT(newDescriptor.structure() == m_structure->structure());
-        } else {
+    else {
+        if (m_structure)
+            ASSERT(newDescriptor.structure() == m_structure->structure.get());
+        else
             m_structure = std::make_unique<InferredStructure>(vm, this, newDescriptor.structure());
-            newDescriptor.structure()->addTransitionWatchpoint(&m_structure->m_watchpoint);
-        }
     }
 
     // Finally, set the descriptor kind.
@@ -506,7 +494,7 @@ void InferredType::removeStructure()
     Descriptor oldDescriptor;
     Descriptor newDescriptor;
     {
-        ConcurrentJITLocker locker(m_lock);
+        ConcurrentJSLocker locker(m_lock);
         oldDescriptor = descriptor(locker);
         newDescriptor = oldDescriptor;
         newDescriptor.removeStructure();
@@ -517,33 +505,6 @@ void InferredType::removeStructure()
 
     InferredTypeFireDetail detail(this, nullptr, oldDescriptor, newDescriptor, JSValue());
     m_watchpointSet.fireAll(vm, detail);
-}
-
-void InferredType::InferredStructureWatchpoint::fireInternal(const FireDetail&)
-{
-    InferredStructure* inferredStructure =
-        bitwise_cast<InferredStructure*>(
-            bitwise_cast<char*>(this) - OBJECT_OFFSETOF(InferredStructure, m_watchpoint));
-
-    inferredStructure->m_parent->removeStructure();
-}
-
-void InferredType::InferredStructureFinalizer::finalizeUnconditionally()
-{
-    InferredStructure* inferredStructure =
-        bitwise_cast<InferredStructure*>(
-            bitwise_cast<char*>(this) - OBJECT_OFFSETOF(InferredStructure, m_finalizer));
-
-    ASSERT(Heap::isMarked(inferredStructure->m_parent));
-    
-    if (!Heap::isMarked(inferredStructure->m_structure.get()))
-        inferredStructure->m_parent->removeStructure();
-}
-
-InferredType::InferredStructure::InferredStructure(VM& vm, InferredType* parent, Structure* structure)
-    : m_parent(parent)
-    , m_structure(vm, parent, structure)
-{
 }
 
 } // namespace JSC
@@ -575,6 +536,9 @@ void printInternal(PrintStream& out, InferredType::Kind kind)
         return;
     case InferredType::Symbol:
         out.print("Symbol");
+        return;
+    case InferredType::BigInt:
+        out.print("BigInt");
         return;
     case InferredType::ObjectWithStructure:
         out.print("ObjectWithStructure");

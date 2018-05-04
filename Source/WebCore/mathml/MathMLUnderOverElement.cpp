@@ -30,8 +30,11 @@
 #if ENABLE(MATHML)
 
 #include "RenderMathMLUnderOver.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(MathMLUnderOverElement);
 
 using namespace MathMLNames;
 
@@ -58,9 +61,9 @@ const MathMLElement::BooleanValue& MathMLUnderOverElement::accentUnder()
 void MathMLUnderOverElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
 {
     if (name == accentAttr)
-        m_accent = Nullopt;
+        m_accent = std::nullopt;
     else if (name == accentunderAttr)
-        m_accentUnder = Nullopt;
+        m_accentUnder = std::nullopt;
 
     MathMLElement::parseAttribute(name, value);
 }

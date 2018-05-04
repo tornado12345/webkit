@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009, 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2009-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,15 +23,27 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef RuntimeApplicationChecks_h
-#define RuntimeApplicationChecks_h
+#pragma once
 
-#if PLATFORM(COCOA)
 #include <wtf/Forward.h>
 
 namespace WebCore {
 
+WEBCORE_EXPORT void setPresentingApplicationPID(int);
+WEBCORE_EXPORT int presentingApplicationPID();
+
+#if PLATFORM(WIN)
+inline bool isInWebProcess() { return false; }
+#elif !PLATFORM(COCOA)
+inline bool isInWebProcess() { return true; }
+#endif
+
+#if PLATFORM(COCOA)
+
+bool isInWebProcess();
+
 WEBCORE_EXPORT void setApplicationBundleIdentifier(const String&);
+String applicationBundleIdentifier();
 
 #if PLATFORM(MAC)
 
@@ -51,7 +63,7 @@ WEBCORE_EXPORT bool isSafari();
 bool isSolidStateNetworksDownloader();
 WEBCORE_EXPORT bool isVersions();
 WEBCORE_EXPORT bool isHRBlock();
-WEBCORE_EXPORT bool isAppStore();
+WEBCORE_EXPORT bool isIAdProducer();
 
 } // MacApplication
 
@@ -66,23 +78,19 @@ WEBCORE_EXPORT bool isMobileSafari();
 WEBCORE_EXPORT bool isWebBookmarksD();
 bool isDumpRenderTree();
 bool isMobileStore();
+bool isSpringBoard();
 WEBCORE_EXPORT bool isWebApp();
-WEBCORE_EXPORT bool isOkCupid();
-WEBCORE_EXPORT bool isFacebook();
-WEBCORE_EXPORT bool isDaijisenDictionary();
-bool isNASAHD();
-WEBCORE_EXPORT bool isTheEconomistOnIphone();
 WEBCORE_EXPORT bool isWebProcess();
 bool isIBooks();
+bool isIBooksStorytime();
 WEBCORE_EXPORT bool isTheSecretSocietyHiddenMystery();
-bool isBaiduNuomi();
+WEBCORE_EXPORT bool isCardiogram();
+WEBCORE_EXPORT bool isNike();
 
 } // IOSApplication
 
 #endif // PLATFORM(IOS)
 
-} // namespace WebCore
-
 #endif // PLATFORM(COCOA)
 
-#endif // RuntimeApplicationChecks_h
+} // namespace WebCore

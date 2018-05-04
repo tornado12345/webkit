@@ -203,58 +203,6 @@ static JSStringRef descriptionOfElements(Vector<AccessibilityUIElement>& element
     return [allElementString createJSStringRef];
 }
 
-static NSDictionary *searchPredicateParameterizedAttributeForSearchCriteria(JSContextRef context, AccessibilityUIElement *startElement, bool isDirectionNext, unsigned resultsLimit, JSValueRef searchKey, JSStringRef searchText, bool visibleOnly, bool immediateDescendantsOnly)
-{
-    NSMutableDictionary *parameterizedAttribute = [NSMutableDictionary dictionary];
-    
-    if (startElement && startElement->platformUIElement())
-        [parameterizedAttribute setObject:(id)startElement->platformUIElement() forKey:@"AXStartElement"];
-    
-    [parameterizedAttribute setObject:(isDirectionNext) ? @"AXDirectionNext" : @"AXDirectionPrevious" forKey:@"AXDirection"];
-    
-    [parameterizedAttribute setObject:@(resultsLimit) forKey:@"AXResultsLimit"];
-    
-    if (searchKey) {
-        id searchKeyParameter = nil;
-        if (JSValueIsString(context, searchKey)) {
-            JSRetainPtr<JSStringRef> searchKeyString(Adopt, JSValueToStringCopy(context, searchKey, nullptr));
-            if (searchKeyString)
-                searchKeyParameter = [NSString stringWithJSStringRef:searchKeyString.get()];
-        }
-        else if (JSValueIsObject(context, searchKey)) {
-            JSObjectRef searchKeyArray = JSValueToObject(context, searchKey, nullptr);
-            unsigned searchKeyArrayLength = 0;
-            
-            JSRetainPtr<JSStringRef> lengthPropertyString(Adopt, JSStringCreateWithUTF8CString("length"));
-            JSValueRef searchKeyArrayLengthValue = JSObjectGetProperty(context, searchKeyArray, lengthPropertyString.get(), nullptr);
-            if (searchKeyArrayLengthValue && JSValueIsNumber(context, searchKeyArrayLengthValue))
-                searchKeyArrayLength = static_cast<unsigned>(JSValueToNumber(context, searchKeyArrayLengthValue, nullptr));
-            
-            for (unsigned i = 0; i < searchKeyArrayLength; ++i) {
-                JSValueRef searchKeyValue = JSObjectGetPropertyAtIndex(context, searchKeyArray, i, nullptr);
-                JSStringRef searchKeyString = JSValueToStringCopy(context, searchKeyValue, nullptr);
-                if (searchKeyString) {
-                    if (!searchKeyParameter)
-                        searchKeyParameter = [NSMutableArray array];
-                    [searchKeyParameter addObject:[NSString stringWithJSStringRef:searchKeyString]];
-                    JSStringRelease(searchKeyString);
-                }
-            }
-        }
-        if (searchKeyParameter)
-            [parameterizedAttribute setObject:searchKeyParameter forKey:@"AXSearchKey"];
-    }
-    
-    if (searchText && JSStringGetLength(searchText))
-        [parameterizedAttribute setObject:[NSString stringWithJSStringRef:searchText] forKey:@"AXSearchText"];
-    
-    [parameterizedAttribute setObject:@(visibleOnly) forKey:@"AXVisibleOnly"];
-    
-    [parameterizedAttribute setObject:@(immediateDescendantsOnly) forKey:@"AXImmediateDescendantsOnly"];
-    
-    return parameterizedAttribute;
-}
-
 static NSDictionary *selectTextParameterizedAttributeForCriteria(JSContextRef context, JSStringRef ambiguityResolution, JSValueRef searchStrings, JSStringRef replacementString, JSStringRef activity)
 {
     NSMutableDictionary *parameterizedAttribute = [NSMutableDictionary dictionary];
@@ -946,12 +894,12 @@ int AccessibilityUIElement::hierarchicalLevel() const
     return 0;
 }
 
-JSStringRef AccessibilityUIElement::speak()
+JSStringRef AccessibilityUIElement::speakAs()
 {
     BEGIN_AX_OBJC_EXCEPTIONS
     id value = [m_element accessibilityAttributeValue:@"AXDRTSpeechAttribute"];
-    if ([value isKindOfClass:[NSString class]])
-        return [value createJSStringRef];
+    if ([value isKindOfClass:[NSArray class]])
+        return [[value componentsJoinedByString:@", "] createJSStringRef];
     END_AX_OBJC_EXCEPTIONS
         
     return nullptr;
@@ -1380,14 +1328,14 @@ void AccessibilityUIElement::setValue(JSStringRef valueText)
 void AccessibilityUIElement::increment()
 {
     BEGIN_AX_OBJC_EXCEPTIONS
-    [m_element accessibilityPerformAction:NSAccessibilityIncrementAction];
+    [m_element accessibilityPerformAction:@"AXSyncIncrementAction"];
     END_AX_OBJC_EXCEPTIONS
 }
 
 void AccessibilityUIElement::decrement()
 {
     BEGIN_AX_OBJC_EXCEPTIONS
-    [m_element accessibilityPerformAction:NSAccessibilityDecrementAction];
+    [m_element accessibilityPerformAction:@"AXSyncDecrementAction"];
     END_AX_OBJC_EXCEPTIONS
 }
 
@@ -1584,6 +1532,18 @@ bool AccessibilityUIElement::isIgnored() const
     return result;
 }
 
+bool AccessibilityUIElement::isSingleLine() const
+{
+    // FIXME: implement
+    return false;
+}
+
+bool AccessibilityUIElement::isMultiLine() const
+{
+    // FIXME: implement
+    return false;
+}
+
 bool AccessibilityUIElement::hasPopup() const
 {
     BEGIN_AX_OBJC_EXCEPTIONS
@@ -1749,6 +1709,44 @@ JSStringRef AccessibilityUIElement::stringForTextMarkerRange(AccessibilityTextMa
     END_AX_OBJC_EXCEPTIONS
     
     return nullptr;
+}
+
+static JSStringRef createJSStringRef(id string)
+{
+    if (!string)
+        return nullptr;
+    id mutableString = [[[NSMutableString alloc] init] autorelease];
+    id attributes = [string attributesAtIndex:0 effectiveRange:nil];
+    id attributeEnumerationBlock = ^(NSDictionary<NSString *, id> *attrs, NSRange range, BOOL *stop) {
+        BOOL misspelled = [[attrs objectForKey:NSAccessibilityMisspelledTextAttribute] boolValue];
+        if (misspelled)
+            misspelled = [[attrs objectForKey:NSAccessibilityMarkedMisspelledTextAttribute] boolValue];
+        if (misspelled)
+            [mutableString appendString:@"Misspelled, "];
+        id font = [attributes objectForKey:(id)kAXFontTextAttribute];
+        if (font)
+            [mutableString appendFormat:@"%@ - %@, ", (id)kAXFontTextAttribute, font];
+    };
+    [string enumerateAttributesInRange:NSMakeRange(0, [string length]) options:(NSAttributedStringEnumerationOptions)0 usingBlock:attributeEnumerationBlock];
+    [mutableString appendString:[string string]];
+    return [mutableString createJSStringRef];
+}
+
+JSStringRef AccessibilityUIElement::attributedStringForTextMarkerRange(AccessibilityTextMarkerRange* markerRange)
+{
+    id string = [m_element accessibilityAttributeValue:@"AXAttributedStringForTextMarkerRange" forParameter:(id)markerRange->platformTextMarkerRange()];
+    return createJSStringRef(string);
+}
+
+JSStringRef AccessibilityUIElement::attributedStringForTextMarkerRangeWithOptions(AccessibilityTextMarkerRange* markerRange, bool includeSpellCheck)
+{
+    id parameter = nil;
+    if (includeSpellCheck)
+        parameter = [NSDictionary dictionaryWithObjectsAndKeys:[NSNumber numberWithBool:includeSpellCheck], @"AXSpellCheck", (id)markerRange->platformTextMarkerRange(), @"AXTextMarkerRange", nil];
+    else
+        parameter = (id)markerRange->platformTextMarkerRange();
+    id string = [m_element accessibilityAttributeValue:@"AXAttributedStringForTextMarkerRangeWithOptions" forParameter:parameter];
+    return createJSStringRef(string);
 }
 
 AccessibilityTextMarkerRange AccessibilityUIElement::textMarkerRangeForMarkers(AccessibilityTextMarker* startMarker, AccessibilityTextMarker* endMarker)

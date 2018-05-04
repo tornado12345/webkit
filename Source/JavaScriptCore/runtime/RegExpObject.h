@@ -27,15 +27,22 @@
 
 namespace JSC {
     
-class RegExpObject : public JSNonFinalObject {
+class RegExpObject final : public JSNonFinalObject {
 public:
-    typedef JSNonFinalObject Base;
+    using Base = JSNonFinalObject;
     static const unsigned StructureFlags = Base::StructureFlags | OverridesGetOwnPropertySlot | OverridesGetPropertyNames;
 
     static RegExpObject* create(VM& vm, Structure* structure, RegExp* regExp)
     {
         RegExpObject* object = new (NotNull, allocateCell<RegExpObject>(vm.heap)) RegExpObject(vm, structure, regExp);
         object->finishCreation(vm);
+        return object;
+    }
+
+    static RegExpObject* create(VM& vm, Structure* structure, RegExp* regExp, JSValue lastIndex)
+    {
+        auto* object = create(vm, structure, regExp);
+        object->m_lastIndex.set(vm, object, lastIndex);
         return object;
     }
 
@@ -88,6 +95,11 @@ public:
         return Structure::create(vm, globalObject, prototype, TypeInfo(RegExpObjectType, StructureFlags), info());
     }
 
+    static ptrdiff_t offsetOfRegExp()
+    {
+        return OBJECT_OFFSETOF(RegExpObject, m_regExp);
+    }
+
     static ptrdiff_t offsetOfLastIndex()
     {
         return OBJECT_OFFSETOF(RegExpObject, m_lastIndex);
@@ -98,7 +110,11 @@ public:
         return OBJECT_OFFSETOF(RegExpObject, m_lastIndexIsWritable);
     }
 
-    static unsigned advanceStringUnicode(String, unsigned length, unsigned currentIndex);
+    static size_t allocationSize(Checked<size_t> inlineCapacity)
+    {
+        ASSERT_UNUSED(inlineCapacity, !inlineCapacity);
+        return sizeof(RegExpObject);
+    }
 
 protected:
     JS_EXPORT_PRIVATE RegExpObject(VM&, Structure*, RegExp*);
@@ -117,15 +133,7 @@ private:
 
     WriteBarrier<RegExp> m_regExp;
     WriteBarrier<Unknown> m_lastIndex;
-    bool m_lastIndexIsWritable;
+    uint8_t m_lastIndexIsWritable;
 };
-
-RegExpObject* asRegExpObject(JSValue);
-
-inline RegExpObject* asRegExpObject(JSValue value)
-{
-    ASSERT(asObject(value)->inherits(RegExpObject::info()));
-    return static_cast<RegExpObject*>(asObject(value));
-}
 
 } // namespace JSC

@@ -66,15 +66,16 @@ class SCM:
         self.checkout_root = self.find_checkout_root(self.cwd)
 
     # A wrapper used by subclasses to create processes.
-    def run(self, args, cwd=None, input=None, error_handler=None, return_exit_code=False, return_stderr=True, decode_output=True):
+    def run(self, args, cwd=None, input=None, error_handler=None, ignore_errors=False, return_exit_code=False, return_stderr=True, decode_output=True):
         # FIXME: We should set cwd appropriately.
         return self._executive.run_command(args,
-                           cwd=cwd,
-                           input=input,
-                           error_handler=error_handler,
-                           return_exit_code=return_exit_code,
-                           return_stderr=return_stderr,
-                           decode_output=decode_output)
+            cwd=cwd,
+            input=input,
+            error_handler=error_handler,
+            ignore_errors=ignore_errors,
+            return_exit_code=return_exit_code,
+            return_stderr=return_stderr,
+            decode_output=decode_output)
 
     # SCM always returns repository relative path, but sometimes we need
     # absolute paths to pass to rm, etc.
@@ -158,10 +159,15 @@ class SCM:
         return self.svn_revision(self.checkout_root)
 
     def svn_revision(self, path):
-        """Returns the latest svn revision found in the checkout."""
+        self._subclass_must_implement()
+
+    def native_revision(self, path):
         self._subclass_must_implement()
 
     def timestamp_of_revision(self, path, revision):
+        self._subclass_must_implement()
+
+    def timestamp_of_native_revision(self, path, revision):
         self._subclass_must_implement()
 
     def create_patch(self, git_commit=None, changed_files=None):

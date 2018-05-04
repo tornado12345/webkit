@@ -1,4 +1,5 @@
 # Copyright (C) 2010 Google Inc. All rights reserved.
+# Copyright (C) 2017 Apple Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are
@@ -53,9 +54,26 @@ class RunTests(AbstractStep):
             Options.iterate_on_new_tests,
             Options.non_interactive,
             Options.quiet,
+            Options.group,
         ]
 
     def run(self, state):
+        if self._options.group == "jsc":
+            self._run_javascriptcore_tests()
+            return
+
+        if self._options.group == "api":
+            self._run_api_tests()
+            return
+
+        if self._options.group == "bindings":
+            self._run_bindings_tests()
+            return
+
+        if self._options.group == "webkitpy":
+            self._run_webkitpy_tests()
+            return
+
         if self._options.iterate_on_new_tests:
             _log.info("Running run-webkit-tests on new tests")
             self._run_webkit_tests(self._options.iterate_on_new_tests)
@@ -63,22 +81,11 @@ class RunTests(AbstractStep):
         if not self._options.test:
             return
 
-        python_unittests_command = self._tool.deprecated_port().run_python_unittests_command()
-        if python_unittests_command:
-            _log.info("Running Python unit tests")
-            if self._options.non_interactive:
-                filesystem = self._tool.filesystem
-                python_unittest_results_directory = self._tool.port_factory.get().python_unittest_results_directory()
-                filesystem.maybe_make_directory(python_unittest_results_directory)
-
-                python_unittests_command.append('--json')
-                output = self._tool.executive.run_command(python_unittests_command, cwd=self._tool.scm().checkout_root, error_handler=Executive.ignore_error, return_stderr=False)
-                filesystem.write_text_file(filesystem.join(python_unittest_results_directory, "results.json"), output)
-            else:
-                self._tool.executive.run_and_throw_if_fail(python_unittests_command, cwd=self._tool.scm().checkout_root)
-
         if not self._options.non_interactive:
-            # FIXME: We should teach the commit-queue and the EWS how to run these tests.
+            python_unittests_command = self._tool.deprecated_port().run_python_unittests_command()
+            if python_unittests_command:
+                _log.info("Running Python unit tests")
+                self._tool.executive.run_and_throw_if_fail(python_unittests_command, cwd=self._tool.scm().checkout_root)
 
             perl_unittests_command = self._tool.deprecated_port().run_perl_unittests_command()
             if perl_unittests_command:
@@ -89,15 +96,6 @@ class RunTests(AbstractStep):
             if javascriptcore_tests_command:
                 _log.info("Running JavaScriptCore tests")
                 self._tool.executive.run_and_throw_if_fail(javascriptcore_tests_command, quiet=True, cwd=self._tool.scm().checkout_root)
-
-        bindings_tests_command = self._tool.deprecated_port().run_bindings_tests_command()
-        if bindings_tests_command:
-            _log.info("Running bindings generation tests")
-            args = bindings_tests_command
-            try:
-                self._tool.executive.run_and_throw_if_fail(args, cwd=self._tool.scm().checkout_root)
-            except ScriptError, e:
-                _log.info("Error running run-bindings-tests: %s" % e.message_with_output())
 
         _log.info("Running run-webkit-tests")
         self._run_webkit_tests()
@@ -127,7 +125,7 @@ class RunTests(AbstractStep):
                 args.append("--quiet")
                 args.append("--skip-failing-tests")
             else:
-                args.append("--no-build");
+                args.append("--no-build")
 
         if self._options.quiet:
             args.append("--quiet")
@@ -142,4 +140,35 @@ class RunTests(AbstractStep):
                 args.append(test)
             args.append("--iterations=%d" % iterate_on_new_tests)
 
+        self._tool.executive.run_and_throw_if_fail(args, cwd=self._tool.scm().checkout_root)
+
+    def _run_javascriptcore_tests(self):
+        args = self._tool.deprecated_port().run_javascriptcore_tests_command(self._options.build_style)
+
+        results_directory = self._tool.port_factory.get(options=self._options).jsc_results_directory()
+        results_file_path = self._tool.filesystem.join(results_directory, "jsc_test_results.json")
+        args.append("--json-output=%s" % results_file_path)
+        self._tool.executive.run_and_throw_if_fail(args, cwd=self._tool.scm().checkout_root)
+
+    def _run_bindings_tests(self):
+        args = self._tool.deprecated_port().run_bindings_tests_command()
+        results_directory = self._tool.port_factory.get(options=self._options).bindings_results_directory()
+        self._tool.filesystem.maybe_make_directory(results_directory)
+        results_file_path = self._tool.filesystem.join(results_directory, "bindings_test_results.json")
+        args.append("--json-output=%s" % results_file_path)
+        self._tool.executive.run_and_throw_if_fail(args, cwd=self._tool.scm().checkout_root)
+
+    def _run_webkitpy_tests(self):
+        args = self._tool.deprecated_port().run_python_unittests_command()
+        results_directory = self._tool.port_factory.get(options=self._options).python_unittest_results_directory()
+        self._tool.filesystem.maybe_make_directory(results_directory)
+        results_file_path = self._tool.filesystem.join(results_directory, "webkitpy_test_results.json")
+        args.append("--json-output={}".format(results_file_path))
+        self._tool.executive.run_and_throw_if_fail(args, cwd=self._tool.scm().checkout_root)
+
+    def _run_api_tests(self):
+        args = self._tool.deprecated_port().run_api_tests_command(self._options.build_style)
+        results_directory = self._tool.port_factory.get(options=self._options).api_results_directory()
+        results_file_path = self._tool.filesystem.join(results_directory, "api_test_results.json")
+        args.append("--json-output=%s" % results_file_path)
         self._tool.executive.run_and_throw_if_fail(args, cwd=self._tool.scm().checkout_root)

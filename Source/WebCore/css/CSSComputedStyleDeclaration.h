@@ -22,19 +22,23 @@
 
 #include "CSSStyleDeclaration.h"
 #include "RenderStyleConstants.h"
+#include "SVGRenderStyleDefs.h"
+#include "TextFlags.h"
 #include <wtf/RefPtr.h>
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
+class CSSFontStyleValue;
 class CSSPrimitiveValue;
 class CSSValueList;
 class Color;
 class Element;
 class FilterOperations;
+class FontSelectionValue;
 class MutableStyleProperties;
 class Node;
-class RenderObject;
+class RenderElement;
 class RenderStyle;
 class SVGPaint;
 class ShadowData;
@@ -51,6 +55,7 @@ public:
     ComputedStyleExtractor(Element*, bool allowVisitedStyle = false, PseudoId = NOPSEUDO);
 
     RefPtr<CSSValue> propertyValue(CSSPropertyID, EUpdateLayout = UpdateLayout);
+    RefPtr<CSSValue> valueForPropertyinStyle(const RenderStyle&, CSSPropertyID, RenderElement* = nullptr);
     String customPropertyText(const String& propertyName);
     RefPtr<CSSValue> customPropertyValue(const String& propertyName);
 
@@ -63,14 +68,26 @@ public:
 
     static Ref<CSSValue> valueForFilter(const RenderStyle&, const FilterOperations&, AdjustPixelValuesForComputedStyle = AdjustPixelValues);
 
+    static Ref<CSSPrimitiveValue> fontNonKeywordWeightFromStyleValue(FontSelectionValue);
+    static Ref<CSSPrimitiveValue> fontWeightFromStyleValue(FontSelectionValue);
+    static Ref<CSSPrimitiveValue> fontNonKeywordStretchFromStyleValue(FontSelectionValue);
+    static Ref<CSSPrimitiveValue> fontStretchFromStyleValue(FontSelectionValue);
+    static Ref<CSSFontStyleValue> fontNonKeywordStyleFromStyleValue(FontSelectionValue);
+    static Ref<CSSFontStyleValue> fontStyleFromStyleValue(FontSelectionValue, FontStyleAxis);
+
 private:
-    // The styled element is either the element passed into computedPropertyValue, or the
-    // PseudoElement for :before and :after if they exist.
-    Element* styledElement();
+    // The styled element is either the element passed into
+    // computedPropertyValue, or the PseudoElement for :before and :after if
+    // they exist.
+    Element* styledElement() const;
+
+    // The renderer we should use for resolving layout-dependent properties.
+    // Note that it differs from styledElement()->renderer() in the case we have
+    // no pseudo-element.
+    RenderElement* styledRenderer() const;
 
     RefPtr<CSSValue> svgPropertyValue(CSSPropertyID, EUpdateLayout);
-    RefPtr<SVGPaint> adjustSVGPaintForCurrentColor(RefPtr<SVGPaint>&&, const RenderStyle*) const;
-
+    RefPtr<CSSValue> adjustSVGPaintForCurrentColor(SVGPaintType, const String& url, const Color&, const Color& currentColor) const;
     static Ref<CSSValue> valueForShadow(const ShadowData*, CSSPropertyID, const RenderStyle&, AdjustPixelValuesForComputedStyle = AdjustPixelValues);
     RefPtr<CSSPrimitiveValue> currentColorOrValidColor(const RenderStyle*, const Color&) const;
 
@@ -104,7 +121,7 @@ private:
     CSSRule* parentRule() const final;
     unsigned length() const final;
     String item(unsigned index) const final;
-    RefPtr<CSSValue> getPropertyCSSValue(const String& propertyName) final;
+    RefPtr<DeprecatedCSSOMValue> getPropertyCSSValue(const String& propertyName) final;
     String getPropertyValue(const String& propertyName) final;
     String getPropertyPriority(const String& propertyName) final;
     String getPropertyShorthand(const String& propertyName) final;

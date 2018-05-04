@@ -30,9 +30,17 @@
 
 #import "WebAccessibilityObjectWrapperBase.h"
 
+#if PLATFORM(MAC)
+
 @interface WebAccessibilityObjectWrapper : WebAccessibilityObjectWrapperBase
 
 - (id)textMarkerRangeFromVisiblePositions:(const WebCore::VisiblePosition&)startPosition endPosition:(const WebCore::VisiblePosition&)endPosition;
 - (id)textMarkerForVisiblePosition:(const WebCore::VisiblePosition&)visiblePos;
+- (id)textMarkerForFirstPositionInTextControl:(WebCore::HTMLTextFormControlElement&)textControl;
+
+// When a plugin uses a WebKit control to act as a surrogate view (e.g. PDF use WebKit to create text fields).
+- (id)associatedPluginParent;
 
 @end
+
+#endif // PLATFORM(MAC)

@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2015 Ericsson AB. All rights reserved.
+ * Copyright (C) 2016 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,36 +33,68 @@
 
 #if ENABLE(MEDIA_STREAM)
 
-#include "ContextDestructionObserver.h"
-#include "JSDOMPromise.h"
-#include "MediaDeviceInfo.h"
-#include "ScriptWrappable.h"
-#include <functional>
+#include "EventTarget.h"
+#include "ExceptionOr.h"
+#include "JSDOMPromiseDeferred.h"
+#include "MediaTrackConstraints.h"
+#include "RealtimeMediaSourceCenter.h"
+#include "Timer.h"
+#include <wtf/WeakPtr.h>
 
 namespace WebCore {
 
-class Dictionary;
 class Document;
-class MediaConstraintsImpl;
+class MediaDeviceInfo;
 class MediaStream;
-class MediaTrackSupportedConstraints;
 
-class MediaDevices : public ScriptWrappable, public RefCounted<MediaDevices>, public ContextDestructionObserver {
+struct MediaTrackSupportedConstraints;
+
+class MediaDevices : public RefCounted<MediaDevices>, public ContextDestructionObserver, public EventTargetWithInlineData {
 public:
-    static Ref<MediaDevices> create(ScriptExecutionContext*);
-    virtual ~MediaDevices();
+    static Ref<MediaDevices> create(Document&);
+
+    ~MediaDevices();
 
     Document* document() const;
 
-    typedef DOMPromise<MediaStream> Promise;
-    typedef DOMPromise<MediaDeviceInfoVector> EnumerateDevicesPromise;
+    using Promise = DOMPromiseDeferred<IDLInterface<MediaStream>>;
+    using EnumerateDevicesPromise = DOMPromiseDeferred<IDLSequence<IDLInterface<MediaDeviceInfo>>>;
 
-    ExceptionOr<void> getUserMedia(Ref<MediaConstraintsImpl>&& audioConstraints, Ref<MediaConstraintsImpl>&& videoConstraints, Promise&&) const;
-    ExceptionOr<void> enumerateDevices(EnumerateDevicesPromise&&) const;
-    RefPtr<MediaTrackSupportedConstraints> getSupportedConstraints();
+    enum class DisplayCaptureSurfaceType {
+        Monitor,
+        Window,
+        Application,
+        Browser,
+    };
+
+    struct StreamConstraints {
+        Variant<bool, MediaTrackConstraints> video;
+        Variant<bool, MediaTrackConstraints> audio;
+    };
+    ExceptionOr<void> getUserMedia(const StreamConstraints&, Promise&&) const;
+    ExceptionOr<void> getDisplayMedia(const StreamConstraints&, Promise&&) const;
+    void enumerateDevices(EnumerateDevicesPromise&&) const;
+    MediaTrackSupportedConstraints getSupportedConstraints();
+
+    using RefCounted<MediaDevices>::ref;
+    using RefCounted<MediaDevices>::deref;
 
 private:
-    explicit MediaDevices(ScriptExecutionContext*);
+    explicit MediaDevices(Document&);
+
+    void scheduledEventTimerFired();
+
+    // EventTargetWithInlineData.
+    EventTargetInterface eventTargetInterface() const override { return MediaDevicesEventTargetInterfaceType; }
+    ScriptExecutionContext* scriptExecutionContext() const final { return m_scriptExecutionContext; }
+    void refEventTarget() override { ref(); }
+    void derefEventTarget() override { deref(); }
+
+    WeakPtr<MediaDevices> createWeakPtr() { return m_weakPtrFactory.createWeakPtr(*this); }
+
+    Timer m_scheduledEventTimer;
+    std::optional<RealtimeMediaSourceCenter::DevicesChangedObserverToken> m_deviceChangedToken;
+    WeakPtrFactory<MediaDevices> m_weakPtrFactory;
 };
 
 } // namespace WebCore

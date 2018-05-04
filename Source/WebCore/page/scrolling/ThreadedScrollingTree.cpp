@@ -31,16 +31,14 @@
 #include "AsyncScrollingCoordinator.h"
 #include "PlatformWheelEvent.h"
 #include "ScrollingThread.h"
-#include "ScrollingTreeFixedNode.h"
 #include "ScrollingTreeNode.h"
 #include "ScrollingTreeScrollingNode.h"
-#include "ScrollingTreeStickyNode.h"
 #include <wtf/RunLoop.h>
 
 namespace WebCore {
 
-ThreadedScrollingTree::ThreadedScrollingTree(AsyncScrollingCoordinator* scrollingCoordinator)
-    : m_scrollingCoordinator(scrollingCoordinator)
+ThreadedScrollingTree::ThreadedScrollingTree(AsyncScrollingCoordinator& scrollingCoordinator)
+    : m_scrollingCoordinator(&scrollingCoordinator)
 {
 }
 
@@ -92,7 +90,7 @@ void ThreadedScrollingTree::commitTreeState(std::unique_ptr<ScrollingStateTree> 
     ScrollingTree::commitTreeState(WTFMove(scrollingStateTree));
 }
 
-void ThreadedScrollingTree::scrollingTreeNodeDidScroll(ScrollingNodeID nodeID, const FloatPoint& scrollPosition, const Optional<FloatPoint>& layoutViewportOrigin, SetOrSyncScrollingLayerPosition scrollingLayerPositionAction)
+void ThreadedScrollingTree::scrollingTreeNodeDidScroll(ScrollingNodeID nodeID, const FloatPoint& scrollPosition, const std::optional<FloatPoint>& layoutViewportOrigin, ScrollingLayerPositionAction scrollingLayerPositionAction)
 {
     if (!m_scrollingCoordinator)
         return;
@@ -105,6 +103,21 @@ void ThreadedScrollingTree::scrollingTreeNodeDidScroll(ScrollingNodeID nodeID, c
     });
 }
 
+void ThreadedScrollingTree::reportSynchronousScrollingReasonsChanged(MonotonicTime timestamp, SynchronousScrollingReasons reasons)
+{
+    RunLoop::main().dispatch([scrollingCoordinator = m_scrollingCoordinator, timestamp, reasons] {
+        scrollingCoordinator->reportSynchronousScrollingReasonsChanged(timestamp, reasons);
+    });
+}
+
+void ThreadedScrollingTree::reportExposedUnfilledArea(MonotonicTime timestamp, unsigned unfilledArea)
+{
+    RunLoop::main().dispatch([scrollingCoordinator = m_scrollingCoordinator, timestamp, unfilledArea] {
+        scrollingCoordinator->reportExposedUnfilledArea(timestamp, unfilledArea);
+    });
+}
+
+#if PLATFORM(COCOA)
 void ThreadedScrollingTree::currentSnapPointIndicesDidChange(ScrollingNodeID nodeID, unsigned horizontal, unsigned vertical)
 {
     if (!m_scrollingCoordinator)
@@ -114,6 +127,7 @@ void ThreadedScrollingTree::currentSnapPointIndicesDidChange(ScrollingNodeID nod
         scrollingCoordinator->setActiveScrollSnapIndices(nodeID, horizontal, vertical);
     });
 }
+#endif
 
 #if PLATFORM(MAC)
 void ThreadedScrollingTree::handleWheelEventPhase(PlatformWheelEventPhase phase)

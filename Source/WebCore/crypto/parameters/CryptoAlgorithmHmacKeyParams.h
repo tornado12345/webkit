@@ -25,19 +25,21 @@
 
 #pragma once
 
-#include "CryptoAlgorithmParameters.h"
-#include <runtime/JSCJSValue.h>
-
 #if ENABLE(SUBTLE_CRYPTO)
+
+#include "CryptoAlgorithmParameters.h"
+#include <JavaScriptCore/JSObject.h>
+#include <JavaScriptCore/Strong.h>
+#include <wtf/Variant.h>
 
 namespace WebCore {
 
 class CryptoAlgorithmHmacKeyParams final : public CryptoAlgorithmParameters {
 public:
     // FIXME: Consider merging hash and hashIdentifier.
-    JSC::JSValue hash;
+    Variant<JSC::Strong<JSC::JSObject>, String> hash;
     CryptoAlgorithmIdentifier hashIdentifier;
-    Optional<unsigned long> length;
+    std::optional<size_t> length;
 
     Class parametersClass() const final { return Class::HmacKeyParams; }
 };

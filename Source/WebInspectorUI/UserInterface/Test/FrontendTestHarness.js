@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2016 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,6 +31,9 @@ FrontendTestHarness = class FrontendTestHarness extends TestHarness
 
         this._results = [];
         this._shouldResendResults = true;
+
+        // Options that are set per-test for debugging purposes.
+        this.dumpActivityToSystemConsole = false;
     }
 
     // TestHarness Overrides
@@ -74,8 +77,10 @@ FrontendTestHarness = class FrontendTestHarness extends TestHarness
         this.evaluateInPage(`TestPage.debugLog(unescape("${escape(stringifiedMessage)}"));`);
     }
 
-    evaluateInPage(expression, callback)
+    evaluateInPage(expression, callback, options={})
     {
+        let remoteObjectOnly = !!options.remoteObjectOnly;
+
         // If we load this page outside of the inspector, or hit an early error when loading
         // the test frontend, then defer evaluating the commands (indefinitely in the former case).
         if (this._originalConsole && !window.RuntimeAgent) {
@@ -83,7 +88,25 @@ FrontendTestHarness = class FrontendTestHarness extends TestHarness
             return;
         }
 
-        RuntimeAgent.evaluate.invoke({expression, objectGroup: "test", includeCommandLineAPI: false}, callback);
+        // Return primitive values directly, otherwise return a WI.RemoteObject instance.
+        function translateResult(result) {
+            let remoteObject = WI.RemoteObject.fromPayload(result);
+            return (!remoteObjectOnly && remoteObject.hasValue()) ? remoteObject.value : remoteObject;
+        }
+
+        let response = RuntimeAgent.evaluate.invoke({expression, objectGroup: "test", includeCommandLineAPI: false})
+        if (callback && typeof callback === "function") {
+            response = response.then(({result, wasThrown}) => callback(null, translateResult(result), wasThrown));
+            response = response.catch((error) => callback(error, null, false));
+        } else {
+            // Turn a thrown Error result into a promise rejection.
+            return response.then(({result, wasThrown}) => {
+                result = translateResult(result);
+                if (result && wasThrown)
+                    return Promise.reject(new Error(result.description));
+                return Promise.resolve(result);
+            });
+        }
     }
 
     debug()
@@ -117,20 +140,64 @@ FrontendTestHarness = class FrontendTestHarness extends TestHarness
             this.completeTest();
     }
 
-    reloadPage(shouldIgnoreCache)
+    reloadPage(options = {})
     {
         console.assert(!this._testPageIsReloading);
         console.assert(!this._testPageReloadedOnce);
 
         this._testPageIsReloading = true;
 
-        return PageAgent.reload(!!shouldIgnoreCache)
+        let {ignoreCache, revalidateAllResources} = options;
+        ignoreCache = !!ignoreCache;
+        revalidateAllResources = !!revalidateAllResources;
+
+        return PageAgent.reload.invoke({ignoreCache, revalidateAllResources})
             .then(() => {
                 this._shouldResendResults = true;
                 this._testPageReloadedOnce = true;
 
                 return Promise.resolve(null);
             });
+    }
+
+    redirectRequestAnimationFrame()
+    {
+        console.assert(!this._originalRequestAnimationFrame);
+        if (this._originalRequestAnimationFrame)
+            return;
+
+        this._originalRequestAnimationFrame = window.requestAnimationFrame;
+        this._requestAnimationFrameCallbacks = new Map;
+        this._nextRequestIdentifier = 1;
+
+        window.requestAnimationFrame = (callback) => {
+            let requestIdentifier = this._nextRequestIdentifier++;
+            this._requestAnimationFrameCallbacks.set(requestIdentifier, callback);
+            if (this._requestAnimationFrameTimer)
+                return requestIdentifier;
+
+            let dispatchCallbacks = () => {
+                let callbacks = this._requestAnimationFrameCallbacks;
+                this._requestAnimationFrameCallbacks = new Map;
+                this._requestAnimationFrameTimer = undefined;
+                let timestamp = window.performance.now();
+                for (let callback of callbacks.values())
+                    callback(timestamp);
+            };
+
+            this._requestAnimationFrameTimer = setTimeout(dispatchCallbacks, 0);
+            return requestIdentifier;
+        };
+
+        window.cancelAnimationFrame = (requestIdentifier) => {
+            if (!this._requestAnimationFrameCallbacks.delete(requestIdentifier))
+                return;
+
+            if (!this._requestAnimationFrameCallbacks.size) {
+                clearTimeout(this._requestAnimationFrameTimer);
+                this._requestAnimationFrameTimer = undefined;
+            }
+        };
     }
 
     redirectConsoleToTestOutput()
@@ -151,25 +218,7 @@ FrontendTestHarness = class FrontendTestHarness extends TestHarness
                 } catch (e) {
                     // Skip the first frame which is added by this function.
                     let frames = e.stack.split("\n").slice(1);
-                    let sanitizedFrames = frames.map((frame, i) => {
-                        // Most frames are of the form "functionName@file:///foo/bar/File.js:345".
-                        // But, some frames do not have a functionName. Get rid of the file path.
-                        let nameAndURLSeparator = frame.indexOf("@");
-                        let frameName = (nameAndURLSeparator > 0) ? frame.substr(0, nameAndURLSeparator) : "(anonymous)";
-
-                        let lastPathSeparator = Math.max(frame.lastIndexOf("/"), frame.lastIndexOf("\\"));
-                        let frameLocation = (lastPathSeparator > 0) ? frame.substr(lastPathSeparator + 1) : frame;
-                        if (!frameLocation.length)
-                            frameLocation = "unknown";
-
-                        // Clean up the location so it is bracketed or in parenthesis.
-                        if (frame.indexOf("[native code]") !== -1)
-                            frameLocation = "[native code]";
-                        else
-                            frameLocation = "(" + frameLocation + ")";
-
-                        return `#${i}: ${frameName} ${frameLocation}`;
-                    });
+                    let sanitizedFrames = frames.map(TestHarness.sanitizeStackFrame);
                     self.addResult("TRACE: " + Array.from(arguments).join(" "));
                     self.addResult(sanitizedFrames.join("\n"));
                 }
@@ -189,16 +238,56 @@ FrontendTestHarness = class FrontendTestHarness extends TestHarness
         window.console = redirectedMethods;
     }
 
-    reportUncaughtException(message, url, lineNumber, columnNumber)
+    reportUnhandledRejection(error)
     {
-        let result = `Uncaught exception in inspector page: ${message} [${url}:${lineNumber}:${columnNumber}]`;
+        let message = error.message;
+        let stack = error.stack;
+        let result = `Unhandled promise rejection in inspector page: ${message}\n`;
+        if (stack) {
+            let sanitizedStack = this.sanitizeStack(stack);
+            result += `\nStack Trace: ${sanitizedStack}\n`;
+        }
 
         // If the connection to the test page is not set up, then just dump to console and give up.
         // Errors encountered this early can be debugged by loading Test.html in a normal browser page.
-        if (this._originalConsole && (!InspectorFrontendHost || !InspectorBackend)) {
+        if (this._originalConsole && !this._testPageHasLoaded())
             this._originalConsole["error"](result);
-            return false;
-        }
+
+        this.addResult(result);
+        this.completeTest();
+
+        // Stop default handler so we can empty InspectorBackend's message queue.
+        return true;
+    }
+
+    reportUncaughtExceptionFromEvent(message, url, lineNumber, columnNumber)
+    {
+        // An exception thrown from a timer callback does not report a URL.
+        if (url === "undefined")
+            url = "global";
+
+        return this.reportUncaughtException({message, url, lineNumber, columnNumber});
+    }
+
+    reportUncaughtException({message, url, lineNumber, columnNumber, stack, code})
+    {
+        let result;
+        let sanitizedURL = TestHarness.sanitizeURL(url);
+        let sanitizedStack = this.sanitizeStack(stack);
+        if (url || lineNumber || columnNumber)
+            result = `Uncaught exception in Inspector page: ${message} [${sanitizedURL}:${lineNumber}:${columnNumber}]\n`;
+        else
+            result = `Uncaught exception in Inspector page: ${message}\n`;
+
+        if (stack)
+            result += `\nStack Trace:\n${sanitizedStack}\n`;
+        if (code)
+            result += `\nEvaluated Code:\n${code}`;
+
+        // If the connection to the test page is not set up, then just dump to console and give up.
+        // Errors encountered this early can be debugged by loading Test.html in a normal browser page.
+        if (this._originalConsole && !this._testPageHasLoaded())
+            this._originalConsole["error"](result);
 
         this.addResult(result);
         this.completeTest();
@@ -207,6 +296,11 @@ FrontendTestHarness = class FrontendTestHarness extends TestHarness
     }
 
     // Private
+
+    _testPageHasLoaded()
+    {
+        return self._shouldResendResults;
+    }
 
     _resendResults()
     {

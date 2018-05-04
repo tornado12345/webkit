@@ -17,8 +17,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGTextPathElement_h
-#define SVGTextPathElement_h
+#pragma once
 
 #include "SVGNames.h"
 #include "SVGTextContentElement.h"
@@ -96,8 +95,8 @@ struct SVGPropertyTraits<SVGTextPathSpacingType> {
     }
 };
 
-class SVGTextPathElement final : public SVGTextContentElement,
-                                 public SVGURIReference {
+class SVGTextPathElement final : public SVGTextContentElement, public SVGURIReference {
+    WTF_MAKE_ISO_ALLOCATED(SVGTextPathElement);
 public:
     // Forward declare enumerations in the W3C naming scheme, for IDL generation.
     enum {
@@ -112,7 +111,7 @@ public:
     static Ref<SVGTextPathElement> create(const QualifiedName&, Document&);
 
 protected:
-    void finishedInsertingSubtree() override;
+    void didFinishInsertingNode() override;
 
 private:
     SVGTextPathElement(const QualifiedName&, Document&);
@@ -122,8 +121,8 @@ private:
     void clearResourceReferences();
 
     void buildPendingResource() override;
-    InsertionNotificationRequest insertedInto(ContainerNode&) override;
-    void removedFrom(ContainerNode&) override;
+    InsertedIntoAncestorResult insertedIntoAncestor(InsertionType, ContainerNode&) override;
+    void removedFromAncestor(RemovalType, ContainerNode&) override;
 
     static bool isSupportedAttribute(const QualifiedName&);
     void parseAttribute(const QualifiedName&, const AtomicString&) override;
@@ -144,5 +143,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif

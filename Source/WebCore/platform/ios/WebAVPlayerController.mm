@@ -29,23 +29,33 @@
 
 #if PLATFORM(IOS) && HAVE(AVKIT)
 
-#import "AVKitSPI.h"
 #import "Logging.h"
+#import "PlaybackSessionInterfaceAVKit.h"
+#import "PlaybackSessionModel.h"
 #import "TimeRanges.h"
-#import "WebPlaybackSessionInterfaceAVKit.h"
-#import "WebPlaybackSessionModel.h"
 #import <AVFoundation/AVTime.h>
+#import <pal/spi/cocoa/AVKitSPI.h>
 #import <wtf/text/CString.h>
 #import <wtf/text/WTFString.h>
 
-#import "CoreMediaSoftLink.h"
+#import <pal/cf/CoreMediaSoftLink.h>
 
-SOFT_LINK_FRAMEWORK_OPTIONAL(AVKit)
+SOFTLINK_AVKIT_FRAMEWORK()
 SOFT_LINK_CLASS_OPTIONAL(AVKit, AVPlayerController)
+SOFT_LINK_CLASS_OPTIONAL(AVKit, AVValueTiming)
 
 using namespace WebCore;
 
-@implementation WebAVPlayerController
+static void * WebAVPlayerControllerSeekableTimeRangesObserverContext = &WebAVPlayerControllerSeekableTimeRangesObserverContext;
+static void * WebAVPlayerControllerHasLiveStreamingContentObserverContext = &WebAVPlayerControllerHasLiveStreamingContentObserverContext;
+
+static double WebAVPlayerControllerLiveStreamSeekableTimeRangeDurationHysteresisDelta = 3.0; // Minimum delta of time required to change the duration of the seekable time range.
+static double WebAVPlayerControllerLiveStreamMinimumTargetDuration = 1.0; // Minimum segment duration to be considered valid.
+static double WebAVPlayerControllerLiveStreamSeekableTimeRangeMinimumDuration = 30.0;
+
+@implementation WebAVPlayerController {
+    BOOL _liveStreamEventModePossible;
+}
 
 - (instancetype)init
 {
@@ -57,11 +67,20 @@ using namespace WebCore;
 
     initAVPlayerController();
     self.playerControllerProxy = [[allocAVPlayerControllerInstance() init] autorelease];
+    _liveStreamEventModePossible = YES;
+
+    [self addObserver:self forKeyPath:@"seekableTimeRanges" options:(NSKeyValueObservingOptionOld | NSKeyValueObservingOptionNew | NSKeyValueObservingOptionInitial) context:WebAVPlayerControllerSeekableTimeRangesObserverContext];
+    [self addObserver:self forKeyPath:@"hasLiveStreamingContent" options:NSKeyValueObservingOptionInitial context:WebAVPlayerControllerHasLiveStreamingContentObserverContext];
+
+
     return self;
 }
 
 - (void)dealloc
 {
+    [self removeObserver:self forKeyPath:@"seekableTimeRanges" context:WebAVPlayerControllerSeekableTimeRangesObserverContext];
+    [self removeObserver:self forKeyPath:@"hasLiveStreamingContent" context:WebAVPlayerControllerHasLiveStreamingContentObserverContext];
+
     [_playerControllerProxy release];
     [_loadedTimeRanges release];
     [_seekableTimeRanges release];
@@ -88,25 +107,22 @@ using namespace WebCore;
 - (void)play:(id)sender
 {
     UNUSED_PARAM(sender);
-    if (!self.delegate)
-        return;
-    self.delegate->play();
+    if (self.delegate)
+        self.delegate->play();
 }
 
 - (void)pause:(id)sender
 {
     UNUSED_PARAM(sender);
-    if (!self.delegate)
-        return;
-    self.delegate->pause();
+    if (self.delegate)
+        self.delegate->pause();
 }
 
 - (void)togglePlayback:(id)sender
 {
     UNUSED_PARAM(sender);
-    if (!self.delegate)
-        return;
-    self.delegate->togglePlayState();
+    if (self.delegate)
+        self.delegate->togglePlayState();
 }
 
 - (void)togglePlaybackEvenWhenInBackground:(id)sender
@@ -137,24 +153,37 @@ using namespace WebCore;
 - (void)beginScrubbing:(id)sender
 {
     UNUSED_PARAM(sender);
-    if (!self.delegate)
-        return;
-    self.delegate->beginScrubbing();
+    if (self.delegate)
+        self.delegate->beginScrubbing();
 }
 
 - (void)endScrubbing:(id)sender
 {
     UNUSED_PARAM(sender);
-    if (!self.delegate)
-        return;
-    self.delegate->endScrubbing();
+    if (self.delegate)
+        self.delegate->endScrubbing();
 }
 
 - (void)seekToTime:(NSTimeInterval)time
 {
-    if (!self.delegate)
-        return;
-    self.delegate->fastSeek(time);
+    if (self.delegate)
+        self.delegate->seekToTime(time);
+}
+
+- (void)seekToTime:(NSTimeInterval)time toleranceBefore:(NSTimeInterval)before toleranceAfter:(NSTimeInterval)after
+{
+    self.delegate->seekToTime(time, before, after);
+}
+
+- (void)seekByTimeInterval:(NSTimeInterval)interval
+{
+    [self seekByTimeInterval:interval toleranceBefore:0. toleranceAfter:0.];
+}
+
+- (void)seekByTimeInterval:(NSTimeInterval)interval toleranceBefore:(NSTimeInterval)before toleranceAfter:(NSTimeInterval)after
+{
+    NSTimeInterval targetTime = [[self timing] currentValue] + interval;
+    [self seekToTime:targetTime toleranceBefore:before toleranceAfter:after];
 }
 
 - (NSTimeInterval)currentTimeWithinEndTimes
@@ -184,12 +213,47 @@ using namespace WebCore;
     return [NSSet setWithObjects:@"contentDuration", @"status", nil];
 }
 
+- (NSTimeInterval)maxTime
+{
+    NSTimeInterval maxTime = NAN;
+
+    NSTimeInterval duration = [self contentDuration];
+    if (!isnan(duration) && !isinf(duration))
+        maxTime = duration;
+    else if ([self hasSeekableLiveStreamingContent] && [self maxTiming])
+        maxTime = [[self maxTiming] currentValue];
+
+    return maxTime;
+}
+
++ (NSSet *)keyPathsForValuesAffectingMaxTime
+{
+    return [NSSet setWithObjects:@"contentDuration", @"hasSeekableLiveStreamingContent", @"maxTiming", nil];
+}
+
+- (NSTimeInterval)minTime
+{
+    NSTimeInterval minTime = 0.0;
+
+    if ([self hasSeekableLiveStreamingContent] && [self minTiming])
+        minTime = [[self minTiming] currentValue];
+
+    return minTime;
+}
+
++ (NSSet *)keyPathsForValuesAffectingMinTime
+{
+    return [NSSet setWithObjects:@"hasSeekableLiveStreamingContent", @"minTiming", nil];
+}
+
 - (void)skipBackwardThirtySeconds:(id)sender
 {
+    using namespace PAL;
+
     UNUSED_PARAM(sender);
     BOOL isTimeWithinSeekableTimeRanges = NO;
     CMTime currentTime = CMTimeMakeWithSeconds([[self timing] currentValue], 1000);
-    CMTime thirtySecondsBeforeCurrentTime = CMTimeSubtract(currentTime, CMTimeMake(30, 1));
+    CMTime thirtySecondsBeforeCurrentTime = CMTimeSubtract(currentTime, PAL::CMTimeMake(30, 1));
 
     for (NSValue *seekableTimeRangeValue in [self seekableTimeRanges]) {
         if (CMTimeRangeContainsTime([seekableTimeRangeValue CMTimeRangeValue], thirtySecondsBeforeCurrentTime)) {
@@ -204,6 +268,8 @@ using namespace WebCore;
 
 - (void)gotoEndOfSeekableRanges:(id)sender
 {
+    using namespace PAL;
+
     UNUSED_PARAM(sender);
     NSTimeInterval timeAtEndOfSeekableTimeRanges = NAN;
 
@@ -231,37 +297,35 @@ using namespace WebCore;
 - (void)beginScanningForward:(id)sender
 {
     UNUSED_PARAM(sender);
-    if (!self.delegate)
-        return;
-    self.delegate->beginScanningForward();
+    if (self.delegate)
+        self.delegate->beginScanningForward();
 }
 
 - (void)endScanningForward:(id)sender
 {
     UNUSED_PARAM(sender);
-    if (!self.delegate)
-        return;
-    self.delegate->endScanning();
+    if (self.delegate)
+        self.delegate->endScanning();
 }
 
 - (void)beginScanningBackward:(id)sender
 {
     UNUSED_PARAM(sender);
-    if (!self.delegate)
-        return;
-    self.delegate->beginScanningBackward();
+    if (self.delegate)
+        self.delegate->beginScanningBackward();
 }
 
 - (void)endScanningBackward:(id)sender
 {
     UNUSED_PARAM(sender);
-    if (!self.delegate)
-        return;
-    self.delegate->endScanning();
+    if (self.delegate)
+        self.delegate->endScanning();
 }
 
 - (BOOL)canSeekToBeginning
 {
+    using namespace PAL;
+
     CMTime minimumTime = kCMTimeIndefinite;
 
     for (NSValue *value in [self seekableTimeRanges])
@@ -278,9 +342,8 @@ using namespace WebCore;
 - (void)seekToBeginning:(id)sender
 {
     UNUSED_PARAM(sender);
-    if (!self.delegate)
-        return;
-    self.delegate->seekToTime(-INFINITY);
+    if (self.delegate)
+        self.delegate->seekToTime(-INFINITY);
 }
 
 - (void)seekChapterBackward:(id)sender
@@ -290,6 +353,8 @@ using namespace WebCore;
 
 - (BOOL)canSeekToEnd
 {
+    using namespace PAL;
+
     CMTime maximumTime = kCMTimeIndefinite;
 
     for (NSValue *value in [self seekableTimeRanges])
@@ -306,9 +371,8 @@ using namespace WebCore;
 - (void)seekToEnd:(id)sender
 {
     UNUSED_PARAM(sender);
-    if (!self.delegate)
-        return;
-    self.delegate->seekToTime(INFINITY);
+    if (self.delegate)
+        self.delegate->seekToTime(INFINITY);
 }
 
 - (void)seekChapterForward:(id)sender
@@ -424,6 +488,166 @@ using namespace WebCore;
             [self setPlaying:NO];
     }
 }
+
+- (BOOL)isMuted
+{
+    return _muted;
+}
+
+- (void)setMuted:(BOOL)muted
+{
+    if (_muted == muted)
+        return;
+    _muted = muted;
+
+    if (self.delegate)
+        self.delegate->setMuted(muted);
+}
+
+- (void)toggleMuted:(id)sender
+{
+    UNUSED_PARAM(sender);
+    if (self.delegate)
+        self.delegate->toggleMuted();
+}
+
+- (double)volume
+{
+    return self.delegate ? self.delegate->volume() : 0;
+}
+
+- (void)setVolume:(double)volume
+{
+    if (self.delegate)
+        self.delegate->setVolume(volume);
+}
+
+- (void)volumeChanged:(double)volume
+{
+    UNUSED_PARAM(volume);
+    [self willChangeValueForKey:@"volume"];
+    [self didChangeValueForKey:@"volume"];
+}
+
+- (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context
+{
+    using namespace PAL;
+
+    UNUSED_PARAM(object);
+    UNUSED_PARAM(keyPath);
+
+    if (WebAVPlayerControllerSeekableTimeRangesObserverContext == context) {
+        NSArray *oldArray = change[NSKeyValueChangeOldKey];
+        NSArray *newArray = change[NSKeyValueChangeNewKey];
+        if ([oldArray isKindOfClass:[NSArray class]] && [newArray isKindOfClass:[NSArray class]]) {
+            CMTimeRange oldSeekableTimeRange = [oldArray count] > 0 ? [[oldArray firstObject] CMTimeRangeValue] : kCMTimeRangeInvalid;
+            CMTimeRange newSeekableTimeRange = [newArray count] > 0 ? [[newArray firstObject] CMTimeRangeValue] : kCMTimeRangeInvalid;
+            if (!CMTimeRangeEqual(oldSeekableTimeRange, newSeekableTimeRange)) {
+                if (CMTIMERANGE_IS_VALID(newSeekableTimeRange) && CMTIMERANGE_IS_VALID(oldSeekableTimeRange) && _liveStreamEventModePossible && !CMTimeRangeContainsTime(newSeekableTimeRange, oldSeekableTimeRange.start))
+                    _liveStreamEventModePossible = NO;
+
+                [self updateMinMaxTiming];
+            }
+        }
+    } else if (WebAVPlayerControllerHasLiveStreamingContentObserverContext == context)
+        [self updateMinMaxTiming];
+}
+
+- (void)updateMinMaxTiming
+{
+    using namespace PAL;
+
+    AVValueTiming *newMinTiming = nil;
+    AVValueTiming *newMaxTiming = nil;
+
+    // For live streams value timings for the min and max times are needed.
+    if ([self hasLiveStreamingContent] && ([[self seekableTimeRanges] count] > 0)) {
+        CMTimeRange seekableTimeRange = [[[self seekableTimeRanges] firstObject] CMTimeRangeValue];
+        if (CMTIMERANGE_IS_VALID(seekableTimeRange)) {
+            NSTimeInterval oldMinTime = [[self minTiming] currentValue];
+            NSTimeInterval oldMaxTime = [[self maxTiming] currentValue];
+            NSTimeInterval newMinTime = CMTimeGetSeconds(seekableTimeRange.start);
+            NSTimeInterval newMaxTime = CMTimeGetSeconds(seekableTimeRange.start) + CMTimeGetSeconds(seekableTimeRange.duration) + (CACurrentMediaTime() - [self seekableTimeRangesLastModifiedTime]);
+            double newMinTimingRate = _liveStreamEventModePossible ? 0.0 : 1.0;
+            BOOL minTimingNeedsUpdate = YES;
+            BOOL maxTimingNeedsUpdate = YES;
+
+            if (isfinite([self liveUpdateInterval]) && [self liveUpdateInterval] > WebAVPlayerControllerLiveStreamMinimumTargetDuration) {
+                // Only update the timing if the new time differs by one segment duration plus the hysteresis delta.
+                minTimingNeedsUpdate = isnan(oldMinTime) || (fabs(oldMinTime - newMinTime) > [self liveUpdateInterval] + WebAVPlayerControllerLiveStreamSeekableTimeRangeDurationHysteresisDelta) || ([[self minTiming] rate] != newMinTimingRate);
+                maxTimingNeedsUpdate = isnan(oldMaxTime) || (fabs(oldMaxTime - newMaxTime) > [self liveUpdateInterval] + WebAVPlayerControllerLiveStreamSeekableTimeRangeDurationHysteresisDelta);
+            }
+
+            if (minTimingNeedsUpdate || maxTimingNeedsUpdate) {
+                newMinTiming = [getAVValueTimingClass() valueTimingWithAnchorValue:newMinTime anchorTimeStamp:[getAVValueTimingClass() currentTimeStamp] rate:newMinTimingRate];
+                newMaxTiming = [getAVValueTimingClass() valueTimingWithAnchorValue:newMaxTime anchorTimeStamp:[getAVValueTimingClass() currentTimeStamp] rate:1.0];
+            } else {
+                newMinTiming = [self minTiming];
+                newMaxTiming = [self maxTiming];
+            }
+        }
+    }
+
+    if (!newMinTiming)
+        newMinTiming = [getAVValueTimingClass() valueTimingWithAnchorValue:[self minTime] anchorTimeStamp:NAN rate:0.0];
+
+    if (!newMaxTiming)
+        newMaxTiming = [getAVValueTimingClass() valueTimingWithAnchorValue:[self maxTime] anchorTimeStamp:NAN rate:0.0];
+
+    [self setMinTiming:newMinTiming];
+    [self setMaxTiming:newMaxTiming];
+}
+
+- (BOOL)hasSeekableLiveStreamingContent
+{
+    BOOL hasSeekableLiveStreamingContent = NO;
+
+    if ([self hasLiveStreamingContent] && [self minTiming] && [self maxTiming] && isfinite([self liveUpdateInterval]) && [self liveUpdateInterval] > WebAVPlayerControllerLiveStreamMinimumTargetDuration && ([self seekableTimeRangesLastModifiedTime] != 0.0)) {
+        NSTimeInterval timeStamp = [getAVValueTimingClass() currentTimeStamp];
+        NSTimeInterval minTime = [[self minTiming] valueForTimeStamp:timeStamp];
+        NSTimeInterval maxTime = [[self maxTiming] valueForTimeStamp:timeStamp];
+        hasSeekableLiveStreamingContent = ((maxTime - minTime) > WebAVPlayerControllerLiveStreamSeekableTimeRangeMinimumDuration);
+    }
+
+    return hasSeekableLiveStreamingContent;
+}
+
++ (NSSet *)keyPathsForValuesAffectingHasSeekableLiveStreamingContent
+{
+    return [NSSet setWithObjects:@"hasLiveStreamingContent", @"minTiming", @"maxTiming", @"seekableTimeRangesLastModifiedTime", nil];
+}
+
+- (void)resetMediaState
+{
+    self.contentDuration = 0;
+    self.contentDurationWithinEndTimes = 0;
+    self.loadedTimeRanges = @[];
+
+    self.canPlay = NO;
+    self.canPause = NO;
+    self.canTogglePlayback = NO;
+    self.hasEnabledAudio = NO;
+    self.canSeek = NO;
+    self.status = AVPlayerControllerStatusUnknown;
+
+    self.minTiming = nil;
+    self.maxTiming = nil;
+    self.timing = nil;
+    self.rate = 0;
+    self.volume = 0;
+
+    self.seekableTimeRanges = [NSMutableArray array];
+
+    self.canScanBackward = NO;
+
+    self.audioMediaSelectionOptions = nil;
+    self.currentAudioMediaSelectionOption = nil;
+
+    self.legibleMediaSelectionOptions = nil;
+    self.currentLegibleMediaSelectionOption = nil;
+    _liveStreamEventModePossible = YES;
+}
+
 @end
 
 @implementation WebAVMediaSelectionOption

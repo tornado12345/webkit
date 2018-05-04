@@ -19,10 +19,8 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGFEBlendElement_h
-#define SVGFEBlendElement_h
+#pragma once
 
-#include "FEBlend.h"
 #include "SVGAnimatedEnumeration.h"
 #include "SVGFilterPrimitiveStandardAttributes.h"
 
@@ -52,6 +50,7 @@ struct SVGPropertyTraits<BlendMode> {
 };
 
 class SVGFEBlendElement final : public SVGFilterPrimitiveStandardAttributes {
+    WTF_MAKE_ISO_ALLOCATED(SVGFEBlendElement);
 public:
     static Ref<SVGFEBlendElement> create(const QualifiedName&, Document&);
 
@@ -71,5 +70,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif

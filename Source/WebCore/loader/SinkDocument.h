@@ -30,6 +30,7 @@
 namespace WebCore {
 
 class SinkDocument final : public HTMLDocument {
+    WTF_MAKE_ISO_ALLOCATED(SinkDocument);
 public:
     static Ref<SinkDocument> create(Frame* frame, const URL& url)
     {
@@ -38,8 +39,8 @@ public:
 
 private:
     SinkDocument(Frame*, const URL&);
-    
-    virtual Ref<DocumentParser> createParser();
+
+    Ref<DocumentParser> createParser() final;
 };
 
 }; // namespace WebCore

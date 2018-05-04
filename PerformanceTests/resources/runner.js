@@ -15,6 +15,9 @@ if (window.testRunner) {
     var jsHeapResults;
     var mallocHeapResults;
     var iterationCount = undefined;
+    var lastResponsivenessTimestamp = 0;
+    var _longestResponsivenessDelay = 0;
+    var continueCheckingResponsiveness = false;
 
     var PerfTestRunner = {};
 
@@ -220,7 +223,7 @@ if (window.testRunner) {
             var prefix = currentTest.name || '';
             if (currentTest.description)
                 PerfTestRunner.log("Description: " + currentTest.description);
-            metric = {'fps': 'FrameRate', 'runs/s': 'Runs', 'ms': 'Time'}[PerfTestRunner.unit];
+            metric = {'fps': 'FrameRate', 'runs/s': 'Runs', 'pt': 'Score', 'ms': 'Time'}[PerfTestRunner.unit];
             var suffix = currentTest.aggregator ? ':' + currentTest.aggregator : '';
             PerfTestRunner.logStatistics(results, PerfTestRunner.unit, prefix + ":" + metric + suffix);
             if (jsHeapResults.length) {
@@ -323,6 +326,32 @@ if (window.testRunner) {
         return PerfTestRunner.now() - startTime;
     }
 
+    PerfTestRunner.startCheckingResponsiveness = function() {
+        lastResponsivenessTimestamp = PerfTestRunner.now();
+        _longestResponsivenessDelay = 0;
+        continueCheckingResponsiveness = true;
+
+        var timeoutFunction = function() {
+            var now = PerfTestRunner.now();
+            var delta = now - lastResponsivenessTimestamp;
+            if (delta > _longestResponsivenessDelay)
+                _longestResponsivenessDelay = delta;    
+
+            lastResponsivenessTimestamp = now;
+            if (continueCheckingResponsiveness)
+                setTimeout(timeoutFunction, 0);
+        }
+        
+        timeoutFunction();
+    }
+
+    PerfTestRunner.stopCheckingResponsiveness = function() {
+        continueCheckingResponsiveness = false;
+    }
+
+    PerfTestRunner.longestResponsivenessDelay = function() {
+        return _longestResponsivenessDelay;
+    }
 
     PerfTestRunner.measurePageLoadTime = function(test) {
         test.run = function() {

@@ -47,9 +47,14 @@ typedef NSWindow *PlatformWindow;
 #elif PLATFORM(GTK)
 typedef WKViewRef PlatformWKView;
 typedef GtkWidget *PlatformWindow;
-#elif PLATFORM(EFL)
-typedef Evas_Object* PlatformWKView;
-typedef Ecore_Evas* PlatformWindow;
+#elif PLATFORM(WPE)
+class HeadlessViewBackend;
+struct wpe_view_backend;
+typedef WKViewRef PlatformWKView;
+typedef HeadlessViewBackend *PlatformWindow;
+#elif PLATFORM(WIN)
+typedef WKViewRef PlatformWKView;
+typedef HWND PlatformWindow;
 #endif
 
 namespace TestWebKitAPI {
@@ -72,7 +77,7 @@ public:
     void simulateSpacebarKeyPress();
     void simulateAltKeyPress();
     void simulateRightClick(unsigned x, unsigned y);
-    void simulateMouseMove(unsigned x, unsigned y);
+    void simulateMouseMove(unsigned x, unsigned y, WKEventModifiers = 0);
 #if PLATFORM(MAC)
     void simulateButtonClick(WKEventMouseButton, unsigned x, unsigned y, WKEventModifiers);
 #endif
@@ -80,8 +85,12 @@ public:
 private:
 #if PLATFORM(MAC)
     void initialize(WKPageConfigurationRef, Class wkViewSubclass);
-#elif PLATFORM(GTK)
+#elif PLATFORM(GTK) || PLATFORM(WPE) || PLATFORM(WIN)
     void initialize(WKPageConfigurationRef);
+#endif
+#if PLATFORM(WIN)
+    static void registerWindowClass();
+    static LRESULT CALLBACK wndProc(HWND, UINT message, WPARAM, LPARAM);
 #endif
 
     PlatformWKView m_view;

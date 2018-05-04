@@ -17,16 +17,17 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGMissingGlyphElement_h
-#define SVGMissingGlyphElement_h
+#pragma once
 
 #if ENABLE(SVG_FONTS)
+
 #include "SVGElement.h"
 #include "SVGNames.h"
 
 namespace WebCore {
 
 class SVGMissingGlyphElement final : public SVGElement {
+    WTF_MAKE_ISO_ALLOCATED(SVGMissingGlyphElement);
 public:
     static Ref<SVGMissingGlyphElement> create(const QualifiedName&, Document&);
 
@@ -39,4 +40,3 @@ private:
 } // namespace WebCore
 
 #endif // ENABLE(SVG_FONTS)
-#endif

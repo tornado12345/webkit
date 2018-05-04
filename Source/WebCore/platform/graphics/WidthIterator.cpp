@@ -29,10 +29,10 @@
 #include "SurrogatePairAwareTextIterator.h"
 #include <wtf/MathExtras.h>
 
-using namespace WTF;
-using namespace Unicode;
 
 namespace WebCore {
+using namespace WTF;
+using namespace Unicode;
 
 WidthIterator::WidthIterator(const FontCascade* font, const TextRun& run, HashSet<const Font*>* fallbackFonts, bool accountForGlyphBounds, bool forTextEmphasis)
     : m_font(font)
@@ -162,9 +162,15 @@ static inline std::pair<bool, bool> expansionLocation(bool ideograph, bool treat
     return std::make_pair(expandLeft, expandRight);
 }
 
+static inline bool characterMustDrawSomething(UChar32 character)
+{
+    return !u_hasBinaryProperty(character, UCHAR_DEFAULT_IGNORABLE_CODE_POINT);
+}
+
 template <typename TextIterator>
 inline unsigned WidthIterator::advanceInternal(TextIterator& textIterator, GlyphBuffer* glyphBuffer)
 {
+    // The core logic here needs to match SimpleLineLayout::widthForSimpleText()
     bool rtl = m_run.rtl();
     bool hasExtraSpacing = (m_font->letterSpacing() || m_font->wordSpacing() || m_expansion) && !m_run.spacingDisabled();
 
@@ -195,11 +201,11 @@ inline unsigned WidthIterator::advanceInternal(TextIterator& textIterator, Glyph
         int currentCharacter = textIterator.currentIndex();
         const GlyphData& glyphData = m_font->glyphDataForCharacter(character, rtl);
         Glyph glyph = glyphData.glyph;
-        if (!glyph) {
+        if (!glyph && !characterMustDrawSomething(character)) {
             textIterator.advance(advanceLength);
             continue;
         }
-        const Font* font = glyphData.font;
+        const Font* font = glyphData.font ? glyphData.font : &m_font->primaryFont();
         ASSERT(font);
 
         // Now that we have a glyph and font data, get its width.

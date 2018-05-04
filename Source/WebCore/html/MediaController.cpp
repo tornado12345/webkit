@@ -28,15 +28,15 @@
 #if ENABLE(VIDEO)
 #include "MediaController.h"
 
-#include "Clock.h"
 #include "EventNames.h"
 #include "HTMLMediaElement.h"
 #include "TimeRanges.h"
-#include <wtf/CurrentTime.h>
+#include <pal/system/Clock.h>
+#include <wtf/NeverDestroyed.h>
 #include <wtf/StdLibExtras.h>
 #include <wtf/text/AtomicString.h>
 
-using namespace WebCore;
+namespace WebCore {
 
 Ref<MediaController> MediaController::create(ScriptExecutionContext& context)
 {
@@ -54,16 +54,13 @@ MediaController::MediaController(ScriptExecutionContext& context)
     , m_asyncEventTimer(*this, &MediaController::asyncEventTimerFired)
     , m_clearPositionTimer(*this, &MediaController::clearPositionTimerFired)
     , m_closedCaptionsVisible(false)
-    , m_clock(Clock::create())
+    , m_clock(PAL::Clock::create())
     , m_scriptExecutionContext(context)
     , m_timeupdateTimer(*this, &MediaController::scheduleTimeupdateEvent)
-    , m_previousTimeupdateTime(0)
 {
 }
 
-MediaController::~MediaController()
-{
-}
+MediaController::~MediaController() = default;
 
 void MediaController::addMediaElement(HTMLMediaElement& element)
 {
@@ -148,7 +145,7 @@ double MediaController::currentTime() const
     if (m_position == MediaPlayer::invalidTime()) {
         // Some clocks may return times outside the range of [0..duration].
         m_position = std::max<double>(0, std::min(duration(), m_clock->currentTime()));
-        m_clearPositionTimer.startOneShot(0);
+        m_clearPositionTimer.startOneShot(0_s);
     }
 
     return m_position;
@@ -256,7 +253,7 @@ ExceptionOr<void> MediaController::setVolume(double level)
     // If the new value is outside the range 0.0 to 1.0 inclusive, then, on setting, an 
     // IndexSizeError exception must be raised instead.
     if (!(level >= 0 && level <= 1))
-        return Exception { INDEX_SIZE_ERR };
+        return Exception { IndexSizeError };
 
     // The volume attribute, on setting, if the new value is in the range 0.0 to 1.0 inclusive,
     // must set the MediaController's media controller volume multiplier to the new value
@@ -316,7 +313,7 @@ const AtomicString& MediaController::playbackState() const
         return playbackStateEnded();
     default:
         ASSERT_NOT_REACHED();
-        return nullAtom;
+        return nullAtom();
     }
 }
 
@@ -341,7 +338,7 @@ static AtomicString eventNameForReadyState(MediaControllerInterface::ReadyState 
         return eventNames().canplaythroughEvent;
     default:
         ASSERT_NOT_REACHED();
-        return nullAtom;
+        return nullAtom();
     }
 }
 
@@ -537,7 +534,7 @@ void MediaController::scheduleEvent(const AtomicString& eventName)
 {
     m_pendingEvents.append(Event::create(eventName, false, true));
     if (!m_asyncEventTimer.isActive())
-        m_asyncEventTimer.startOneShot(0);
+        m_asyncEventTimer.startOneShot(0_s);
 }
 
 void MediaController::asyncEventTimerFired()
@@ -663,7 +660,7 @@ void MediaController::returnToRealtime()
 
 // The spec says to fire periodic timeupdate events (those sent while playing) every
 // "15 to 250ms", we choose the slowest frequency
-static const double maxTimeupdateEventFrequency = 0.25;
+static const Seconds maxTimeupdateEventFrequency { 250_ms };
 
 void MediaController::startTimeupdateTimer()
 {
@@ -675,8 +672,8 @@ void MediaController::startTimeupdateTimer()
 
 void MediaController::scheduleTimeupdateEvent()
 {
-    double now = monotonicallyIncreasingTime();
-    double timedelta = now - m_previousTimeupdateTime;
+    MonotonicTime now = MonotonicTime::now();
+    Seconds timedelta = now - m_previousTimeupdateTime;
 
     if (timedelta < maxTimeupdateEventFrequency)
         return;
@@ -684,5 +681,7 @@ void MediaController::scheduleTimeupdateEvent()
     scheduleEvent(eventNames().timeupdateEvent);
     m_previousTimeupdateTime = now;
 }
+
+} // namespace WebCore
 
 #endif

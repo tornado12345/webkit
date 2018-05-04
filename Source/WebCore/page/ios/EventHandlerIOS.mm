@@ -26,15 +26,21 @@
 #import "config.h"
 #import "EventHandler.h"
 
+#if PLATFORM(IOS)
+
 #import "AXObjectCache.h"
+#import "AutoscrollController.h"
 #import "Chrome.h"
 #import "ChromeClient.h"
+#import "DataTransfer.h"
+#import "DragState.h"
 #import "FocusController.h"
 #import "Frame.h"
 #import "FrameView.h"
 #import "KeyboardEvent.h"
 #import "MouseEventWithHitTestResults.h"
 #import "Page.h"
+#import "Pasteboard.h"
 #import "PlatformEventFactoryIOS.h"
 #import "PlatformKeyboardEvent.h"
 #import "RenderWidget.h"
@@ -44,6 +50,7 @@
 #import <wtf/BlockObjCExceptions.h>
 #import <wtf/NeverDestroyed.h>
 #import <wtf/Noncopyable.h>
+#import <wtf/SetForScope.h>
 
 #if ENABLE(IOS_TOUCH_EVENTS)
 #import <WebKitAdditions/EventHandlerIOSTouch.cpp>
@@ -127,7 +134,7 @@ bool EventHandler::tabsToAllFormControls(KeyboardEvent* event) const
         return false;
 
     KeyboardUIMode keyboardUIMode = page->chrome().client().keyboardUIMode();
-    bool handlingOptionTab = isKeyboardOptionTab(event);
+    bool handlingOptionTab = event && isKeyboardOptionTab(*event);
 
     // If tab-to-links is off, option-tab always highlights all controls.
     if ((keyboardUIMode & KeyboardAccessTabsToLinks) == 0 && handlingOptionTab)
@@ -554,5 +561,132 @@ PlatformMouseEvent EventHandler::currentPlatformMouseEvent() const
 {
     return PlatformEventFactory::createPlatformMouseEvent(currentEvent());
 }
+    
+void EventHandler::startSelectionAutoscroll(RenderObject* renderer, const FloatPoint& positionInWindow)
+{
+    Ref<Frame> protectedFrame(m_frame);
+
+    m_targetAutoscrollPositionInWindow = protectedFrame->view()->contentsToView(roundedIntPoint(positionInWindow));
+    
+    m_isAutoscrolling = true;
+    m_autoscrollController->startAutoscrollForSelection(renderer);
+}
+
+void EventHandler::cancelSelectionAutoscroll()
+{
+    m_isAutoscrolling = false;
+    m_autoscrollController->stopAutoscrollTimer();
+}
+
+static IntSize autoscrollAdjustmentFactorForScreenBoundaries(const IntPoint& screenPoint, const FloatRect& screenRect)
+{
+    // If the window is at the edge of the screen, and the touch position is also at that edge of the screen,
+    // we need to adjust the autoscroll amount in order for the user to be able to autoscroll in that direction.
+    // We can pretend that the touch position is slightly beyond the edge of the screen, and then autoscrolling
+    // will occur as expected. This function figures out just how much to adjust the autoscroll amount by
+    // in order to get autoscrolling to feel natural in this situation.
+    
+    IntSize adjustmentFactor;
+    
+#define EDGE_DISTANCE_THRESHOLD 100
+
+    float screenLeftEdge = screenRect.x();
+    float insetScreenLeftEdge = screenLeftEdge + EDGE_DISTANCE_THRESHOLD;
+    float screenRightEdge = screenRect.maxX();
+    float insetScreenRightEdge = screenRightEdge - EDGE_DISTANCE_THRESHOLD;
+    if (screenPoint.x() >= screenLeftEdge && screenPoint.x() < insetScreenLeftEdge) {
+        float distanceFromEdge = screenPoint.x() - screenLeftEdge - EDGE_DISTANCE_THRESHOLD;
+        if (distanceFromEdge < 0)
+            adjustmentFactor.setWidth(-EDGE_DISTANCE_THRESHOLD);
+    } else if (screenPoint.x() >= insetScreenRightEdge && screenPoint.x() < screenRightEdge) {
+        float distanceFromEdge = EDGE_DISTANCE_THRESHOLD - (screenRightEdge - screenPoint.x());
+        if (distanceFromEdge > 0)
+            adjustmentFactor.setWidth(EDGE_DISTANCE_THRESHOLD);
+    }
+    
+    float screenTopEdge = screenRect.y();
+    float insetScreenTopEdge = screenTopEdge + EDGE_DISTANCE_THRESHOLD;
+    float screenBottomEdge = screenRect.maxY();
+    float insetScreenBottomEdge = screenBottomEdge - EDGE_DISTANCE_THRESHOLD;
+    
+    if (screenPoint.y() >= screenTopEdge && screenPoint.y() < insetScreenTopEdge) {
+        float distanceFromEdge = screenPoint.y() - screenTopEdge - EDGE_DISTANCE_THRESHOLD;
+        if (distanceFromEdge < 0)
+            adjustmentFactor.setHeight(-EDGE_DISTANCE_THRESHOLD);
+    } else if (screenPoint.y() >= insetScreenBottomEdge && screenPoint.y() < screenBottomEdge) {
+        float distanceFromEdge = EDGE_DISTANCE_THRESHOLD - (screenBottomEdge - screenPoint.y());
+        if (distanceFromEdge > 0)
+            adjustmentFactor.setHeight(EDGE_DISTANCE_THRESHOLD);
+    }
+    
+    return adjustmentFactor;
+}
+    
+IntPoint EventHandler::targetPositionInWindowForSelectionAutoscroll() const
+{
+    Ref<Frame> protectedFrame(m_frame);
+    
+    FloatRect unobscuredContentRect = protectedFrame->view()->unobscuredContentRect();
+    
+    // Manually need to convert viewToContents, as it will be skipped because delegatedScrolling is on iOS
+    IntPoint contentPosition = protectedFrame->view()->viewToContents(protectedFrame->view()->convertFromContainingWindow(m_targetAutoscrollPositionInWindow));
+    IntSize adjustPosition = autoscrollAdjustmentFactorForScreenBoundaries(contentPosition, unobscuredContentRect);
+    return contentPosition + adjustPosition;
+}
+    
+bool EventHandler::shouldUpdateAutoscroll()
+{
+    return m_isAutoscrolling;
+}
+
+#if ENABLE(DRAG_SUPPORT)
+
+bool EventHandler::eventLoopHandleMouseDragged(const MouseEventWithHitTestResults&)
+{
+    return false;
+}
+
+bool EventHandler::tryToBeginDataInteractionAtPoint(const IntPoint& clientPosition, const IntPoint&)
+{
+    Ref<Frame> protectedFrame(m_frame);
+
+    auto* document = m_frame.document();
+    if (!document)
+        return false;
+
+    document->updateLayoutIgnorePendingStylesheets();
+
+    FloatPoint adjustedClientPositionAsFloatPoint(clientPosition);
+    protectedFrame->nodeRespondingToClickEvents(clientPosition, adjustedClientPositionAsFloatPoint);
+    IntPoint adjustedClientPosition = roundedIntPoint(adjustedClientPositionAsFloatPoint);
+    IntPoint adjustedGlobalPosition = protectedFrame->view()->windowToContents(adjustedClientPosition);
+
+    PlatformMouseEvent syntheticMousePressEvent(adjustedClientPosition, adjustedGlobalPosition, LeftButton, PlatformEvent::MousePressed, 1, false, false, false, false, WallTime::now(), 0, NoTap);
+    PlatformMouseEvent syntheticMouseMoveEvent(adjustedClientPosition, adjustedGlobalPosition, LeftButton, PlatformEvent::MouseMoved, 0, false, false, false, false, WallTime::now(), 0, NoTap);
+
+    HitTestRequest request(HitTestRequest::Active | HitTestRequest::DisallowUserAgentShadowContent);
+    auto documentPoint = protectedFrame->view() ? protectedFrame->view()->windowToContents(syntheticMouseMoveEvent.position()) : syntheticMouseMoveEvent.position();
+    auto hitTestedMouseEvent = document->prepareMouseEvent(request, documentPoint, syntheticMouseMoveEvent);
+
+    RefPtr<Frame> subframe = subframeForHitTestResult(hitTestedMouseEvent);
+    if (subframe && subframe->eventHandler().tryToBeginDataInteractionAtPoint(adjustedClientPosition, adjustedGlobalPosition))
+        return true;
+
+    // FIXME: This needs to be refactored, along with handleMousePressEvent and handleMouseMoveEvent, so that state associated only with dragging
+    // lives solely in the DragController, and so that we don't need to pretend that a mouse press and mouse move have already occurred here.
+    m_mouseDownMayStartDrag = eventMayStartDrag(syntheticMousePressEvent);
+    if (!m_mouseDownMayStartDrag)
+        return false;
+
+    SetForScope<bool> mousePressed(m_mousePressed, true);
+    dragState().source = nullptr;
+    m_mouseDownPos = protectedFrame->view()->windowToContents(syntheticMouseMoveEvent.position());
+
+    return handleMouseDraggedEvent(hitTestedMouseEvent, DontCheckDragHysteresis);
+}
+
+#endif
 
 }
+
+#endif // PLATFORM(IOS)

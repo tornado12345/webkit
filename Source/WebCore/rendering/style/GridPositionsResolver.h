@@ -28,10 +28,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef GridPositionsResolver_h
-#define GridPositionsResolver_h
-
-#if ENABLE(CSS_GRID_LAYOUT)
+#pragma once
 
 #include "GridPosition.h"
 
@@ -73,6 +70,8 @@ private:
 // Class with all the code related to grid items positions resolution.
 class GridPositionsResolver {
 public:
+    static GridPositionSide initialPositionSide(GridTrackSizingDirection);
+    static GridPositionSide finalPositionSide(GridTrackSizingDirection);
     static unsigned spanSizeForAutoPlacedItem(const RenderStyle&, const RenderBox&, GridTrackSizingDirection);
     static GridSpan resolveGridPositionsFromStyle(const RenderStyle&, const RenderBox&, GridTrackSizingDirection, unsigned autoRepeatTracksCount);
     static unsigned explicitGridColumnCount(const RenderStyle&, unsigned autoRepeatColumnsCount);
@@ -80,7 +79,3 @@ public:
 };
 
 } // namespace WebCore
-
-#endif // ENABLE(CSS_GRID_LAYOUT)
-
-#endif // GridPositionsResolver_h

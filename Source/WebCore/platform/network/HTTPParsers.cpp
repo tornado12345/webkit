@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2006 Alexey Proskuryakov (ap@webkit.org)
- * Copyright (C) 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2006-2017 Apple Inc. All rights reserved.
  * Copyright (C) 2009 Torch Mobile Inc. http://www.torchmobile.com/
  * Copyright (C) 2009 Google Inc. All rights reserved.
  * Copyright (C) 2011 Apple Inc. All Rights Reserved.
@@ -35,15 +35,16 @@
 
 #include "HTTPHeaderNames.h"
 #include <wtf/DateMath.h>
+#include <wtf/Language.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/text/CString.h>
 #include <wtf/text/StringBuilder.h>
 #include <wtf/text/WTFString.h>
 #include <wtf/unicode/CharacterNames.h>
 
-using namespace WTF;
 
 namespace WebCore {
+using namespace WTF;
 
 // true if there is more to parse, after incrementing pos past whitespace.
 // Note: Might return pos == str.length()
@@ -127,6 +128,47 @@ bool isValidHTTPHeaderValue(const String& value)
 }
 
 // See RFC 7230, Section 3.2.6.
+static bool isDelimiterCharacter(const UChar c)
+{
+    // DQUOTE and "(),/:;<=>?@[\]{}"
+    return (c == '"' || c == '(' || c == ')' || c == ',' || c == '/' || c == ':' || c == ';'
+        || c == '<' || c == '=' || c == '>' || c == '?' || c == '@' || c == '[' || c == '\\'
+        || c == ']' || c == '{' || c == '}');
+}
+
+// See RFC 7231, Section 5.3.2.
+bool isValidAcceptHeaderValue(const String& value)
+{
+    for (unsigned i = 0; i < value.length(); ++i) {
+        UChar c = value[i];
+        // First check for alphanumeric for performance reasons then whitelist four delimiter characters.
+        if (isASCIIAlphanumeric(c) || c == ',' || c == '/' || c == ';' || c == '=')
+            continue;
+        if (isDelimiterCharacter(c))
+            return false;
+    }
+    
+    return true;
+}
+
+// See RFC 7231, Section 5.3.5 and 3.1.3.2.
+bool isValidLanguageHeaderValue(const String& value)
+{
+    for (unsigned i = 0; i < value.length(); ++i) {
+        UChar c = value[i];
+        if (isASCIIAlphanumeric(c) || c == ' ' || c == '*' || c == ',' || c == '-' || c == '.' || c == ';' || c == '=')
+            continue;
+        return false;
+    }
+    
+    // FIXME: Validate further by splitting into language tags and optional quality
+    // values (q=) and then check each language tag.
+    // Language tags https://tools.ietf.org/html/rfc7231#section-3.1.3.1
+    // Language tag syntax https://tools.ietf.org/html/bcp47#section-2.1
+    return true;
+}
+
+// See RFC 7230, Section 3.2.6.
 bool isValidHTTPToken(const String& value)
 {
     if (value.isEmpty())
@@ -177,7 +219,7 @@ bool parseHTTPRefresh(const String& refresh, double& delay, String& url)
         ++pos;
         skipWhiteSpace(refresh, pos);
         unsigned urlStartPos = pos;
-        if (refresh.find("url", urlStartPos, false) == urlStartPos) {
+        if (refresh.findIgnoringASCIICase("url", urlStartPos) == urlStartPos) {
             urlStartPos += 3;
             skipWhiteSpace(refresh, urlStartPos);
             if (refresh[urlStartPos] == '=') {
@@ -211,14 +253,14 @@ bool parseHTTPRefresh(const String& refresh, double& delay, String& url)
     }
 }
 
-Optional<std::chrono::system_clock::time_point> parseHTTPDate(const String& value)
+std::optional<WallTime> parseHTTPDate(const String& value)
 {
     double dateInMillisecondsSinceEpoch = parseDateFromNullTerminatedCharacters(value.utf8().data());
     if (!std::isfinite(dateInMillisecondsSinceEpoch))
-        return { };
+        return std::nullopt;
     // This assumes system_clock epoch equals Unix epoch which is true for all implementations but unspecified.
-    // FIXME: The parsing function should be switched to std::chrono too.
-    return std::chrono::system_clock::time_point(std::chrono::milliseconds(static_cast<long long>(dateInMillisecondsSinceEpoch)));
+    // FIXME: The parsing function should be switched to WallTime too.
+    return WallTime::fromRawSeconds(dateInMillisecondsSinceEpoch / 1000.0);
 }
 
 // FIXME: This function doesn't comply with RFC 6266.
@@ -305,7 +347,7 @@ void findCharsetInMediaType(const String& mediaType, unsigned int& charsetPos, u
     unsigned length = mediaType.length();
     
     while (pos < length) {
-        pos = mediaType.find("charset", pos, false);
+        pos = mediaType.findIgnoringASCIICase("charset", pos);
         if (pos == notFound || pos == 0) {
             charsetLen = 0;
             return;
@@ -342,14 +384,14 @@ void findCharsetInMediaType(const String& mediaType, unsigned int& charsetPos, u
 
 XSSProtectionDisposition parseXSSProtectionHeader(const String& header, String& failureReason, unsigned& failurePosition, String& reportURL)
 {
-    static NeverDestroyed<String> failureReasonInvalidToggle(ASCIILiteral("expected 0 or 1"));
-    static NeverDestroyed<String> failureReasonInvalidSeparator(ASCIILiteral("expected semicolon"));
-    static NeverDestroyed<String> failureReasonInvalidEquals(ASCIILiteral("expected equals sign"));
-    static NeverDestroyed<String> failureReasonInvalidMode(ASCIILiteral("invalid mode directive"));
-    static NeverDestroyed<String> failureReasonInvalidReport(ASCIILiteral("invalid report directive"));
-    static NeverDestroyed<String> failureReasonDuplicateMode(ASCIILiteral("duplicate mode directive"));
-    static NeverDestroyed<String> failureReasonDuplicateReport(ASCIILiteral("duplicate report directive"));
-    static NeverDestroyed<String> failureReasonInvalidDirective(ASCIILiteral("unrecognized directive"));
+    static NeverDestroyed<String> failureReasonInvalidToggle(MAKE_STATIC_STRING_IMPL("expected 0 or 1"));
+    static NeverDestroyed<String> failureReasonInvalidSeparator(MAKE_STATIC_STRING_IMPL("expected semicolon"));
+    static NeverDestroyed<String> failureReasonInvalidEquals(MAKE_STATIC_STRING_IMPL("expected equals sign"));
+    static NeverDestroyed<String> failureReasonInvalidMode(MAKE_STATIC_STRING_IMPL("invalid mode directive"));
+    static NeverDestroyed<String> failureReasonInvalidReport(MAKE_STATIC_STRING_IMPL("invalid report directive"));
+    static NeverDestroyed<String> failureReasonDuplicateMode(MAKE_STATIC_STRING_IMPL("duplicate mode directive"));
+    static NeverDestroyed<String> failureReasonDuplicateReport(MAKE_STATIC_STRING_IMPL("duplicate report directive"));
+    static NeverDestroyed<String> failureReasonInvalidDirective(MAKE_STATIC_STRING_IMPL("unrecognized directive"));
 
     unsigned pos = 0;
 
@@ -429,21 +471,25 @@ XSSProtectionDisposition parseXSSProtectionHeader(const String& header, String& 
     }
 }
 
-#if ENABLE(NOSNIFF)
 ContentTypeOptionsDisposition parseContentTypeOptionsHeader(const String& header)
 {
     if (equalLettersIgnoringASCIICase(header.stripWhiteSpace(), "nosniff"))
         return ContentTypeOptionsNosniff;
     return ContentTypeOptionsNone;
 }
-#endif
 
+// For example: "HTTP/1.1 200 OK" => "OK".
+// Note that HTTP/2 does not include a reason phrase, so we return the empty atom.
 AtomicString extractReasonPhraseFromHTTPStatusLine(const String& statusLine)
 {
     StringView view = statusLine;
     size_t spacePos = view.find(' ');
+
     // Remove status code from the status line.
     spacePos = view.find(' ', spacePos + 1);
+    if (spacePos == notFound)
+        return emptyAtom();
+
     return view.substring(spacePos + 1).toAtomicString();
 }
 
@@ -486,10 +532,11 @@ bool parseRange(const String& range, long long& rangeOffset, long long& rangeEnd
     rangeOffset = rangeEnd = rangeSuffixLength = -1;
 
     // The "bytes" unit identifier should be present.
-    static const char bytesStart[] = "bytes="; 
-    if (!range.startsWith(bytesStart, false))
+    static const unsigned bytesLength = 6;
+    if (!startsWithLettersIgnoringASCIICase(range, "bytes="))
         return false;
-    String byteRange = range.substring(sizeof(bytesStart) - 1);
+    // FIXME: The rest of this should use StringView.
+    String byteRange = range.substring(bytesLength);
 
     // The '-' character needs to be present.
     int index = byteRange.find('-');
@@ -732,7 +779,7 @@ void parseAccessControlExposeHeadersAllowList(const String& headerValue, HTTPHea
     }
 }
 
-// Implememtnation of https://fetch.spec.whatwg.org/#cors-safelisted-response-header-name
+// Implements <https://fetch.spec.whatwg.org/#forbidden-header-name>.
 bool isForbiddenHeaderName(const String& name)
 {
     HTTPHeaderName headerName;
@@ -766,9 +813,16 @@ bool isForbiddenHeaderName(const String& name)
     return startsWithLettersIgnoringASCIICase(name, "sec-") || startsWithLettersIgnoringASCIICase(name, "proxy-");
 }
 
+// Implements <https://fetch.spec.whatwg.org/#forbidden-response-header-name>.
 bool isForbiddenResponseHeaderName(const String& name)
 {
     return equalLettersIgnoringASCIICase(name, "set-cookie") || equalLettersIgnoringASCIICase(name, "set-cookie2");
+}
+
+// Implements <https://fetch.spec.whatwg.org/#forbidden-method>.
+bool isForbiddenMethod(const String& name)
+{
+    return equalLettersIgnoringASCIICase(name, "connect") || equalLettersIgnoringASCIICase(name, "trace") || equalLettersIgnoringASCIICase(name, "track");
 }
 
 bool isSimpleHeader(const String& name, const String& value)
@@ -776,18 +830,7 @@ bool isSimpleHeader(const String& name, const String& value)
     HTTPHeaderName headerName;
     if (!findHTTPHeaderName(name, headerName))
         return false;
-    switch (headerName) {
-    case HTTPHeaderName::Accept:
-    case HTTPHeaderName::AcceptLanguage:
-    case HTTPHeaderName::ContentLanguage:
-        return true;
-    case HTTPHeaderName::ContentType: {
-        String mimeType = extractMIMETypeFromMediaType(value);
-        return equalLettersIgnoringASCIICase(mimeType, "application/x-www-form-urlencoded") || equalLettersIgnoringASCIICase(mimeType, "multipart/form-data") || equalLettersIgnoringASCIICase(mimeType, "text/plain");
-    }
-    default:
-        return false;
-    }
+    return isCrossOriginSafeRequestHeader(headerName, value);
 }
 
 bool isCrossOriginSafeHeader(HTTPHeaderName name, const HTTPHeaderSet& accessControlExposeHeaderSet)
@@ -824,10 +867,12 @@ bool isCrossOriginSafeRequestHeader(HTTPHeaderName name, const String& value)
 {
     switch (name) {
     case HTTPHeaderName::Accept:
+        return isValidAcceptHeaderValue(value);
     case HTTPHeaderName::AcceptLanguage:
     case HTTPHeaderName::ContentLanguage:
-        return true;
+        return isValidLanguageHeaderValue(value);
     case HTTPHeaderName::ContentType: {
+        // Preflight is required for MIME types that can not be sent via form submission.
         String mimeType = extractMIMETypeFromMediaType(value);
         return equalLettersIgnoringASCIICase(mimeType, "application/x-www-form-urlencoded") || equalLettersIgnoringASCIICase(mimeType, "multipart/form-data") || equalLettersIgnoringASCIICase(mimeType, "text/plain");
     }
@@ -835,6 +880,37 @@ bool isCrossOriginSafeRequestHeader(HTTPHeaderName name, const String& value)
         // FIXME: Should we also make safe other headers (DPR, Downlink, Save-Data...)? That would require validating their values.
         return false;
     }
+}
+
+// Implements <https://fetch.spec.whatwg.org/#concept-method-normalize>.
+String normalizeHTTPMethod(const String& method)
+{
+    const char* const methods[] = { "DELETE", "GET", "HEAD", "OPTIONS", "POST", "PUT" };
+    for (auto* value : methods) {
+        if (equalIgnoringASCIICase(method, value)) {
+            // Don't bother allocating a new string if it's already all uppercase.
+            if (method == value)
+                break;
+            return ASCIILiteral { value };
+        }
+    }
+    return method;
+}
+
+FromOriginDisposition parseFromOriginHeader(const String& header)
+{
+    auto strippedHeader = stripLeadingAndTrailingHTTPSpaces(header);
+
+    if (strippedHeader.isEmpty())
+        return FromOriginDisposition::None;
+
+    if (equalLettersIgnoringASCIICase(strippedHeader, "same"))
+        return FromOriginDisposition::Same;
+
+    if (equalLettersIgnoringASCIICase(strippedHeader, "same-site"))
+        return FromOriginDisposition::SameSite;
+
+    return FromOriginDisposition::Invalid;
 }
 
 }

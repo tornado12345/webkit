@@ -26,6 +26,8 @@
 #include "config.h"
 #include "ScrollbarThemeIOS.h"
 
+#if PLATFORM(IOS)
+
 #include "GraphicsContext.h"
 #include "IntRect.h"
 #include "PlatformMouseEvent.h"
@@ -61,19 +63,19 @@ void ScrollbarThemeIOS::preferencesChanged()
 {
 }
 
-int ScrollbarThemeIOS::scrollbarThickness(ScrollbarControlSize)
+int ScrollbarThemeIOS::scrollbarThickness(ScrollbarControlSize, ScrollbarExpansionState)
 {
     return 0;
 }
 
-double ScrollbarThemeIOS::initialAutoscrollTimerDelay()
+Seconds ScrollbarThemeIOS::initialAutoscrollTimerDelay()
 {
-    return 0;
+    return 0_s;
 }
 
-double ScrollbarThemeIOS::autoscrollTimerDelay()
+Seconds ScrollbarThemeIOS::autoscrollTimerDelay()
 {
-    return 0;
+    return 0_s;
 }
     
 ScrollbarButtonsPlacement ScrollbarThemeIOS::buttonsPlacement() const
@@ -117,3 +119,5 @@ bool ScrollbarThemeIOS::paint(Scrollbar&, GraphicsContext&, const IntRect& /*dam
 }
 
 } // namespace WebCore
+
+#endif // PLATFORM(IOS)

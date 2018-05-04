@@ -18,14 +18,14 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGPolylineElement_h
-#define SVGPolylineElement_h
+#pragma once
 
 #include "SVGPolyElement.h"
 
 namespace WebCore {
 
 class SVGPolylineElement final : public SVGPolyElement {
+    WTF_MAKE_ISO_ALLOCATED(SVGPolylineElement);
 public:
     static Ref<SVGPolylineElement> create(const QualifiedName&, Document&);
 
@@ -34,5 +34,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif

@@ -23,8 +23,7 @@
  *
  */
 
-#ifndef PaintInfo_h
-#define PaintInfo_h
+#pragma once
 
 #include "AffineTransform.h"
 #include "GraphicsContext.h"
@@ -39,6 +38,7 @@ namespace WebCore {
 
 class OverlapTestRequestClient;
 class RenderInline;
+class RenderLayer;
 class RenderLayerModelObject;
 class RenderObject;
 
@@ -51,7 +51,8 @@ typedef HashMap<OverlapTestRequestClient*, IntRect> OverlapTestRequestMap;
 struct PaintInfo {
     PaintInfo(GraphicsContext& newContext, const LayoutRect& newRect, PaintPhase newPhase, PaintBehavior newPaintBehavior,
         RenderObject* newSubtreePaintRoot = nullptr, ListHashSet<RenderInline*>* newOutlineObjects = nullptr,
-        OverlapTestRequestMap* overlapTestRequests = nullptr, const RenderLayerModelObject* newPaintContainer = nullptr)
+        OverlapTestRequestMap* overlapTestRequests = nullptr, const RenderLayerModelObject* newPaintContainer = nullptr,
+        const RenderLayer* enclosingSelfPaintingLayer = nullptr, bool newRequireSecurityOriginAccessForWidgets = false)
             : rect(newRect)
             , phase(newPhase)
             , paintBehavior(newPaintBehavior)
@@ -59,6 +60,8 @@ struct PaintInfo {
             , outlineObjects(newOutlineObjects)
             , overlapTestRequests(overlapTestRequests)
             , paintContainer(newPaintContainer)
+            , requireSecurityOriginAccessForWidgets(newRequireSecurityOriginAccessForWidgets)
+            , m_enclosingSelfPaintingLayer(enclosingSelfPaintingLayer)
             , m_context(&newContext)
     {
     }
@@ -99,6 +102,8 @@ struct PaintInfo {
     bool skipRootBackground() const { return paintBehavior & PaintBehaviorSkipRootBackground; }
     bool paintRootBackgroundOnly() const { return paintBehavior & PaintBehaviorRootBackgroundOnly; }
 
+    const RenderLayer* enclosingSelfPaintingLayer() const { return m_enclosingSelfPaintingLayer; }
+
     void applyTransform(const AffineTransform& localToAncestorTransform)
     {
         if (localToAncestorTransform.isIdentity())
@@ -109,7 +114,7 @@ struct PaintInfo {
         if (rect.isInfinite())
             return;
 
-        FloatRect tranformedRect(localToAncestorTransform.inverse().valueOr(AffineTransform()).mapRect(rect));
+        FloatRect tranformedRect(localToAncestorTransform.inverse().value_or(AffineTransform()).mapRect(rect));
         rect.setLocation(LayoutPoint(tranformedRect.location()));
         rect.setSize(LayoutSize(tranformedRect.size()));
     }
@@ -121,11 +126,11 @@ struct PaintInfo {
     ListHashSet<RenderInline*>* outlineObjects; // used to list outlines that should be painted by a block with inline children
     OverlapTestRequestMap* overlapTestRequests;
     const RenderLayerModelObject* paintContainer; // the layer object that originates the current painting
+    bool requireSecurityOriginAccessForWidgets { false };
+    const RenderLayer* m_enclosingSelfPaintingLayer { nullptr };
 
 private:
     GraphicsContext* m_context;
 };
 
 } // namespace WebCore
-
-#endif // PaintInfo_h

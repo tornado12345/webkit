@@ -25,7 +25,11 @@
 
 #pragma once
 
-#include <runtime/JSCJSValue.h>
+#include "CachedModuleScriptLoader.h"
+#include "CachedModuleScriptLoaderClient.h"
+#include "URL.h"
+#include "URLHash.h"
+#include <JavaScriptCore/JSCJSValue.h>
 #include <wtf/Noncopyable.h>
 
 namespace JSC {
@@ -34,26 +38,36 @@ class ExecState;
 class JSGlobalObject;
 class JSInternalPromise;
 class JSModuleLoader;
+class SourceOrigin;
 
 }
 
 namespace WebCore {
 
 class Document;
+class JSDOMGlobalObject;
 
-class ScriptModuleLoader {
+class ScriptModuleLoader final : private CachedModuleScriptLoaderClient {
     WTF_MAKE_NONCOPYABLE(ScriptModuleLoader); WTF_MAKE_FAST_ALLOCATED;
 public:
     explicit ScriptModuleLoader(Document&);
+    ~ScriptModuleLoader();
 
     Document& document() { return m_document; }
 
-    JSC::JSInternalPromise* resolve(JSC::JSGlobalObject*, JSC::ExecState*, JSC::JSModuleLoader*, JSC::JSValue moduleName, JSC::JSValue importerModuleKey, JSC::JSValue initiator);
-    JSC::JSInternalPromise* fetch(JSC::JSGlobalObject*, JSC::ExecState*, JSC::JSModuleLoader*, JSC::JSValue moduleKey, JSC::JSValue initiator);
-    JSC::JSValue evaluate(JSC::JSGlobalObject*, JSC::ExecState*, JSC::JSModuleLoader*, JSC::JSValue moduleKey, JSC::JSValue moduleRecord, JSC::JSValue initiator);
+    JSC::Identifier resolve(JSC::JSGlobalObject*, JSC::ExecState*, JSC::JSModuleLoader*, JSC::JSValue moduleName, JSC::JSValue importerModuleKey, JSC::JSValue scriptFetcher);
+    JSC::JSInternalPromise* fetch(JSC::JSGlobalObject*, JSC::ExecState*, JSC::JSModuleLoader*, JSC::JSValue moduleKey, JSC::JSValue parameters, JSC::JSValue scriptFetcher);
+    JSC::JSValue evaluate(JSC::JSGlobalObject*, JSC::ExecState*, JSC::JSModuleLoader*, JSC::JSValue moduleKey, JSC::JSValue moduleRecord, JSC::JSValue scriptFetcher);
+    JSC::JSInternalPromise* importModule(JSC::JSGlobalObject*, JSC::ExecState*, JSC::JSModuleLoader*, JSC::JSString*, JSC::JSValue parameters, const JSC::SourceOrigin&);
+    JSC::JSObject* createImportMetaProperties(JSC::JSGlobalObject*, JSC::ExecState*, JSC::JSModuleLoader*, JSC::JSValue, JSC::JSModuleRecord*, JSC::JSValue);
 
 private:
+    void notifyFinished(CachedModuleScriptLoader&, RefPtr<DeferredPromise>) final;
+    URL moduleURL(JSC::ExecState&, JSC::JSValue);
+
     Document& m_document;
+    HashMap<URL, URL> m_requestURLToResponseURLMap;
+    HashSet<Ref<CachedModuleScriptLoader>> m_loaders;
 };
 
 } // namespace WebCore

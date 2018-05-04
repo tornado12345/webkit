@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010, 2014-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2010, 2014-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,7 +32,7 @@
 #include "StringFunctions.h"
 #include "TestInvocation.h"
 #include "WebCoreTestSupport.h"
-#include <WebCore/UUID.h>
+#include <JavaScriptCore/InitializeThreading.h>
 #include <WebKit/WKArray.h>
 #include <WebKit/WKAuthenticationChallenge.h>
 #include <WebKit/WKAuthenticationDecisionListener.h>
@@ -59,20 +59,23 @@
 #include <WebKit/WKSecurityOriginRef.h>
 #include <WebKit/WKTextChecker.h>
 #include <WebKit/WKUserMediaPermissionCheck.h>
+#include <WebKit/WKWebsiteDataStoreRef.h>
 #include <algorithm>
 #include <cstdio>
 #include <ctype.h>
 #include <fstream>
-#include <runtime/InitializeThreading.h>
 #include <stdlib.h>
 #include <string>
 #include <unistd.h>
+#include <wtf/AutodrainedPool.h>
 #include <wtf/CryptographicallyRandomNumber.h>
 #include <wtf/HexNumber.h>
 #include <wtf/MainThread.h>
+#include <wtf/ProcessPrivilege.h>
 #include <wtf/RefCounted.h>
 #include <wtf/RunLoop.h>
-#include <wtf/TemporaryChange.h>
+#include <wtf/SetForScope.h>
+#include <wtf/UUID.h>
 #include <wtf/text/CString.h>
 #include <wtf/text/WTFString.h>
 
@@ -103,6 +106,12 @@ static WKDataRef copyWebCryptoMasterKey(WKPageRef, const void*)
 {
     // Any 128 bit key would do, all we need for testing is to implement the callback.
     return WKDataCreate((const uint8_t*)"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f", 16);
+}
+
+static WKStringRef copySignedPublicKeyAndChallengeString(WKPageRef, const void*)
+{
+    // Any fake response would do, all we need for testing is to implement the callback.
+    return WKStringCreateWithUTF8CString("MIHFMHEwXDANBgkqhkiG9w0BAQEFAANLADBIAkEAnX0TILJrOMUue%2BPtwBRE6XfV%0AWtKQbsshxk5ZhcUwcwyvcnIq9b82QhJdoACdD34rqfCAIND46fXKQUnb0mvKzQID%0AAQABFhFNb3ppbGxhSXNNeUZyaWVuZDANBgkqhkiG9w0BAQQFAANBAAKv2Eex2n%2FS%0Ar%2F7iJNroWlSzSMtTiQTEB%2BADWHGj9u1xrUrOilq%2Fo2cuQxIfZcNZkYAkWP4DubqW%0Ai0%2F%2FrgBvmco%3D");
 }
 
 static TestController* controller;
@@ -151,7 +160,21 @@ static bool runBeforeUnloadConfirmPanel(WKPageRef page, WKStringRef message, WKF
 static void runOpenPanel(WKPageRef page, WKFrameRef frame, WKOpenPanelParametersRef parameters, WKOpenPanelResultListenerRef resultListenerRef, const void*)
 {
     printf("OPEN FILE PANEL\n");
-    WKOpenPanelResultListenerCancel(resultListenerRef);
+    if (WKOpenPanelParametersGetAllowsDirectories(parameters))
+        printf("-> DIRECTORIES ARE ALLOWED\n");
+    WKArrayRef fileURLs = TestController::singleton().openPanelFileURLs();
+    if (!fileURLs || !WKArrayGetSize(fileURLs)) {
+        WKOpenPanelResultListenerCancel(resultListenerRef);
+        return;
+    }
+
+    if (WKOpenPanelParametersGetAllowsMultipleFiles(parameters)) {
+        WKOpenPanelResultListenerChooseFiles(resultListenerRef, fileURLs);
+        return;
+    }
+
+    WKTypeRef firstItem = WKArrayGetItemAtIndex(fileURLs, 0);
+    WKOpenPanelResultListenerChooseFiles(resultListenerRef, adoptWK(WKArrayCreate(&firstItem, 1)).get());
 }
 
 void TestController::runModal(WKPageRef page, const void* clientInfo)
@@ -197,6 +220,11 @@ static void checkUserMediaPermissionForOrigin(WKPageRef, WKFrameRef frame, WKSec
     TestController::singleton().handleCheckOfUserMediaPermissionForOrigin(frame, userMediaDocumentOrigin, topLevelDocumentOrigin, checkRequest);
 }
 
+static void requestPointerLock(WKPageRef page, const void*)
+{
+    WKPageDidAllowPointerLock(page);
+}
+
 WKPageRef TestController::createOtherPage(WKPageRef oldPage, WKPageConfigurationRef configuration, WKNavigationActionRef navigationAction, WKWindowFeaturesRef windowFeatures, const void *clientInfo)
 {
     PlatformWebView* parentView = static_cast<PlatformWebView*>(const_cast<void*>(clientInfo));
@@ -206,8 +234,8 @@ WKPageRef TestController::createOtherPage(WKPageRef oldPage, WKPageConfiguration
 
     view->resizeTo(800, 600);
 
-    WKPageUIClientV6 otherPageUIClient = {
-        { 6, view },
+    WKPageUIClientV8 otherPageUIClient = {
+        { 8, view },
         0, // createNewPage_deprecatedForUseWithV0
         0, // showPage
         closeOtherPage,
@@ -270,16 +298,20 @@ WKPageRef TestController::createOtherPage(WKPageRef oldPage, WKPageConfiguration
         0, // runJavaScriptConfirm
         0, // runJavaScriptPrompt
         checkUserMediaPermissionForOrigin,
+        0, // runBeforeUnloadConfirmPanel
+        0, // fullscreenMayReturnToInline
+        requestPointerLock,
+        0,
     };
     WKPageSetPageUIClient(newPage, &otherPageUIClient.base);
     
-    WKPageNavigationClientV0 pageNavigationClient = {
-        { 0, &TestController::singleton() },
+    WKPageNavigationClientV3 pageNavigationClient = {
+        { 3, &TestController::singleton() },
         decidePolicyForNavigationAction,
         decidePolicyForNavigationResponse,
         decidePolicyForPluginLoad,
         0, // didStartProvisionalNavigation
-        0, // didReceiveServerRedirectForProvisionalNavigation
+        didReceiveServerRedirectForProvisionalNavigation,
         0, // didFailProvisionalNavigation
         0, // didCommitNavigation
         0, // didFinishNavigation
@@ -295,7 +327,10 @@ WKPageRef TestController::createOtherPage(WKPageRef oldPage, WKPageConfiguration
         didBeginNavigationGesture,
         willEndNavigationGesture,
         didEndNavigationGesture,
-        didRemoveNavigationGestureSnapshot
+        didRemoveNavigationGestureSnapshot,
+        0, // webProcessDidTerminate
+        0, // contentRuleListNotification
+        copySignedPublicKeyAndChallengeString
     };
     WKPageSetPageNavigationClient(newPage, &pageNavigationClient.base);
 
@@ -321,8 +356,8 @@ const char* TestController::libraryPathForTesting()
 void TestController::initialize(int argc, const char* argv[])
 {
     JSC::initializeThreading();
-    WTF::initializeMainThread();
     RunLoop::initializeMainRunLoop();
+    WTF::setProcessPrivileges(allPrivileges());
 
     platformInitialize();
 
@@ -347,6 +382,8 @@ void TestController::initialize(int argc, const char* argv[])
     m_paths = options.paths;
     m_allowedHosts = options.allowedHosts;
     m_shouldShowWebView = options.shouldShowWebView;
+    m_shouldShowTouches = options.shouldShowTouches;
+    m_allowAnyHTTPSCertificateForAllowedHosts = options.allowAnyHTTPSCertificateForAllowedHosts;
 
     if (options.printSupportedFeatures) {
         // FIXME: On Windows, DumpRenderTree uses this to expose whether it supports 3d
@@ -367,6 +404,7 @@ void TestController::initialize(int argc, const char* argv[])
 #if PLATFORM(MAC)
     WebCoreTestSupport::installMockGamepadProvider();
 #endif
+
     WKRetainPtr<WKStringRef> pageGroupIdentifier(AdoptWK, WKStringCreateWithUTF8CString("WebKitTestRunnerPageGroup"));
     m_pageGroup.adopt(WKPageGroupCreateWithIdentifier(pageGroupIdentifier.get()));
 }
@@ -388,6 +426,7 @@ WKRetainPtr<WKContextConfigurationRef> TestController::generateContextConfigurat
         WKContextConfigurationSetLocalStorageDirectory(configuration.get(), toWK(temporaryFolder + separator + "LocalStorage").get());
         WKContextConfigurationSetWebSQLDatabaseDirectory(configuration.get(), toWK(temporaryFolder + separator + "Databases" + separator + "WebSQL").get());
         WKContextConfigurationSetMediaKeysStorageDirectory(configuration.get(), toWK(temporaryFolder + separator + "MediaKeys").get());
+        WKContextConfigurationSetResourceLoadStatisticsDirectory(configuration.get(), toWK(temporaryFolder + separator + "ResourceLoadStatistics").get());
     }
     return configuration;
 }
@@ -467,6 +506,11 @@ void TestController::createWebViewWithOptions(const TestOptions& options)
         WKArrayAppendItem(overrideLanguages.get(), adoptWK(WKStringCreateWithUTF8CString(language.utf8().data())).get());
     WKContextConfigurationSetOverrideLanguages(contextConfiguration.get(), overrideLanguages.get());
 
+    if (options.enableProcessSwapOnNavigation) {
+        WKContextConfigurationSetProcessSwapsOnNavigation(contextConfiguration.get(), true);
+        WKContextConfigurationSetProcessSwapsOnWindowOpenWithOpener(contextConfiguration.get(), true);
+    }
+
     auto configuration = generatePageConfiguration(contextConfiguration.get());
 
     // Some preferences (notably mock scroll bars setting) currently cannot be re-applied to an existing view, so we need to set them now.
@@ -474,8 +518,8 @@ void TestController::createWebViewWithOptions(const TestOptions& options)
     resetPreferencesToConsistentValues(options);
 
     platformCreateWebView(configuration.get(), options);
-    WKPageUIClientV6 pageUIClient = {
-        { 6, m_mainWebView.get() },
+    WKPageUIClientV8 pageUIClient = {
+        { 8, m_mainWebView.get() },
         0, // createNewPage_deprecatedForUseWithV0
         0, // showPage
         0, // close
@@ -538,16 +582,20 @@ void TestController::createWebViewWithOptions(const TestOptions& options)
         0, // runJavaScriptConfirm
         0, // runJavaScriptPrompt
         checkUserMediaPermissionForOrigin,
+        0, // runBeforeUnloadConfirmPanel
+        0, // fullscreenMayReturnToInline
+        requestPointerLock,
+        0,
     };
     WKPageSetPageUIClient(m_mainWebView->page(), &pageUIClient.base);
 
-    WKPageNavigationClientV0 pageNavigationClient = {
-        { 0, this },
+    WKPageNavigationClientV3 pageNavigationClient = {
+        { 3, this },
         decidePolicyForNavigationAction,
         decidePolicyForNavigationResponse,
         decidePolicyForPluginLoad,
         0, // didStartProvisionalNavigation
-        0, // didReceiveServerRedirectForProvisionalNavigation
+        didReceiveServerRedirectForProvisionalNavigation,
         0, // didFailProvisionalNavigation
         didCommitNavigation,
         didFinishNavigation,
@@ -563,12 +611,15 @@ void TestController::createWebViewWithOptions(const TestOptions& options)
         didBeginNavigationGesture,
         willEndNavigationGesture,
         didEndNavigationGesture,
-        didRemoveNavigationGestureSnapshot
+        didRemoveNavigationGestureSnapshot,
+        0, // webProcessDidTerminate
+        0, // contentRuleListNotification
+        copySignedPublicKeyAndChallengeString
     };
     WKPageSetPageNavigationClient(m_mainWebView->page(), &pageNavigationClient.base);
 
-    WKContextDownloadClientV0 downloadClient = {
-        { 0, this },
+    WKContextDownloadClientV1 downloadClient = {
+        { 1, this },
         downloadDidStart,
         0, // didReceiveAuthenticationChallenge
         0, // didReceiveResponse
@@ -579,7 +630,8 @@ void TestController::createWebViewWithOptions(const TestOptions& options)
         downloadDidFinish,
         downloadDidFail,
         downloadDidCancel,
-        0 // processDidCrash;
+        0, // processDidCrash;
+        downloadDidReceiveServerRedirectToURL
     };
     WKContextSetDownloadClient(context(), &downloadClient.base);
     
@@ -628,9 +680,12 @@ void TestController::resetPreferencesToConsistentValues(const TestOptions& optio
     WKPreferencesSetPageVisibilityBasedProcessSuppressionEnabled(preferences, false);
     WKPreferencesSetOfflineWebApplicationCacheEnabled(preferences, true);
     WKPreferencesSetFontSmoothingLevel(preferences, kWKFontSmoothingLevelNoSubpixelAntiAliasing);
+    WKPreferencesSetSubpixelAntialiasedLayerTextEnabled(preferences, false);
     WKPreferencesSetXSSAuditorEnabled(preferences, false);
     WKPreferencesSetWebAudioEnabled(preferences, true);
-    WKPreferencesSetMediaStreamEnabled(preferences, true);
+    WKPreferencesSetMediaDevicesEnabled(preferences, true);
+    WKPreferencesSetWebRTCLegacyAPIEnabled(preferences, true);
+    WKPreferencesSetWebRTCMDNSICECandidatesEnabled(preferences, false);
     WKPreferencesSetDeveloperExtrasEnabled(preferences, true);
     WKPreferencesSetJavaScriptRuntimeFlags(preferences, kWKJavaScriptRuntimeFlagsAllEnabled);
     WKPreferencesSetJavaScriptCanOpenWindowsAutomatically(preferences, true);
@@ -647,8 +702,19 @@ void TestController::resetPreferencesToConsistentValues(const TestOptions& optio
     WKPreferencesSetArtificialPluginInitializationDelayEnabled(preferences, false);
     WKPreferencesSetTabToLinksEnabled(preferences, false);
     WKPreferencesSetInteractiveFormValidationEnabled(preferences, true);
+    WKPreferencesSetDataTransferItemsEnabled(preferences, true);
+    WKPreferencesSetCustomPasteboardDataEnabled(preferences, true);
+
     WKPreferencesSetMockScrollbarsEnabled(preferences, options.useMockScrollbars);
     WKPreferencesSetNeedsSiteSpecificQuirks(preferences, options.needsSiteSpecificQuirks);
+    WKPreferencesSetAttachmentElementEnabled(preferences, options.enableAttachmentElement);
+    WKPreferencesSetIntersectionObserverEnabled(preferences, options.enableIntersectionObserver);
+    WKPreferencesSetMenuItemElementEnabled(preferences, options.enableMenuItemElement);
+    WKPreferencesSetModernMediaControlsEnabled(preferences, options.enableModernMediaControls);
+    WKPreferencesSetWebAuthenticationEnabled(preferences, options.enableWebAuthentication);
+    WKPreferencesSetIsSecureContextAttributeEnabled(preferences, options.enableIsSecureContextAttribute);
+    WKPreferencesSetAllowCrossOriginSubresourcesToAskForCredentials(preferences, options.allowCrossOriginSubresourcesToAskForCredentials);
+    WKPreferencesSetCSSAnimationsAndCSSTransitionsBackedByWebAnimationsEnabled(preferences, options.enableCSSAnimationsAndCSSTransitionsBackedByWebAnimations);
 
     static WKStringRef defaultTextEncoding = WKStringCreateWithUTF8CString("ISO-8859-1");
     WKPreferencesSetDefaultTextEncodingName(preferences, defaultTextEncoding);
@@ -661,6 +727,7 @@ void TestController::resetPreferencesToConsistentValues(const TestOptions& optio
     static WKStringRef sansSerifFontFamily = WKStringCreateWithUTF8CString("Helvetica");
     static WKStringRef serifFontFamily = WKStringCreateWithUTF8CString("Times");
 
+    WKPreferencesSetMinimumFontSize(preferences, 0);
     WKPreferencesSetStandardFontFamily(preferences, standardFontFamily);
     WKPreferencesSetCursiveFontFamily(preferences, cursiveFontFamily);
     WKPreferencesSetFantasyFontFamily(preferences, fantasyFontFamily);
@@ -676,23 +743,40 @@ void TestController::resetPreferencesToConsistentValues(const TestOptions& optio
     WKPreferencesSetHiddenPageDOMTimerThrottlingEnabled(preferences, false);
     WKPreferencesSetHiddenPageCSSAnimationSuspensionEnabled(preferences, false);
 
-    WKPreferencesSetAcceleratedDrawingEnabled(preferences, m_shouldUseAcceleratedDrawing);
+    WKPreferencesSetAcceleratedDrawingEnabled(preferences, m_shouldUseAcceleratedDrawing || options.useAcceleratedDrawing);
     // FIXME: We should be testing the default.
     WKPreferencesSetStorageBlockingPolicy(preferences, kWKAllowAllStorage);
 
+    WKPreferencesSetFetchAPIKeepAliveEnabled(preferences, true);
+    WKPreferencesSetResourceTimingEnabled(preferences, true);
+    WKPreferencesSetUserTimingEnabled(preferences, true);
+    WKPreferencesSetMediaPreloadingEnabled(preferences, true);
     WKPreferencesSetMediaPlaybackAllowsInline(preferences, true);
     WKPreferencesSetInlineMediaPlaybackRequiresPlaysInlineAttribute(preferences, false);
+    WKPreferencesSetBeaconAPIEnabled(preferences, true);
+    WKPreferencesSetDirectoryUploadEnabled(preferences, true);
 
     WKCookieManagerDeleteAllCookies(WKContextGetCookieManager(m_context.get()));
 
     WKPreferencesSetMockCaptureDevicesEnabled(preferences, true);
+    
+    WKPreferencesSetLargeImageAsyncDecodingEnabled(preferences, false);
+
+    WKPreferencesSetInspectorAdditionsEnabled(preferences, options.enableInspectorAdditions);
+
+    WKPreferencesSetStorageAccessAPIEnabled(preferences, true);
+    
+    WKPreferencesSetAccessibilityObjectModelEnabled(preferences, true);
+    WKPreferencesSetMediaCapabilitiesEnabled(preferences, true);
+
+    WKPreferencesSetRestrictedHTTPResponseAccess(preferences, true);
 
     platformResetPreferencesToConsistentValues();
 }
 
 bool TestController::resetStateToConsistentValues(const TestOptions& options)
 {
-    TemporaryChange<State> changeState(m_state, Resetting);
+    SetForScope<State> changeState(m_state, Resetting);
     m_beforeUnloadReturnValue = true;
 
     // This setting differs between the antique and modern Mac WebKit2 API.
@@ -723,6 +807,11 @@ bool TestController::resetStateToConsistentValues(const TestOptions& options)
 
     WKContextClearCachedCredentials(TestController::singleton().context());
 
+    clearServiceWorkerRegistrations();
+    clearDOMCaches();
+
+    WKContextSetAllowsAnySSLCertificateForServiceWorkerTesting(platformContext(), true);
+
     // FIXME: This function should also ensure that there is only one page open.
 
     // Reset the EventSender for each test.
@@ -732,9 +821,12 @@ bool TestController::resetStateToConsistentValues(const TestOptions& options)
     // some other code doing this, it should probably be responsible for cleanup too.
     resetPreferencesToConsistentValues(options);
 
-#if !PLATFORM(COCOA)
+#if !PLATFORM(COCOA) && !PLATFORM(WPE)
     WKTextCheckerContinuousSpellCheckingEnabledStateChanged(true);
 #endif
+
+    // Make sure the view is in the window (a test can unparent it).
+    m_mainWebView->addToWindow();
 
     // In the case that a test using the chrome input field failed, be sure to clean up for the next test.
     m_mainWebView->removeChromeInputField();
@@ -745,14 +837,9 @@ bool TestController::resetStateToConsistentValues(const TestOptions& options)
 
     WKPageClearWheelEventTestTrigger(m_mainWebView->page());
 
-#if PLATFORM(EFL)
-    // EFL use a real window while other ports such as Qt don't.
-    // In EFL, we need to resize the window to the original size after calls to window.resizeTo.
-    WKRect rect = m_mainWebView->windowFrame();
-    m_mainWebView->setWindowFrame(WKRectMake(rect.origin.x, rect.origin.y, TestController::viewWidth, TestController::viewHeight));
-#endif
-
     WKPageSetMuted(m_mainWebView->page(), true);
+
+    WKPageClearUserMediaState(m_mainWebView->page());
 
     // Reset notification permissions
     m_webNotificationProvider.reset();
@@ -764,9 +851,8 @@ bool TestController::resetStateToConsistentValues(const TestOptions& options)
 
     // Reset UserMedia permissions.
     m_userMediaPermissionRequests.clear();
-    m_cahcedUserMediaPermissions.clear();
-    m_isUserMediaPermissionSet = false;
-    m_isUserMediaPermissionAllowed = false;
+    m_cachedUserMediaPermissions.clear();
+    setUserMediaPermission(true);
 
     // Reset Custom Policy Delegate.
     setCustomPolicyDelegate(false, false);
@@ -781,7 +867,9 @@ bool TestController::resetStateToConsistentValues(const TestOptions& options)
     m_authenticationPassword = String();
 
     m_shouldBlockAllPlugins = false;
+    setPluginSupportedMode({ });
 
+    m_shouldLogDownloadCallbacks = false;
     m_shouldLogHistoryClientCallbacks = false;
     m_shouldLogCanAuthenticateAgainstProtectionSpace = false;
 
@@ -789,15 +877,21 @@ bool TestController::resetStateToConsistentValues(const TestOptions& options)
 
     platformResetStateToConsistentValues();
 
-    // Reset main page back to about:blank
-    m_doneResetting = false;
-
     m_shouldDecideNavigationPolicyAfterDelay = false;
+    m_shouldDecideResponsePolicyAfterDelay = false;
 
     setNavigationGesturesEnabled(false);
     
     setIgnoresViewportScaleLimits(options.ignoresViewportScaleLimits);
 
+    m_openPanelFileURLs = nullptr;
+    
+    statisticsResetToConsistentState();
+
+    m_didReceiveServerRedirectForProvisionalNavigation = false;
+
+    // Reset main page back to about:blank
+    m_doneResetting = false;
     WKPageLoadURL(m_mainWebView->page(), blankURL());
     runUntil(m_doneResetting, m_currentInvocation->shortTimeout());
     return m_doneResetting;
@@ -811,16 +905,23 @@ void TestController::terminateWebContentProcess()
 void TestController::reattachPageToWebProcess()
 {
     // Loading a web page is the only way to reattach an existing page to a process.
+    SetForScope<State> changeState(m_state, Resetting);
     m_doneResetting = false;
     WKPageLoadURL(m_mainWebView->page(), blankURL());
-    runUntil(m_doneResetting, m_currentInvocation->shortTimeout());
+    runUntil(m_doneResetting, noTimeout);
 }
 
 const char* TestController::webProcessName()
 {
     // FIXME: Find a way to not hardcode the process name.
-#if PLATFORM(COCOA)
+#if PLATFORM(IOS) && !PLATFORM(IOS_SIMULATOR)
+    return "com.apple.WebKit.WebContent";
+#elif PLATFORM(COCOA)
     return "com.apple.WebKit.WebContent.Development";
+#elif PLATFORM(GTK)
+    return "WebKitWebProcess";
+#elif PLATFORM(WPE)
+    return "WPEWebProcess";
 #else
     return "WebProcess";
 #endif
@@ -829,8 +930,14 @@ const char* TestController::webProcessName()
 const char* TestController::networkProcessName()
 {
     // FIXME: Find a way to not hardcode the process name.
-#if PLATFORM(COCOA)
+#if PLATFORM(IOS) && !PLATFORM(IOS_SIMULATOR)
+    return "com.apple.WebKit.Networking";
+#elif PLATFORM(COCOA)
     return "com.apple.WebKit.Networking.Development";
+#elif PLATFORM(GTK)
+    return "WebKitNetworkProcess";
+#elif PLATFORM(WPE)
+    return "WPENetworkProcess";
 #else
     return "NetworkProcess";
 #endif
@@ -839,11 +946,26 @@ const char* TestController::networkProcessName()
 const char* TestController::databaseProcessName()
 {
     // FIXME: Find a way to not hardcode the process name.
-#if PLATFORM(COCOA)
-    return "com.apple.WebKit.Databases.Development";
+#if PLATFORM(IOS) && !PLATFORM(IOS_SIMULATOR)
+#if !PLATFORM(WATCHOS) && !PLATFORM(APPLETV) && __IPHONE_OS_VERSION_MIN_REQUIRED < 110300
+    return "com.apple.WebKit.Databases";
+#else
+    return "com.apple.WebKit.Storage";
+#endif
+#elif PLATFORM(COCOA)
+    return "com.apple.WebKit.Storage.Development";
+#elif PLATFORM(GTK)
+    return "WebKitStorageProcess";
+#elif PLATFORM(WPE)
+    return "WPEStorageProcess";
 #else
     return "DatabaseProcess";
 #endif
+}
+
+void TestController::setAllowsAnySSLCertificate(bool allows)
+{
+    WKContextSetAllowsAnySSLCertificateForWebSocketTesting(platformContext(), allows);
 }
 
 static std::string testPath(WKURLRef url)
@@ -902,11 +1024,22 @@ static bool parseBooleanTestHeaderValue(const std::string& value)
     return false;
 }
 
-static void updateTestOptionsFromTestHeader(TestOptions& testOptions, const std::string& pathOrURL)
+static std::string parseStringTestHeaderValueAsRelativePath(const std::string& value, const std::string& pathOrURL)
 {
-    // Gross. Need to reduce conversions between all the string types and URLs.
-    WKRetainPtr<WKURLRef> wkURL(AdoptWK, createTestURL(pathOrURL.c_str()));
-    std::string filename = testPath(wkURL.get());
+    WKRetainPtr<WKURLRef> baseURL(AdoptWK, createTestURL(pathOrURL.c_str()));
+    WKRetainPtr<WKURLRef> relativeURL(AdoptWK, WKURLCreateWithBaseURL(baseURL.get(), value.c_str()));
+    return toSTD(adoptWK(WKURLCopyPath(relativeURL.get())));
+}
+
+static void updateTestOptionsFromTestHeader(TestOptions& testOptions, const std::string& pathOrURL, const std::string& absolutePath)
+{
+    std::string filename = absolutePath;
+    if (filename.empty()) {
+        // Gross. Need to reduce conversions between all the string types and URLs.
+        WKRetainPtr<WKURLRef> wkURL(AdoptWK, createTestURL(pathOrURL.c_str()));
+        filename = testPath(wkURL.get());
+    }
+
     if (filename.empty())
         return;
 
@@ -942,6 +1075,8 @@ static void updateTestOptionsFromTestHeader(TestOptions& testOptions, const std:
             String(value.c_str()).split(",", false, testOptions.overrideLanguages);
         if (key == "useThreadedScrolling")
             testOptions.useThreadedScrolling = parseBooleanTestHeaderValue(value);
+        if (key == "useAcceleratedDrawing")
+            testOptions.useAcceleratedDrawing = parseBooleanTestHeaderValue(value);
         if (key == "useFlexibleViewport")
             testOptions.useFlexibleViewport = parseBooleanTestHeaderValue(value);
         if (key == "useDataDetection")
@@ -954,19 +1089,45 @@ static void updateTestOptionsFromTestHeader(TestOptions& testOptions, const std:
             testOptions.ignoresViewportScaleLimits = parseBooleanTestHeaderValue(value);
         if (key == "useCharacterSelectionGranularity")
             testOptions.useCharacterSelectionGranularity = parseBooleanTestHeaderValue(value);
+        if (key == "enableAttachmentElement")
+            testOptions.enableAttachmentElement = parseBooleanTestHeaderValue(value);
+        if (key == "enableIntersectionObserver")
+            testOptions.enableIntersectionObserver = parseBooleanTestHeaderValue(value);
+        if (key == "enableMenuItemElement")
+            testOptions.enableMenuItemElement = parseBooleanTestHeaderValue(value);
+        if (key == "enableModernMediaControls")
+            testOptions.enableModernMediaControls = parseBooleanTestHeaderValue(value);
+        if (key == "enablePointerLock")
+            testOptions.enablePointerLock = parseBooleanTestHeaderValue(value);
+        if (key == "enableWebAuthentication")
+            testOptions.enableWebAuthentication = parseBooleanTestHeaderValue(value);
+        if (key == "enableIsSecureContextAttribute")
+            testOptions.enableIsSecureContextAttribute = parseBooleanTestHeaderValue(value);
+        if (key == "enableInspectorAdditions")
+            testOptions.enableInspectorAdditions = parseBooleanTestHeaderValue(value);
+        if (key == "dumpJSConsoleLogInStdErr")
+            testOptions.dumpJSConsoleLogInStdErr = parseBooleanTestHeaderValue(value);
+        if (key == "applicationManifest")
+            testOptions.applicationManifest = parseStringTestHeaderValueAsRelativePath(value, pathOrURL);
+        if (key == "allowCrossOriginSubresourcesToAskForCredentials")
+            testOptions.allowCrossOriginSubresourcesToAskForCredentials = parseBooleanTestHeaderValue(value);
+        if (key == "enableCSSAnimationsAndCSSTransitionsBackedByWebAnimations")
+            testOptions.enableCSSAnimationsAndCSSTransitionsBackedByWebAnimations = parseBooleanTestHeaderValue(value);
+        if (key == "enableProcessSwapOnNavigation")
+            testOptions.enableProcessSwapOnNavigation = parseBooleanTestHeaderValue(value);
         pairStart = pairEnd + 1;
     }
 }
 
-TestOptions TestController::testOptionsForTest(const std::string& pathOrURL) const
+TestOptions TestController::testOptionsForTest(const TestCommand& command) const
 {
-    TestOptions options(pathOrURL);
+    TestOptions options(command.pathOrURL);
 
     options.useRemoteLayerTree = m_shouldUseRemoteLayerTree;
     options.shouldShowWebView = m_shouldShowWebView;
 
-    updatePlatformSpecificTestOptionsForTest(options, pathOrURL);
-    updateTestOptionsFromTestHeader(options, pathOrURL);
+    updatePlatformSpecificTestOptionsForTest(options, command.pathOrURL);
+    updateTestOptionsFromTestHeader(options, command.pathOrURL, command.absolutePath);
 
     return options;
 }
@@ -996,15 +1157,6 @@ void TestController::configureViewForTest(const TestInvocation& test)
 
     platformConfigureViewForTest(test);
 }
-
-struct TestCommand {
-    TestCommand() : shouldDumpPixels(false), timeout(0) { }
-
-    std::string pathOrURL;
-    bool shouldDumpPixels;
-    std::string expectedPixelHash;
-    int timeout;
-};
 
 class CommandTokenizer {
 public:
@@ -1076,7 +1228,11 @@ TestCommand parseInputLine(const std::string& inputLine)
             result.shouldDumpPixels = true;
             if (tokenizer.hasNext())
                 result.expectedPixelHash = tokenizer.next();
-        } else
+        } else if (arg == std::string("--dump-jsconsolelog-in-stderr"))
+            result.dumpJSConsoleLogInStdErr = true;
+        else if (arg == std::string("--absolutePath"))
+            result.absolutePath = tokenizer.next();
+        else
             die(inputLine);
     }
     return result;
@@ -1084,12 +1240,14 @@ TestCommand parseInputLine(const std::string& inputLine)
 
 bool TestController::runTest(const char* inputLine)
 {
+    AutodrainedPool pool;
+    
     WKTextCheckerSetTestingMode(true);
     TestCommand command = parseInputLine(std::string(inputLine));
 
     m_state = RunningTest;
     
-    TestOptions options = testOptionsForTest(command.pathOrURL);
+    TestOptions options = testOptionsForTest(command);
 
     WKRetainPtr<WKURLRef> wkURL(AdoptWK, createTestURL(command.pathOrURL.c_str()));
     m_currentInvocation = std::make_unique<TestInvocation>(wkURL.get(), options);
@@ -1098,6 +1256,7 @@ bool TestController::runTest(const char* inputLine)
         m_currentInvocation->setIsPixelTest(command.expectedPixelHash);
     if (command.timeout > 0)
         m_currentInvocation->setCustomTimeout(command.timeout);
+    m_currentInvocation->setDumpJSConsoleLogInStdErr(command.dumpJSConsoleLogInStdErr || options.dumpJSConsoleLogInStdErr);
 
     platformWillRunTest(*m_currentInvocation);
 
@@ -1256,23 +1415,6 @@ void TestController::didReceiveMessageFromInjectedBundle(WKStringRef messageName
             
             // Forward to WebProcess
             m_eventSenderProxy->mouseScrollByWithWheelAndMomentumPhases(x, y, phase, momentum);
-
-            return;
-        }
-
-        if (WKStringIsEqualToUTF8CString(subMessageName, "SwipeGestureWithWheelAndMomentumPhases")) {
-            WKRetainPtr<WKStringRef> xKey = adoptWK(WKStringCreateWithUTF8CString("X"));
-            double x = WKDoubleGetValue(static_cast<WKDoubleRef>(WKDictionaryGetItemForKey(messageBodyDictionary, xKey.get())));
-
-            WKRetainPtr<WKStringRef> yKey = adoptWK(WKStringCreateWithUTF8CString("Y"));
-            double y = WKDoubleGetValue(static_cast<WKDoubleRef>(WKDictionaryGetItemForKey(messageBodyDictionary, yKey.get())));
-
-            WKRetainPtr<WKStringRef> phaseKey = adoptWK(WKStringCreateWithUTF8CString("Phase"));
-            int phase = static_cast<int>(WKUInt64GetValue(static_cast<WKUInt64Ref>(WKDictionaryGetItemForKey(messageBodyDictionary, phaseKey.get()))));
-            WKRetainPtr<WKStringRef> momentumKey = adoptWK(WKStringCreateWithUTF8CString("Momentum"));
-            int momentum = static_cast<int>(WKUInt64GetValue(static_cast<WKUInt64Ref>(WKDictionaryGetItemForKey(messageBodyDictionary, momentumKey.get()))));
-
-            m_eventSenderProxy->swipeGestureWithWheelAndMomentumPhases(x, y, phase, momentum);
 
             return;
         }
@@ -1509,6 +1651,11 @@ void TestController::didFinishNavigation(WKPageRef page, WKNavigationRef navigat
     static_cast<TestController*>(const_cast<void*>(clientInfo))->didFinishNavigation(page, navigation);
 }
 
+void TestController::didReceiveServerRedirectForProvisionalNavigation(WKPageRef page, WKNavigationRef navigation, WKTypeRef userData, const void* clientInfo)
+{
+    static_cast<TestController*>(const_cast<void*>(clientInfo))->didReceiveServerRedirectForProvisionalNavigation(page, navigation, userData);
+}
+
 bool TestController::canAuthenticateAgainstProtectionSpace(WKPageRef page, WKProtectionSpaceRef protectionSpace, const void* clientInfo)
 {
     return static_cast<TestController*>(const_cast<void*>(clientInfo))->canAuthenticateAgainstProtectionSpace(page, protectionSpace);
@@ -1571,9 +1718,53 @@ WKPluginLoadPolicy TestController::decidePolicyForPluginLoad(WKPageRef, WKPlugin
 #endif
 }
 
+void TestController::setPluginSupportedMode(const String& mode)
+{
+    if (m_unsupportedPluginMode == mode)
+        return;
+
+    m_unsupportedPluginMode = mode;
+    if (m_unsupportedPluginMode.isEmpty()) {
+        WKContextClearSupportedPlugins(m_context.get());
+        return;
+    }
+
+    WKRetainPtr<WKMutableArrayRef> emptyArray = adoptWK(WKMutableArrayCreate());
+    WKRetainPtr<WKStringRef> allOrigins = adoptWK(WKStringCreateWithUTF8CString(""));
+    WKRetainPtr<WKStringRef> specificOrigin = adoptWK(WKStringCreateWithUTF8CString("localhost"));
+
+    WKRetainPtr<WKStringRef> pdfName = adoptWK(WKStringCreateWithUTF8CString("My personal PDF"));
+    WKContextAddSupportedPlugin(m_context.get(), allOrigins.get(), pdfName.get(), emptyArray.get(), emptyArray.get());
+
+    WKRetainPtr<WKStringRef> nameNetscape = adoptWK(WKStringCreateWithUTF8CString("com.apple.testnetscapeplugin"));
+    WKRetainPtr<WKStringRef> mimeTypeNetscape = adoptWK(WKStringCreateWithUTF8CString("application/x-webkit-test-netscape"));
+    WKRetainPtr<WKMutableArrayRef> mimeTypesNetscape = adoptWK(WKMutableArrayCreate());
+    WKArrayAppendItem(mimeTypesNetscape.get(), mimeTypeNetscape.get());
+
+    WKRetainPtr<WKStringRef> namePdf = adoptWK(WKStringCreateWithUTF8CString("WebKit built-in PDF"));
+
+    if (m_unsupportedPluginMode == "allOrigins") {
+        WKContextAddSupportedPlugin(m_context.get(), allOrigins.get(), nameNetscape.get(), mimeTypesNetscape.get(), emptyArray.get());
+        WKContextAddSupportedPlugin(m_context.get(), allOrigins.get(), namePdf.get(), emptyArray.get(), emptyArray.get());
+        return;
+    }
+
+    if (m_unsupportedPluginMode == "specificOrigin") {
+        WKContextAddSupportedPlugin(m_context.get(), specificOrigin.get(), nameNetscape.get(), mimeTypesNetscape.get(), emptyArray.get());
+        WKContextAddSupportedPlugin(m_context.get(), specificOrigin.get(), namePdf.get(), emptyArray.get(), emptyArray.get());
+        return;
+    }
+}
+
 void TestController::didCommitNavigation(WKPageRef page, WKNavigationRef navigation)
 {
     mainWebView()->focus();
+}
+
+void TestController::didReceiveServerRedirectForProvisionalNavigation(WKPageRef page, WKNavigationRef navigation, WKTypeRef userData)
+{
+    m_didReceiveServerRedirectForProvisionalNavigation = true;
+    return;
 }
 
 bool TestController::canAuthenticateAgainstProtectionSpace(WKPageRef page, WKProtectionSpaceRef protectionSpace)
@@ -1584,7 +1775,7 @@ bool TestController::canAuthenticateAgainstProtectionSpace(WKPageRef page, WKPro
     
     if (authenticationScheme == kWKProtectionSpaceAuthenticationSchemeServerTrustEvaluationRequested) {
         std::string host = toSTD(adoptWK(WKProtectionSpaceCopyHost(protectionSpace)).get());
-        return host == "localhost" || host == "127.0.0.1";
+        return host == "localhost" || host == "127.0.0.1" || (m_allowAnyHTTPSCertificateForAllowedHosts && m_allowedHosts.find(host) != m_allowedHosts.end());
     }
     
     return authenticationScheme <= kWKProtectionSpaceAuthenticationSchemeHTTPDigest;
@@ -1670,21 +1861,28 @@ void TestController::downloadDidCancel(WKContextRef context, WKDownloadRef downl
     static_cast<TestController*>(const_cast<void*>(clientInfo))->downloadDidCancel(context, download);
 }
 
+void TestController::downloadDidReceiveServerRedirectToURL(WKContextRef context, WKDownloadRef download, WKURLRef url, const void* clientInfo)
+{
+    static_cast<TestController*>(const_cast<void*>(clientInfo))->downloadDidReceiveServerRedirectToURL(context, download, url);
+}
+
 void TestController::downloadDidStart(WKContextRef context, WKDownloadRef download)
 {
-    m_currentInvocation->outputText("Download started.\n");
+    if (m_shouldLogDownloadCallbacks)
+        m_currentInvocation->outputText("Download started.\n");
 }
 
 WKStringRef TestController::decideDestinationWithSuggestedFilename(WKContextRef, WKDownloadRef, WKStringRef filename, bool*& allowOverwrite)
 {
     String suggestedFilename = toWTFString(filename);
 
-    StringBuilder builder;
-    builder.append("Downloading URL with suggested filename \"");
-    builder.append(suggestedFilename);
-    builder.append("\"\n");
-
-    m_currentInvocation->outputText(builder.toString());
+    if (m_shouldLogDownloadCallbacks) {
+        StringBuilder builder;
+        builder.append("Downloading URL with suggested filename \"");
+        builder.append(suggestedFilename);
+        builder.append("\"\n");
+        m_currentInvocation->outputText(builder.toString());
+    }
 
     const char* dumpRenderTreeTemp = libraryPathForTesting();
     if (!dumpRenderTreeTemp)
@@ -1700,35 +1898,51 @@ WKStringRef TestController::decideDestinationWithSuggestedFilename(WKContextRef,
 
 void TestController::downloadDidFinish(WKContextRef, WKDownloadRef)
 {
-    m_currentInvocation->outputText("Download completed.\n");
+    if (m_shouldLogDownloadCallbacks)
+        m_currentInvocation->outputText("Download completed.\n");
     m_currentInvocation->notifyDownloadDone();
+}
+
+void TestController::downloadDidReceiveServerRedirectToURL(WKContextRef, WKDownloadRef, WKURLRef url)
+{
+    if (m_shouldLogDownloadCallbacks) {
+        StringBuilder builder;
+        builder.appendLiteral("Download was redirected to \"");
+        WKRetainPtr<WKStringRef> urlStringWK = adoptWK(WKURLCopyString(url));
+        builder.append(toSTD(urlStringWK).c_str());
+        builder.appendLiteral("\".\n");
+        m_currentInvocation->outputText(builder.toString());
+    }
 }
 
 void TestController::downloadDidFail(WKContextRef, WKDownloadRef, WKErrorRef error)
 {
-    String message = String::format("Download failed.\n");
-    m_currentInvocation->outputText(message);
-    
-    WKRetainPtr<WKStringRef> errorDomain = adoptWK(WKErrorCopyDomain(error));
-    WKRetainPtr<WKStringRef> errorDescription = adoptWK(WKErrorCopyLocalizedDescription(error));
-    int errorCode = WKErrorGetErrorCode(error);
+    if (m_shouldLogDownloadCallbacks) {
+        String message = String::format("Download failed.\n");
+        m_currentInvocation->outputText(message);
 
-    StringBuilder errorBuilder;
-    errorBuilder.append("Failed: ");
-    errorBuilder.append(toWTFString(errorDomain));
-    errorBuilder.append(", code=");
-    errorBuilder.appendNumber(errorCode);
-    errorBuilder.append(", description=");
-    errorBuilder.append(toWTFString(errorDescription));
-    errorBuilder.append("\n");
+        WKRetainPtr<WKStringRef> errorDomain = adoptWK(WKErrorCopyDomain(error));
+        WKRetainPtr<WKStringRef> errorDescription = adoptWK(WKErrorCopyLocalizedDescription(error));
+        int errorCode = WKErrorGetErrorCode(error);
 
-    m_currentInvocation->outputText(errorBuilder.toString());
+        StringBuilder errorBuilder;
+        errorBuilder.append("Failed: ");
+        errorBuilder.append(toWTFString(errorDomain));
+        errorBuilder.append(", code=");
+        errorBuilder.appendNumber(errorCode);
+        errorBuilder.append(", description=");
+        errorBuilder.append(toWTFString(errorDescription));
+        errorBuilder.append("\n");
+
+        m_currentInvocation->outputText(errorBuilder.toString());
+    }
     m_currentInvocation->notifyDownloadDone();
 }
 
 void TestController::downloadDidCancel(WKContextRef, WKDownloadRef)
 {
-    m_currentInvocation->outputText("Download cancelled.\n");
+    if (m_shouldLogDownloadCallbacks)
+        m_currentInvocation->outputText("Download cancelled.\n");
     m_currentInvocation->notifyDownloadDone();
 }
 
@@ -1779,9 +1993,9 @@ void TestController::setGeolocationPermission(bool enabled)
     decidePolicyForGeolocationPermissionRequestIfPossible();
 }
 
-void TestController::setMockGeolocationPosition(double latitude, double longitude, double accuracy, bool providesAltitude, double altitude, bool providesAltitudeAccuracy, double altitudeAccuracy, bool providesHeading, double heading, bool providesSpeed, double speed)
+void TestController::setMockGeolocationPosition(double latitude, double longitude, double accuracy, bool providesAltitude, double altitude, bool providesAltitudeAccuracy, double altitudeAccuracy, bool providesHeading, double heading, bool providesSpeed, double speed, bool providesFloorLevel, double floorLevel)
 {
-    m_geolocationProvider->setPosition(latitude, longitude, accuracy, providesAltitude, altitude, providesAltitudeAccuracy, altitudeAccuracy, providesHeading, heading, providesSpeed, speed);
+    m_geolocationProvider->setPosition(latitude, longitude, accuracy, providesAltitude, altitude, providesAltitudeAccuracy, altitudeAccuracy, providesHeading, heading, providesSpeed, speed, providesFloorLevel, floorLevel);
 }
 
 void TestController::setMockGeolocationPositionUnavailableError(WKStringRef errorMessage)
@@ -1846,26 +2060,9 @@ void TestController::setUserMediaPermission(bool enabled)
     decidePolicyForUserMediaPermissionRequestIfPossible();
 }
 
-static String createCanonicalUUIDString()
+void TestController::resetUserMediaPermission()
 {
-    unsigned randomData[4];
-    cryptographicallyRandomValues(reinterpret_cast<unsigned char*>(randomData), sizeof(randomData));
-
-    // Format as Version 4 UUID.
-    StringBuilder builder;
-    builder.reserveCapacity(36);
-    appendUnsignedAsHexFixedSize(randomData[0], builder, 8, Lowercase);
-    builder.append('-');
-    appendUnsignedAsHexFixedSize(randomData[1] >> 16, builder, 4, Lowercase);
-    builder.appendLiteral("-4");
-    appendUnsignedAsHexFixedSize(randomData[1] & 0x00000fff, builder, 3, Lowercase);
-    builder.append('-');
-    appendUnsignedAsHexFixedSize((randomData[2] >> 30) | 0x8, builder, 1, Lowercase);
-    appendUnsignedAsHexFixedSize((randomData[2] >> 16) & 0x00000fff, builder, 3, Lowercase);
-    builder.append('-');
-    appendUnsignedAsHexFixedSize(randomData[2] & 0x0000ffff, builder, 4, Lowercase);
-    appendUnsignedAsHexFixedSize(randomData[3], builder, 8, Lowercase);
-    return builder.toString();
+    m_isUserMediaPermissionSet = false;
 }
 
 class OriginSettings : public RefCounted<OriginSettings> {
@@ -1882,34 +2079,34 @@ public:
 
     HashMap<uint64_t, String>& ephemeralSalts() { return m_ephemeralSalts; }
 
+    void incrementRequestCount() { ++m_requestCount; }
+    void resetRequestCount() { m_requestCount = 0; }
+    unsigned requestCount() const { return m_requestCount; }
+
 private:
     HashMap<uint64_t, String> m_ephemeralSalts;
     String m_persistentSalt;
+    unsigned m_requestCount { 0 };
     bool m_persistentPermission { false };
 };
 
 String TestController::saltForOrigin(WKFrameRef frame, String originHash)
 {
-    RefPtr<OriginSettings> settings = m_cahcedUserMediaPermissions.get(originHash);
-    if (!settings) {
-        settings = adoptRef(*new OriginSettings());
-        m_cahcedUserMediaPermissions.add(originHash, settings);
-    }
-
-    auto& ephemeralSalts = settings->ephemeralSalts();
+    auto& settings = settingsForOrigin(originHash);
+    auto& ephemeralSalts = settings.ephemeralSalts();
     auto frameInfo = adoptWK(WKFrameCreateFrameInfo(frame));
     auto frameHandle = WKFrameInfoGetFrameHandleRef(frameInfo.get());
     uint64_t frameIdentifier = WKFrameHandleGetFrameID(frameHandle);
     String frameSalt = ephemeralSalts.get(frameIdentifier);
 
-    if (settings->persistentPermission()) {
+    if (settings.persistentPermission()) {
         if (frameSalt.length())
             return frameSalt;
 
-        if (!settings->persistentSalt().length())
-            settings->setPersistentSalt(createCanonicalUUIDString());
+        if (!settings.persistentSalt().length())
+            settings.setPersistentSalt(createCanonicalUUIDString());
 
-        return settings->persistentSalt();
+        return settings.persistentSalt();
     }
 
     if (!frameSalt.length()) {
@@ -1920,24 +2117,20 @@ String TestController::saltForOrigin(WKFrameRef frame, String originHash)
     return frameSalt;
 }
 
-void TestController::setUserMediaPermissionForOrigin(bool permission, WKStringRef userMediaDocumentOriginString, WKStringRef topLevelDocumentOriginString)
+void TestController::setUserMediaPersistentPermissionForOrigin(bool permission, WKStringRef userMediaDocumentOriginString, WKStringRef topLevelDocumentOriginString)
 {
     auto originHash = userMediaOriginHash(userMediaDocumentOriginString, topLevelDocumentOriginString);
-    RefPtr<OriginSettings> settings = m_cahcedUserMediaPermissions.get(originHash);
-    if (!settings) {
-        settings = adoptRef(*new OriginSettings());
-        m_cahcedUserMediaPermissions.add(originHash, settings);
-    }
-
-    settings->setPersistentPermission(permission);
+    auto& settings = settingsForOrigin(originHash);
+    settings.setPersistentPermission(permission);
 }
 
 void TestController::handleCheckOfUserMediaPermissionForOrigin(WKFrameRef frame, WKSecurityOriginRef userMediaDocumentOrigin, WKSecurityOriginRef topLevelDocumentOrigin, const WKUserMediaPermissionCheckRef& checkRequest)
 {
     auto originHash = userMediaOriginHash(userMediaDocumentOrigin, topLevelDocumentOrigin);
     auto salt = saltForOrigin(frame, originHash);
+    WKRetainPtr<WKStringRef> saltString = adoptWK(WKStringCreateWithUTF8CString(salt.utf8().data()));
 
-    WKUserMediaPermissionCheckSetUserMediaAccessInfo(checkRequest, WKStringCreateWithUTF8CString(salt.utf8().data()), m_cahcedUserMediaPermissions.get(originHash)->persistentPermission());
+    WKUserMediaPermissionCheckSetUserMediaAccessInfo(checkRequest, saltString.get(), settingsForOrigin(originHash).persistentPermission());
 }
 
 void TestController::handleUserMediaPermissionRequest(WKFrameRef frame, WKSecurityOriginRef userMediaDocumentOrigin, WKSecurityOriginRef topLevelDocumentOrigin, WKUserMediaPermissionRequestRef request)
@@ -1945,6 +2138,29 @@ void TestController::handleUserMediaPermissionRequest(WKFrameRef frame, WKSecuri
     auto originHash = userMediaOriginHash(userMediaDocumentOrigin, topLevelDocumentOrigin);
     m_userMediaPermissionRequests.append(std::make_pair(originHash, request));
     decidePolicyForUserMediaPermissionRequestIfPossible();
+}
+
+OriginSettings& TestController::settingsForOrigin(const String& originHash)
+{
+    RefPtr<OriginSettings> settings = m_cachedUserMediaPermissions.get(originHash);
+    if (!settings) {
+        settings = adoptRef(*new OriginSettings());
+        m_cachedUserMediaPermissions.add(originHash, settings);
+    }
+
+    return *settings;
+}
+
+unsigned TestController::userMediaPermissionRequestCountForOrigin(WKStringRef userMediaDocumentOriginString, WKStringRef topLevelDocumentOriginString)
+{
+    auto originHash = userMediaOriginHash(userMediaDocumentOriginString, topLevelDocumentOriginString);
+    return settingsForOrigin(originHash).requestCount();
+}
+
+void TestController::resetUserMediaPermissionRequestCountForOrigin(WKStringRef userMediaDocumentOriginString, WKStringRef topLevelDocumentOriginString)
+{
+    auto originHash = userMediaOriginHash(userMediaDocumentOriginString, topLevelDocumentOriginString);
+    settingsForOrigin(originHash).resetRequestCount();
 }
 
 void TestController::decidePolicyForUserMediaPermissionRequestIfPossible()
@@ -1956,18 +2172,16 @@ void TestController::decidePolicyForUserMediaPermissionRequestIfPossible()
         auto originHash = pair.first;
         auto request = pair.second.get();
 
-        bool persistentPermission = false;
-        RefPtr<OriginSettings> settings = m_cahcedUserMediaPermissions.get(originHash);
-        if (settings)
-            persistentPermission = settings->persistentPermission();
+        auto& settings = settingsForOrigin(originHash);
+        settings.incrementRequestCount();
 
-        if (!m_isUserMediaPermissionAllowed && !persistentPermission) {
+        if (!m_isUserMediaPermissionAllowed && !settings.persistentPermission()) {
             WKUserMediaPermissionRequestDeny(request, kWKPermissionDenied);
             continue;
         }
 
-        WKRetainPtr<WKArrayRef> audioDeviceUIDs = WKUserMediaPermissionRequestAudioDeviceUIDs(request);
-        WKRetainPtr<WKArrayRef> videoDeviceUIDs = WKUserMediaPermissionRequestVideoDeviceUIDs(request);
+        WKRetainPtr<WKArrayRef> audioDeviceUIDs = adoptWK(WKUserMediaPermissionRequestAudioDeviceUIDs(request));
+        WKRetainPtr<WKArrayRef> videoDeviceUIDs = adoptWK(WKUserMediaPermissionRequestVideoDeviceUIDs(request));
 
         if (!WKArrayGetSize(videoDeviceUIDs.get()) && !WKArrayGetSize(audioDeviceUIDs.get())) {
             WKUserMediaPermissionRequestDeny(request, kWKNoConstraints);
@@ -1978,13 +2192,13 @@ void TestController::decidePolicyForUserMediaPermissionRequestIfPossible()
         if (WKArrayGetSize(videoDeviceUIDs.get()))
             videoDeviceUID = reinterpret_cast<WKStringRef>(WKArrayGetItemAtIndex(videoDeviceUIDs.get(), 0));
         else
-            videoDeviceUID = WKStringCreateWithUTF8CString("");
+            videoDeviceUID = adoptWK(WKStringCreateWithUTF8CString(""));
 
         WKRetainPtr<WKStringRef> audioDeviceUID;
         if (WKArrayGetSize(audioDeviceUIDs.get()))
             audioDeviceUID = reinterpret_cast<WKStringRef>(WKArrayGetItemAtIndex(audioDeviceUIDs.get(), 0));
         else
-            audioDeviceUID = WKStringCreateWithUTF8CString("");
+            audioDeviceUID = adoptWK(WKStringCreateWithUTF8CString(""));
 
         WKUserMediaPermissionRequestAllow(request, audioDeviceUID.get(), videoDeviceUID.get());
     }
@@ -2056,17 +2270,28 @@ void TestController::decidePolicyForNavigationResponse(WKPageRef, WKNavigationRe
 
 void TestController::decidePolicyForNavigationResponse(WKNavigationResponseRef navigationResponse, WKFramePolicyListenerRef listener)
 {
-    // Even though Response was already checked by WKBundlePagePolicyClient, the check did not include plugins
-    // so we have to re-check again.
-    if (WKNavigationResponseCanShowMIMEType(navigationResponse)) {
-        WKFramePolicyListenerUse(listener);
-        return;
-    }
+    WKRetainPtr<WKNavigationResponseRef> retainedNavigationResponse { navigationResponse };
+    WKRetainPtr<WKFramePolicyListenerRef> retainedListener { listener };
 
-    if (m_shouldDownloadUndisplayableMIMETypes)
-        WKFramePolicyListenerDownload(listener);
+    bool shouldDownloadUndisplayableMIMETypes = m_shouldDownloadUndisplayableMIMETypes;
+    auto decisionFunction = [shouldDownloadUndisplayableMIMETypes, retainedNavigationResponse, retainedListener]() {
+        // Even though Response was already checked by WKBundlePagePolicyClient, the check did not include plugins
+        // so we have to re-check again.
+        if (WKNavigationResponseCanShowMIMEType(retainedNavigationResponse.get())) {
+            WKFramePolicyListenerUse(retainedListener.get());
+            return;
+        }
+
+        if (shouldDownloadUndisplayableMIMETypes)
+            WKFramePolicyListenerDownload(retainedListener.get());
+        else
+            WKFramePolicyListenerIgnore(retainedListener.get());
+    };
+
+    if (m_shouldDecideResponsePolicyAfterDelay)
+        RunLoop::main().dispatch(WTFMove(decisionFunction));
     else
-        WKFramePolicyListenerIgnore(listener);
+        decisionFunction();
 }
 
 void TestController::didNavigateWithNavigationData(WKContextRef, WKPageRef, WKNavigationDataRef navigationData, WKFrameRef frame, const void* clientInfo)
@@ -2161,6 +2386,16 @@ void TestController::setIgnoresViewportScaleLimits(bool ignoresViewportScaleLimi
     WKPageSetIgnoresViewportScaleLimits(m_mainWebView->page(), ignoresViewportScaleLimits);
 }
 
+void TestController::terminateNetworkProcess()
+{
+    WKContextTerminateNetworkProcess(platformContext());
+}
+
+void TestController::terminateServiceWorkerProcess()
+{
+    WKContextTerminateServiceWorkerProcess(platformContext());
+}
+
 #if !PLATFORM(COCOA)
 void TestController::platformWillRunTest(const TestInvocation&)
 {
@@ -2178,12 +2413,21 @@ PlatformWebView* TestController::platformCreateOtherPage(PlatformWebView* parent
 
 WKContextRef TestController::platformAdjustContext(WKContextRef context, WKContextConfigurationRef contextConfiguration)
 {
+    auto* dataStore = WKContextGetWebsiteDataStore(context);
+    WKWebsiteDataStoreSetResourceLoadStatisticsEnabled(dataStore, true);
+
+    if (const char* dumpRenderTreeTemp = libraryPathForTesting()) {
+        String temporaryFolder = String::fromUTF8(dumpRenderTreeTemp);
+        const char separator = '/';
+
+        WKWebsiteDataStoreSetServiceWorkerRegistrationDirectory(dataStore, toWK(temporaryFolder + separator + "ServiceWorkers").get());
+    }
+
     return context;
 }
 
 void TestController::platformResetStateToConsistentValues()
 {
-
 }
 
 unsigned TestController::imageCountInGeneralPasteboard() const
@@ -2191,6 +2435,411 @@ unsigned TestController::imageCountInGeneralPasteboard() const
     return 0;
 }
 
+void TestController::removeAllSessionCredentials()
+{
+}
+
+void TestController::getAllStorageAccessEntries()
+{
+}
+
 #endif
+
+struct ClearServiceWorkerRegistrationsCallbackContext {
+    explicit ClearServiceWorkerRegistrationsCallbackContext(TestController& controller)
+        : testController(controller)
+    {
+    }
+
+    TestController& testController;
+    bool done { false };
+};
+
+static void clearServiceWorkerRegistrationsCallback(void* userData)
+{
+    auto* context = static_cast<ClearServiceWorkerRegistrationsCallbackContext*>(userData);
+    context->done = true;
+    context->testController.notifyDone();
+}
+
+void TestController::clearServiceWorkerRegistrations()
+{
+    auto websiteDataStore = WKContextGetWebsiteDataStore(platformContext());
+    ClearServiceWorkerRegistrationsCallbackContext context(*this);
+
+    WKWebsiteDataStoreRemoveAllServiceWorkerRegistrations(websiteDataStore, &context, clearServiceWorkerRegistrationsCallback);
+    runUntil(context.done, noTimeout);
+}
+
+struct ClearDOMCacheCallbackContext {
+    explicit ClearDOMCacheCallbackContext(TestController& controller)
+        : testController(controller)
+    {
+    }
+
+    TestController& testController;
+    bool done { false };
+};
+
+static void clearDOMCacheCallback(void* userData)
+{
+    auto* context = static_cast<ClearDOMCacheCallbackContext*>(userData);
+    context->done = true;
+    context->testController.notifyDone();
+}
+
+void TestController::clearDOMCache(WKStringRef origin)
+{
+    auto websiteDataStore = WKContextGetWebsiteDataStore(platformContext());
+    ClearDOMCacheCallbackContext context(*this);
+
+    auto cacheOrigin = adoptWK(WKSecurityOriginCreateFromString(origin));
+    WKWebsiteDataStoreRemoveFetchCacheForOrigin(websiteDataStore, cacheOrigin.get(), &context, clearDOMCacheCallback);
+    runUntil(context.done, noTimeout);
+}
+
+void TestController::clearDOMCaches()
+{
+    auto websiteDataStore = WKContextGetWebsiteDataStore(platformContext());
+    ClearDOMCacheCallbackContext context(*this);
+
+    WKWebsiteDataStoreRemoveAllFetchCaches(websiteDataStore, &context, clearDOMCacheCallback);
+    runUntil(context.done, noTimeout);
+}
+
+struct FetchCacheOriginsCallbackContext {
+    FetchCacheOriginsCallbackContext(TestController& controller, WKStringRef origin)
+        : testController(controller)
+        , origin(origin)
+    {
+    }
+
+    TestController& testController;
+    WKStringRef origin;
+
+    bool done { false };
+    bool result { false };
+};
+
+static void fetchCacheOriginsCallback(WKArrayRef origins, void* userData)
+{
+    auto* context = static_cast<FetchCacheOriginsCallbackContext*>(userData);
+    context->done = true;
+
+    auto size = WKArrayGetSize(origins);
+    for (size_t index = 0; index < size && !context->result; ++index) {
+        WKSecurityOriginRef securityOrigin = reinterpret_cast<WKSecurityOriginRef>(WKArrayGetItemAtIndex(origins, index));
+        if (WKStringIsEqual(context->origin, adoptWK(WKSecurityOriginCopyToString(securityOrigin)).get()))
+            context->result = true;
+    }
+    context->testController.notifyDone();
+}
+
+bool TestController::hasDOMCache(WKStringRef origin)
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    FetchCacheOriginsCallbackContext context(*this, origin);
+    WKWebsiteDataStoreGetFetchCacheOrigins(dataStore, &context, fetchCacheOriginsCallback);
+    runUntil(context.done, noTimeout);
+    return context.result;
+}
+
+struct FetchCacheSizeForOriginCallbackContext {
+    explicit FetchCacheSizeForOriginCallbackContext(TestController& controller)
+        : testController(controller)
+    {
+    }
+
+    TestController& testController;
+
+    bool done { false };
+    uint64_t result { 0 };
+};
+
+static void fetchCacheSizeForOriginCallback(uint64_t size, void* userData)
+{
+    auto* context = static_cast<FetchCacheSizeForOriginCallbackContext*>(userData);
+    context->done = true;
+    context->result = size;
+    context->testController.notifyDone();
+}
+
+uint64_t TestController::domCacheSize(WKStringRef origin)
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    FetchCacheSizeForOriginCallbackContext context(*this);
+    WKWebsiteDataStoreGetFetchCacheSizeForOrigin(dataStore, origin, &context, fetchCacheSizeForOriginCallback);
+    runUntil(context.done, noTimeout);
+    return context.result;
+}
+
+void TestController::setStatisticsLastSeen(WKStringRef host, double seconds)
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    WKWebsiteDataStoreSetStatisticsLastSeen(dataStore, host, seconds);
+}
+
+void TestController::setStatisticsPrevalentResource(WKStringRef host, bool value)
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    WKWebsiteDataStoreSetStatisticsPrevalentResource(dataStore, host, value);
+}
+
+void TestController::setStatisticsVeryPrevalentResource(WKStringRef host, bool value)
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    WKWebsiteDataStoreSetStatisticsVeryPrevalentResource(dataStore, host, value);
+}
+
+struct ResourceStatisticsCallbackContext {
+    explicit ResourceStatisticsCallbackContext(TestController& controller)
+        : testController(controller)
+    {
+    }
+
+    TestController& testController;
+    bool done { false };
+    bool result { false };
+};
+
+static void resourceStatisticsVoidResultCallback(void* userData)
+{
+    auto* context = static_cast<ResourceStatisticsCallbackContext*>(userData);
+    context->done = true;
+    context->testController.notifyDone();
+}
+
+static void resourceStatisticsBooleanResultCallback(bool result, void* userData)
+{
+    auto* context = static_cast<ResourceStatisticsCallbackContext*>(userData);
+    context->result = result;
+    context->done = true;
+    context->testController.notifyDone();
+}
+
+bool TestController::isStatisticsPrevalentResource(WKStringRef host)
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    ResourceStatisticsCallbackContext context(*this);
+    WKWebsiteDataStoreIsStatisticsPrevalentResource(dataStore, host, &context, resourceStatisticsBooleanResultCallback);
+    runUntil(context.done, noTimeout);
+    return context.result;
+}
+
+bool TestController::isStatisticsVeryPrevalentResource(WKStringRef host)
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    ResourceStatisticsCallbackContext context(*this);
+    WKWebsiteDataStoreIsStatisticsVeryPrevalentResource(dataStore, host, &context, resourceStatisticsBooleanResultCallback);
+    runUntil(context.done, noTimeout);
+    return context.result;
+}
+
+bool TestController::isStatisticsRegisteredAsSubFrameUnder(WKStringRef subFrameHost, WKStringRef topFrameHost)
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    ResourceStatisticsCallbackContext context(*this);
+    WKWebsiteDataStoreIsStatisticsRegisteredAsSubFrameUnder(dataStore, subFrameHost, topFrameHost, &context, resourceStatisticsBooleanResultCallback);
+    runUntil(context.done, noTimeout);
+    return context.result;
+}
+
+bool TestController::isStatisticsRegisteredAsRedirectingTo(WKStringRef hostRedirectedFrom, WKStringRef hostRedirectedTo)
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    ResourceStatisticsCallbackContext context(*this);
+    WKWebsiteDataStoreIsStatisticsRegisteredAsRedirectingTo(dataStore, hostRedirectedFrom, hostRedirectedTo, &context, resourceStatisticsBooleanResultCallback);
+    runUntil(context.done, noTimeout);
+    return context.result;
+}
+
+void TestController::setStatisticsHasHadUserInteraction(WKStringRef host, bool value)
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    WKWebsiteDataStoreSetStatisticsHasHadUserInteraction(dataStore, host, value);
+}
+
+void TestController::setStatisticsHasHadNonRecentUserInteraction(WKStringRef host)
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    WKWebsiteDataStoreSetStatisticsHasHadNonRecentUserInteraction(dataStore, host);
+}
+
+bool TestController::isStatisticsHasHadUserInteraction(WKStringRef host)
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    ResourceStatisticsCallbackContext context(*this);
+    WKWebsiteDataStoreIsStatisticsHasHadUserInteraction(dataStore, host, &context, resourceStatisticsBooleanResultCallback);
+    runUntil(context.done, noTimeout);
+    return context.result;
+}
+
+void TestController::setStatisticsGrandfathered(WKStringRef host, bool value)
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    WKWebsiteDataStoreSetStatisticsGrandfathered(dataStore, host, value);
+}
+
+bool TestController::isStatisticsGrandfathered(WKStringRef host)
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    ResourceStatisticsCallbackContext context(*this);
+    WKWebsiteDataStoreIsStatisticsGrandfathered(dataStore, host, &context, resourceStatisticsBooleanResultCallback);
+    runUntil(context.done, noTimeout);
+    return context.result;
+}
+
+void TestController::setStatisticsSubframeUnderTopFrameOrigin(WKStringRef host, WKStringRef topFrameHost)
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    WKWebsiteDataStoreSetStatisticsSubframeUnderTopFrameOrigin(dataStore, host, topFrameHost);
+}
+
+void TestController::setStatisticsSubresourceUnderTopFrameOrigin(WKStringRef host, WKStringRef topFrameHost)
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    WKWebsiteDataStoreSetStatisticsSubresourceUnderTopFrameOrigin(dataStore, host, topFrameHost);
+}
+
+void TestController::setStatisticsSubresourceUniqueRedirectTo(WKStringRef host, WKStringRef hostRedirectedTo)
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    WKWebsiteDataStoreSetStatisticsSubresourceUniqueRedirectTo(dataStore, host, hostRedirectedTo);
+}
+
+void TestController::setStatisticsSubresourceUniqueRedirectFrom(WKStringRef host, WKStringRef hostRedirectedFrom)
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    WKWebsiteDataStoreSetStatisticsSubresourceUniqueRedirectFrom(dataStore, host, hostRedirectedFrom);
+}
+
+void TestController::setStatisticsTopFrameUniqueRedirectTo(WKStringRef host, WKStringRef hostRedirectedTo)
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    WKWebsiteDataStoreSetStatisticsTopFrameUniqueRedirectTo(dataStore, host, hostRedirectedTo);
+}
+
+void TestController::setStatisticsTopFrameUniqueRedirectFrom(WKStringRef host, WKStringRef hostRedirectedFrom)
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    WKWebsiteDataStoreSetStatisticsTopFrameUniqueRedirectFrom(dataStore, host, hostRedirectedFrom);
+}
+
+void TestController::setStatisticsTimeToLiveUserInteraction(double seconds)
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    WKWebsiteDataStoreSetStatisticsTimeToLiveUserInteraction(dataStore, seconds);
+}
+
+void TestController::setStatisticsTimeToLiveCookiePartitionFree(double seconds)
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    WKWebsiteDataStoreSetStatisticsTimeToLiveCookiePartitionFree(dataStore, seconds);
+}
+
+void TestController::statisticsProcessStatisticsAndDataRecords()
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    WKWebsiteDataStoreStatisticsProcessStatisticsAndDataRecords(dataStore);
+}
+
+void TestController::statisticsUpdateCookiePartitioning()
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    ResourceStatisticsCallbackContext context(*this);
+    WKWebsiteDataStoreStatisticsUpdateCookiePartitioning(dataStore, &context, resourceStatisticsVoidResultCallback);
+    runUntil(context.done, noTimeout);
+    m_currentInvocation->didSetPartitionOrBlockCookiesForHost();
+}
+
+void TestController::statisticsSetShouldPartitionCookiesForHost(WKStringRef host, bool value)
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    ResourceStatisticsCallbackContext context(*this);
+    WKWebsiteDataStoreSetStatisticsShouldPartitionCookiesForHost(dataStore, host, value, &context, resourceStatisticsVoidResultCallback);
+    runUntil(context.done, noTimeout);
+    m_currentInvocation->didSetPartitionOrBlockCookiesForHost();
+}
+
+void TestController::statisticsSubmitTelemetry()
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    WKWebsiteDataStoreStatisticsSubmitTelemetry(dataStore);
+}
+
+void TestController::setStatisticsNotifyPagesWhenDataRecordsWereScanned(bool value)
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    WKWebsiteDataStoreSetStatisticsNotifyPagesWhenDataRecordsWereScanned(dataStore, value);
+}
+
+void TestController::setStatisticsShouldClassifyResourcesBeforeDataRecordsRemoval(bool value)
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    WKWebsiteDataStoreSetStatisticsShouldClassifyResourcesBeforeDataRecordsRemoval(dataStore, value);
+}
+
+void TestController::setStatisticsNotifyPagesWhenTelemetryWasCaptured(bool value)
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    WKWebsiteDataStoreSetStatisticsNotifyPagesWhenTelemetryWasCaptured(dataStore, value);
+}
+
+void TestController::setStatisticsMinimumTimeBetweenDataRecordsRemoval(double seconds)
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    WKWebsiteDataStoreSetStatisticsMinimumTimeBetweenDataRecordsRemoval(dataStore, seconds);
+}
+
+void TestController::setStatisticsGrandfatheringTime(double seconds)
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    WKWebsiteDataStoreSetStatisticsGrandfatheringTime(dataStore, seconds);
+}
+
+void TestController::setStatisticsMaxStatisticsEntries(unsigned entries)
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    WKWebsiteDataStoreSetStatisticsMaxStatisticsEntries(dataStore, entries);
+}
+
+void TestController::setStatisticsPruneEntriesDownTo(unsigned entries)
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    WKWebsiteDataStoreSetStatisticsPruneEntriesDownTo(dataStore, entries);
+}
+
+void TestController::statisticsClearInMemoryAndPersistentStore()
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    ResourceStatisticsCallbackContext context(*this);
+    WKWebsiteDataStoreStatisticsClearInMemoryAndPersistentStore(dataStore, &context, resourceStatisticsVoidResultCallback);
+    runUntil(context.done, noTimeout);
+    m_currentInvocation->didClearStatisticsThroughWebsiteDataRemoval();
+}
+
+void TestController::statisticsClearInMemoryAndPersistentStoreModifiedSinceHours(unsigned hours)
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    ResourceStatisticsCallbackContext context(*this);
+    WKWebsiteDataStoreStatisticsClearInMemoryAndPersistentStoreModifiedSinceHours(dataStore, hours, &context, resourceStatisticsVoidResultCallback);
+    runUntil(context.done, noTimeout);
+    m_currentInvocation->didClearStatisticsThroughWebsiteDataRemoval();
+}
+
+void TestController::statisticsClearThroughWebsiteDataRemoval()
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    ResourceStatisticsCallbackContext context(*this);
+    WKWebsiteDataStoreStatisticsClearThroughWebsiteDataRemoval(dataStore, &context, resourceStatisticsVoidResultCallback);
+    runUntil(context.done, noTimeout);
+    m_currentInvocation->didClearStatisticsThroughWebsiteDataRemoval();
+}
+
+void TestController::statisticsResetToConsistentState()
+{
+    auto* dataStore = WKContextGetWebsiteDataStore(platformContext());
+    WKWebsiteDataStoreStatisticsResetToConsistentState(dataStore);
+}
 
 } // namespace WTR

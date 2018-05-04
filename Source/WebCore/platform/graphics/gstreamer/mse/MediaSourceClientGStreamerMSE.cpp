@@ -24,6 +24,10 @@
 #include "AppendPipeline.h"
 #include "MediaPlayerPrivateGStreamerMSE.h"
 #include "WebKitMediaSourceGStreamer.h"
+#include <gst/gst.h>
+
+GST_DEBUG_CATEGORY_EXTERN(webkit_mse_debug);
+#define GST_CAT_DEFAULT webkit_mse_debug
 
 #if ENABLE(VIDEO) && USE(GSTREAMER) && ENABLE(MEDIA_SOURCE)
 
@@ -104,11 +108,27 @@ void MediaSourceClientGStreamerMSE::abort(RefPtr<SourceBufferPrivateGStreamer> s
     appendPipeline->abort();
 }
 
-bool MediaSourceClientGStreamerMSE::append(RefPtr<SourceBufferPrivateGStreamer> sourceBufferPrivate, const unsigned char* data, unsigned length)
+void MediaSourceClientGStreamerMSE::resetParserState(RefPtr<SourceBufferPrivateGStreamer> sourceBufferPrivate)
 {
     ASSERT(WTF::isMainThread());
 
-    GST_DEBUG("Appending %u bytes", length);
+    GST_DEBUG("resetting parser state");
+
+    if (!m_playerPrivate)
+        return;
+
+    RefPtr<AppendPipeline> appendPipeline = m_playerPrivate->m_appendPipelinesMap.get(sourceBufferPrivate);
+
+    ASSERT(appendPipeline);
+
+    appendPipeline->abort();
+}
+
+bool MediaSourceClientGStreamerMSE::append(RefPtr<SourceBufferPrivateGStreamer> sourceBufferPrivate, Vector<unsigned char>&& data)
+{
+    ASSERT(WTF::isMainThread());
+
+    GST_DEBUG("Appending %zu bytes", data.size());
 
     if (!m_playerPrivate)
         return false;
@@ -117,8 +137,14 @@ bool MediaSourceClientGStreamerMSE::append(RefPtr<SourceBufferPrivateGStreamer> 
 
     ASSERT(appendPipeline);
 
-    GstBuffer* buffer = gst_buffer_new_and_alloc(length);
-    gst_buffer_fill(buffer, 0, data, length);
+    // Wrap the whole Vector object in case the data is stored in the inlined buffer.
+    auto* bufferData = data.data();
+    auto bufferLength = data.size();
+    GstBuffer* buffer = gst_buffer_new_wrapped_full(static_cast<GstMemoryFlags>(0), bufferData, bufferLength, 0, bufferLength, new Vector<unsigned char>(WTFMove(data)),
+        [](gpointer data)
+        {
+            delete static_cast<Vector<unsigned char>*>(data);
+        });
 
     return appendPipeline->pushNewBuffer(buffer) == GST_FLOW_OK;
 }
@@ -157,16 +183,25 @@ void MediaSourceClientGStreamerMSE::flush(AtomicString trackId)
 {
     ASSERT(WTF::isMainThread());
 
-    if (m_playerPrivate)
+    // This is only for on-the-fly reenqueues after appends. When seeking, the seek will do its own flush.
+    if (m_playerPrivate && !m_playerPrivate->m_seeking)
         m_playerPrivate->m_playbackPipeline->flush(trackId);
 }
 
-void MediaSourceClientGStreamerMSE::enqueueSample(PassRefPtr<MediaSample> prpSample)
+void MediaSourceClientGStreamerMSE::enqueueSample(Ref<MediaSample>&& sample)
 {
     ASSERT(WTF::isMainThread());
 
     if (m_playerPrivate)
-        m_playerPrivate->m_playbackPipeline->enqueueSample(prpSample);
+        m_playerPrivate->m_playbackPipeline->enqueueSample(WTFMove(sample));
+}
+
+void MediaSourceClientGStreamerMSE::allSamplesInTrackEnqueued(const AtomicString& trackId)
+{
+    ASSERT(WTF::isMainThread());
+
+    if (m_playerPrivate)
+        m_playerPrivate->m_playbackPipeline->allSamplesInTrackEnqueued(trackId);
 }
 
 GRefPtr<WebKitMediaSrc> MediaSourceClientGStreamerMSE::webKitMediaSrc()

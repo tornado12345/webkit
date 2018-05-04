@@ -31,7 +31,6 @@
 #import "LegacyTileCache.h"
 #import "PlatformScreen.h"
 #import "WAKViewInternal.h"
-#import "WebCoreSystemInterface.h"
 #import "WebCoreThreadRun.h"
 #import "WebEvent.h"
 #import "WKContentObservation.h"
@@ -436,6 +435,16 @@ static id<OrientationProvider> gOrientationProvider;
     if (!_tileCache)
         return;
     _tileCache->setTilesOpaque(opaque);
+}
+
+- (void)setIsInSnapshottingPaint:(BOOL)isInSnapshottingPaint
+{
+    _isInSnapshottingPaint = isInSnapshottingPaint;
+}
+
+- (BOOL)isInSnapshottingPaint
+{
+    return _isInSnapshottingPaint;
 }
 
 - (void)setEntireWindowVisibleForTesting:(BOOL)entireWindowVisible

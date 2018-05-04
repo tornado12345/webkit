@@ -20,8 +20,7 @@
  *
  */
 
-#ifndef RenderListMarker_h
-#define RenderListMarker_h
+#pragma once
 
 #include "RenderBox.h"
 
@@ -34,6 +33,7 @@ String listMarkerText(EListStyleType, int value);
 // Used to render the list item's marker.
 // The RenderListMarker always has to be a child of a RenderListItem.
 class RenderListMarker final : public RenderBox {
+    WTF_MAKE_ISO_ALLOCATED(RenderListMarker);
 public:
     RenderListMarker(RenderListItem&, RenderStyle&&);
     virtual ~RenderListMarker();
@@ -43,9 +43,17 @@ public:
 
     bool isInside() const;
 
+    LayoutUnit lineOffsetForListItem() const { return m_lineOffsetForListItem; }
+
     void updateMarginsAndContent();
 
+#if !ASSERT_DISABLED
+    RenderListItem& listItem() const { return m_listItem; }
+#endif
+
 private:
+    void willBeDestroyed() override;
+
     void element() const = delete;
 
     const char* renderName() const override { return "RenderListMarker"; }
@@ -83,10 +91,9 @@ private:
     String m_text;
     RefPtr<StyleImage> m_image;
     RenderListItem& m_listItem;
+    LayoutUnit m_lineOffsetForListItem;
 };
 
 } // namespace WebCore
 
 SPECIALIZE_TYPE_TRAITS_RENDER_OBJECT(RenderListMarker, isListMarker())
-
-#endif // RenderListMarker_h

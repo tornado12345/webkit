@@ -29,11 +29,9 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef ScrollAnimator_h
-#define ScrollAnimator_h
+#pragma once
 
 #include "FloatPoint.h"
-#include "LayoutUnit.h"
 #include "PlatformWheelEvent.h"
 #include "ScrollTypes.h"
 #include "WheelEventTestTrigger.h"
@@ -70,7 +68,7 @@ public:
     // The base class implementation always scrolls immediately, never animates.
     virtual bool scroll(ScrollbarOrientation, ScrollGranularity, float step, float multiplier);
 
-    virtual void scrollToOffsetWithoutAnimation(const FloatPoint&);
+    virtual void scrollToOffsetWithoutAnimation(const FloatPoint&, ScrollClamping = ScrollClamping::Clamped);
 
     ScrollableArea& scrollableArea() const { return m_scrollableArea; }
 
@@ -134,11 +132,12 @@ public:
     bool processWheelEventForScrollSnap(const PlatformWheelEvent&);
 #endif
     void updateScrollSnapState();
-    LayoutUnit scrollOffsetOnAxis(ScrollEventAxis) const override;
+    FloatPoint scrollOffset() const override;
     void immediateScrollOnAxis(ScrollEventAxis, float delta) override;
     bool activeScrollSnapIndexDidChange() const;
     unsigned activeScrollSnapIndexForAxis(ScrollEventAxis) const;
     LayoutSize scrollExtent() const override;
+    FloatSize viewportSize() const override;
 #endif
 
 protected:
@@ -155,4 +154,3 @@ protected:
 
 } // namespace WebCore
 
-#endif // ScrollAnimator_h

@@ -40,12 +40,15 @@ namespace JSC {
 static EncodedJSValue JSC_HOST_CALL arrayBufferFuncIsView(ExecState*);
 
 const ClassInfo JSArrayBufferConstructor::s_info = {
-    "Function", &Base::s_info, 0,
+    "Function", &Base::s_info, nullptr, nullptr,
     CREATE_METHOD_TABLE(JSArrayBufferConstructor)
 };
 
+static EncodedJSValue JSC_HOST_CALL callArrayBuffer(ExecState*);
+static EncodedJSValue JSC_HOST_CALL constructArrayBuffer(ExecState*);
+
 JSArrayBufferConstructor::JSArrayBufferConstructor(VM& vm, Structure* structure, ArrayBufferSharingMode sharingMode)
-    : Base(vm, structure)
+    : Base(vm, structure, callArrayBuffer, constructArrayBuffer)
     , m_sharingMode(sharingMode)
 {
 }
@@ -53,14 +56,14 @@ JSArrayBufferConstructor::JSArrayBufferConstructor(VM& vm, Structure* structure,
 void JSArrayBufferConstructor::finishCreation(VM& vm, JSArrayBufferPrototype* prototype, GetterSetter* speciesSymbol)
 {
     Base::finishCreation(vm, ASCIILiteral(arrayBufferSharingModeName(m_sharingMode)));
-    putDirectWithoutTransition(vm, vm.propertyNames->prototype, prototype, DontEnum | DontDelete | ReadOnly);
-    putDirectWithoutTransition(vm, vm.propertyNames->length, jsNumber(1), DontEnum | DontDelete | ReadOnly);
-    putDirectNonIndexAccessor(vm, vm.propertyNames->speciesSymbol, speciesSymbol, Accessor | ReadOnly | DontEnum);
+    putDirectWithoutTransition(vm, vm.propertyNames->prototype, prototype, PropertyAttribute::DontEnum | PropertyAttribute::DontDelete | PropertyAttribute::ReadOnly);
+    putDirectWithoutTransition(vm, vm.propertyNames->length, jsNumber(1), PropertyAttribute::DontEnum | PropertyAttribute::ReadOnly);
+    putDirectNonIndexAccessor(vm, vm.propertyNames->speciesSymbol, speciesSymbol, PropertyAttribute::Accessor | PropertyAttribute::ReadOnly | PropertyAttribute::DontEnum);
 
     if (m_sharingMode == ArrayBufferSharingMode::Default) {
         JSGlobalObject* globalObject = this->globalObject();
-        JSC_NATIVE_FUNCTION_WITHOUT_TRANSITION(vm.propertyNames->isView, arrayBufferFuncIsView, DontEnum, 1);
-        JSC_NATIVE_FUNCTION_WITHOUT_TRANSITION(vm.propertyNames->builtinNames().isViewPrivateName(), arrayBufferFuncIsView, DontEnum, 1);
+        JSC_NATIVE_FUNCTION_WITHOUT_TRANSITION(vm.propertyNames->isView, arrayBufferFuncIsView, static_cast<unsigned>(PropertyAttribute::DontEnum), 1);
+        JSC_NATIVE_FUNCTION_WITHOUT_TRANSITION(vm.propertyNames->builtinNames().isViewPrivateName(), arrayBufferFuncIsView, static_cast<unsigned>(PropertyAttribute::DontEnum), 1);
     }
 }
 
@@ -77,7 +80,7 @@ Structure* JSArrayBufferConstructor::createStructure(
     VM& vm, JSGlobalObject* globalObject, JSValue prototype)
 {
     return Structure::create(
-        vm, globalObject, prototype, TypeInfo(ObjectType, StructureFlags), info());
+        vm, globalObject, prototype, TypeInfo(InternalFunctionType, StructureFlags), info());
 }
 
 static EncodedJSValue JSC_HOST_CALL constructArrayBuffer(ExecState* exec)
@@ -86,8 +89,11 @@ static EncodedJSValue JSC_HOST_CALL constructArrayBuffer(ExecState* exec)
     auto scope = DECLARE_THROW_SCOPE(vm);
 
     JSArrayBufferConstructor* constructor =
-        jsCast<JSArrayBufferConstructor*>(exec->callee());
-    
+        jsCast<JSArrayBufferConstructor*>(exec->jsCallee());
+
+    Structure* arrayBufferStructure = InternalFunction::createSubclassStructure(exec, exec->newTarget(), constructor->globalObject()->arrayBufferStructure(constructor->sharingMode()));
+    RETURN_IF_EXCEPTION(scope, { });
+
     unsigned length;
     if (exec->argumentCount()) {
         length = exec->uncheckedArgument(0).toIndex(exec, "length");
@@ -98,20 +104,16 @@ static EncodedJSValue JSC_HOST_CALL constructArrayBuffer(ExecState* exec)
         // with a zero length.
         length = 0;
     }
-    
+
     auto buffer = ArrayBuffer::tryCreate(length, 1);
     if (!buffer)
         return JSValue::encode(throwOutOfMemoryError(exec, scope));
     
     if (constructor->sharingMode() == ArrayBufferSharingMode::Shared)
         buffer->makeShared();
-    
     ASSERT(constructor->sharingMode() == buffer->sharingMode());
-    
-    Structure* arrayBufferStructure = InternalFunction::createSubclassStructure(exec, exec->newTarget(), constructor->globalObject()->arrayBufferStructure(constructor->sharingMode()));
-    RETURN_IF_EXCEPTION(scope, encodedJSValue());
+
     JSArrayBuffer* result = JSArrayBuffer::create(vm, arrayBufferStructure, WTFMove(buffer));
-    
     return JSValue::encode(result);
 }
 
@@ -122,25 +124,12 @@ static EncodedJSValue JSC_HOST_CALL callArrayBuffer(ExecState* exec)
     return JSValue::encode(throwConstructorCannotBeCalledAsFunctionTypeError(exec, scope, "ArrayBuffer"));
 }
 
-ConstructType JSArrayBufferConstructor::getConstructData(
-    JSCell*, ConstructData& constructData)
-{
-    constructData.native.function = constructArrayBuffer;
-    return ConstructType::Host;
-}
-
-CallType JSArrayBufferConstructor::getCallData(JSCell*, CallData& callData)
-{
-    callData.native.function = callArrayBuffer;
-    return CallType::Host;
-}
-
 // ------------------------------ Functions --------------------------------
 
 // ECMA 24.1.3.1
 EncodedJSValue JSC_HOST_CALL arrayBufferFuncIsView(ExecState* exec)
 {
-    return JSValue::encode(jsBoolean(jsDynamicCast<JSArrayBufferView*>(exec->argument(0))));
+    return JSValue::encode(jsBoolean(jsDynamicCast<JSArrayBufferView*>(exec->vm(), exec->argument(0))));
 }
     
 

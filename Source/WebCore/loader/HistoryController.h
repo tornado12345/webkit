@@ -39,7 +39,10 @@ namespace WebCore {
 class Frame;
 class HistoryItem;
 class SerializedScriptValue;
-class StringWithDirection;
+
+enum class NavigationPolicyCheck;
+
+struct StringWithDirection;
 
 class HistoryController {
     WTF_MAKE_NONCOPYABLE(HistoryController);
@@ -83,22 +86,22 @@ public:
     HistoryItem* provisionalItem() const { return m_provisionalItem.get(); }
     void setProvisionalItem(HistoryItem*);
 
-    void pushState(PassRefPtr<SerializedScriptValue>, const String& title, const String& url);
-    void replaceState(PassRefPtr<SerializedScriptValue>, const String& title, const String& url);
+    void pushState(RefPtr<SerializedScriptValue>&&, const String& title, const String& url);
+    void replaceState(RefPtr<SerializedScriptValue>&&, const String& title, const String& url);
 
     void setDefersLoading(bool);
 
 private:
     friend class Page;
     bool shouldStopLoadingForHistoryItem(HistoryItem&) const;
-    void goToItem(HistoryItem&, FrameLoadType);
+    void goToItem(HistoryItem&, FrameLoadType, NavigationPolicyCheck);
 
     void initializeItem(HistoryItem&);
     Ref<HistoryItem> createItem();
     Ref<HistoryItem> createItemTree(Frame& targetFrame, bool clipAtTarget);
 
     void recursiveSetProvisionalItem(HistoryItem&, HistoryItem*);
-    void recursiveGoToItem(HistoryItem&, HistoryItem*, FrameLoadType);
+    void recursiveGoToItem(HistoryItem&, HistoryItem*, FrameLoadType, NavigationPolicyCheck);
     bool isReplaceLoadTypeWithProvisionalItem(FrameLoadType);
     bool isReloadTypeWithProvisionalItem(FrameLoadType);
     void recursiveUpdateForCommit();

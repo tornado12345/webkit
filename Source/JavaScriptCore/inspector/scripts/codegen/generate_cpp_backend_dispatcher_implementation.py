@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Copyright (c) 2014-2016 Apple Inc. All rights reserved.
+# Copyright (c) 2014-2018 Apple Inc. All rights reserved.
 # Copyright (c) 2014 University of Washington. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -38,23 +38,17 @@ log = logging.getLogger('global')
 
 
 class CppBackendDispatcherImplementationGenerator(CppGenerator):
-    def __init__(self, model, input_filepath):
-        CppGenerator.__init__(self, model, input_filepath)
+    def __init__(self, *args, **kwargs):
+        CppGenerator.__init__(self, *args, **kwargs)
 
     def output_filename(self):
         return "%sBackendDispatchers.cpp" % self.protocol_name()
 
     def domains_to_generate(self):
-        return filter(lambda domain: len(domain.commands) > 0, Generator.domains_to_generate(self))
+        return filter(lambda domain: len(self.commands_for_domain(domain)) > 0, Generator.domains_to_generate(self))
 
     def generate_output(self):
-        secondary_headers = [
-            '<inspector/InspectorFrontendRouter.h>',
-            '<inspector/InspectorValues.h>',
-            '<wtf/NeverDestroyed.h>',
-            '<wtf/text/CString.h>']
-
-        secondary_includes = ['#include %s' % header for header in secondary_headers]
+        secondary_includes = self._generate_secondary_header_includes()
 
         if self.model().framework.setting('alternate_dispatchers', False):
             secondary_includes.append('')
@@ -77,6 +71,17 @@ class CppBackendDispatcherImplementationGenerator(CppGenerator):
 
     # Private methods.
 
+    def _generate_secondary_header_includes(self):
+        header_includes = [
+            (["JavaScriptCore", "WebKit"], ("JavaScriptCore", "inspector/InspectorFrontendRouter.h")),
+            (["JavaScriptCore", "WebKit"], ("WTF", "wtf/JSONValues.h")),
+            (["JavaScriptCore", "WebKit"], ("WTF", "wtf/NeverDestroyed.h")),
+            (["JavaScriptCore", "WebKit"], ("WTF", "wtf/text/CString.h"))
+        ]
+
+        return self.generate_includes_from_entries(header_includes)
+
+
     def _generate_handler_class_destructor_for_domain(self, domain):
         destructor_args = {
             'domainName': domain.domain_name
@@ -92,12 +97,14 @@ class CppBackendDispatcherImplementationGenerator(CppGenerator):
         }
         implementations.append(Template(CppTemplates.BackendDispatcherImplementationDomainConstructor).substitute(None, **constructor_args))
 
-        if len(domain.commands) <= 5:
+        commands = self.commands_for_domain(domain)
+
+        if len(commands) <= 5:
             implementations.append(self._generate_small_dispatcher_switch_implementation_for_domain(domain))
         else:
             implementations.append(self._generate_large_dispatcher_switch_implementation_for_domain(domain))
 
-        for command in domain.commands:
+        for command in commands:
             if command.is_async:
                 implementations.append(self._generate_async_dispatcher_class_for_domain(command, domain))
             implementations.append(self._generate_dispatcher_implementation_for_command(command, domain))
@@ -105,10 +112,12 @@ class CppBackendDispatcherImplementationGenerator(CppGenerator):
         return self.wrap_with_guard_for_domain(domain, '\n\n'.join(implementations))
 
     def _generate_small_dispatcher_switch_implementation_for_domain(self, domain):
+        commands = self.commands_for_domain(domain)
+
         cases = []
-        cases.append('    if (method == "%s")' % domain.commands[0].command_name)
-        cases.append('        %s(requestId, WTFMove(parameters));' % domain.commands[0].command_name)
-        for command in domain.commands[1:]:
+        cases.append('    if (method == "%s")' % commands[0].command_name)
+        cases.append('        %s(requestId, WTFMove(parameters));' % commands[0].command_name)
+        for command in commands[1:]:
             cases.append('    else if (method == "%s")' % command.command_name)
             cases.append('        %s(requestId, WTFMove(parameters));' % command.command_name)
 
@@ -120,8 +129,10 @@ class CppBackendDispatcherImplementationGenerator(CppGenerator):
         return Template(CppTemplates.BackendDispatcherImplementationSmallSwitch).substitute(None, **switch_args)
 
     def _generate_large_dispatcher_switch_implementation_for_domain(self, domain):
+        commands = self.commands_for_domain(domain)
+
         cases = []
-        for command in domain.commands:
+        for command in commands:
             args = {
                 'domainName': domain.domain_name,
                 'commandName': command.command_name
@@ -152,8 +163,8 @@ class CppBackendDispatcherImplementationGenerator(CppGenerator):
 
             if parameter.is_optional:
                 if CppGenerator.should_use_wrapper_for_return_type(parameter.type):
-                    out_parameter_assignments.append('    if (%(parameterName)s.isAssigned())' % param_args)
-                    out_parameter_assignments.append('        jsonMessage->%(keyedSetMethod)s(ASCIILiteral("%(parameterKey)s"), %(parameterName)s.getValue());' % param_args)
+                    out_parameter_assignments.append('    if (%(parameterName)s.has_value())' % param_args)
+                    out_parameter_assignments.append('        jsonMessage->%(keyedSetMethod)s(ASCIILiteral("%(parameterKey)s"), *%(parameterName)s);' % param_args)
                 else:
                     out_parameter_assignments.append('    if (%(parameterName)s)' % param_args)
                     out_parameter_assignments.append('        jsonMessage->%(keyedSetMethod)s(ASCIILiteral("%(parameterKey)s"), %(parameterName)s);' % param_args)
@@ -175,7 +186,9 @@ class CppBackendDispatcherImplementationGenerator(CppGenerator):
         out_parameter_declarations = []
         out_parameter_assignments = []
         alternate_dispatcher_method_parameters = ['requestId']
-        method_parameters = ['error']
+        method_parameters = []
+        if not command.is_async:
+            method_parameters.append('error')
 
         for parameter in command.call_parameters:
             parameter_name = 'in_' + parameter.parameter_name
@@ -245,8 +258,8 @@ class CppBackendDispatcherImplementationGenerator(CppGenerator):
                 out_parameter_declarations.append('    %(parameterType)s out_%(parameterName)s;' % param_args)
                 if parameter.is_optional:
                     if CppGenerator.should_use_wrapper_for_return_type(parameter.type):
-                        out_parameter_assignments.append('        if (out_%(parameterName)s.isAssigned())' % param_args)
-                        out_parameter_assignments.append('            result->%(keyedSetMethod)s(ASCIILiteral("%(parameterKey)s"), out_%(parameterName)s.getValue());' % param_args)
+                        out_parameter_assignments.append('        if (out_%(parameterName)s.has_value())' % param_args)
+                        out_parameter_assignments.append('            result->%(keyedSetMethod)s(ASCIILiteral("%(parameterKey)s"), *out_%(parameterName)s);' % param_args)
                     else:
                         out_parameter_assignments.append('        if (out_%(parameterName)s)' % param_args)
                         out_parameter_assignments.append('            result->%(keyedSetMethod)s(ASCIILiteral("%(parameterKey)s"), out_%(parameterName)s);' % param_args)
@@ -255,7 +268,7 @@ class CppBackendDispatcherImplementationGenerator(CppGenerator):
                 else:
                     out_parameter_assignments.append('        result->%(keyedSetMethod)s(ASCIILiteral("%(parameterKey)s"), out_%(parameterName)s);' % param_args)
 
-                if CppGenerator.should_pass_by_copy_for_return_type(parameter.type):
+                if CppGenerator.should_pass_by_copy_for_return_type(parameter.type) or parameter.is_optional and CppGenerator.should_use_wrapper_for_return_type(parameter.type):
                     method_parameters.append('out_' + parameter.parameter_name)
                 else:
                     method_parameters.append('&out_' + parameter.parameter_name)
@@ -271,9 +284,9 @@ class CppBackendDispatcherImplementationGenerator(CppGenerator):
 
         lines = []
         if len(command.call_parameters) == 0:
-            lines.append('void %(domainName)sBackendDispatcher::%(commandName)s(long requestId, RefPtr<InspectorObject>&&)' % command_args)
+            lines.append('void %(domainName)sBackendDispatcher::%(commandName)s(long requestId, RefPtr<JSON::Object>&&)' % command_args)
         else:
-            lines.append('void %(domainName)sBackendDispatcher::%(commandName)s(long requestId, RefPtr<InspectorObject>&& parameters)' % command_args)
+            lines.append('void %(domainName)sBackendDispatcher::%(commandName)s(long requestId, RefPtr<JSON::Object>&& parameters)' % command_args)
         lines.append('{')
 
         if len(command.call_parameters) > 0:
@@ -288,31 +301,31 @@ class CppBackendDispatcherImplementationGenerator(CppGenerator):
             lines.append('#endif')
             lines.append('')
 
-        lines.append('    ErrorString error;')
-        lines.append('    Ref<InspectorObject> result = InspectorObject::create();')
         if command.is_async:
             lines.append('    Ref<%(domainName)sBackendDispatcherHandler::%(callbackName)s> callback = adoptRef(*new %(domainName)sBackendDispatcherHandler::%(callbackName)s(m_backendDispatcher.copyRef(), requestId));' % command_args)
+        else:
+            lines.append('    ErrorString error;')
+            lines.append('    Ref<JSON::Object> result = JSON::Object::create();')
+
         if len(command.return_parameters) > 0:
             lines.extend(out_parameter_declarations)
         lines.append('    m_agent->%(commandName)s(%(invocationParameters)s);' % command_args)
         lines.append('')
-        if command.is_async:
-            lines.append('    if (error.length()) {')
-            lines.extend(out_parameter_assignments)
-            lines.append('    }')
-        elif len(command.return_parameters) > 1:
-            lines.append('    if (!error.length()) {')
-            lines.extend(out_parameter_assignments)
-            lines.append('    }')
-        elif len(command.return_parameters) == 1:
-            lines.append('    if (!error.length())')
-            lines.extend(out_parameter_assignments)
-            lines.append('')
 
         if not command.is_async:
+            if len(command.return_parameters) > 1:
+                lines.append('    if (!error.length()) {')
+                lines.extend(out_parameter_assignments)
+                lines.append('    }')
+            elif len(command.return_parameters) == 1:
+                lines.append('    if (!error.length())')
+                lines.extend(out_parameter_assignments)
+                lines.append('')
+
             lines.append('    if (!error.length())')
-            lines.append('        m_backendDispatcher->sendResponse(requestId, WTFMove(result));')
+            lines.append('        m_backendDispatcher->sendResponse(requestId, WTFMove(result), false);')
             lines.append('    else')
             lines.append('        m_backendDispatcher->reportProtocolError(BackendDispatcher::ServerError, WTFMove(error));')
+
         lines.append('}')
         return "\n".join(lines)

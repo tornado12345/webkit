@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2016 Yusuke Suzuki <utatane.tea@gmail.com>
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,9 +28,38 @@
 
 #include "Instruction.h"
 #include "Interpreter.h"
+#include "JSCPtrTag.h"
+#include "LLIntData.h"
 #include "UnlinkedCodeBlock.h"
 
 namespace JSC {
+
+inline Opcode Interpreter::getOpcode(OpcodeID id)
+{
+    return LLInt::getOpcode(id);
+}
+
+inline OpcodeID Interpreter::getOpcodeID(Opcode opcode)
+{
+#if ENABLE(COMPUTED_GOTO_OPCODES)
+    ASSERT(isOpcode(opcode));
+#if USE(LLINT_EMBEDDED_OPCODE_ID)
+    // The OpcodeID is embedded in the int32_t word preceding the location of
+    // the LLInt code for the opcode (see the EMBED_OPCODE_ID_IF_NEEDED macro
+    // in LowLevelInterpreter.cpp).
+    auto codePtr = MacroAssemblerCodePtr<BytecodePtrTag>::createFromExecutableAddress(opcode);
+    int32_t* opcodeIDAddress = codePtr.dataLocation<int32_t*>() - 1;
+    OpcodeID opcodeID = static_cast<OpcodeID>(*opcodeIDAddress);
+    ASSERT(opcodeID < NUMBER_OF_BYTECODE_IDS);
+    return opcodeID;
+#else
+    return opcodeIDTable().get(opcode);
+#endif // USE(LLINT_EMBEDDED_OPCODE_ID)
+    
+#else // not ENABLE(COMPUTED_GOTO_OPCODES)
+    return opcode;
+#endif
+}
 
 inline OpcodeID Interpreter::getOpcodeID(const Instruction& instruction)
 {

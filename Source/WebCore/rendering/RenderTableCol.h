@@ -23,8 +23,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef RenderTableCol_h
-#define RenderTableCol_h
+#pragma once
 
 #include "RenderBox.h"
 
@@ -34,6 +33,7 @@ class RenderTable;
 class RenderTableCell;
 
 class RenderTableCol final : public RenderBox {
+    WTF_MAKE_ISO_ALLOCATED(RenderTableCol);
 public:
     RenderTableCol(Element&, RenderStyle&&);
     Element& element() const { return downcast<Element>(nodeForNonAnonymous()); }
@@ -105,5 +105,3 @@ inline RenderTableCol* RenderTableCol::enclosingColumnGroupIfAdjacentAfter() con
 } // namespace WebCore
 
 SPECIALIZE_TYPE_TRAITS_RENDER_OBJECT(RenderTableCol, isRenderTableCol())
-
-#endif // RenderTableCol_h

@@ -34,8 +34,7 @@ import os
 import sys
 import time
 
-from webkitpy.layout_tests.servers import http_server
-from webkitpy.layout_tests.servers import http_server_base
+from webkitpy.layout_tests.servers import http_server, http_server_base
 
 _log = logging.getLogger(__name__)
 
@@ -44,12 +43,11 @@ _WS_LOG_NAME = 'pywebsocket.ws.log'
 _WSS_LOG_NAME = 'pywebsocket.wss.log'
 
 
-_DEFAULT_WS_PORT = 8880
-_DEFAULT_WSS_PORT = 9323
-
-
 class PyWebSocket(http_server.Lighttpd):
-    def __init__(self, port_obj, output_dir, port=_DEFAULT_WS_PORT,
+    DEFAULT_WS_PORT = 8880
+    DEFAULT_WSS_PORT = 9323
+
+    def __init__(self, port_obj, output_dir, port=DEFAULT_WS_PORT,
                  root=None, use_tls=False,
                  private_key=None, certificate=None, ca_certificate=None,
                  pidfile=None):
@@ -57,7 +55,7 @@ class PyWebSocket(http_server.Lighttpd):
           output_dir: the absolute path to the layout test result directory
         """
         http_server.Lighttpd.__init__(self, port_obj, output_dir,
-                                      port=_DEFAULT_WS_PORT,
+                                      port=port,
                                       root=root)
         self._output_dir = output_dir
         self._pid_file = pidfile
@@ -106,6 +104,9 @@ class PyWebSocket(http_server.Lighttpd):
             self._log_prefix = _WSS_LOG_NAME
         else:
             self._log_prefix = _WS_LOG_NAME
+
+    def ports_to_forward(self):
+        return [self._port]
 
     def _prepare_config(self):
         log_file_name = self._log_prefix
@@ -156,7 +157,7 @@ class PyWebSocket(http_server.Lighttpd):
     def _remove_stale_logs(self):
         try:
             self._remove_log_files(self._output_dir, self._log_prefix)
-        except OSError, e:
+        except OSError as e:
             _log.warning('Failed to remove stale %s log files: %s' % (self._name, str(e)))
 
     def _spawn_process(self):
@@ -174,3 +175,7 @@ class PyWebSocket(http_server.Lighttpd):
         if self._wsout:
             self._wsout.close()
             self._wsout = None
+
+
+def is_web_socket_server_running():
+    return http_server_base.HttpServerBase._is_running_on_port(PyWebSocket.DEFAULT_WS_PORT)

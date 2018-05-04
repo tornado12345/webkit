@@ -31,9 +31,7 @@
 
 #include "CaptureDevice.h"
 #include "Document.h"
-#include "ExceptionCode.h"
 #include "Frame.h"
-#include "MainFrame.h"
 #include "SecurityOrigin.h"
 #include "UserMediaController.h"
 
@@ -50,9 +48,7 @@ MediaDevicesEnumerationRequest::MediaDevicesEnumerationRequest(ScriptExecutionCo
 {
 }
 
-MediaDevicesEnumerationRequest::~MediaDevicesEnumerationRequest()
-{
-}
+MediaDevicesEnumerationRequest::~MediaDevicesEnumerationRequest() = default;
 
 SecurityOrigin* MediaDevicesEnumerationRequest::userMediaDocumentOrigin() const
 {
@@ -67,16 +63,14 @@ SecurityOrigin* MediaDevicesEnumerationRequest::topLevelDocumentOrigin() const
     if (!scriptExecutionContext())
         return nullptr;
 
-    if (Frame* frame = downcast<Document>(*scriptExecutionContext()).frame()) {
-        if (frame->isMainFrame())
-            return nullptr;
-    }
-
-    return scriptExecutionContext()->topOrigin();
+    return &scriptExecutionContext()->topOrigin();
 }
 
 void MediaDevicesEnumerationRequest::contextDestroyed()
 {
+    // Calling cancel() may destroy ourselves.
+    Ref<MediaDevicesEnumerationRequest> protectedThis(*this);
+
     cancel();
     ContextDestructionObserver::contextDestroyed();
 }
@@ -90,6 +84,7 @@ void MediaDevicesEnumerationRequest::start()
     if (!controller)
         return;
 
+    Ref<MediaDevicesEnumerationRequest> protectedThis(*this);
     controller->enumerateMediaDevices(*this);
 }
 
@@ -100,12 +95,8 @@ void MediaDevicesEnumerationRequest::cancel()
 
 void MediaDevicesEnumerationRequest::setDeviceInfo(const Vector<CaptureDevice>& deviceList, const String& deviceIdentifierHashSalt, bool originHasPersistentAccess)
 {
-    m_deviceList = deviceList;
-    m_deviceIdentifierHashSalt = deviceIdentifierHashSalt;
-    m_originHasPersistentAccess = originHasPersistentAccess;
-
     if (m_completionHandler)
-        m_completionHandler(m_deviceList, m_deviceIdentifierHashSalt, m_originHasPersistentAccess);
+        m_completionHandler(deviceList, deviceIdentifierHashSalt, originHasPersistentAccess);
     m_completionHandler = nullptr;
 }
 

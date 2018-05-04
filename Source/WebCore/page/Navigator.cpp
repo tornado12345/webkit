@@ -31,26 +31,27 @@
 #include "FrameLoader.h"
 #include "FrameLoaderClient.h"
 #include "Geolocation.h"
-#include "Language.h"
+#include "LoaderStrategy.h"
 #include "Page.h"
+#include "PlatformStrategies.h"
 #include "PluginData.h"
 #include "ScriptController.h"
 #include "SecurityOrigin.h"
 #include "Settings.h"
+#include <wtf/Language.h>
 #include <wtf/StdLibExtras.h>
 
-using namespace WTF;
 
 namespace WebCore {
+using namespace WTF;
 
-Navigator::Navigator(Frame& frame)
-    : DOMWindowProperty(&frame)
+Navigator::Navigator(ScriptExecutionContext& context, Frame& frame)
+    : NavigatorBase(context)
+    , DOMWindowProperty(&frame)
 {
 }
 
-Navigator::~Navigator()
-{
-}
+Navigator::~Navigator() = default;
 
 // If this function returns true, we need to hide the substring "4." that would otherwise
 // appear in the appVersion string. This is to avoid problems with old versions of a
@@ -89,6 +90,11 @@ String Navigator::userAgent() const
     return m_frame->loader().userAgent(m_frame->document()->url());
 }
 
+bool Navigator::onLine() const
+{
+    return platformStrategies()->loaderStrategy()->isOnLine();
+}
+
 DOMPluginArray& Navigator::plugins()
 {
     if (!m_plugins)
@@ -125,7 +131,7 @@ bool Navigator::javaEnabled() const
 
     if (!m_frame->settings().isJavaEnabled())
         return false;
-    if (m_frame->document()->securityOrigin()->isLocal() && !m_frame->settings().isJavaEnabledForLocalFiles())
+    if (m_frame->document()->securityOrigin().isLocal() && !m_frame->settings().isJavaEnabledForLocalFiles())
         return false;
 
     return true;

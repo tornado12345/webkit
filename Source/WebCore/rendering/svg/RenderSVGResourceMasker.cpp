@@ -26,17 +26,18 @@
 #include "Image.h"
 #include "IntRect.h"
 #include "SVGRenderingContext.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(RenderSVGResourceMasker);
 
 RenderSVGResourceMasker::RenderSVGResourceMasker(SVGMaskElement& element, RenderStyle&& style)
     : RenderSVGResourceContainer(element, WTFMove(style))
 {
 }
 
-RenderSVGResourceMasker::~RenderSVGResourceMasker()
-{
-}
+RenderSVGResourceMasker::~RenderSVGResourceMasker() = default;
 
 void RenderSVGResourceMasker::removeAllClientsFromCache(bool markForInvalidation)
 {
@@ -53,10 +54,10 @@ void RenderSVGResourceMasker::removeClientFromCache(RenderElement& client, bool 
     markClientForInvalidation(client, markForInvalidation ? BoundariesInvalidation : ParentOnlyInvalidation);
 }
 
-bool RenderSVGResourceMasker::applyResource(RenderElement& renderer, const RenderStyle&, GraphicsContext*& context, unsigned short resourceMode)
+bool RenderSVGResourceMasker::applyResource(RenderElement& renderer, const RenderStyle&, GraphicsContext*& context, OptionSet<RenderSVGResourceMode> resourceMode)
 {
     ASSERT(context);
-    ASSERT_UNUSED(resourceMode, resourceMode == ApplyToDefaultMode);
+    ASSERT_UNUSED(resourceMode, resourceMode == RenderSVGResourceMode::ApplyToDefault);
 
     bool missingMaskerData = !m_masker.contains(&renderer);
     if (missingMaskerData)
@@ -93,8 +94,8 @@ bool RenderSVGResourceMasker::drawContentIntoMaskImage(MaskerData* maskerData, C
     AffineTransform maskContentTransformation;
     if (maskElement().maskContentUnits() == SVGUnitTypes::SVG_UNIT_TYPE_OBJECTBOUNDINGBOX) {
         FloatRect objectBoundingBox = object->objectBoundingBox();
-        maskContentTransformation.translate(objectBoundingBox.x(), objectBoundingBox.y());
-        maskContentTransformation.scaleNonUniform(objectBoundingBox.width(), objectBoundingBox.height());
+        maskContentTransformation.translate(objectBoundingBox.location());
+        maskContentTransformation.scale(objectBoundingBox.size());
         maskImageContext.concatCTM(maskContentTransformation);
     }
 
@@ -112,7 +113,7 @@ bool RenderSVGResourceMasker::drawContentIntoMaskImage(MaskerData* maskerData, C
     }
 
 #if !USE(CG)
-    maskerData->maskImage->transformColorSpace(ColorSpaceDeviceRGB, colorSpace);
+    maskerData->maskImage->transformColorSpace(ColorSpaceSRGB, colorSpace);
 #else
     UNUSED_PARAM(colorSpace);
 #endif
@@ -152,8 +153,8 @@ FloatRect RenderSVGResourceMasker::resourceBoundingBox(const RenderObject& objec
     FloatRect maskRect = m_maskContentBoundaries;
     if (maskElement().maskContentUnits() == SVGUnitTypes::SVG_UNIT_TYPE_OBJECTBOUNDINGBOX) {
         AffineTransform transform;
-        transform.translate(objectBoundingBox.x(), objectBoundingBox.y());
-        transform.scaleNonUniform(objectBoundingBox.width(), objectBoundingBox.height());
+        transform.translate(objectBoundingBox.location());
+        transform.scale(objectBoundingBox.size());
         maskRect = transform.mapRect(maskRect);
     }
 

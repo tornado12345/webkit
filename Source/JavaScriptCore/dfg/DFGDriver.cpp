@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011-2014, 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2011-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -38,6 +38,7 @@
 #include "JITCode.h"
 #include "JSCInlines.h"
 #include "Options.h"
+#include "ThunkGenerators.h"
 #include "TypeProfilerLog.h"
 #include <wtf/Atomics.h>
 #include <wtf/NeverDestroyed.h>
@@ -70,7 +71,7 @@ static FunctionWhitelist& ensureGlobalDFGWhitelist()
 static CompilationResult compileImpl(
     VM& vm, CodeBlock* codeBlock, CodeBlock* profiledDFGCodeBlock, CompilationMode mode,
     unsigned osrEntryBytecodeIndex, const Operands<JSValue>& mustHandleValues,
-    PassRefPtr<DeferredCompilationCallback> callback)
+    Ref<DeferredCompilationCallback>&& callback)
 {
     if (!Options::bytecodeRangeToDFGCompile().isInRange(codeBlock->instructionCount())
         || !ensureGlobalDFGWhitelist().contains(codeBlock))
@@ -88,6 +89,8 @@ static CompilationResult compileImpl(
     
     // Make sure that any stubs that the DFG is going to use are initialized. We want to
     // make sure that all JIT code generation does finalization on the main thread.
+    vm.getCTIStub(arityFixupGenerator);
+    vm.getCTIStub(osrExitThunkGenerator);
     vm.getCTIStub(osrExitGenerationThunkGenerator);
     vm.getCTIStub(throwExceptionFromCallSlowPathGenerator);
     vm.getCTIStub(linkCallThunkGenerator);
@@ -96,25 +99,25 @@ static CompilationResult compileImpl(
     if (vm.typeProfiler())
         vm.typeProfilerLog()->processLogEntries(ASCIILiteral("Preparing for DFG compilation."));
     
-    RefPtr<Plan> plan = adoptRef(
-        new Plan(codeBlock, profiledDFGCodeBlock, mode, osrEntryBytecodeIndex, mustHandleValues));
+    Ref<Plan> plan = adoptRef(
+        *new Plan(codeBlock, profiledDFGCodeBlock, mode, osrEntryBytecodeIndex, mustHandleValues));
     
-    plan->callback = callback;
+    plan->callback = WTFMove(callback);
     if (Options::useConcurrentJIT()) {
         Worklist& worklist = ensureGlobalWorklistFor(mode);
         if (logCompilationChanges(mode))
             dataLog("Deferring DFG compilation of ", *codeBlock, " with queue length ", worklist.queueLength(), ".\n");
-        worklist.enqueue(plan);
+        worklist.enqueue(WTFMove(plan));
         return CompilationDeferred;
     }
     
-    plan->compileInThread(*vm.dfgState, 0);
+    plan->compileInThread(nullptr);
     return plan->finalizeWithoutNotifyingCallback();
 }
 #else // ENABLE(DFG_JIT)
 static CompilationResult compileImpl(
     VM&, CodeBlock*, CodeBlock*, CompilationMode, unsigned, const Operands<JSValue>&,
-    PassRefPtr<DeferredCompilationCallback>)
+    Ref<DeferredCompilationCallback>&&)
 {
     return CompilationFailed;
 }
@@ -123,12 +126,11 @@ static CompilationResult compileImpl(
 CompilationResult compile(
     VM& vm, CodeBlock* codeBlock, CodeBlock* profiledDFGCodeBlock, CompilationMode mode,
     unsigned osrEntryBytecodeIndex, const Operands<JSValue>& mustHandleValues,
-    PassRefPtr<DeferredCompilationCallback> passedCallback)
+    Ref<DeferredCompilationCallback>&& callback)
 {
-    RefPtr<DeferredCompilationCallback> callback = passedCallback;
     CompilationResult result = compileImpl(
         vm, codeBlock, profiledDFGCodeBlock, mode, osrEntryBytecodeIndex, mustHandleValues,
-        callback);
+        callback.copyRef());
     if (result != CompilationDeferred)
         callback->compilationDidComplete(codeBlock, profiledDFGCodeBlock, result);
     return result;

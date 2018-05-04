@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005, 2006, 2007, 2008, 2014-2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2005-2018 Apple Inc. All rights reserved.
  * Copyright (C) 2006 Jonas Witt <jonas.witt@gmail.com>
  * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
  * Copyright (C) 2006 Alexey Proskuryakov <ap@nypop.com>
@@ -35,23 +35,27 @@
 #import "DumpRenderTree.h"
 #import "DumpRenderTreeDraggingInfo.h"
 #import "DumpRenderTreeFileDraggingSource.h"
+#import "DumpRenderTreePasteboard.h"
 #import "WebCoreTestSupport.h"
 #import <WebKit/DOMPrivate.h>
 #import <WebKit/WebKit.h>
 #import <WebKit/WebViewPrivate.h>
 #import <functional>
+#import <wtf/RetainPtr.h>
 
 #if !PLATFORM(IOS)
 #import <Carbon/Carbon.h> // for GetCurrentEventTime()
+#import <WebKit/WebHTMLView.h>
+#import <objc/runtime.h>
 #import <wtf/mac/AppKitCompatibilityDeclarations.h>
 #endif
 
 #if PLATFORM(IOS)
-#import <WebCore/GraphicsServicesSPI.h> // for GSCurrentEventTimestamp()
+#import <UIKit/UIKit.h>
 #import <WebKit/KeyEventCodesIOS.h>
 #import <WebKit/WAKWindow.h>
 #import <WebKit/WebEvent.h>
-#import <UIKit/UIKit.h>
+#import <pal/spi/ios/GraphicsServicesSPI.h> // for GSCurrentEventTimestamp()
 #endif
 
 #if !PLATFORM(IOS)
@@ -138,6 +142,35 @@ BOOL replayingSavedEvents;
 
 @implementation EventSendingController
 
+#if PLATFORM(MAC)
+static NSDraggingSession *drt_WebHTMLView_beginDraggingSessionWithItemsEventSource(WebHTMLView *self, id _cmd, NSArray<NSDraggingItem *> *items, NSEvent *event, id<NSDraggingSource> source)
+{
+    ASSERT(!draggingInfo);
+
+    WebFrameView *webFrameView = ^ {
+        for (NSView *superview = self.superview; superview; superview = superview.superview) {
+            if ([superview isKindOfClass:WebFrameView.class])
+                return (WebFrameView *)superview;
+        }
+
+        ASSERT_NOT_REACHED();
+        return (WebFrameView *)nil;
+    }();
+
+    WebView *webView = webFrameView.webFrame.webView;
+
+    NSPasteboard *pasteboard = [NSPasteboard pasteboardWithName:NSDragPboard];
+    for (NSDraggingItem *item in items)
+        [pasteboard writeObjects:@[ item.item ]];
+
+    draggingInfo = [[DumpRenderTreeDraggingInfo alloc] initWithImage:nil offset:NSZeroSize pasteboard:pasteboard source:source];
+    [webView draggingUpdated:draggingInfo];
+    [EventSendingController replaySavedEvents];
+
+    return nullptr;
+}
+#endif
+
 + (void)initialize
 {
     webkitDomEventNames = [[NSArray alloc] initWithObjects:
@@ -188,6 +221,15 @@ BOOL replayingSavedEvents;
         @"unload",
         @"zoom",
         nil];
+
+#if PLATFORM(MAC)
+    // Add an implementation of -[WebHTMLView beginDraggingSessionWithItems:event:source:].
+    SEL selector = @selector(beginDraggingSessionWithItems:event:source:);
+    const char* typeEncoding = method_getTypeEncoding(class_getInstanceMethod(NSView.class, selector));
+
+    if (!class_addMethod(WebHTMLView.class, selector, reinterpret_cast<IMP>(drt_WebHTMLView_beginDraggingSessionWithItemsEventSource), typeEncoding))
+        ASSERT_NOT_REACHED();
+#endif
 }
 
 + (BOOL)isSelectorExcludedFromWebScript:(SEL)aSelector
@@ -215,6 +257,7 @@ BOOL replayingSavedEvents;
             || aSelector == @selector(callAfterScrollingCompletes:)
 #if PLATFORM(MAC)
             || aSelector == @selector(beginDragWithFiles:)
+            || aSelector == @selector(beginDragWithFilePromises:)
 #endif
 #if PLATFORM(IOS)
             || aSelector == @selector(addTouchAtX:y:)
@@ -246,6 +289,8 @@ BOOL replayingSavedEvents;
 #if PLATFORM(MAC)
     if (aSelector == @selector(beginDragWithFiles:))
         return @"beginDragWithFiles";
+    if (aSelector == @selector(beginDragWithFilePromises:))
+        return @"beginDragWithFilePromises";
 #endif
     if (aSelector == @selector(contextClick))
         return @"contextClick";
@@ -417,6 +462,46 @@ static NSEventType eventTypeForMouseButtonAndAction(int button, MouseAction acti
 
     dragMode = NO; // dragMode saves events and then replays them later.  We don't need/want that.
     leftMouseButtonDown = YES; // Make the rest of eventSender think a drag is in progress
+}
+
+- (void)beginDragWithFilePromises:(WebScriptObject *)filePaths
+{
+    assert(!draggingInfo);
+
+    NSPasteboard *pasteboard = [NSPasteboard pasteboardWithUniqueName];
+    [pasteboard declareTypes:@[NSFilesPromisePboardType, NSFilenamesPboardType] owner:nil];
+
+    NSURL *currentTestURL = [NSURL URLWithString:mainFrame.webView.mainFrameURL];
+
+    size_t i = 0;
+    NSMutableArray *fileURLs = [NSMutableArray array];
+    NSMutableArray *fileUTIs = [NSMutableArray array];
+    while (true) {
+        id filePath = [filePaths webScriptValueAtIndex:i++];
+        if (![filePath isKindOfClass:NSString.class])
+            break;
+
+        NSURL *fileURL = [NSURL fileURLWithPath:(NSString *)filePath relativeToURL:currentTestURL];
+        [fileURLs addObject:fileURL];
+
+        NSString *fileUTI;
+        if (![fileURL getResourceValue:&fileUTI forKey:NSURLTypeIdentifierKey error:nil])
+            break;
+        [fileUTIs addObject:fileUTI];
+    }
+
+    [pasteboard setPropertyList:fileUTIs forType:NSFilesPromisePboardType];
+    assert([pasteboard propertyListForType:NSFilesPromisePboardType]);
+
+    [pasteboard setPropertyList:@[@"file-name-should-not-be-used"] forType:NSFilenamesPboardType];
+    assert([pasteboard propertyListForType:NSFilenamesPboardType]);
+
+    auto source = adoptNS([[DumpRenderTreeFileDraggingSource alloc] initWithPromisedFileURLs:fileURLs]);
+    draggingInfo = [[DumpRenderTreeDraggingInfo alloc] initWithImage:nil offset:NSZeroSize pasteboard:pasteboard source:source.get()];
+    [mainFrame.webView draggingEntered:draggingInfo];
+
+    dragMode = NO;
+    leftMouseButtonDown = YES;
 }
 #endif // !PLATFORM(IOS)
 
@@ -643,9 +728,9 @@ static int buildModifierFlags(const WebScriptObject* modifiers)
 
     NSView *view = [mainFrame webView];
 #if !PLATFORM(IOS)
-    lastMousePosition = [view convertPoint:NSMakePoint(x, [view frame].size.height - y) toView:nil];
+    NSPoint newMousePosition = [view convertPoint:NSMakePoint(x, [view frame].size.height - y) toView:nil];
     NSEvent *event = [NSEvent mouseEventWithType:(leftMouseButtonDown ? NSEventTypeLeftMouseDragged : NSEventTypeMouseMoved)
-                                        location:lastMousePosition 
+                                        location:newMousePosition
                                    modifierFlags:0 
                                        timestamp:[self currentEventTime]
                                     windowNumber:[[view window] windowNumber] 
@@ -653,6 +738,11 @@ static int buildModifierFlags(const WebScriptObject* modifiers)
                                      eventNumber:++eventNumber 
                                       clickCount:(leftMouseButtonDown ? clickCount : 0) 
                                         pressure:0.0];
+    CGEventRef cgEvent = event.CGEvent;
+    CGEventSetIntegerValueField(cgEvent, kCGMouseEventDeltaX, newMousePosition.x - lastMousePosition.x);
+    CGEventSetIntegerValueField(cgEvent, kCGMouseEventDeltaY, newMousePosition.y - lastMousePosition.y);
+    event = [NSEvent eventWithCGEvent:cgEvent];
+    lastMousePosition = newMousePosition;
 #else
     lastMousePosition = [view convertPoint:NSMakePoint(x, y) toView:nil];
     WebEvent *event = [[WebEvent alloc] initWithMouseEventType:WebEventMouseMoved
@@ -889,6 +979,10 @@ static int buildModifierFlags(const WebScriptObject* modifiers)
         const unichar ch = NSDeleteFunctionKey;
         eventCharacter = [NSString stringWithCharacters:&ch length:1];
         keyCode = 0x75;
+    } else if ([character isEqualToString:@"escape"]) {
+        const unichar ch = 0x1B;
+        eventCharacter = [NSString stringWithCharacters:&ch length:1];
+        keyCode = 0x35;
     } else if ([character isEqualToString:@"printScreen"]) {
         const unichar ch = NSPrintScreenFunctionKey;
         eventCharacter = [NSString stringWithCharacters:&ch length:1];

@@ -17,8 +17,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGFEConvolveMatrixElement_h
-#define SVGFEConvolveMatrixElement_h
+#pragma once
 
 #include "FEConvolveMatrix.h"
 #include "SVGAnimatedBoolean.h"
@@ -64,6 +63,7 @@ struct SVGPropertyTraits<EdgeModeType> {
 };
 
 class SVGFEConvolveMatrixElement final : public SVGFilterPrimitiveStandardAttributes {
+    WTF_MAKE_ISO_ALLOCATED(SVGFEConvolveMatrixElement);
 public:
     static Ref<SVGFEConvolveMatrixElement> create(const QualifiedName&, Document&);
 
@@ -100,5 +100,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif

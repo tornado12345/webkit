@@ -27,8 +27,11 @@
 #include "Document.h"
 #include "HTMLHeadElement.h"
 #include "HTMLNames.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(HTMLMetaElement);
 
 using namespace HTMLNames;
 
@@ -36,6 +39,11 @@ inline HTMLMetaElement::HTMLMetaElement(const QualifiedName& tagName, Document& 
     : HTMLElement(tagName, document)
 {
     ASSERT(hasTagName(metaTag));
+}
+
+Ref<HTMLMetaElement> HTMLMetaElement::create(Document& document)
+{
+    return adoptRef(*new HTMLMetaElement(metaTag, document));
 }
 
 Ref<HTMLMetaElement> HTMLMetaElement::create(const QualifiedName& tagName, Document& document)
@@ -55,18 +63,23 @@ void HTMLMetaElement::parseAttribute(const QualifiedName& name, const AtomicStri
         HTMLElement::parseAttribute(name, value);
 }
 
-Node::InsertionNotificationRequest HTMLMetaElement::insertedInto(ContainerNode& insertionPoint)
+Node::InsertedIntoAncestorResult HTMLMetaElement::insertedIntoAncestor(InsertionType insertionType, ContainerNode& parentOfInsertedTree)
 {
-    HTMLElement::insertedInto(insertionPoint);
-    if (insertionPoint.inDocument())
-        process();
-    return InsertionDone;
+    HTMLElement::insertedIntoAncestor(insertionType, parentOfInsertedTree);
+    if (insertionType.connectedToDocument)
+        return InsertedIntoAncestorResult::NeedsPostInsertionCallback;
+    return InsertedIntoAncestorResult::Done;
+}
+
+void HTMLMetaElement::didFinishInsertingNode()
+{
+    process();
 }
 
 void HTMLMetaElement::process()
 {
     // Changing a meta tag while it's not in the tree shouldn't have any effect on the document.
-    if (!inDocument())
+    if (!isConnected())
         return;
 
     const AtomicString& contentValue = attributeWithoutSynchronization(contentAttr);

@@ -1,7 +1,7 @@
 <!doctype html>
-<!-- 
+<!--
 This test uses data only, and thus does not require fake media devices.
- -->
+-->
 
 <html>
 <head>
@@ -14,7 +14,7 @@ This test uses data only, and thus does not require fake media devices.
   <div id="stateinfo">
   </div>
 
-  <!--  These files are in place when executing on W3C.  -->
+  <!-- These files are in place when executing on W3C. -->
   <script src="/resources/testharness.js"></script>
   <script src="/resources/testharnessreport.js"></script>
   <script type="text/javascript">
@@ -34,10 +34,6 @@ This test uses data only, and thus does not require fake media devices.
     if (event.candidate) {
       gFirstConnection.addIceCandidate(event.candidate);
     }
-  });
-
-  var onRemoteStream = test.step_func(function(event) {
-    assert_unreached('WebRTC received a stream when there was none');
   });
 
   var onIceConnectionStateChange = test.step_func(function(event) {
@@ -75,7 +71,6 @@ This test uses data only, and thus does not require fake media devices.
 
     gSecondConnection = new RTCPeerConnection(null);
     gSecondConnection.onicecandidate = onIceCandidateToSecond;
-    gSecondConnection.onaddstream = onRemoteStream;
     gSecondConnection.oniceconnectionstatechange = onIceConnectionStateChange;
 
     // The createDataChannel is necessary and sufficient to make

@@ -38,24 +38,19 @@ log = logging.getLogger('global')
 
 
 class CppFrontendDispatcherImplementationGenerator(CppGenerator):
-    def __init__(self, model, input_filepath):
-        CppGenerator.__init__(self, model, input_filepath)
+    def __init__(self, *args, **kwargs):
+        CppGenerator.__init__(self, *args, **kwargs)
 
     def output_filename(self):
         return "%sFrontendDispatchers.cpp" % self.protocol_name()
 
     def domains_to_generate(self):
-        return filter(lambda domain: len(domain.events) > 0, Generator.domains_to_generate(self))
+        return filter(lambda domain: len(self.events_for_domain(domain)) > 0, Generator.domains_to_generate(self))
 
     def generate_output(self):
-        secondary_headers = [
-            '"InspectorFrontendRouter.h"',
-            '<wtf/text/CString.h>',
-        ]
-
         header_args = {
             'primaryInclude': '"%sFrontendDispatchers.h"' % self.protocol_name(),
-            'secondaryIncludes': "\n".join(['#include %s' % header for header in secondary_headers]),
+            'secondaryIncludes': self._generate_secondary_header_includes(),
         }
 
         sections = []
@@ -67,9 +62,18 @@ class CppFrontendDispatcherImplementationGenerator(CppGenerator):
 
     # Private methods.
 
+    def _generate_secondary_header_includes(self):
+        header_includes = [
+            (["JavaScriptCore", "WebKit"], ("JavaScriptCore", "inspector/InspectorFrontendRouter.h")),
+            (["JavaScriptCore", "WebKit"], ("WTF", "wtf/text/CString.h"))
+        ]
+
+        return '\n'.join(self.generate_includes_from_entries(header_includes))
+
     def _generate_dispatcher_implementations_for_domain(self, domain):
         implementations = []
-        for event in domain.events:
+        events = self.events_for_domain(domain)
+        for event in events:
             implementations.append(self._generate_dispatcher_implementation_for_event(event, domain))
 
         return self.wrap_with_guard_for_domain(domain, '\n\n'.join(implementations))
@@ -110,11 +114,11 @@ class CppFrontendDispatcherImplementationGenerator(CppGenerator):
 
         lines.append('void %(domainName)sFrontendDispatcher::%(eventName)s(%(formalParameters)s)' % event_args)
         lines.append('{')
-        lines.append('    Ref<InspectorObject> jsonMessage = InspectorObject::create();')
+        lines.append('    Ref<JSON::Object> jsonMessage = JSON::Object::create();')
         lines.append('    jsonMessage->setString(ASCIILiteral("method"), ASCIILiteral("%(domainName)s.%(eventName)s"));' % event_args)
 
         if len(parameter_assignments) > 0:
-            lines.append('    Ref<InspectorObject> paramsObject = InspectorObject::create();')
+            lines.append('    Ref<JSON::Object> paramsObject = JSON::Object::create();')
             lines.extend(parameter_assignments)
             lines.append('    jsonMessage->setObject(ASCIILiteral("params"), WTFMove(paramsObject));')
 

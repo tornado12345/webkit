@@ -22,8 +22,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef RenderTableCell_h
-#define RenderTableCell_h
+#pragma once
 
 #include "RenderBlockFlow.h"
 #include "RenderTableRow.h"
@@ -38,6 +37,7 @@ static const unsigned maxColumnIndex = 0x1FFFFFE; // 33554430
 enum IncludeBorderColorOrNot { DoNotIncludeBorderColor, IncludeBorderColor };
 
 class RenderTableCell final : public RenderBlockFlow {
+    WTF_MAKE_ISO_ALLOCATED(RenderTableCell);
 public:
     RenderTableCell(Element&, RenderStyle&&);
     RenderTableCell(Document&, RenderStyle&&);
@@ -109,8 +109,8 @@ public:
     bool cellWidthChanged() const { return m_cellWidthChanged; }
     void setCellWidthChanged(bool b = true) { m_cellWidthChanged = b; }
 
-    static std::unique_ptr<RenderTableCell> createAnonymousWithParentRenderer(const RenderTableRow&);
-    std::unique_ptr<RenderBox> createAnonymousBoxWithSameTypeAs(const RenderBox&) const override;
+    static RenderPtr<RenderTableCell> createAnonymousWithParentRenderer(const RenderTableRow&);
+    RenderPtr<RenderBox> createAnonymousBoxWithSameTypeAs(const RenderBox&) const override;
 
     // This function is used to unify which table part's style we use for computing direction and
     // writing mode. Writing modes are not allowed on row group and row but direction is.
@@ -139,7 +139,7 @@ protected:
     void computePreferredLogicalWidths() override;
 
 private:
-    static std::unique_ptr<RenderTableCell> createTableCellWithStyle(Document&, const RenderStyle&);
+    static RenderPtr<RenderTableCell> createTableCellWithStyle(Document&, const RenderStyle&);
 
     const char* renderName() const override { return (isAnonymous() || isPseudoElement()) ? "RenderTableCell (anonymous)" : "RenderTableCell"; }
 
@@ -198,6 +198,8 @@ private:
 
     void nextSibling() const = delete;
     void previousSibling() const = delete;
+
+    bool hasLineIfEmpty() const final;
 
     // Note MSVC will only pack members if they have identical types, hence we use unsigned instead of bool here.
     unsigned m_column : 25;
@@ -376,7 +378,7 @@ inline void RenderTableCell::invalidateHasEmptyCollapsedBorders()
     m_hasEmptyCollapsedEndBorder = false;
 }
 
-inline std::unique_ptr<RenderBox> RenderTableCell::createAnonymousBoxWithSameTypeAs(const RenderBox& renderer) const
+inline RenderPtr<RenderBox> RenderTableCell::createAnonymousBoxWithSameTypeAs(const RenderBox& renderer) const
 {
     return RenderTableCell::createTableCellWithStyle(renderer.document(), renderer.style());
 }
@@ -384,5 +386,3 @@ inline std::unique_ptr<RenderBox> RenderTableCell::createAnonymousBoxWithSameTyp
 } // namespace WebCore
 
 SPECIALIZE_TYPE_TRAITS_RENDER_OBJECT(RenderTableCell, isTableCell())
-
-#endif // RenderTableCell_h

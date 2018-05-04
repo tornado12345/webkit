@@ -1,4 +1,4 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl
 
 # Copyright (C) 2014 Apple Inc. All rights reserved.
 #
@@ -27,6 +27,7 @@
 # THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use strict;
+use warnings;
 use File::Basename;
 use FindBin;
 use Getopt::Long qw(:config pass_through);
@@ -62,6 +63,6 @@ my @xcodeOptions = ("-target", "ImageDiff");
 push @xcodeOptions, XcodeOptions();
 
 # Build
-chdir "Tools/DumpRenderTree" or die;
-$result = buildXCodeProject("DumpRenderTree", $clean, @xcodeOptions, @ARGV);
+chdir "Tools/ImageDiff" or die;
+$result = buildXCodeProject("ImageDiff", $clean, @xcodeOptions, @ARGV);
 exit exitStatus($result);

@@ -28,8 +28,7 @@
  * SUCH DAMAGE.
  */
 
-#ifndef CSSParserMode_h
-#define CSSParserMode_h
+#pragma once
 
 #include "TextEncoding.h"
 #include "URL.h"
@@ -97,9 +96,6 @@ public:
     String charset;
     CSSParserMode mode { HTMLStandardMode };
     bool isHTMLDocument { false };
-#if ENABLE(CSS_GRID_LAYOUT)
-    bool cssGridLayoutEnabled { false };
-#endif
 #if ENABLE(TEXT_AUTOSIZING)
     bool textAutosizingEnabled { false };
 #endif
@@ -107,8 +103,17 @@ public:
     bool enforcesCSSMIMETypeInNoQuirksMode { true };
     bool useLegacyBackgroundSizeShorthandBehavior { false };
     bool springTimingFunctionEnabled { false };
-    bool useNewParser { false };
+    bool constantPropertiesEnabled { false };
+    bool conicGradientsEnabled { false };
+    bool colorFilterEnabled { false };
+    bool deferredCSSParserEnabled { false };
+    bool allowNewLinesClamp { false };
     
+    // This is only needed to support getMatchedCSSRules.
+    bool hasDocumentSecurityOrigin { false };
+    
+    bool useSystemAppearance { false };
+
     URL completeURL(const String& url) const
     {
         if (url.isNull())
@@ -117,10 +122,6 @@ public:
             return URL(baseURL, url);
         return URL(baseURL, url, TextEncoding(charset));
     }
-
-#if ENABLE(VARIATION_FONTS)
-    bool variationFontsEnabled { false };
-#endif
 };
 
 bool operator==(const CSSParserContext&, const CSSParserContext&);
@@ -132,24 +133,22 @@ struct CSSParserContextHash {
     static unsigned hash(const CSSParserContext& key)
     {
         auto hash = URLHash::hash(key.baseURL);
-        hash ^= StringHash::hash(key.charset);
+        if (!key.charset.isEmpty())
+            hash ^= StringHash::hash(key.charset);
         unsigned bits = key.isHTMLDocument                  << 0
             & key.isHTMLDocument                            << 1
-#if ENABLE(CSS_GRID_LAYOUT)
-            & key.cssGridLayoutEnabled                      << 2
-#endif
 #if ENABLE(TEXT_AUTOSIZING)
-            & key.textAutosizingEnabled                     << 3
+            & key.textAutosizingEnabled                     << 2
 #endif
-            & key.needsSiteSpecificQuirks                   << 4
-            & key.enforcesCSSMIMETypeInNoQuirksMode         << 5
-            & key.useLegacyBackgroundSizeShorthandBehavior  << 6
-            & key.springTimingFunctionEnabled               << 7
-            & key.useNewParser                              << 8
-#if ENABLE(VARIATION_FONTS)
-            & key.variationFontsEnabled                     << 9
-#endif
-            & key.mode                                      << 10;
+            & key.needsSiteSpecificQuirks                   << 3
+            & key.enforcesCSSMIMETypeInNoQuirksMode         << 4
+            & key.useLegacyBackgroundSizeShorthandBehavior  << 5
+            & key.springTimingFunctionEnabled               << 6
+            & key.conicGradientsEnabled                     << 7
+            & key.deferredCSSParserEnabled                  << 8
+            & key.hasDocumentSecurityOrigin                 << 9
+            & key.mode                                      << 10
+            & key.allowNewLinesClamp                        << 11;
         hash ^= WTF::intHash(bits);
         return hash;
     }
@@ -160,7 +159,7 @@ struct CSSParserContextHash {
     static const bool safeToCompareToEmptyOrDeleted = false;
 };
 
-}
+} // namespace WebCore
 
 namespace WTF {
 template<> struct HashTraits<WebCore::CSSParserContext> : GenericHashTraits<WebCore::CSSParserContext> {
@@ -172,6 +171,4 @@ template<> struct HashTraits<WebCore::CSSParserContext> : GenericHashTraits<WebC
 template<> struct DefaultHash<WebCore::CSSParserContext> {
     typedef WebCore::CSSParserContextHash Hash;
 };
-}
-
-#endif // CSSParserMode_h
+} // namespace WTF

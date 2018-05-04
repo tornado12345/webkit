@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,31 +33,46 @@
 
 namespace JSC {
 
-inline void CodeBlockSet::mark(const LockHolder& locker, void* candidateCodeBlock)
-{
-    ASSERT(m_lock.isLocked());
-    // We have to check for 0 and -1 because those are used by the HashMap as markers.
-    uintptr_t value = reinterpret_cast<uintptr_t>(candidateCodeBlock);
-    
-    // This checks for both of those nasty cases in one go.
-    // 0 + 1 = 1
-    // -1 + 1 = 0
-    if (value + 1 <= 1)
-        return;
-
-    CodeBlock* codeBlock = static_cast<CodeBlock*>(candidateCodeBlock); 
-    if (!m_oldCodeBlocks.contains(codeBlock) && !m_newCodeBlocks.contains(codeBlock))
-        return;
-
-    mark(locker, codeBlock);
-}
-
-inline void CodeBlockSet::mark(const LockHolder&, CodeBlock* codeBlock)
+inline void CodeBlockSet::mark(const AbstractLocker&, CodeBlock* codeBlock)
 {
     if (!codeBlock)
         return;
 
     m_currentlyExecuting.add(codeBlock);
+}
+
+template<typename Functor>
+void CodeBlockSet::iterate(const Functor& functor)
+{
+    auto locker = holdLock(m_lock);
+    iterate(locker, functor);
+}
+
+template<typename Functor>
+void CodeBlockSet::iterate(const AbstractLocker&, const Functor& functor)
+{
+    for (CodeBlock* codeBlock : m_codeBlocks)
+        functor(codeBlock);
+}
+
+template<typename Functor>
+void CodeBlockSet::iterateViaSubspaces(VM& vm, const Functor& functor)
+{
+    vm.forEachCodeBlockSpace(
+        [&] (IsoSubspace& space) {
+            space.forEachLiveCell(
+                [&] (HeapCell* cell, HeapCell::Kind) {
+                    functor(jsCast<CodeBlock*>(static_cast<JSCell*>(cell)));
+                });
+        });
+}
+
+template<typename Functor>
+void CodeBlockSet::iterateCurrentlyExecuting(const Functor& functor)
+{
+    LockHolder locker(&m_lock);
+    for (CodeBlock* codeBlock : m_currentlyExecuting)
+        functor(codeBlock);
 }
 
 } // namespace JSC

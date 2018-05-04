@@ -23,9 +23,9 @@
 #include "config.h"
 #include "WebKitCommonEncryptionDecryptorGStreamer.h"
 
-#if ENABLE(LEGACY_ENCRYPTED_MEDIA) && USE(GSTREAMER)
+#if ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER)
 
-#include "GRefPtrGStreamer.h"
+#include "GStreamerCommon.h"
 #include <wtf/Condition.h>
 #include <wtf/RunLoop.h>
 
@@ -44,7 +44,7 @@ static GstCaps* webkitMediaCommonEncryptionDecryptTransformCaps(GstBaseTransform
 static GstFlowReturn webkitMediaCommonEncryptionDecryptTransformInPlace(GstBaseTransform*, GstBuffer*);
 static gboolean webkitMediaCommonEncryptionDecryptSinkEventHandler(GstBaseTransform*, GstEvent*);
 
-static gboolean webKitMediaCommonEncryptionDecryptDefaultSetupCipher(WebKitMediaCommonEncryptionDecrypt*);
+static gboolean webKitMediaCommonEncryptionDecryptDefaultSetupCipher(WebKitMediaCommonEncryptionDecrypt*, GstBuffer*);
 static void webKitMediaCommonEncryptionDecryptDefaultReleaseCipher(WebKitMediaCommonEncryptionDecrypt*);
 
 GST_DEBUG_CATEGORY_STATIC(webkit_media_common_encryption_decrypt_debug_category);
@@ -112,13 +112,13 @@ static GstCaps* webkitMediaCommonEncryptionDecryptTransformCaps(GstBaseTransform
     unsigned size = gst_caps_get_size(caps);
     for (unsigned i = 0; i < size; ++i) {
         GstStructure* incomingStructure = gst_caps_get_structure(caps, i);
-        GRefPtr<GstStructure> outgoingStructure = nullptr;
+        GUniquePtr<GstStructure> outgoingStructure = nullptr;
 
         if (direction == GST_PAD_SINK) {
             if (!gst_structure_has_field(incomingStructure, "original-media-type"))
                 continue;
 
-            outgoingStructure = adoptGRef(gst_structure_copy(incomingStructure));
+            outgoingStructure = GUniquePtr<GstStructure>(gst_structure_copy(incomingStructure));
             gst_structure_set_name(outgoingStructure.get(), gst_structure_get_string(outgoingStructure.get(), "original-media-type"));
 
             // Filter out the DRM related fields from the down-stream caps.
@@ -130,7 +130,7 @@ static GstCaps* webkitMediaCommonEncryptionDecryptTransformCaps(GstBaseTransform
                     gst_structure_remove_field(outgoingStructure.get(), fieldName);
             }
         } else {
-            outgoingStructure = adoptGRef(gst_structure_copy(incomingStructure));
+            outgoingStructure = GUniquePtr<GstStructure>(gst_structure_copy(incomingStructure));
             // Filter out the video related fields from the up-stream caps,
             // because they are not relevant to the input caps of this element and
             // can cause caps negotiation failures with adaptive bitrate streams.
@@ -168,7 +168,7 @@ static GstCaps* webkitMediaCommonEncryptionDecryptTransformCaps(GstBaseTransform
         }
 
         if (!duplicate)
-            gst_caps_append_structure(transformedCaps, outgoingStructure.leakRef());
+            gst_caps_append_structure(transformedCaps, outgoingStructure.release());
     }
 
     if (filter) {
@@ -197,7 +197,10 @@ static GstFlowReturn webkitMediaCommonEncryptionDecryptTransformInPlace(GstBaseT
             GST_ERROR_OBJECT(self, "can't process key requests in less than PAUSED state");
             return GST_FLOW_NOT_SUPPORTED;
         }
-        priv->condition.waitFor(priv->mutex, std::chrono::seconds(5), [priv] {
+        // Send "decrypt-key-needed" message to the application in order to resend the key if it is available in the application.
+        gst_element_post_message(GST_ELEMENT(self), gst_message_new_element(GST_OBJECT(self), gst_structure_new_empty("decrypt-key-needed")));
+
+        priv->condition.waitFor(priv->mutex, Seconds(5), [priv] {
             return priv->keyReceived;
         });
         if (!priv->keyReceived) {
@@ -253,8 +256,13 @@ static GstFlowReturn webkitMediaCommonEncryptionDecryptTransformInPlace(GstBaseT
         subSamplesBuffer = gst_value_get_buffer(value);
     }
 
+    value = gst_structure_get_value(protectionMeta->info, "kid");
+    GstBuffer* keyIDBuffer = nullptr;
+    if (value)
+        keyIDBuffer = gst_value_get_buffer(value);
+
     WebKitMediaCommonEncryptionDecryptClass* klass = WEBKIT_MEDIA_CENC_DECRYPT_GET_CLASS(self);
-    if (!klass->setupCipher(self)) {
+    if (!klass->setupCipher(self, keyIDBuffer)) {
         GST_ERROR_OBJECT(self, "Failed to configure cipher");
         gst_buffer_remove_meta(buffer, reinterpret_cast<GstMeta*>(protectionMeta));
         return GST_FLOW_NOT_SUPPORTED;
@@ -292,30 +300,19 @@ static gboolean webkitMediaCommonEncryptionDecryptSinkEventHandler(GstBaseTransf
 
     switch (GST_EVENT_TYPE(event)) {
     case GST_EVENT_PROTECTION: {
-        const char* systemId;
-        const char* origin;
-        GstBuffer* initDataBuffer;
+        const char* systemId = nullptr;
 
-        GST_DEBUG_OBJECT(self, "received protection event");
-        gst_event_parse_protection(event, &systemId, &initDataBuffer, &origin);
-        GST_DEBUG_OBJECT(self, "systemId: %s", systemId);
+        gst_event_parse_protection(event, &systemId, nullptr, nullptr);
+        GST_TRACE_OBJECT(self, "received protection event for %s", systemId);
 
-        if (!g_str_equal(systemId, klass->protectionSystemId)) {
-            gst_event_unref(event);
-            result = TRUE;
-            break;
+        if (!g_strcmp0(systemId, klass->protectionSystemId)) {
+            GST_DEBUG_OBJECT(self, "sending protection event to the pipeline");
+            gst_element_post_message(GST_ELEMENT(self),
+                gst_message_new_element(GST_OBJECT(self),
+                    gst_structure_new("drm-key-needed", "event", GST_TYPE_EVENT, event, nullptr)));
         }
 
-        // Keep the event ref around so that the parsed event data
-        // remains valid until the drm-key-need message has been sent.
-        priv->protectionEvent = adoptGRef(event);
-        RunLoop::main().dispatch([self, initDataBuffer] {
-            WebKitMediaCommonEncryptionDecryptClass* klass = WEBKIT_MEDIA_CENC_DECRYPT_GET_CLASS(self);
-            if (klass) {
-                klass->requestDecryptionKey(self, initDataBuffer);
-                self->priv->protectionEvent = nullptr;
-            }});
-
+        gst_event_unref(event);
         result = TRUE;
         break;
     }
@@ -360,7 +357,7 @@ static GstStateChangeReturn webKitMediaCommonEncryptionDecryptorChangeState(GstE
 }
 
 
-static gboolean webKitMediaCommonEncryptionDecryptDefaultSetupCipher(WebKitMediaCommonEncryptionDecrypt*)
+static gboolean webKitMediaCommonEncryptionDecryptDefaultSetupCipher(WebKitMediaCommonEncryptionDecrypt*, GstBuffer*)
 {
     return true;
 }
@@ -370,5 +367,4 @@ static void webKitMediaCommonEncryptionDecryptDefaultReleaseCipher(WebKitMediaCo
 {
 }
 
-
-#endif // ENABLE(LEGACY_ENCRYPTED_MEDIA) && USE(GSTREAMER)
+#endif // ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER)

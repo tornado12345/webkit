@@ -34,9 +34,9 @@
 
 #include <cairo-win32.h>
 
-using namespace std;
 
 namespace WebCore {
+using namespace std;
 
 void FontPlatformData::platformDataInit(HFONT font, float size, HDC hdc, WCHAR* faceName)
 {
@@ -83,6 +83,11 @@ FontPlatformData::FontPlatformData(GDIObject<HFONT> font, cairo_font_face_t* fon
 
     m_scaledFont = adoptRef(cairo_scaled_font_create(fontFace, &fontMatrix, &ctm, options));
     cairo_font_options_destroy(options);
+}
+
+unsigned FontPlatformData::hash() const
+{
+    return PtrHash<cairo_scaled_font_t*>::hash(m_scaledFont.get());
 }
 
 bool FontPlatformData::platformIsEqual(const FontPlatformData& other) const

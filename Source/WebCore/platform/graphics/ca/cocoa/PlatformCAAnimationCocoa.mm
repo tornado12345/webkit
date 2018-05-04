@@ -28,9 +28,9 @@
 
 #import "FloatConversion.h"
 #import "PlatformCAFilters.h"
-#import "QuartzCoreSPI.h"
 #import "TimingFunction.h"
 #import <QuartzCore/QuartzCore.h>
+#import <pal/spi/cocoa/QuartzCoreSPI.h>
 #import <wtf/text/WTFString.h>
 
 using namespace WebCore;
@@ -129,19 +129,19 @@ static PlatformCAAnimation::ValueFunctionType fromCAValueFunctionType(NSString* 
 CAMediaTimingFunction* WebCore::toCAMediaTimingFunction(const TimingFunction* timingFunction, bool reverse)
 {
     ASSERT(timingFunction);
-    if (timingFunction->isCubicBezierTimingFunction()) {
+    if (is<CubicBezierTimingFunction>(timingFunction)) {
         RefPtr<CubicBezierTimingFunction> reversed;
-        const CubicBezierTimingFunction* ctf = static_cast<const CubicBezierTimingFunction*>(timingFunction);
+        auto* function = downcast<CubicBezierTimingFunction>(timingFunction);
 
         if (reverse) {
-            reversed = ctf->createReversed();
-            ctf = reversed.get();
+            reversed = function->createReversed();
+            function = reversed.get();
         }
 
-        float x1 = static_cast<float>(ctf->x1());
-        float y1 = static_cast<float>(ctf->y1());
-        float x2 = static_cast<float>(ctf->x2());
-        float y2 = static_cast<float>(ctf->y2());
+        float x1 = static_cast<float>(function->x1());
+        float y1 = static_cast<float>(function->y1());
+        float x2 = static_cast<float>(function->x2());
+        float y2 = static_cast<float>(function->y2());
         return [CAMediaTimingFunction functionWithControlPoints: x1 : y1 : x2 : y2];
     }
     
@@ -149,14 +149,14 @@ CAMediaTimingFunction* WebCore::toCAMediaTimingFunction(const TimingFunction* ti
     return [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionLinear];
 }
 
-PassRefPtr<PlatformCAAnimation> PlatformCAAnimationCocoa::create(AnimationType type, const String& keyPath)
+Ref<PlatformCAAnimation> PlatformCAAnimationCocoa::create(AnimationType type, const String& keyPath)
 {
-    return adoptRef(new PlatformCAAnimationCocoa(type, keyPath));
+    return adoptRef(*new PlatformCAAnimationCocoa(type, keyPath));
 }
 
-PassRefPtr<PlatformCAAnimation> PlatformCAAnimationCocoa::create(PlatformAnimationRef animation)
+Ref<PlatformCAAnimation> PlatformCAAnimationCocoa::create(PlatformAnimationRef animation)
 {
-    return adoptRef(new PlatformCAAnimationCocoa(animation));
+    return adoptRef(*new PlatformCAAnimationCocoa(animation));
 }
 
 PlatformCAAnimationCocoa::PlatformCAAnimationCocoa(AnimationType type, const String& keyPath)
@@ -196,9 +196,9 @@ PlatformCAAnimationCocoa::~PlatformCAAnimationCocoa()
 {
 }
 
-PassRefPtr<PlatformCAAnimation> PlatformCAAnimationCocoa::copy() const
+Ref<PlatformCAAnimation> PlatformCAAnimationCocoa::copy() const
 {
-    RefPtr<PlatformCAAnimation> animation = create(animationType(), keyPath());
+    auto animation = create(animationType(), keyPath());
     
     animation->setBeginTime(beginTime());
     animation->setDuration(duration());
@@ -212,7 +212,7 @@ PassRefPtr<PlatformCAAnimation> PlatformCAAnimationCocoa::copy() const
     animation->copyTimingFunctionFrom(*this);
     animation->setValueFunction(valueFunction());
 
-    setHasExplicitBeginTime(downcast<PlatformCAAnimationCocoa>(*animation).platformAnimation(), hasExplicitBeginTime(platformAnimation()));
+    setHasExplicitBeginTime(downcast<PlatformCAAnimationCocoa>(animation.get()).platformAnimation(), hasExplicitBeginTime(platformAnimation()));
     
     // Copy the specific Basic or Keyframe values.
     if (animationType() == Keyframe) {
@@ -329,11 +329,7 @@ void PlatformCAAnimationCocoa::setTimingFunction(const TimingFunction* value, bo
             springAnimation.mass = function.mass();
             springAnimation.stiffness = function.stiffness();
             springAnimation.damping = function.damping();
-#if PLATFORM(IOS) || PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 101100
             springAnimation.initialVelocity = function.initialVelocity();
-#else
-            springAnimation.velocity = function.initialVelocity();
-#endif
         }
         break;
     }

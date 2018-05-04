@@ -31,6 +31,31 @@ var unexpectedErrorMessage; // set by onerror when expectingError is not true
         return document.createElement(tagName);
     }
 
+    var rootElement = null;
+    function ensureRootElement()
+    {
+        if (!rootElement || !rootElement.isConnected) {
+            rootElement = document.body || document.documentElement;
+            if (document.documentElement.namespaceURI == 'http://www.w3.org/2000/svg') {
+                // FIXME: Make the test harness use SVG elements naively.
+                var foreignObject = document.createElementNS('http://www.w3.org/2000/svg', 'foreignObject');
+                foreignObject.setAttribute('x', '0px');
+                foreignObject.setAttribute('y', '0px');
+                foreignObject.setAttribute('width', '100%');
+                foreignObject.setAttribute('height', '100%');
+                foreignObject.setAttribute('style', 'padding: 10px; background-color: rgba(255, 255, 255, 0.5)');
+                document.documentElement.appendChild(foreignObject);
+                rootElement = foreignObject;
+            }
+        }
+        return rootElement;
+    }
+
+    moveForeignObjectToTopIfNeeded = function () {
+        if (rootElement && rootElement.localName == 'foreignObject')
+            document.documentElement.appendChild(rootElement);
+    }
+
     function getOrCreate(id, tagName)
     {
         var element = document.getElementById(id);
@@ -40,7 +65,8 @@ var unexpectedErrorMessage; // set by onerror when expectingError is not true
         element = createHTMLElement(tagName);
         element.id = id;
         var refNode;
-        var parent = document.body || document.documentElement;
+        var parent = ensureRootElement();
+
         if (id == "description")
             refNode = getOrCreate("console", "div");
         else
@@ -69,8 +95,8 @@ var unexpectedErrorMessage; // set by onerror when expectingError is not true
     debug = function debug(msg)
     {
         var span = createHTMLElement("span");
-        getOrCreate("console", "div").appendChild(span); // insert it first so XHTML knows the namespace
         span.innerHTML = msg + '<br />';
+        getOrCreate("console", "div").appendChild(span);
     };
 
     var css =
@@ -91,7 +117,7 @@ var unexpectedErrorMessage; // set by onerror when expectingError is not true
     {
         var styleElement = createHTMLElement("style");
         styleElement.textContent = css;
-        (document.head || document.documentElement).appendChild(styleElement);
+        (document.head || ensureRootElement()).appendChild(styleElement);
     }
 
     function handleTestFinished()
@@ -109,6 +135,11 @@ var unexpectedErrorMessage; // set by onerror when expectingError is not true
 
     if (!isWorker()) {
         window.addEventListener('DOMContentLoaded', function() {
+            // Call waitUntilDone() as early as possible otherwise some tests may complete before
+            // the load event has fired.
+            if (window.jsTestIsAsync && window.testRunner)
+                testRunner.waitUntilDone();
+
             // Some tests set jsTestIsAsync in load event handler. Adding the listener late
             // makes handleTestFinished() run after the test handles load events.
             window.addEventListener("load", handleTestFinished, false);
@@ -228,29 +259,29 @@ function evalAndLog(_a, _quiet)
   return _av;
 }
 
-function shouldBe(_a, _b, quiet)
+function shouldBe(_a, _b, _quiet)
 {
-  if (typeof _a != "string" || typeof _b != "string")
-    debug("WARN: shouldBe() expects string arguments");
-  var _exception;
-  var _av;
-  try {
-     _av = eval(_a);
-  } catch (e) {
-     _exception = e;
-  }
-  var _bv = eval(_b);
-
-  if (_exception)
-    testFailed(_a + " should be " + _bv + ". Threw exception " + _exception);
-  else if (isResultCorrect(_av, _bv)) {
-    if (!quiet) {
-        testPassed(_a + " is " + _b);
+    if ((typeof _a != "function" && typeof _a != "string") || (typeof _b != "function" && typeof _b != "string"))
+        debug("WARN: shouldBe() expects function or string arguments");
+    var _exception;
+    var _av;
+    try {
+        _av = (typeof _a == "function" ? _a() : eval(_a));
+    } catch (e) {
+        _exception = e;
     }
-  } else if (typeof(_av) == typeof(_bv))
-    testFailed(_a + " should be " + _bv + ". Was " + stringify(_av) + ".");
-  else
-    testFailed(_a + " should be " + _bv + " (of type " + typeof _bv + "). Was " + _av + " (of type " + typeof _av + ").");
+    var _bv = (typeof _b == "function" ? _b() : eval(_b));
+
+    if (_exception)
+        testFailed(_a + " should be " + stringify(_bv) + ". Threw exception " + _exception);
+    else if (isResultCorrect(_av, _bv)) {
+        if (!_quiet) {
+            testPassed(_a + " is " + (typeof _b == "function" ? _bv : _b));
+        }
+    } else if (typeof(_av) == typeof(_bv))
+        testFailed(_a + " should be " + stringify(_bv) + ". Was " + stringify(_av) + ".");
+    else
+        testFailed(_a + " should be " + stringify(_bv) + " (of type " + typeof _bv + "). Was " + _av + " (of type " + typeof _av + ").");
 }
 
 // Execute condition every 5 milliseconds until it succeeds.
@@ -353,25 +384,25 @@ function shouldBeCloseTo(_to_eval, _target, _tolerance, _quiet)
 
 function shouldNotBe(_a, _b, _quiet)
 {
-  if (typeof _a != "string" || typeof _b != "string")
-    debug("WARN: shouldNotBe() expects string arguments");
-  var _exception;
-  var _av;
-  try {
-     _av = eval(_a);
-  } catch (e) {
-     _exception = e;
-  }
-  var _bv = eval(_b);
-
-  if (_exception)
-    testFailed(_a + " should not be " + _bv + ". Threw exception " + _exception);
-  else if (!isResultCorrect(_av, _bv)) {
-    if (!_quiet) {
-        testPassed(_a + " is not " + _b);
+    if ((typeof _a != "function" && typeof _a != "string") || (typeof _b != "function" && typeof _b != "string"))
+        debug("WARN: shouldNotBe() expects function or string arguments");
+    var _exception;
+    var _av;
+    try {
+        _av = (typeof _a == "function" ? _a() : eval(_a));
+    } catch (e) {
+        _exception = e;
     }
-  } else
-    testFailed(_a + " should not be " + _bv + ".");
+    var _bv = (typeof _b == "function" ? _b() : eval(_b));
+
+    if (_exception)
+        testFailed(_a + " should not be " + _bv + ". Threw exception " + _exception);
+    else if (!isResultCorrect(_av, _bv)) {
+        if (!_quiet) {
+            testPassed(_a + " is not " + (typeof _b == "function" ? _bv : _b));
+        }
+    } else
+        testFailed(_a + " should not be " + _bv + ".");
 }
 
 function shouldBecomeDifferent(_a, _b, completionHandler)
@@ -564,7 +595,7 @@ function expectTrue(v, msg) {
 
 function shouldNotThrow(_a, _message) {
     try {
-        typeof _a == "function" ?  _a() : eval(_a);
+        typeof _a == "function" ? _a() : eval(_a);
         testPassed((_message ? _message : _a) + " did not throw exception.");
     } catch (e) {
         testFailed((_message ? _message : _a) + " should not throw exception. Threw exception " + e + ".");
@@ -645,6 +676,42 @@ function expectError()
     expectingError = true;
 }
 
+function shouldReject(_a, _message)
+{
+    var _exception;
+    var _av;
+    try {
+        _av = typeof _a == "function" ? _a() : eval(_a);
+    } catch (e) {
+        testFailed((_message ? _message : _a) + " should not throw exception. Threw exception " + e + ".");
+        return Promise.resolve();
+    }
+
+    return _av.then(function(result) {
+        testFailed((_message ? _message : _a) + " should reject promise. Resolved with " + result + ".");
+    }, function(error) {
+        testPassed((_message ? _message : _a) + " rejected promise  with " + error + ".");
+    });
+}
+
+function shouldThrowErrorName(_a, _name)
+{
+    var _exception;
+    try {
+        typeof _a == "function" ? _a() : eval(_a);
+    } catch (e) {
+        _exception = e;
+    }
+
+    if (_exception) {
+        if (_exception.name == _name)
+            testPassed(_a + " threw exception " + _exception + ".");
+        else
+            testFailed(_a + " should throw a " + _name + ". Threw a " + _exception.name + ".");
+    } else
+        testFailed(_a + " should throw a " + _name + ". Did not throw.");
+}
+
 function shouldHaveHadError(message)
 {
     if (expectingError) {
@@ -707,6 +774,7 @@ function finishJSTest()
     if (!self.wasPostTestScriptParsed)
         return;
     isSuccessfullyParsed();
+    moveForeignObjectToTopIfNeeded();
     if (self.jsTestIsAsync && self.testRunner)
         testRunner.notifyDone();
 }

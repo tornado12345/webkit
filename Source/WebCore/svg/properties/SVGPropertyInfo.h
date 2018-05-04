@@ -17,8 +17,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGPropertyInfo_h
-#define SVGPropertyInfo_h
+#pragma once
 
 #include "QualifiedName.h"
 
@@ -33,7 +32,8 @@ enum AnimatedPropertyState {
 };
 
 enum AnimatedPropertyType {
-    AnimatedAngle,
+    AnimatedPropertyTypeMin = 0,
+    AnimatedAngle = AnimatedPropertyTypeMin,
     AnimatedBoolean,
     AnimatedColor,
     AnimatedEnumeration,
@@ -50,7 +50,8 @@ enum AnimatedPropertyType {
     AnimatedRect,
     AnimatedString,
     AnimatedTransformList,
-    AnimatedUnknown
+    AnimatedPropertyTypeMax,
+    AnimatedUnknown = AnimatedPropertyTypeMax
 };
 
 struct SVGPropertyInfo {
@@ -71,6 +72,4 @@ public:
     LookupOrCreateWrapperForAnimatedProperty lookupOrCreateWrapperForAnimatedProperty;
 };
 
-}
-
-#endif // SVGPropertyInfo_h
+} // namespace WebCore

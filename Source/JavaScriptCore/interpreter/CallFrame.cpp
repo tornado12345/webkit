@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008, 2013-2014, 2016 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2008-2017 Apple Inc. All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,7 +30,10 @@
 #include "InlineCallFrame.h"
 #include "Interpreter.h"
 #include "JSCInlines.h"
+#include "JSWebAssemblyInstance.h"
 #include "VMEntryScope.h"
+#include "WasmContext.h"
+#include "WasmInstance.h"
 #include <wtf/StringPrintStream.h>
 
 namespace JSC {
@@ -118,19 +121,19 @@ unsigned CallFrame::callSiteBitsAsBytecodeOffset() const
 {
     ASSERT(codeBlock());
     ASSERT(callSiteBitsAreBytecodeOffset());
-    return currentVPC() - codeBlock()->instructions().begin();     
+    return codeBlock()->bytecodeOffset(currentVPC());     
 }
 
 #else // USE(JSVALUE32_64)
 Instruction* CallFrame::currentVPC() const
 {
     ASSERT(callSiteBitsAreBytecodeOffset());
-    return codeBlock()->instructions().begin() + callSiteBitsAsBytecodeOffset();
+    return &codeBlock()->instructions()[callSiteBitsAsBytecodeOffset()];
 }
 
 void CallFrame::setCurrentVPC(Instruction* vpc)
 {
-    CallSiteIndex callSite(vpc - codeBlock()->instructions().begin());
+    CallSiteIndex callSite(codeBlock()->bytecodeOffset(vpc));
     this[CallFrameSlot::argumentCount].tag() = static_cast<int32_t>(callSite.bits());
 }
 
@@ -145,6 +148,7 @@ unsigned CallFrame::callSiteBitsAsBytecodeOffset() const
     
 unsigned CallFrame::bytecodeOffset()
 {
+    ASSERT(!callee().isWasm());
     if (!codeBlock())
         return 0;
 #if ENABLE(DFG_JIT)
@@ -185,8 +189,12 @@ Register* CallFrame::topOfFrameInternal()
 
 JSGlobalObject* CallFrame::vmEntryGlobalObject()
 {
-    if (this == lexicalGlobalObject()->globalExec())
-        return lexicalGlobalObject();
+    RELEASE_ASSERT(callee().isCell());
+    if (callee().asCell()->isObject()) { 
+        if (this == lexicalGlobalObject()->globalExec())
+            return lexicalGlobalObject();
+    }
+    // If we're not an object, we're wasm, and therefore we're executing code and the below is safe.
 
     // For any ExecState that's not a globalExec, the 
     // dynamic global object must be set since code is running
@@ -194,24 +202,106 @@ JSGlobalObject* CallFrame::vmEntryGlobalObject()
     return vm().entryScope->globalObject();
 }
 
-CallFrame* CallFrame::callerFrame(VMEntryFrame*& currVMEntryFrame)
+JSGlobalObject* CallFrame::vmEntryGlobalObject(VM& vm)
 {
-    if (callerFrameOrVMEntryFrame() == currVMEntryFrame) {
-        VMEntryRecord* currVMEntryRecord = vmEntryRecord(currVMEntryFrame);
-        currVMEntryFrame = currVMEntryRecord->prevTopVMEntryFrame();
-        return currVMEntryRecord->prevTopCallFrame();
+    if (callee().isCell() && callee().asCell()->isObject()) {
+        if (this == lexicalGlobalObject()->globalExec())
+            return lexicalGlobalObject();
     }
-    return static_cast<CallFrame*>(callerFrameOrVMEntryFrame());
+
+    // For any ExecState that's not a globalExec, the 
+    // dynamic global object must be set since code is running
+    ASSERT(vm.entryScope);
+    return vm.entryScope->globalObject();
 }
 
-SUPPRESS_ASAN CallFrame* CallFrame::unsafeCallerFrame(VMEntryFrame*& currVMEntryFrame)
+JSGlobalObject* CallFrame::wasmAwareLexicalGlobalObject(VM& vm)
 {
-    if (unsafeCallerFrameOrVMEntryFrame() == currVMEntryFrame) {
-        VMEntryRecord* currVMEntryRecord = vmEntryRecord(currVMEntryFrame);
-        currVMEntryFrame = currVMEntryRecord->unsafePrevTopVMEntryFrame();
+#if ENABLE(WEBASSEMBLY)
+    if (!callee().isWasm())
+        return lexicalGlobalObject();
+    return vm.wasmContext.load()->owner<JSWebAssemblyInstance>()->globalObject();
+#else
+    UNUSED_PARAM(vm);
+    return lexicalGlobalObject();
+#endif
+}
+
+bool CallFrame::isAnyWasmCallee()
+{
+    CalleeBits callee = this->callee();
+    if (callee.isWasm())
+        return true;
+
+    ASSERT(callee.isCell());
+    if (!!callee.rawPtr() && isWebAssemblyToJSCallee(callee.asCell()))
+        return true;
+
+    return false;
+}
+
+CallFrame* CallFrame::callerFrame(EntryFrame*& currEntryFrame)
+{
+    if (callerFrameOrEntryFrame() == currEntryFrame) {
+        VMEntryRecord* currVMEntryRecord = vmEntryRecord(currEntryFrame);
+        currEntryFrame = currVMEntryRecord->prevTopEntryFrame();
+        return currVMEntryRecord->prevTopCallFrame();
+    }
+    return static_cast<CallFrame*>(callerFrameOrEntryFrame());
+}
+
+SUPPRESS_ASAN CallFrame* CallFrame::unsafeCallerFrame(EntryFrame*& currEntryFrame)
+{
+    if (unsafeCallerFrameOrEntryFrame() == currEntryFrame) {
+        VMEntryRecord* currVMEntryRecord = vmEntryRecord(currEntryFrame);
+        currEntryFrame = currVMEntryRecord->unsafePrevTopEntryFrame();
         return currVMEntryRecord->unsafePrevTopCallFrame();
     }
-    return static_cast<CallFrame*>(unsafeCallerFrameOrVMEntryFrame());
+    return static_cast<CallFrame*>(unsafeCallerFrameOrEntryFrame());
+}
+
+SourceOrigin CallFrame::callerSourceOrigin()
+{
+    RELEASE_ASSERT(callee().isCell());
+    VM* vm = &this->vm();
+    SourceOrigin sourceOrigin;
+    bool haveSkippedFirstFrame = false;
+    StackVisitor::visit(this, vm, [&](StackVisitor& visitor) {
+        if (!std::exchange(haveSkippedFirstFrame, true))
+            return StackVisitor::Status::Continue;
+
+        switch (visitor->codeType()) {
+        case StackVisitor::Frame::CodeType::Function:
+            // Skip the builtin functions since they should not pass the source origin to the dynamic code generation calls.
+            // Consider the following code.
+            //
+            // [ "42 + 44" ].forEach(eval);
+            //
+            // In the above case, the eval function will be interpreted as the indirect call to eval inside forEach function.
+            // At that time, the generated eval code should have the source origin to the original caller of the forEach function
+            // instead of the source origin of the forEach function.
+            if (static_cast<FunctionExecutable*>(visitor->codeBlock()->ownerScriptExecutable())->isBuiltinFunction())
+                return StackVisitor::Status::Continue;
+            FALLTHROUGH;
+
+        case StackVisitor::Frame::CodeType::Eval:
+        case StackVisitor::Frame::CodeType::Module:
+        case StackVisitor::Frame::CodeType::Global:
+            sourceOrigin = visitor->codeBlock()->ownerScriptExecutable()->sourceOrigin();
+            return StackVisitor::Status::Done;
+
+        case StackVisitor::Frame::CodeType::Native:
+            return StackVisitor::Status::Continue;
+
+        case StackVisitor::Frame::CodeType::Wasm:
+            // FIXME: Should return the source origin for WASM.
+            return StackVisitor::Status::Done;
+        }
+
+        RELEASE_ASSERT_NOT_REACHED();
+        return StackVisitor::Status::Done;
+    });
+    return sourceOrigin;
 }
 
 String CallFrame::friendlyFunctionName()
@@ -228,8 +318,8 @@ String CallFrame::friendlyFunctionName()
     case GlobalCode:
         return ASCIILiteral("global code");
     case FunctionCode:
-        if (callee())
-            return getCalculatedDisplayName(vm(), callee());
+        if (jsCallee())
+            return getCalculatedDisplayName(vm(), jsCallee());
         return emptyString();
     }
 
@@ -240,7 +330,7 @@ String CallFrame::friendlyFunctionName()
 void CallFrame::dump(PrintStream& out)
 {
     if (CodeBlock* codeBlock = this->codeBlock()) {
-        out.print(codeBlock->inferredName(), "#", codeBlock->hashAsStringIfPossible(), " [", codeBlock->jitType(), "]");
+        out.print(codeBlock->inferredName(), "#", codeBlock->hashAsStringIfPossible(), " [", codeBlock->jitType(), " bc#", bytecodeOffset(), "]");
 
         out.print("(");
         thisValue().dumpForBacktrace(out);

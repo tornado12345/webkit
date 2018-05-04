@@ -19,8 +19,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGAnimatedProperty_h
-#define SVGAnimatedProperty_h
+#pragma once
 
 #include "SVGAnimatedPropertyDescription.h"
 #include "SVGPropertyInfo.h"
@@ -43,7 +42,6 @@ public:
 
     virtual bool isAnimating() const { return false; }
     virtual bool isAnimatedListTearOff() const { return false; }
-    virtual void propertyWillBeDeleted(const SVGProperty&) { }
 
     // Caching facilities.
     typedef HashMap<SVGAnimatedPropertyDescription, SVGAnimatedProperty*, SVGAnimatedPropertyDescriptionHash, SVGAnimatedPropertyDescriptionHashTraits> Cache;
@@ -98,6 +96,4 @@ protected:
     bool m_isReadOnly;
 };
 
-}
-
-#endif // SVGAnimatedProperty_h
+} // namespace WebCore

@@ -29,18 +29,15 @@
 #include "config.h"
 #include "FetchBodyOwner.h"
 
-#if ENABLE(FETCH_API)
-
-#include "ExceptionCode.h"
 #include "FetchLoader.h"
-#include "FetchResponseSource.h"
 #include "HTTPParsers.h"
 #include "JSBlob.h"
+#include "ResourceError.h"
 #include "ResourceResponse.h"
 
 namespace WebCore {
 
-FetchBodyOwner::FetchBodyOwner(ScriptExecutionContext& context, Optional<FetchBody>&& body, Ref<FetchHeaders>&& headers)
+FetchBodyOwner::FetchBodyOwner(ScriptExecutionContext& context, std::optional<FetchBody>&& body, Ref<FetchHeaders>&& headers)
     : ActiveDOMObject(&context)
     , m_body(WTFMove(body))
     , m_headers(WTFMove(headers))
@@ -51,7 +48,7 @@ FetchBodyOwner::FetchBodyOwner(ScriptExecutionContext& context, Optional<FetchBo
 void FetchBodyOwner::stop()
 {
     if (m_body)
-        m_body->cleanConsumePromise();
+        m_body->cleanConsumer();
 
     if (m_blobLoader) {
         bool isUniqueReference = hasOneRef();
@@ -62,14 +59,33 @@ void FetchBodyOwner::stop()
     }
 }
 
-bool FetchBodyOwner::isDisturbedOrLocked() const
+bool FetchBodyOwner::isDisturbed() const
 {
+    if (isBodyNull())
+        return false;
+
     if (m_isDisturbed)
         return true;
 
-#if ENABLE(READABLE_STREAM_API)
-    if (m_readableStreamSource && m_readableStreamSource->isReadableStreamLocked())
+#if ENABLE(STREAMS_API)
+    if (body().readableStream())
+        return body().readableStream()->isDisturbed();
+#endif
+
+    return false;
+}
+
+bool FetchBodyOwner::isDisturbedOrLocked() const
+{
+    if (isBodyNull())
+        return false;
+
+    if (m_isDisturbed)
         return true;
+
+#if ENABLE(STREAMS_API)
+    if (body().readableStream())
+        return body().readableStream()->isDisturbed() || body().readableStream()->isLocked();
 #endif
 
     return false;
@@ -77,7 +93,7 @@ bool FetchBodyOwner::isDisturbedOrLocked() const
 
 void FetchBodyOwner::arrayBuffer(Ref<DeferredPromise>&& promise)
 {
-    if (isBodyNull()) {
+    if (isBodyNullOrOpaque()) {
         fulfillPromiseWithArrayBuffer(WTFMove(promise), nullptr, 0);
         return;
     }
@@ -91,8 +107,8 @@ void FetchBodyOwner::arrayBuffer(Ref<DeferredPromise>&& promise)
 
 void FetchBodyOwner::blob(Ref<DeferredPromise>&& promise)
 {
-    if (isBodyNull()) {
-        promise->resolve(Blob::create(Vector<uint8_t>(), Blob::normalizedContentType(extractMIMETypeFromMediaType(m_contentType))));
+    if (isBodyNullOrOpaque()) {
+        promise->resolve<IDLInterface<Blob>>(Blob::create(Vector<uint8_t> { }, Blob::normalizedContentType(extractMIMETypeFromMediaType(m_contentType))));
         return;
     }
     if (isDisturbedOrLocked()) {
@@ -103,7 +119,7 @@ void FetchBodyOwner::blob(Ref<DeferredPromise>&& promise)
     m_body->blob(*this, WTFMove(promise), m_contentType);
 }
 
-void FetchBodyOwner::cloneBody(const FetchBodyOwner& owner)
+void FetchBodyOwner::cloneBody(FetchBodyOwner& owner)
 {
     m_contentType = owner.m_contentType;
     if (owner.isBodyNull())
@@ -111,9 +127,9 @@ void FetchBodyOwner::cloneBody(const FetchBodyOwner& owner)
     m_body = owner.m_body->clone();
 }
 
-void FetchBodyOwner::extractBody(ScriptExecutionContext& context, JSC::ExecState& state, JSC::JSValue value)
+void FetchBodyOwner::extractBody(ScriptExecutionContext& context, FetchBody::Init&& value)
 {
-    m_body = FetchBody::extract(context, state, value, m_contentType);
+    m_body = FetchBody::extract(context, WTFMove(value), m_contentType);
 }
 
 void FetchBodyOwner::updateContentType()
@@ -134,13 +150,13 @@ void FetchBodyOwner::consumeOnceLoadingFinished(FetchBodyConsumer::Type type, Re
         return;
     }
     m_isDisturbed = true;
-    m_body->consumeOnceLoadingFinished(type, WTFMove(promise));
+    m_body->consumeOnceLoadingFinished(type, WTFMove(promise), m_contentType);
 }
 
 void FetchBodyOwner::formData(Ref<DeferredPromise>&& promise)
 {
-    if (isBodyNull()) {
-        promise->reject(0);
+    if (isBodyNullOrOpaque()) {
+        promise->reject();
         return;
     }
     if (isDisturbedOrLocked()) {
@@ -153,8 +169,8 @@ void FetchBodyOwner::formData(Ref<DeferredPromise>&& promise)
 
 void FetchBodyOwner::json(Ref<DeferredPromise>&& promise)
 {
-    if (isBodyNull()) {
-        promise->reject(SYNTAX_ERR);
+    if (isBodyNullOrOpaque()) {
+        promise->reject(SyntaxError);
         return;
     }
     if (isDisturbedOrLocked()) {
@@ -167,8 +183,8 @@ void FetchBodyOwner::json(Ref<DeferredPromise>&& promise)
 
 void FetchBodyOwner::text(Ref<DeferredPromise>&& promise)
 {
-    if (isBodyNull()) {
-        promise->resolve(String());
+    if (isBodyNullOrOpaque()) {
+        promise->resolve<IDLDOMString>({ });
         return;
     }
     if (isDisturbedOrLocked()) {
@@ -182,7 +198,6 @@ void FetchBodyOwner::text(Ref<DeferredPromise>&& promise)
 void FetchBodyOwner::loadBlob(const Blob& blob, FetchBodyConsumer* consumer)
 {
     // Can only be called once for a body instance.
-    ASSERT(isDisturbed());
     ASSERT(!m_blobLoader);
     ASSERT(!isBodyNull());
 
@@ -191,13 +206,13 @@ void FetchBodyOwner::loadBlob(const Blob& blob, FetchBodyConsumer* consumer)
         return;
     }
 
-    m_blobLoader = { *this };
+    m_blobLoader.emplace(*this);
     m_blobLoader->loader = std::make_unique<FetchLoader>(*m_blobLoader, consumer);
 
     m_blobLoader->loader->start(*scriptExecutionContext(), blob);
     if (!m_blobLoader->loader->isStarted()) {
         m_body->loadingFailed();
-        m_blobLoader = Nullopt;
+        m_blobLoader = std::nullopt;
         return;
     }
     setPendingActivity(this);
@@ -207,14 +222,14 @@ void FetchBodyOwner::finishBlobLoading()
 {
     ASSERT(m_blobLoader);
 
-    m_blobLoader = Nullopt;
+    m_blobLoader = std::nullopt;
     unsetPendingActivity(this);
 }
 
 void FetchBodyOwner::blobLoadingSucceeded()
 {
     ASSERT(!isBodyNull());
-#if ENABLE(READABLE_STREAM_API)
+#if ENABLE(STREAMS_API)
     if (m_readableStreamSource) {
         m_readableStreamSource->close();
         m_readableStreamSource = nullptr;
@@ -227,7 +242,7 @@ void FetchBodyOwner::blobLoadingSucceeded()
 void FetchBodyOwner::blobLoadingFailed()
 {
     ASSERT(!isBodyNull());
-#if ENABLE(READABLE_STREAM_API)
+#if ENABLE(STREAMS_API)
     if (m_readableStreamSource) {
         if (!m_readableStreamSource->isCancelling())
             m_readableStreamSource->error(ASCIILiteral("Blob loading failed"));
@@ -242,7 +257,7 @@ void FetchBodyOwner::blobLoadingFailed()
 void FetchBodyOwner::blobChunk(const char* data, size_t size)
 {
     ASSERT(data);
-#if ENABLE(READABLE_STREAM_API)
+#if ENABLE(STREAMS_API)
     ASSERT(m_readableStreamSource);
     if (!m_readableStreamSource->enqueue(ArrayBuffer::tryCreate(data, size)))
         stop();
@@ -260,16 +275,52 @@ FetchBodyOwner::BlobLoader::BlobLoader(FetchBodyOwner& owner)
 void FetchBodyOwner::BlobLoader::didReceiveResponse(const ResourceResponse& response)
 {
     if (response.httpStatusCode() != 200)
-        didFail();
+        didFail({ });
 }
 
-void FetchBodyOwner::BlobLoader::didFail()
+void FetchBodyOwner::BlobLoader::didFail(const ResourceError&)
 {
     // didFail might be called within FetchLoader::start call.
     if (loader->isStarted())
         owner.blobLoadingFailed();
 }
 
-} // namespace WebCore
+RefPtr<ReadableStream> FetchBodyOwner::readableStream(JSC::ExecState& state)
+{
+    if (isBodyNullOrOpaque())
+        return nullptr;
 
-#endif // ENABLE(FETCH_API)
+    if (!m_body->hasReadableStream())
+        createReadableStream(state);
+
+    return m_body->readableStream();
+}
+
+void FetchBodyOwner::createReadableStream(JSC::ExecState& state)
+{
+    ASSERT(!m_readableStreamSource);
+    if (isDisturbed()) {
+        m_body->setReadableStream(ReadableStream::create(state, nullptr));
+        m_body->readableStream()->lock();
+    } else {
+        m_readableStreamSource = adoptRef(*new FetchBodySource(*this));
+        m_body->setReadableStream(ReadableStream::create(state, m_readableStreamSource));
+    }
+}
+
+void FetchBodyOwner::consumeBodyAsStream()
+{
+    ASSERT(m_readableStreamSource);
+
+    if (m_loadingError) {
+        auto errorMessage = m_loadingError->localizedDescription();
+        m_readableStreamSource->error(errorMessage.isEmpty() ? ASCIILiteral("Loading failed") : errorMessage);
+        return;
+    }
+
+    body().consumeAsStream(*this, *m_readableStreamSource);
+    if (!m_readableStreamSource->isPulling())
+        m_readableStreamSource = nullptr;
+}
+
+} // namespace WebCore

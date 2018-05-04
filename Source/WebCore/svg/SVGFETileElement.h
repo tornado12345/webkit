@@ -18,15 +18,14 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGFETileElement_h
-#define SVGFETileElement_h
+#pragma once
 
-#include "FETile.h"
 #include "SVGFilterPrimitiveStandardAttributes.h"
 
 namespace WebCore {
 
 class SVGFETileElement final : public SVGFilterPrimitiveStandardAttributes {
+    WTF_MAKE_ISO_ALLOCATED(SVGFETileElement);
 public:
     static Ref<SVGFETileElement> create(const QualifiedName&, Document&);
 
@@ -43,5 +42,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif

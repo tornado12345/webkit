@@ -33,15 +33,14 @@
 #include "Event.h"
 #include "EventHeaders.h"
 #include "EventInterfaces.h"
-#include "EventNames.h"
 #include "JSDOMBinding.h"
 #include "JSDataTransfer.h"
-#include <runtime/JSLock.h>
+#include <JavaScriptCore/JSLock.h>
 #include <wtf/text/AtomicString.h>
 
-using namespace JSC;
 
 namespace WebCore {
+using namespace JSC;
 
 #define TRY_TO_WRAP_WITH_INTERFACE(interfaceName) \
     case interfaceName##InterfaceType: \

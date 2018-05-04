@@ -31,14 +31,12 @@
 
 namespace WebCore {
 
-OESTextureFloat::OESTextureFloat(WebGLRenderingContextBase* context)
+OESTextureFloat::OESTextureFloat(WebGLRenderingContextBase& context)
     : WebGLExtension(context)
 {
 }
 
-OESTextureFloat::~OESTextureFloat()
-{
-}
+OESTextureFloat::~OESTextureFloat() = default;
 
 WebGLExtension::ExtensionName OESTextureFloat::getName() const
 {

@@ -49,25 +49,25 @@ class TerminateQueue(Exception):
 
 class QueueEngineDelegate:
     def queue_log_path(self):
-        raise NotImplementedError, "subclasses must implement"
+        raise NotImplementedError('subclasses must implement')
 
     def work_item_log_path(self, work_item):
-        raise NotImplementedError, "subclasses must implement"
+        raise NotImplementedError('subclasses must implement')
 
     def begin_work_queue(self):
-        raise NotImplementedError, "subclasses must implement"
+        raise NotImplementedError('subclasses must implement')
 
     def should_continue_work_queue(self):
-        raise NotImplementedError, "subclasses must implement"
+        raise NotImplementedError('subclasses must implement')
 
     def next_work_item(self):
-        raise NotImplementedError, "subclasses must implement"
+        raise NotImplementedError('subclasses must implement')
 
     def process_work_item(self, work_item):
-        raise NotImplementedError, "subclasses must implement"
+        raise NotImplementedError('subclasses must implement')
 
     def handle_unexpected_error(self, work_item, message):
-        raise NotImplementedError, "subclasses must implement"
+        raise NotImplementedError('subclasses must implement')
 
 
 class QueueEngine:
@@ -103,7 +103,7 @@ class QueueEngine:
                     if not self._delegate.process_work_item(work_item):
                         _log.warning("Unable to process work item.")
                         continue
-                except ScriptError, e:
+                except ScriptError as e:
                     self._open_work_log(work_item)
                     self._work_log.write(e.message_with_output())
                     # Use a special exit code to indicate that the error was already
@@ -112,13 +112,13 @@ class QueueEngine:
                         continue
                     message = "Unexpected failure when processing patch!  Please file a bug against webkit-patch.\n%s" % e.message_with_output()
                     self._delegate.handle_unexpected_error(work_item, message)
-            except TerminateQueue, e:
+            except TerminateQueue as e:
                 self._stopping("TerminateQueue exception received.")
                 return 0
-            except KeyboardInterrupt, e:
+            except KeyboardInterrupt as e:
                 self._stopping("User terminated queue.")
                 return 1
-            except Exception, e:
+            except Exception as e:
                 traceback.print_exc()
                 # Don't try tell the status bot, in case telling it causes an exception.
                 self._sleep("Exception while preparing queue")

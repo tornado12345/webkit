@@ -233,14 +233,11 @@ expression
             }
             $$ = static_cast<YYSTYPE>(0);
         }
-        else if ($1 < 0)
-        {
-            // Logical shift left.
-            $$ = static_cast<YYSTYPE>(static_cast<UNSIGNED_TYPE>($1) << $3);
-        }
         else
         {
-            $$ = $1 << $3;
+            // Logical shift left. Casting to unsigned is needed to ensure there's no signed integer
+            // overflow, which some tools treat as an error.
+            $$ = static_cast<YYSTYPE>(static_cast<UNSIGNED_TYPE>($1) << $3);
         }
     }
     | expression '-' expression {
@@ -264,6 +261,12 @@ expression
             }
             $$ = static_cast<YYSTYPE>(0);
         }
+        else if (($1 == std::numeric_limits<YYSTYPE>::min()) && ($3 == -1))
+        {
+            // Check for the special case where the minimum representable number is
+            // divided by -1. If left alone this has undefined results.
+            $$ = 0;
+        }
         else
         {
             $$ = $1 % $3;
@@ -284,7 +287,7 @@ expression
             }
             $$ = static_cast<YYSTYPE>(0);
         }
-        else if ($1 == std::numeric_limits<YYSTYPE>::min() && $3 == -1)
+        else if (($1 == std::numeric_limits<YYSTYPE>::min()) && ($3 == -1))
         {
             // Check for the special case where the minimum representable number is
             // divided by -1. If left alone this leads to integer overflow in C++, which

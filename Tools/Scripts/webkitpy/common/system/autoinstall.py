@@ -218,7 +218,7 @@ class AutoInstaller(object):
 
         try:
             tar_file = tarfile.open(path)
-        except tarfile.ReadError, err:
+        except tarfile.ReadError as err:
             # Append existing Error message to new Error.
             message = ("Could not open tar file: %s\n"
                        " The file probably does not have the correct format.\n"
@@ -268,14 +268,14 @@ class AutoInstaller(object):
 
         try:
             zip_file = zipfile.ZipFile(path, "r")
-        except zipfile.BadZipfile, err:
+        except zipfile.BadZipfile as err:
             message = ("Could not open zip file: %s\n"
                        " --> Inner message: %s"
                        % (path, err))
             raise Exception(message)
 
         try:
-            self._extract_all(zip_file, scratch_dir)
+            self._extract_all(zip_file, target_path)
         finally:
             zip_file.close()
 
@@ -344,7 +344,7 @@ class AutoInstaller(object):
                 if regex.match(parsed_url[1]):
                     parsed_url[1] = addresses.next()
                     new_url = urlparse.urlunparse(parsed_url)
-        except StopIteration, e:
+        except StopIteration as e:
             _log.info('Ran out of mirrors.')
 
         return new_url
@@ -356,7 +356,7 @@ class AutoInstaller(object):
             try:
                 netstream = urllib2.urlopen(url, timeout=30)
                 break
-            except IOError, err:
+            except IOError as err:
                 # Try multiple times
                 if failures < 2:
                     _log.warning("Failed to download %s, %s retrying" % (
@@ -378,7 +378,7 @@ class AutoInstaller(object):
                            % (url, err))
                 raise IOError(message)
         code = 200
-        if hasattr(netstream, "getcode"):
+        if not url.startswith("file") and hasattr(netstream, "getcode"):
             code = netstream.getcode()
         if not 200 <= code < 300:
             raise ValueError("HTTP Error code %s" % code)
@@ -467,7 +467,8 @@ class AutoInstaller(object):
 
         Optional Args:
           should_refresh: A boolean value of whether the package should be
-                          downloaded again if the package is already present.
+                          downloaded and reinstalled again even if the
+                          package is already present.
           target_name: The name of the folder or file in the autoinstaller
                        target directory at which the package should be
                        installed.  Defaults to the base name of the
@@ -488,7 +489,7 @@ class AutoInstaller(object):
             target_name = os.path.basename(url_subpath)
 
         target_path = os.path.join(self._target_dir, target_name.replace('/', os.sep))
-        if not should_refresh and self._is_downloaded(target_name, url):
+        if not should_refresh and self._is_downloaded(target_name, url) and os.path.exists(target_path):
             return
 
         files_to_remove = files_to_remove or []
@@ -507,7 +508,7 @@ class AutoInstaller(object):
                           url=url,
                           url_subpath=url_subpath,
                           files_to_remove=files_to_remove)
-        except Exception, err:
+        except Exception as err:
             # Append existing Error message to new Error.
             message = ("Error auto-installing the %s package to:\n"
                        ' "%s"\n'

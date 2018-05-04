@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2009-2017 Apple Inc. All Rights Reserved.
  * Copyright (C) 2009, 2011 Google Inc. All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -28,8 +28,10 @@
 #include "WorkerScriptLoader.h"
 
 #include "ContentSecurityPolicy.h"
+#include "FetchIdioms.h"
 #include "ResourceResponse.h"
 #include "ScriptExecutionContext.h"
+#include "ServiceWorker.h"
 #include "TextResourceDecoder.h"
 #include "WorkerGlobalScope.h"
 #include "WorkerScriptLoaderClient.h"
@@ -38,19 +40,17 @@
 
 namespace WebCore {
 
-WorkerScriptLoader::WorkerScriptLoader()
-{
-}
+WorkerScriptLoader::WorkerScriptLoader() = default;
 
-WorkerScriptLoader::~WorkerScriptLoader()
-{
-}
+WorkerScriptLoader::~WorkerScriptLoader() = default;
 
-void WorkerScriptLoader::loadSynchronously(ScriptExecutionContext* scriptExecutionContext, const URL& url, FetchOptions::Mode mode, ContentSecurityPolicyEnforcement contentSecurityPolicyEnforcement, const String& initiatorIdentifier)
+void WorkerScriptLoader::loadSynchronously(ScriptExecutionContext* scriptExecutionContext, const URL& url, FetchOptions::Mode mode, FetchOptions::Cache cachePolicy, ContentSecurityPolicyEnforcement contentSecurityPolicyEnforcement, const String& initiatorIdentifier)
 {
     ASSERT(scriptExecutionContext);
+    auto& workerGlobalScope = downcast<WorkerGlobalScope>(*scriptExecutionContext);
 
     m_url = url;
+    m_destination = FetchOptions::Destination::Script;
 
     std::unique_ptr<ResourceRequest> request(createResourceRequest(initiatorIdentifier));
     if (!request)
@@ -64,37 +64,48 @@ void WorkerScriptLoader::loadSynchronously(ScriptExecutionContext* scriptExecuti
     ThreadableLoaderOptions options;
     options.credentials = FetchOptions::Credentials::Include;
     options.mode = mode;
+    options.cache = cachePolicy;
     options.sendLoadCallbacks = SendCallbacks;
     options.contentSecurityPolicyEnforcement = contentSecurityPolicyEnforcement;
-
-    WorkerThreadableLoader::loadResourceSynchronously(downcast<WorkerGlobalScope>(*scriptExecutionContext), WTFMove(*request), *this, options);
+    options.destination = m_destination;
+#if ENABLE(SERVICE_WORKER)
+    options.serviceWorkersMode = workerGlobalScope.isServiceWorkerGlobalScope() ? ServiceWorkersMode::None : ServiceWorkersMode::All;
+    if (auto* activeServiceWorker = workerGlobalScope.activeServiceWorker())
+        options.serviceWorkerRegistrationIdentifier = activeServiceWorker->registrationIdentifier();
+#endif
+    WorkerThreadableLoader::loadResourceSynchronously(workerGlobalScope, WTFMove(*request), *this, options);
 }
 
-void WorkerScriptLoader::loadAsynchronously(ScriptExecutionContext* scriptExecutionContext, const URL& url, FetchOptions::Mode mode, ContentSecurityPolicyEnforcement contentSecurityPolicyEnforcement, const String& initiatorIdentifier, WorkerScriptLoaderClient* client)
+void WorkerScriptLoader::loadAsynchronously(ScriptExecutionContext& scriptExecutionContext, ResourceRequest&& scriptRequest, FetchOptions&& fetchOptions, ContentSecurityPolicyEnforcement contentSecurityPolicyEnforcement, ServiceWorkersMode serviceWorkerMode, WorkerScriptLoaderClient& client)
 {
-    ASSERT(client);
-    ASSERT(scriptExecutionContext);
+    m_client = &client;
+    m_url = scriptRequest.url();
+    m_destination = fetchOptions.destination;
 
-    m_client = client;
-    m_url = url;
+    ASSERT(scriptRequest.httpMethod() == "GET");
 
-    std::unique_ptr<ResourceRequest> request(createResourceRequest(initiatorIdentifier));
+    auto request = std::make_unique<ResourceRequest>(WTFMove(scriptRequest));
     if (!request)
         return;
 
     // Only used for loading worker scripts in classic mode.
     // FIXME: We should add an option to set credential mode.
-    ASSERT(mode == FetchOptions::Mode::SameOrigin);
+    ASSERT(fetchOptions.mode == FetchOptions::Mode::SameOrigin);
 
-    ThreadableLoaderOptions options;
+    ThreadableLoaderOptions options { WTFMove(fetchOptions) };
     options.credentials = FetchOptions::Credentials::SameOrigin;
-    options.mode = mode;
     options.sendLoadCallbacks = SendCallbacks;
     options.contentSecurityPolicyEnforcement = contentSecurityPolicyEnforcement;
+    // A service worker job can be executed from a worker context or a document context.
+    options.serviceWorkersMode = serviceWorkerMode;
+#if ENABLE(SERVICE_WORKER)
+    if (auto* activeServiceWorker = scriptExecutionContext.activeServiceWorker())
+        options.serviceWorkerRegistrationIdentifier = activeServiceWorker->registrationIdentifier();
+#endif
 
     // During create, callbacks may happen which remove the last reference to this object.
     Ref<WorkerScriptLoader> protectedThis(*this);
-    m_threadableLoader = ThreadableLoader::create(*scriptExecutionContext, *this, WTFMove(*request), options);
+    m_threadableLoader = ThreadableLoader::create(scriptExecutionContext, *this, WTFMove(*request), options);
 }
 
 const URL& WorkerScriptLoader::responseURL() const
@@ -110,15 +121,32 @@ std::unique_ptr<ResourceRequest> WorkerScriptLoader::createResourceRequest(const
     request->setInitiatorIdentifier(initiatorIdentifier);
     return request;
 }
-    
+
 void WorkerScriptLoader::didReceiveResponse(unsigned long identifier, const ResourceResponse& response)
 {
     if (response.httpStatusCode() / 100 != 2 && response.httpStatusCode()) {
         m_failed = true;
         return;
     }
+
+    if (!isScriptAllowedByNosniff(response)) {
+        String message = makeString("Refused to execute ", response.url().stringCenterEllipsizedToLength(), " as script because \"X-Content-Type: nosniff\" was given and its Content-Type is not a script MIME type.");
+        m_error = ResourceError { errorDomainWebKitInternal, 0, url(), message, ResourceError::Type::General };
+        m_failed = true;
+        return;
+    }
+
+    if (shouldBlockResponseDueToMIMEType(response, m_destination)) {
+        String message = makeString("Refused to execute ", response.url().stringCenterEllipsizedToLength(), " as script because ", response.mimeType(), " is not a script MIME type.");
+        m_error = ResourceError { errorDomainWebKitInternal, 0, response.url(), message, ResourceError::Type::General };
+        m_failed = true;
+        return;
+    }
+
     m_responseURL = response.url();
+    m_responseMIMEType = response.mimeType();
     m_responseEncoding = response.textEncodingName();
+    m_contentSecurityPolicy = ContentSecurityPolicyResponseHeaders { response };
     if (m_client)
         m_client->didReceiveResponse(identifier, response);
 }
@@ -144,7 +172,7 @@ void WorkerScriptLoader::didReceiveData(const char* data, int len)
     m_script.append(m_decoder->decode(data, len));
 }
 
-void WorkerScriptLoader::didFinishLoading(unsigned long identifier, double)
+void WorkerScriptLoader::didFinishLoading(unsigned long identifier)
 {
     if (m_failed) {
         notifyError();
@@ -158,14 +186,17 @@ void WorkerScriptLoader::didFinishLoading(unsigned long identifier, double)
     notifyFinished();
 }
 
-void WorkerScriptLoader::didFail(const ResourceError&)
+void WorkerScriptLoader::didFail(const ResourceError& error)
 {
+    m_error = error;
     notifyError();
 }
 
 void WorkerScriptLoader::notifyError()
 {
     m_failed = true;
+    if (m_error.isNull())
+        m_error = ResourceError { errorDomainWebKitInternal, 0, url(), "Failed to load script", ResourceError::Type::General };
     notifyFinished();
 }
 
@@ -176,11 +207,22 @@ String WorkerScriptLoader::script()
 
 void WorkerScriptLoader::notifyFinished()
 {
+    m_threadableLoader = nullptr;
     if (!m_client || m_finishing)
         return;
 
     m_finishing = true;
     m_client->notifyFinished();
+}
+
+void WorkerScriptLoader::cancel()
+{
+    if (!m_threadableLoader)
+        return;
+
+    m_client = nullptr;
+    m_threadableLoader->cancel();
+    m_threadableLoader = nullptr;
 }
 
 } // namespace WebCore

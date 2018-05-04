@@ -1,4 +1,4 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl
 
 # Copyright (C) 2005, 2006, 2007 Apple Inc.  All rights reserved.
 # Copyright (C) 2011 Carl Lobo.  All rights reserved.
@@ -95,11 +95,13 @@ print "Checking for newer version of $zipFile...\n";
 # errors for those requests. Instead we can just set a size limit for a GET request (which we can also set the range for
 # to request just the first byte) so that we don't have to retrieve the entire file.
 $ua->max_size(0);
-my $response = $ua->get($libsURL, "Range", "bytes=0-0");
+my $response = $ua->get($libsURL, Accept => '*/*', Range => "bytes=0-0");
 $ua->max_size(undef);
 
 if (! $response->is_success) {
-    print STDERR "Could not access $libsURL:\n", $response->headers_as_string, "\n";
+    print STDERR "Could not access $libsURL:\n";
+    print STDERR $response->message, "\n";
+    print STDERR $response->headers_as_string, "\n";
     print STDERR "Please ensure that $libsURL is reachable";
     if ($libsURL =~ /^https/i) {
         print STDERR " and that Perl can use LWP::Simple to connect to HTTPS URLs.\n";
@@ -165,7 +167,9 @@ if (! defined $lastModified) {
     $response = $ua->get($headerURL);
 
     if (! $response->is_success) {
-        print STDERR "Could not access $headerURL:\n", $response->headers_as_string, "\n";
+        print STDERR "Could not access $headerURL:\n";
+        print STDERR $response->message, "\n";
+        print STDERR $response->headers_as_string, "\n";
         print STDERR "Please ensure that $headerURL is reachable";
         if ($headerURL =~ /^https/i) {
             print STDERR " and that Perl can use LWP::Simple to connect to HTTPS URLs.\n";
@@ -187,8 +191,10 @@ if (defined $lastModifiedTime && defined $oldLastModifiedTime
 
 print "Downloading $zipFile...\n\n";
 print "$libsURL\n";
-my $result = getstore($libsURL, File::Spec->catfile($tmpAbsDir, $zipFile));
-die "Couldn't download $zipFile!" if is_error($result);
+my $request = HTTP::Request->new(GET => $libsURL);
+$request->header(Accept => "*/*");
+$response = $ua->request($request, File::Spec->catfile($tmpAbsDir, $zipFile));
+die "Couldn't download $zipFile!" if is_error($response->code);
 
 my $zip = Archive::Zip->new(File::Spec->catfile($tmpAbsDir, $zipFile));
 
@@ -207,7 +213,7 @@ if (! $zip->memberNamed($prefixDirectoryPathInZipFile)) {
     }
 }
 
-$result = $zip->extractTree("", $tmpAbsDir);
+my $result = $zip->extractTree("", $tmpAbsDir);
 die "Couldn't unzip $zipFile." if $result != AZ_OK;
 
 print "\nInstalling $file...\n";

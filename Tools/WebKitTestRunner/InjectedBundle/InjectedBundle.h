@@ -81,8 +81,10 @@ public:
 
     bool shouldDumpPixels() const { return m_dumpPixels; }
     bool useWaitToDumpWatchdogTimer() const { return m_useWaitToDumpWatchdogTimer; }
-    
+    bool dumpJSConsoleLogInStdErr() const { return m_dumpJSConsoleLogInStdErr; };
+
     void outputText(const String&);
+    void dumpToStdErr(const String&);
     void postNewBeforeUnloadReturnValue(bool);
     void postAddChromeInputField();
     void postRemoveChromeInputField();
@@ -95,13 +97,16 @@ public:
 
     // Geolocation.
     void setGeolocationPermission(bool);
-    void setMockGeolocationPosition(double latitude, double longitude, double accuracy, bool providesAltitude, double altitude, bool providesAltitudeAccuracy, double altitudeAccuracy, bool providesHeading, double heading, bool providesSpeed, double speed);
+    void setMockGeolocationPosition(double latitude, double longitude, double accuracy, bool providesAltitude, double altitude, bool providesAltitudeAccuracy, double altitudeAccuracy, bool providesHeading, double heading, bool providesSpeed, double speed, bool providesFloorLevel, double floorLevel);
     void setMockGeolocationPositionUnavailableError(WKStringRef errorMessage);
     bool isGeolocationProviderActive() const;
 
     // MediaStream.
     void setUserMediaPermission(bool);
-    void setUserMediaPermissionForOrigin(bool permission, WKStringRef origin, WKStringRef parentOrigin);
+    void resetUserMediaPermission();
+    void setUserMediaPersistentPermissionForOrigin(bool permission, WKStringRef origin, WKStringRef parentOrigin);
+    unsigned userMediaPermissionRequestCountForOrigin(WKStringRef origin, WKStringRef parentOrigin) const;
+    void resetUserMediaPermissionRequestCountForOrigin(WKStringRef origin, WKStringRef parentOrigin);
 
     // Policy delegate.
     void setCustomPolicyDelegate(bool enabled, bool permissive);
@@ -128,7 +133,13 @@ public:
     unsigned imageCountInGeneralPasteboard() const;
 
     void setAllowsAnySSLCertificate(bool);
-    
+
+    void statisticsNotifyObserver();
+
+    void textDidChangeInTextField();
+    void textFieldDidBeginEditing();
+    void textFieldDidEndEditing();
+
 private:
     InjectedBundle();
     ~InjectedBundle();
@@ -145,10 +156,13 @@ private:
     void didReceiveMessage(WKStringRef messageName, WKTypeRef messageBody);
     void didReceiveMessageToPage(WKBundlePageRef, WKStringRef messageName, WKTypeRef messageBody);
 
+    void setUpInjectedBundleClients(WKBundlePageRef);
+
     void platformInitialize(WKTypeRef initializationUserData);
     void resetLocalSettings();
 
-    void beginTesting(WKDictionaryRef initialSettings);
+    enum class BegingTestingMode { New, Resume };
+    void beginTesting(WKDictionaryRef initialSettings, BegingTestingMode);
 
     bool booleanForKey(WKDictionaryRef, const char* key);
 
@@ -178,6 +192,7 @@ private:
     bool m_useWorkQueue;
     int m_timeout;
     bool m_pixelResultIsPending { false };
+    bool m_dumpJSConsoleLogInStdErr { false };
 
     WKRetainPtr<WKDataRef> m_audioResult;
     WKRetainPtr<WKImageRef> m_pixelResult;

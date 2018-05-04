@@ -29,104 +29,68 @@
 #if ENABLE(SUBTLE_CRYPTO)
 
 #include "CommonCryptoUtilities.h"
-#include "CryptoAlgorithmRsaSsaParamsDeprecated.h"
-#include "CryptoDigest.h"
+#include "CryptoDigestAlgorithm.h"
 #include "CryptoKeyRSA.h"
-#include "ExceptionCode.h"
 
 namespace WebCore {
 
-inline bool getCryptoDigestAlgorithm(CryptoAlgorithmIdentifier hashFunction, CryptoDigest::Algorithm& algorithm)
-{
-    switch (hashFunction) {
-    case CryptoAlgorithmIdentifier::SHA_1:
-        algorithm = CryptoDigest::Algorithm::SHA_1;
-        return true;
-    case CryptoAlgorithmIdentifier::SHA_224:
-        algorithm = CryptoDigest::Algorithm::SHA_224;
-        return true;
-    case CryptoAlgorithmIdentifier::SHA_256:
-        algorithm = CryptoDigest::Algorithm::SHA_256;
-        return true;
-    case CryptoAlgorithmIdentifier::SHA_384:
-        algorithm = CryptoDigest::Algorithm::SHA_384;
-        return true;
-    case CryptoAlgorithmIdentifier::SHA_512:
-        algorithm = CryptoDigest::Algorithm::SHA_512;
-        return true;
-    default:
-        return false;
-    }
-}
-
-void CryptoAlgorithmRSASSA_PKCS1_v1_5::platformSign(const CryptoAlgorithmRsaSsaParamsDeprecated& parameters, const CryptoKeyRSA& key, const CryptoOperationData& data, VectorCallback&& callback, VoidCallback&& failureCallback, ExceptionCode& ec)
+static ExceptionOr<Vector<uint8_t>> signRSASSA_PKCS1_v1_5(CryptoAlgorithmIdentifier hash, const PlatformRSAKey key, size_t keyLength, const Vector<uint8_t>& data)
 {
     CCDigestAlgorithm digestAlgorithm;
-    if (!getCommonCryptoDigestAlgorithm(parameters.hash, digestAlgorithm)) {
-        ec = NOT_SUPPORTED_ERR;
-        return;
-    }
+    if (!getCommonCryptoDigestAlgorithm(hash, digestAlgorithm))
+        return Exception { OperationError };
 
-    CryptoDigest::Algorithm cryptoDigestAlgorithm;
-    if (!getCryptoDigestAlgorithm(parameters.hash, cryptoDigestAlgorithm)) {
-        ec = NOT_SUPPORTED_ERR;
-        return;
-    }
+    auto cryptoDigestAlgorithm = WebCore::cryptoDigestAlgorithm(hash);
+    if (!cryptoDigestAlgorithm)
+        return Exception { OperationError };
+    auto digest = PAL::CryptoDigest::create(*cryptoDigestAlgorithm);
+    if (!digest)
+        return Exception { OperationError };
+    digest->addBytes(data.data(), data.size());
+    auto digestData = digest->computeHash();
 
-    std::unique_ptr<CryptoDigest> digest = CryptoDigest::create(cryptoDigestAlgorithm);
-    if (!digest) {
-        ec = NOT_SUPPORTED_ERR;
-        return;
-    }
-
-    digest->addBytes(data.first, data.second);
-
-    Vector<uint8_t> digestData = digest->computeHash();
-
-    Vector<uint8_t> signature(512);
+    Vector<uint8_t> signature(keyLength / 8); // Per https://tools.ietf.org/html/rfc3447#section-8.2.1
     size_t signatureSize = signature.size();
 
-    CCCryptorStatus status = CCRSACryptorSign(key.platformKey(), ccPKCS1Padding, digestData.data(), digestData.size(), digestAlgorithm, 0, signature.data(), &signatureSize);
-    if (status) {
-        failureCallback();
-        return;
-    }
+    CCCryptorStatus status = CCRSACryptorSign(key, ccPKCS1Padding, digestData.data(), digestData.size(), digestAlgorithm, 0, signature.data(), &signatureSize);
+    if (status)
+        return Exception { OperationError };
 
-    signature.resize(signatureSize);
-    callback(signature);
+    return WTFMove(signature);
 }
 
-void CryptoAlgorithmRSASSA_PKCS1_v1_5::platformVerify(const CryptoAlgorithmRsaSsaParamsDeprecated& parameters, const CryptoKeyRSA& key, const CryptoOperationData& signature, const CryptoOperationData& data, BoolCallback&& callback, VoidCallback&& failureCallback, ExceptionCode& ec)
+static ExceptionOr<bool> verifyRSASSA_PKCS1_v1_5(CryptoAlgorithmIdentifier hash, const PlatformRSAKey key, const Vector<uint8_t>& signature, const Vector<uint8_t>& data)
 {
     CCDigestAlgorithm digestAlgorithm;
-    if (!getCommonCryptoDigestAlgorithm(parameters.hash, digestAlgorithm)) {
-        ec = NOT_SUPPORTED_ERR;
-        return;
-    }
+    if (!getCommonCryptoDigestAlgorithm(hash, digestAlgorithm))
+        return Exception { OperationError };
 
-    CryptoDigest::Algorithm cryptoDigestAlgorithm;
-    if (!getCryptoDigestAlgorithm(parameters.hash, cryptoDigestAlgorithm)) {
-        ec = NOT_SUPPORTED_ERR;
-        return;
-    }
+    auto cryptoDigestAlgorithm = WebCore::cryptoDigestAlgorithm(hash);
+    if (!cryptoDigestAlgorithm)
+        return Exception { OperationError };
+    auto digest = PAL::CryptoDigest::create(*cryptoDigestAlgorithm);
+    if (!digest)
+        return Exception { OperationError };
+    digest->addBytes(data.data(), data.size());
+    auto digestData = digest->computeHash();
 
-    std::unique_ptr<CryptoDigest> digest = CryptoDigest::create(cryptoDigestAlgorithm);
-    if (!digest) {
-        ec = NOT_SUPPORTED_ERR;
-        return;
-    }
-
-    digest->addBytes(data.first, data.second);
-
-    Vector<uint8_t> digestData = digest->computeHash();
-
-    CCCryptorStatus status = CCRSACryptorVerify(key.platformKey(), ccPKCS1Padding, digestData.data(), digestData.size(), digestAlgorithm, 0, signature.first, signature.second);
+    auto status = CCRSACryptorVerify(key, ccPKCS1Padding, digestData.data(), digestData.size(), digestAlgorithm, 0, signature.data(), signature.size());
     if (!status)
-        callback(true);
-    else if (status == kCCNotVerified || status == kCCDecodeError) // <rdar://problem/15464982> CCRSACryptorVerify returns kCCDecodeError instead of kCCNotVerified sometimes
-        callback(false);
-    else
-        failureCallback();
+        return true;
+    if (status == kCCNotVerified || status == kCCDecodeError) // <rdar://problem/15464982> CCRSACryptorVerify returns kCCDecodeError instead of kCCNotVerified sometimes
+        return false;
+
+    return Exception { OperationError };
+}
+
+ExceptionOr<Vector<uint8_t>> CryptoAlgorithmRSASSA_PKCS1_v1_5::platformSign(const CryptoKeyRSA& key, const Vector<uint8_t>& data)
+{
+    return signRSASSA_PKCS1_v1_5(key.hashAlgorithmIdentifier(), key.platformKey(), key.keySizeInBits(), data);
+}
+
+ExceptionOr<bool> CryptoAlgorithmRSASSA_PKCS1_v1_5::platformVerify(const CryptoKeyRSA& key, const Vector<uint8_t>& signature, const Vector<uint8_t>& data)
+{
+    return verifyRSASSA_PKCS1_v1_5(key.hashAlgorithmIdentifier(), key.platformKey(), signature, data);
 }
 
 } // namespace WebCore

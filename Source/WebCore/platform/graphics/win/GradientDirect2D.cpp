@@ -59,8 +59,15 @@ void Gradient::generateGradient(ID2D1RenderTarget* renderTarget)
     sortStopsIfNecessary();
 
     Vector<D2D1_GRADIENT_STOP> gradientStops;
-    for (auto stop : m_stops)
-        gradientStops.append(D2D1::GradientStop(stop.stop, D2D1::ColorF(stop.red, stop.green, stop.blue, stop.alpha)));
+    // FIXME: Add support for ExtendedColor.
+    for (auto stop : m_stops) {
+        float r;
+        float g;
+        float b;
+        float a;
+        stop.color.getRGBA(r, g, b, a);
+        gradientStops.append(D2D1::GradientStop(stop.offset, D2D1::ColorF(r, g, b, a)));
+    }
 
     COMPtr<ID2D1GradientStopCollection> gradientStopCollection;
     HRESULT hr = renderTarget->CreateGradientStopCollection(gradientStops.data(), gradientStops.size(), &gradientStopCollection);
@@ -71,62 +78,78 @@ void Gradient::generateGradient(ID2D1RenderTarget* renderTarget)
         m_gradient = nullptr;
     }
 
-    if (m_radial) {
-        FloatSize offset = p1() - p0();
-        ID2D1RadialGradientBrush* radialGradient = nullptr;
-        float radiusX = endRadius() + offset.width();
-        float radiusY = radiusX / m_aspectRatio;
-        hr = renderTarget->CreateRadialGradientBrush(
-            D2D1::RadialGradientBrushProperties(p0(), D2D1::Point2F(offset.width(), offset.height()), radiusX, radiusY),
-            D2D1::BrushProperties(), gradientStopCollection.get(),
-            &radialGradient);
-        RELEASE_ASSERT(SUCCEEDED(hr));
-        m_gradient = radialGradient;
-    } else {
-        ID2D1LinearGradientBrush* linearGradient = nullptr;
-        hr = renderTarget->CreateLinearGradientBrush(
-            D2D1::LinearGradientBrushProperties(p0(), p1()),
-            D2D1::BrushProperties(), gradientStopCollection.get(),
-            &linearGradient);
-        RELEASE_ASSERT(SUCCEEDED(hr));
-        m_gradient = linearGradient;
-    }
+    WTF::switchOn(m_data,
+        [&] (const LinearData& data) {
+            ID2D1LinearGradientBrush* linearGradient = nullptr;
+            hr = renderTarget->CreateLinearGradientBrush(
+                D2D1::LinearGradientBrushProperties(data.point0, data.point1),
+                D2D1::BrushProperties(), gradientStopCollection.get(),
+                &linearGradient);
+            RELEASE_ASSERT(SUCCEEDED(hr));
+            m_gradient = linearGradient;
+        },
+        [&] (const RadialData& data) {
+            FloatSize offset = data.point1 - data.point0;
+            ID2D1RadialGradientBrush* radialGradient = nullptr;
+            float radiusX = data.endRadius + offset.width();
+            float radiusY = radiusX / data.aspectRatio;
+            hr = renderTarget->CreateRadialGradientBrush(
+                D2D1::RadialGradientBrushProperties(p0(), D2D1::Point2F(offset.width(), offset.height()), radiusX, radiusY),
+                D2D1::BrushProperties(), gradientStopCollection.get(),
+                &radialGradient);
+            RELEASE_ASSERT(SUCCEEDED(hr));
+            m_gradient = radialGradient;
+        }
+    );
 
     hash();
 }
 
-void Gradient::fill(GraphicsContext* context, const FloatRect& rect)
+void Gradient::fill(GraphicsContext& context, const FloatRect& rect)
 {
-    auto d2dContext = context->platformContext();
+    auto d2dContext = context.platformContext();
 
-    bool needScaling = aspectRatio() != 1;
-    if (needScaling) {
-        context->save();
-        // Scale from the center of the gradient. We only ever scale non-deprecated gradients,
-        // for which m_p0 == m_p1.
-        ASSERT(m_p0 == m_p1);
+    WTF::switchOn(m_data,
+        [&] (const LinearData& data) {
+            if (!m_cachedHash || !m_gradient)
+                generateGradient(d2dContext);
 
-        D2D1_MATRIX_3X2_F ctm = { };
-        d2dContext->GetTransform(&ctm);
+            d2dContext->SetTags(GRADIENT_DRAWING, __LINE__);
 
-        AffineTransform transform(ctm);
-        transform.translate(m_p0);
-        transform.scaleNonUniform(1.0, 1.0 / aspectRatio());
-        transform.translate(-m_p0);
+            const D2D1_RECT_F d2dRect = rect;
+            d2dContext->FillRectangle(&d2dRect, m_gradient);
+        },
+        [&] (const RadialData& data) {
+            bool needScaling = data.aspectRatio != 1;
+            if (needScaling) {
+                context.save();
+                // Scale from the center of the gradient. We only ever scale non-deprecated gradients,
+                // for which m_p0 == m_p1.
+                ASSERT(data.point0 == data.point1);
 
-        d2dContext->SetTransform(ctm);
-    }
+                D2D1_MATRIX_3X2_F ctm = { };
+                d2dContext->GetTransform(&ctm);
 
-    if (!m_cachedHash || !m_gradient)
-        generateGradient(d2dContext);
+                AffineTransform transform(ctm);
+                transform.translate(data.point0);
+                transform.scaleNonUniform(1.0, 1.0 / data.aspectRatio);
+                transform.translate(-data.point0);
 
-    d2dContext->SetTags(GRADIENT_DRAWING, __LINE__);
+                d2dContext->SetTransform(ctm);
+            }
 
-    const D2D1_RECT_F d2dRect = rect;
-    d2dContext->FillRectangle(&d2dRect, m_gradient);
+            if (!m_cachedHash || !m_gradient)
+                generateGradient(d2dContext);
 
-    if (needScaling)
-        context->restore();
+            d2dContext->SetTags(GRADIENT_DRAWING, __LINE__);
+
+            const D2D1_RECT_F d2dRect = rect;
+            d2dContext->FillRectangle(&d2dRect, m_gradient);
+
+            if (needScaling)
+                context.restore();
+        }
+    );
 }
 
 }

@@ -19,8 +19,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGFELightElement_h
-#define SVGFELightElement_h
+#pragma once
 
 #include "LightSource.h"
 #include "SVGAnimatedNumber.h"
@@ -28,11 +27,13 @@
 
 namespace WebCore {
 
+class SVGFilterBuilder;
+
 class SVGFELightElement : public SVGElement {
+    WTF_MAKE_ISO_ALLOCATED(SVGFELightElement);
 public:
-    virtual Ref<LightSource> lightSource() const = 0;
+    virtual Ref<LightSource> lightSource(SVGFilterBuilder&) const = 0;
     static SVGFELightElement* findLightElement(const SVGElement*);
-    static RefPtr<LightSource> findLightSource(const SVGElement*);
 
 protected:
     SVGFELightElement(const QualifiedName&, Document&);
@@ -59,5 +60,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif

@@ -19,8 +19,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef RenderSVGGradientStop_h
-#define RenderSVGGradientStop_h
+#pragma once
 
 #include "RenderElement.h"
 #include "SVGStopElement.h"
@@ -31,6 +30,7 @@ class SVGGradientElement;
 
 // This class exists mostly so we can hear about gradient stop style changes
 class RenderSVGGradientStop final : public RenderElement {
+    WTF_MAKE_ISO_ALLOCATED(RenderSVGGradientStop);
 public:
     RenderSVGGradientStop(SVGStopElement&, RenderStyle&&);
     virtual ~RenderSVGGradientStop();
@@ -63,5 +63,3 @@ private:
 } // namespace WebCore
 
 SPECIALIZE_TYPE_TRAITS_RENDER_OBJECT(RenderSVGGradientStop, isSVGGradientStop())
-
-#endif // RenderSVGGradientStop_h

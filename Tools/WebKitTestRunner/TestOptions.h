@@ -33,6 +33,7 @@ namespace WTR {
 
 struct TestOptions {
     bool useThreadedScrolling { false };
+    bool useAcceleratedDrawing { false };
     bool useRemoteLayerTree { false };
     bool shouldShowWebView { false };
     bool useFlexibleViewport { false };
@@ -43,11 +44,55 @@ struct TestOptions {
     bool needsSiteSpecificQuirks { false };
     bool ignoresViewportScaleLimits { false };
     bool useCharacterSelectionGranularity { false };
+    bool enableAttachmentElement { false };
+    bool enableIntersectionObserver { false };
+    bool enableMenuItemElement { false };
+    bool enableModernMediaControls { true };
+    bool enablePointerLock { false };
+    bool enableWebAuthentication { true };
+    bool enableIsSecureContextAttribute { true };
+    bool enableInspectorAdditions { false };
+    bool shouldShowTouches { false };
+    bool dumpJSConsoleLogInStdErr { false };
+    bool allowCrossOriginSubresourcesToAskForCredentials { false };
+    bool enableCSSAnimationsAndCSSTransitionsBackedByWebAnimations { false };
+    bool enableProcessSwapOnNavigation { false };
 
     float deviceScaleFactor { 1 };
     Vector<String> overrideLanguages;
+    std::string applicationManifest;
     
     TestOptions(const std::string& pathOrURL);
+
+    // Add here options that can only be set upon PlatformWebView
+    // initialization and make sure it's up to date when adding new
+    // options to this struct. Otherwise, tests using those options
+    // might fail if WTR is reusing an existing PlatformWebView.
+    bool hasSameInitializationOptions(const TestOptions& options) const
+    {
+        if (useThreadedScrolling != options.useThreadedScrolling
+            || useAcceleratedDrawing != options.useAcceleratedDrawing
+            || overrideLanguages != options.overrideLanguages
+            || useMockScrollbars != options.useMockScrollbars
+            || needsSiteSpecificQuirks != options.needsSiteSpecificQuirks
+            || useCharacterSelectionGranularity != options.useCharacterSelectionGranularity
+            || enableAttachmentElement != options.enableAttachmentElement
+            || enableIntersectionObserver != options.enableIntersectionObserver
+            || enableMenuItemElement != options.enableMenuItemElement
+            || enableModernMediaControls != options.enableModernMediaControls
+            || enablePointerLock != options.enablePointerLock
+            || enableWebAuthentication != options.enableWebAuthentication
+            || enableIsSecureContextAttribute != options.enableIsSecureContextAttribute
+            || enableInspectorAdditions != options.enableInspectorAdditions
+            || dumpJSConsoleLogInStdErr != options.dumpJSConsoleLogInStdErr
+            || applicationManifest != options.applicationManifest
+            || allowCrossOriginSubresourcesToAskForCredentials != options.allowCrossOriginSubresourcesToAskForCredentials
+            || enableCSSAnimationsAndCSSTransitionsBackedByWebAnimations != options.enableCSSAnimationsAndCSSTransitionsBackedByWebAnimations
+            || enableProcessSwapOnNavigation != options.enableProcessSwapOnNavigation)
+            return false;
+
+        return true;
+    }
 };
 
 }

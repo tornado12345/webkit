@@ -20,12 +20,10 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef RenderSVGRoot_h
-#define RenderSVGRoot_h
+#pragma once
 
 #include "FloatRect.h"
 #include "RenderReplaced.h"
-
 #include "SVGRenderSupport.h"
 
 namespace WebCore {
@@ -35,6 +33,7 @@ class RenderSVGResourceContainer;
 class SVGSVGElement;
 
 class RenderSVGRoot final : public RenderReplaced {
+    WTF_MAKE_ISO_ALLOCATED(RenderSVGRoot);
 public:
     RenderSVGRoot(SVGSVGElement&, RenderStyle&&);
     virtual ~RenderSVGRoot();
@@ -73,7 +72,7 @@ private:
     const char* renderName() const override { return "RenderSVGRoot"; }
 
     LayoutUnit computeReplacedLogicalWidth(ShouldComputePreferred  = ComputeActual) const override;
-    LayoutUnit computeReplacedLogicalHeight() const override;
+    LayoutUnit computeReplacedLogicalHeight(std::optional<LayoutUnit> estimatedUsedWidth = std::nullopt) const override;
     void layout() override;
     void paintReplaced(PaintInfo&, const LayoutPoint&) override;
 
@@ -83,8 +82,6 @@ private:
     void willBeRemovedFromTree() override;
 
     void styleDidChange(StyleDifference, const RenderStyle* oldStyle) override;
-    void addChild(RenderObject* child, RenderObject* beforeChild = 0) override;
-    void removeChild(RenderObject&) override;
 
     const AffineTransform& localToParentTransform() const override;
 
@@ -129,5 +126,3 @@ private:
 } // namespace WebCore
 
 SPECIALIZE_TYPE_TRAITS_RENDER_OBJECT(RenderSVGRoot, isSVGRoot())
-
-#endif // RenderSVGRoot_h

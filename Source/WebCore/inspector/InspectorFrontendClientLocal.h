@@ -45,12 +45,13 @@ class InspectorFrontendHost;
 class Page;
 
 class InspectorFrontendClientLocal : public InspectorFrontendClient {
-    WTF_MAKE_NONCOPYABLE(InspectorFrontendClientLocal); WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_NONCOPYABLE(InspectorFrontendClientLocal);
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     class WEBCORE_EXPORT Settings {
     public:
-        Settings() { }
-        virtual ~Settings() { }
+        Settings() = default;
+        virtual ~Settings() = default;
         virtual String getProperty(const String& name);
         virtual void setProperty(const String& name, const String& value);
     };
@@ -63,6 +64,8 @@ public:
 
     void startWindowDrag() override { }
     WEBCORE_EXPORT void moveWindowBy(float x, float y) final;
+
+    WEBCORE_EXPORT UserInterfaceLayoutDirection userInterfaceLayoutDirection() const final;
 
     WEBCORE_EXPORT void requestSetDockSide(DockSide) final;
     WEBCORE_EXPORT void changeAttachedWindowHeight(unsigned) final;

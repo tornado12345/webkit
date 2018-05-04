@@ -307,6 +307,18 @@ public:
             m_index = m_bitVector->findBit(m_index + 1, true);
             return *this;
         }
+
+        iterator operator++(int)
+        {
+            iterator result = *this;
+            ++(*this);
+            return result;
+        }
+
+        bool isAtEnd() const
+        {
+            return m_index >= m_bitVector->size();
+        }
         
         bool operator==(const iterator& other) const
         {

@@ -34,11 +34,9 @@
 #include "PlatformCALayer.h"
 #include "TileController.h"
 #include "TiledBacking.h"
-#include "WebCoreHeaderDetection.h"
 #include <QuartzCore/CACFLayer.h>
 #include <wtf/MainThread.h>
 
-using namespace std;
 using namespace WebCore;
 
 PlatformCALayerWinInternal::PlatformCALayerWinInternal(PlatformCALayer* owner)
@@ -46,9 +44,7 @@ PlatformCALayerWinInternal::PlatformCALayerWinInternal(PlatformCALayer* owner)
 {
 }
 
-PlatformCALayerWinInternal::~PlatformCALayerWinInternal()
-{
-}
+PlatformCALayerWinInternal::~PlatformCALayerWinInternal() = default;
 
 struct DisplayOnMainThreadContext {
     RetainPtr<CACFLayerRef> layer;
@@ -104,7 +100,7 @@ void PlatformCALayerWinInternal::displayCallback(CACFLayerRef caLayer, CGContext
     // smaller than the layer bounds (e.g. tiled layers)
     CGRect clipBounds = CGContextGetClipBoundingBox(context);
     IntRect clip(enclosingIntRect(clipBounds));
-    client->platformCALayerPaintContents(owner(), graphicsContext, clip);
+    client->platformCALayerPaintContents(owner(), graphicsContext, clip, GraphicsLayerPaintNormal);
 
     if (client->platformCALayerShowRepaintCounter(owner())
         && !repaintCountersAreDrawnByGridController(layerType)) {
@@ -221,7 +217,7 @@ void PlatformCALayerWinInternal::removeAllSublayers()
 
 void PlatformCALayerWinInternal::insertSublayer(PlatformCALayer& layer, size_t index)
 {
-    index = min(index, sublayerCount());
+    index = std::min(index, sublayerCount());
 
     layer.removeFromSuperlayer();
     CACFLayerInsertSublayer(owner()->platformLayer(), layer.platformLayer(), index);

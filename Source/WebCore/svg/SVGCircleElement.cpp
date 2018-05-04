@@ -21,16 +21,17 @@
 #include "config.h"
 #include "SVGCircleElement.h"
 
-#include "ExceptionCode.h"
 #include "FloatPoint.h"
 #include "RenderSVGEllipse.h"
 #include "RenderSVGPath.h"
 #include "RenderSVGResource.h"
-#include "SVGException.h"
-#include "SVGLength.h"
+#include "SVGLengthValue.h"
 #include "SVGNames.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(SVGCircleElement);
 
 // Animated property definitions
 DEFINE_ANIMATED_LENGTH(SVGCircleElement, SVGNames::cxAttr, Cx, cx)
@@ -66,11 +67,11 @@ void SVGCircleElement::parseAttribute(const QualifiedName& name, const AtomicStr
     SVGParsingError parseError = NoError;
 
     if (name == SVGNames::cxAttr)
-        setCxBaseValue(SVGLength::construct(LengthModeWidth, value, parseError));
+        setCxBaseValue(SVGLengthValue::construct(LengthModeWidth, value, parseError));
     else if (name == SVGNames::cyAttr)
-        setCyBaseValue(SVGLength::construct(LengthModeHeight, value, parseError));
+        setCyBaseValue(SVGLengthValue::construct(LengthModeHeight, value, parseError));
     else if (name == SVGNames::rAttr)
-        setRBaseValue(SVGLength::construct(LengthModeOther, value, parseError, ForbidNegativeLengths));
+        setRBaseValue(SVGLengthValue::construct(LengthModeOther, value, parseError, ForbidNegativeLengths));
 
     reportAttributeParsingError(parseError, name, value);
 

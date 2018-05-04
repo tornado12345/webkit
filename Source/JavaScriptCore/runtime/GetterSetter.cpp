@@ -1,7 +1,7 @@
 /*
  *  Copyright (C) 1999-2002 Harri Porten (porten@kde.org)
  *  Copyright (C) 2001 Peter Kelly (pmk@post.com)
- *  Copyright (C) 2004, 2007-2009, 2014, 2016 Apple Inc. All rights reserved.
+ *  Copyright (C) 2004-2017 Apple Inc. All rights reserved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Library General Public
@@ -33,7 +33,7 @@ namespace JSC {
 
 STATIC_ASSERT_IS_TRIVIALLY_DESTRUCTIBLE(GetterSetter);
 
-const ClassInfo GetterSetter::s_info = { "GetterSetter", &Base::s_info, 0, CREATE_METHOD_TABLE(GetterSetter) };
+const ClassInfo GetterSetter::s_info = { "GetterSetter", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(GetterSetter) };
 
 void GetterSetter::visitChildren(JSCell* cell, SlotVisitor& visitor)
 {
@@ -41,8 +41,8 @@ void GetterSetter::visitChildren(JSCell* cell, SlotVisitor& visitor)
     ASSERT_GC_OBJECT_INHERITS(thisObject, info());
     JSCell::visitChildren(thisObject, visitor);
 
-    visitor.append(&thisObject->m_getter);
-    visitor.append(&thisObject->m_setter);
+    visitor.append(thisObject->m_getter);
+    visitor.append(thisObject->m_setter);
 }
 
 GetterSetter* GetterSetter::withGetter(VM& vm, JSGlobalObject* globalObject, JSObject* newGetter)
@@ -83,6 +83,7 @@ JSValue callGetter(ExecState* exec, JSValue base, JSValue getterSetter)
 
     CallData callData;
     CallType callType = getter->methodTable(vm)->getCallData(getter, callData);
+    scope.release();
     return call(exec, getter, callType, callData, base, ArgList());
 }
 
@@ -100,9 +101,11 @@ bool callSetter(ExecState* exec, JSValue base, JSValue getterSetter, JSValue val
 
     MarkedArgumentBuffer args;
     args.append(value);
+    ASSERT(!args.hasOverflowed());
 
     CallData callData;
     CallType callType = setter->methodTable(vm)->getCallData(setter, callData);
+    scope.release();
     call(exec, setter, callType, callData, base, args);
     return true;
 }

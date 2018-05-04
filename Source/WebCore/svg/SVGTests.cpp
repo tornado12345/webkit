@@ -24,10 +24,10 @@
 
 #include "DOMImplementation.h"
 #include "HTMLNames.h"
-#include "Language.h"
 #include "SVGElement.h"
 #include "SVGNames.h"
 #include "SVGStringList.h"
+#include <wtf/Language.h>
 #include <wtf/NeverDestroyed.h>
 
 #if ENABLE(MATHML)
@@ -191,7 +191,7 @@ bool SVGTests::handleAttributeChange(SVGElement* targetElement, const QualifiedN
     ASSERT(targetElement);
     if (!isKnownAttribute(attributeName))
         return false;
-    if (!targetElement->inDocument())
+    if (!targetElement->isConnected())
         return true;
     targetElement->invalidateStyleAndRenderersForSubtree();
     return true;
@@ -204,45 +204,44 @@ void SVGTests::addSupportedAttributes(HashSet<QualifiedName>& supportedAttribute
     supportedAttributes.add(systemLanguageAttr);
 }
 
-void SVGTests::synchronizeAttribute(SVGElement* contextElement, SVGSynchronizableAnimatedProperty<SVGStringList>& property, const QualifiedName& attributeName)
+void SVGTests::synchronizeAttribute(SVGElement& contextElement, SVGSynchronizableAnimatedProperty<SVGStringListValues>& property, const QualifiedName& attributeName)
 {
-    ASSERT(contextElement);
     if (!property.shouldSynchronize)
         return;
-    m_requiredFeatures.synchronize(contextElement, attributeName, property.value.valueAsString());
+    m_requiredFeatures.synchronize(&contextElement, attributeName, property.value.valueAsString());
 }
 
-void SVGTests::synchronizeRequiredFeatures(SVGElement* contextElement)
+void SVGTests::synchronizeRequiredFeatures(SVGElement& contextElement)
 {
     synchronizeAttribute(contextElement, m_requiredFeatures, requiredFeaturesAttr);
 }
 
-void SVGTests::synchronizeRequiredExtensions(SVGElement* contextElement)
+void SVGTests::synchronizeRequiredExtensions(SVGElement& contextElement)
 {
     synchronizeAttribute(contextElement, m_requiredExtensions, requiredExtensionsAttr);
 }
 
-void SVGTests::synchronizeSystemLanguage(SVGElement* contextElement)
+void SVGTests::synchronizeSystemLanguage(SVGElement& contextElement)
 {
     synchronizeAttribute(contextElement, m_systemLanguage, systemLanguageAttr);
 }
 
-SVGStringList& SVGTests::requiredFeatures()
+Ref<SVGStringList> SVGTests::requiredFeatures(SVGElement& contextElement)
 {
     m_requiredFeatures.shouldSynchronize = true;
-    return m_requiredFeatures.value;
+    return SVGStringList::create(contextElement, m_requiredFeatures.value);
 }
 
-SVGStringList& SVGTests::requiredExtensions()
+Ref<SVGStringList> SVGTests::requiredExtensions(SVGElement& contextElement)
 {
     m_requiredExtensions.shouldSynchronize = true;    
-    return m_requiredExtensions.value;
+    return SVGStringList::create(contextElement, m_requiredExtensions.value);
 }
 
-SVGStringList& SVGTests::systemLanguage()
+Ref<SVGStringList> SVGTests::systemLanguage(SVGElement& contextElement)
 {
     m_systemLanguage.shouldSynchronize = true;
-    return m_systemLanguage.value;
+    return SVGStringList::create(contextElement, m_systemLanguage.value);
 }
 
 bool SVGTests::hasFeatureForLegacyBindings(const String& feature, const String& version)
@@ -252,8 +251,8 @@ bool SVGTests::hasFeatureForLegacyBindings(const String& feature, const String& 
     // This is what the DOMImplementation function now does in JavaScript as is now suggested in the DOM specification.
     // The behavior implemented below is quirky, but preserves what WebKit has done for at least the last few years.
 
-    bool hasSVG10FeaturePrefix = feature.startsWith("org.w3c.dom.svg", false) || feature.startsWith("org.w3c.svg", false);
-    bool hasSVG11FeaturePrefix = feature.startsWith("http://www.w3.org/tr/svg", false);
+    bool hasSVG10FeaturePrefix = startsWithLettersIgnoringASCIICase(feature, "org.w3c.dom.svg") || startsWithLettersIgnoringASCIICase(feature, "org.w3c.svg");
+    bool hasSVG11FeaturePrefix = startsWithLettersIgnoringASCIICase(feature, "http://www.w3.org/tr/svg");
 
     // We don't even try to handle feature names that don't look like the SVG ones, so just return true for all of those.
     if (!(hasSVG10FeaturePrefix || hasSVG11FeaturePrefix))

@@ -23,8 +23,7 @@
  *
  */
 
-#ifndef PaintPhase_h
-#define PaintPhase_h
+#pragma once
 
 namespace WebCore {
 
@@ -59,15 +58,16 @@ enum PaintBehaviorFlags {
     PaintBehaviorSkipSelectionHighlight      = 1 << 1,
     PaintBehaviorForceBlackText              = 1 << 2,
     PaintBehaviorForceWhiteText              = 1 << 3,
-    PaintBehaviorFlattenCompositingLayers    = 1 << 4,
-    PaintBehaviorRenderingSVGMask            = 1 << 5,
-    PaintBehaviorSkipRootBackground          = 1 << 6,
-    PaintBehaviorRootBackgroundOnly          = 1 << 7,
-    PaintBehaviorSelectionAndBackgroundsOnly = 1 << 8,
+    PaintBehaviorRenderingSVGMask            = 1 << 4,
+    PaintBehaviorSkipRootBackground          = 1 << 5,
+    PaintBehaviorRootBackgroundOnly          = 1 << 6,
+    PaintBehaviorSelectionAndBackgroundsOnly = 1 << 7,
+    PaintBehaviorExcludeSelection            = 1 << 8,
+    PaintBehaviorFlattenCompositingLayers    = 1 << 9, // Paint doesn't stop at compositing layer boundaries.
+    PaintBehaviorSnapshotting                = 1 << 10,
+    PaintBehaviorTileFirstPaint              = 1 << 11,
 };
 
 typedef unsigned PaintBehavior;
 
 } // namespace WebCore
-
-#endif // PaintPhase_h

@@ -18,8 +18,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGFEMergeNodeElement_h
-#define SVGFEMergeNodeElement_h
+#pragma once
 
 #include "SVGAnimatedString.h"
 #include "SVGElement.h"
@@ -27,6 +26,7 @@
 namespace WebCore {
 
 class SVGFEMergeNodeElement final : public SVGElement {
+    WTF_MAKE_ISO_ALLOCATED(SVGFEMergeNodeElement);
 public:
     static Ref<SVGFEMergeNodeElement> create(const QualifiedName&, Document&);
 
@@ -43,5 +43,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif

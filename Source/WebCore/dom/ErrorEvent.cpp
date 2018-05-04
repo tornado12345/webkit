@@ -34,11 +34,11 @@
 
 #include "DOMWrapperWorld.h"
 #include "EventNames.h"
-#include <heap/HeapInlines.h>
-
-using namespace JSC;
+#include <JavaScriptCore/HeapInlines.h>
+#include <JavaScriptCore/StrongInlines.h>
 
 namespace WebCore {
+using namespace JSC;
 
 ErrorEvent::ErrorEvent(ExecState& state, const AtomicString& type, const Init& initializer, IsTrusted isTrusted)
     : Event(type, initializer, isTrusted)
@@ -50,7 +50,7 @@ ErrorEvent::ErrorEvent(ExecState& state, const AtomicString& type, const Init& i
 {
 }
 
-ErrorEvent::ErrorEvent(const String& message, const String& fileName, unsigned lineNumber, unsigned columnNumber, const Deprecated::ScriptValue& error)
+ErrorEvent::ErrorEvent(const String& message, const String& fileName, unsigned lineNumber, unsigned columnNumber, JSC::Strong<JSC::Unknown> error)
     : Event(eventNames().errorEvent, false, true)
     , m_message(message)
     , m_fileName(fileName)
@@ -60,28 +60,26 @@ ErrorEvent::ErrorEvent(const String& message, const String& fileName, unsigned l
 {
 }
 
-ErrorEvent::~ErrorEvent()
-{
-}
+ErrorEvent::~ErrorEvent() = default;
 
 EventInterface ErrorEvent::eventInterface() const
 {
     return ErrorEventInterfaceType;
 }
 
-JSValue ErrorEvent::sanitizedErrorValue(ExecState& exec, JSGlobalObject& globalObject)
+JSValue ErrorEvent::error(ExecState& state, JSGlobalObject& globalObject)
 {    
-    auto error = m_error.jsValue();
+    auto error = m_error.get();
     if (!error)
         return jsNull();
 
-    if (error.isObject() && &worldForDOMObject(error.getObject()) != &currentWorld(&exec)) {
+    if (!isWorldCompatible(state, error)) {
         // We need to make sure ErrorEvents do not leak their error property across isolated DOM worlds.
         // Ideally, we would check that the worlds have different privileges but that's not possible yet.
-        auto serializedError = trySerializeError(exec);
+        auto serializedError = trySerializeError(state);
         if (!serializedError)
             return jsNull();
-        return serializedError->deserialize(exec, &globalObject);
+        return serializedError->deserialize(state, &globalObject);
     }
 
     return error;
@@ -90,7 +88,7 @@ JSValue ErrorEvent::sanitizedErrorValue(ExecState& exec, JSGlobalObject& globalO
 RefPtr<SerializedScriptValue> ErrorEvent::trySerializeError(ExecState& exec)
 {
     if (!m_triedToSerialize) {
-        m_serializedDetail = SerializedScriptValue::create(exec, m_error, NonThrowing);
+        m_serializedDetail = SerializedScriptValue::create(exec, m_error.get(), SerializationErrorMode::NonThrowing);
         m_triedToSerialize = true;
     }
     return m_serializedDetail;

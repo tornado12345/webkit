@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007, 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2007-2017 Apple Inc. All rights reserved.
  * Copyright (C) 2015 Canon Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,8 +27,9 @@
 #include "config.h"
 #include "FileSystem.h"
 
-#include "ScopeGuard.h"
+#include "FileMetadata.h"
 #include <wtf/HexNumber.h>
+#include <wtf/Scope.h>
 #include <wtf/text/CString.h>
 #include <wtf/text/StringBuilder.h>
 
@@ -40,6 +41,8 @@
 #endif
 
 namespace WebCore {
+
+namespace FileSystem {
 
 // The following lower-ASCII characters need escaping to be used in a filename
 // across all systems, including Windows:
@@ -151,17 +154,12 @@ String decodeFromFilename(const String& inputString)
             return { };
 
         if (inputString[i+1] != '+') {
-            char value;
-            if (!hexDigitValue(inputString[i + 1], value))
+            if (!isASCIIHexDigit(inputString[i + 1]))
                 return { };
-            LChar character = value << 4;
-
-            if (!hexDigitValue(inputString[i + 2], value))
+            if (!isASCIIHexDigit(inputString[i + 2]))
                 return { };
-
-            result.append(character | value);
+            result.append(toASCIIHexValue(inputString[i + 1], inputString[i + 2]));
             i += 2;
-
             continue;
         }
 
@@ -170,23 +168,16 @@ String decodeFromFilename(const String& inputString)
         if (i + 5 >= length)
             return { };
 
-        char value;
-        if (!hexDigitValue(inputString[i + 2], value))
+        if (!isASCIIHexDigit(inputString[i + 2]))
             return { };
-        UChar character = value << 12;
-
-        if (!hexDigitValue(inputString[i + 3], value))
+        if (!isASCIIHexDigit(inputString[i + 3]))
             return { };
-        character = character | (value << 8);
-
-        if (!hexDigitValue(inputString[i + 4], value))
+        if (!isASCIIHexDigit(inputString[i + 4]))
             return { };
-        character = character | (value << 4);
-
-        if (!hexDigitValue(inputString[i + 5], value))
+        if (!isASCIIHexDigit(inputString[i + 5]))
             return { };
 
-        result.append(character | value);
+        result.append(toASCIIHexValue(inputString[i + 2], inputString[i + 3]) << 8 | toASCIIHexValue(inputString[i + 4], inputString[i + 5]));
         i += 5;
     }
 
@@ -216,7 +207,7 @@ String lastComponentOfPathIgnoringTrailingSlash(const String& path)
 
 bool appendFileContentsToFileHandle(const String& path, PlatformFileHandle& target)
 {
-    auto source = openFile(path, OpenForRead);
+    auto source = openFile(path, FileOpenMode::Read);
 
     if (!isHandleValid(source))
         return false;
@@ -224,7 +215,7 @@ bool appendFileContentsToFileHandle(const String& path, PlatformFileHandle& targ
     static int bufferSize = 1 << 19;
     Vector<char> buffer(bufferSize);
 
-    ScopeGuard fileCloser([source]() {
+    auto fileCloser = WTF::makeScopeExit([source]() {
         PlatformFileHandle handle = source;
         closeFile(handle);
     });
@@ -245,9 +236,29 @@ bool appendFileContentsToFileHandle(const String& path, PlatformFileHandle& targ
     ASSERT_NOT_REACHED();
 }
 
+    
+bool filesHaveSameVolume(const String& fileA, const String& fileB)
+{
+    auto fsRepFileA = fileSystemRepresentation(fileA);
+    auto fsRepFileB = fileSystemRepresentation(fileB);
+    
+    if (fsRepFileA.isNull() || fsRepFileB.isNull())
+        return false;
+
+    bool result = false;
+
+    auto fileADev = getFileDeviceId(fsRepFileA);
+    auto fileBDev = getFileDeviceId(fsRepFileB);
+
+    if (fileADev && fileBDev)
+        result = (fileADev == fileBDev);
+    
+    return result;
+}
+
 #if !PLATFORM(MAC)
 
-void setMetadataURL(String&, const String&, const String&)
+void setMetadataURL(const String&, const String&, const String&)
 {
 }
 
@@ -319,4 +330,44 @@ MappedFileData::MappedFileData(const String& filePath, bool& success)
 #endif
 }
 
+PlatformFileHandle openAndLockFile(const String& path, FileOpenMode openMode, OptionSet<FileLockMode> lockMode)
+{
+    auto handle = openFile(path, openMode);
+    if (handle == invalidPlatformFileHandle)
+        return invalidPlatformFileHandle;
+
+#if USE(FILE_LOCK)
+    bool locked = lockFile(handle, lockMode);
+    ASSERT_UNUSED(locked, locked);
+#endif
+
+    return handle;
+}
+
+void unlockAndCloseFile(PlatformFileHandle handle)
+{
+#if USE(FILE_LOCK)
+    bool unlocked = unlockFile(handle);
+    ASSERT_UNUSED(unlocked, unlocked);
+#endif
+    closeFile(handle);
+}
+
+bool fileIsDirectory(const String& path, ShouldFollowSymbolicLinks shouldFollowSymbolicLinks)
+{
+    auto metadata = shouldFollowSymbolicLinks == ShouldFollowSymbolicLinks::Yes ? fileMetadataFollowingSymlinks(path) : fileMetadata(path);
+    if (!metadata)
+        return false;
+    return metadata.value().type == FileMetadata::Type::Directory;
+}
+
+std::optional<WallTime> getFileModificationTime(const String& path)
+{
+    time_t modificationTime = 0;
+    if (!getFileModificationTime(path, modificationTime))
+        return std::nullopt;
+    return WallTime::fromRawSeconds(modificationTime);
+}
+
+} // namespace FileSystem
 } // namespace WebCore

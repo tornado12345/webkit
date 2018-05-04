@@ -265,12 +265,12 @@ svn: resource out of date; try updating
 """
         command_does_not_exist = ['does_not_exist', 'invalid_option']
         self.assertRaises(OSError, run_command, command_does_not_exist)
-        self.assertRaises(OSError, run_command, command_does_not_exist, error_handler=Executive.ignore_error)
+        self.assertRaises(OSError, run_command, command_does_not_exist, ignore_errors=True)
 
         command_returns_non_zero = ['/bin/sh', '--invalid-option']
         self.assertRaises(ScriptError, run_command, command_returns_non_zero)
         # Check if returns error text:
-        self.assertTrue(run_command(command_returns_non_zero, error_handler=Executive.ignore_error))
+        self.assertTrue(run_command(command_returns_non_zero, ignore_errors=True))
 
         self.assertRaises(CheckoutNeedsUpdate, commit_error_handler, ScriptError(output=git_failure_message))
         self.assertRaises(CheckoutNeedsUpdate, commit_error_handler, ScriptError(output=svn_failure_message))
@@ -416,7 +416,7 @@ class SCMTest(unittest.TestCase):
         self.assertEqual(self.scm.committer_email_for_revision(3), getpass.getuser())  # Committer "email" will be the current user
 
     def _shared_test_reverse_diff(self):
-        self._setup_webkittools_scripts_symlink(self.scm) # Git's apply_reverse_diff uses resolve-ChangeLogs
+        self._setup_webkittools_scripts_symlink(self.scm)  # Git's apply_reverse_diff uses resolve-ChangeLogs.
         # Only test the simple case, as any other will end up with conflict markers.
         self.scm.apply_reverse_diff('5')
         self.assertEqual(read_from_path('test_file'), "test1test2test3\n")
@@ -703,7 +703,7 @@ class SVNTest(SCMTest):
         # Change into our test directory and run the create_patch command.
         os.chdir(test_dir_path)
         scm = detect_scm_system(test_dir_path)
-        self.assertEqual(scm.checkout_root, self.svn_checkout_path) # Sanity check that detection worked right.
+        self.assertEqual(scm.checkout_root, self.svn_checkout_path)  # Sanity check that detection worked right.
         actual_patch_contents = scm.create_patch()
         expected_patch_contents = """Index: test_dir2/test_file2
 ===================================================================
@@ -902,6 +902,10 @@ END
     def test_head_svn_revision(self):
         self._shared_test_head_svn_revision()
 
+    def test_native_revision(self):
+        self.assertEqual(self.scm.head_svn_revision(), self.scm.native_revision('.'))
+        self.assertEqual(self.scm.native_revision('.'), '5')
+
     def test_propset_propget(self):
         filepath = os.path.join(self.svn_checkout_path, "test_file")
         expected_mime_type = "x-application/foo-bar"
@@ -1079,6 +1083,11 @@ class GitTest(SCMTest):
         # If we cloned a git repo tracking an SVN repo, this would give the same result as
         # self._shared_test_head_svn_revision().
         self.assertEqual(scm.head_svn_revision(), '')
+
+    def test_native_revision(self):
+        scm = self.tracking_scm
+        command = ['git', '-C', scm.checkout_root, 'rev-parse', 'HEAD']
+        self.assertEqual(scm.native_revision(scm.checkout_root), run_command(command).strip())
 
     def test_rename_files(self):
         scm = self.tracking_scm
@@ -1591,6 +1600,10 @@ class GitSVNTest(SCMTest):
     def test_head_svn_revision(self):
         self._shared_test_head_svn_revision()
 
+    def test_native_revision(self):
+        command = ['git', '-C', self.git_checkout_path, 'rev-parse', 'HEAD']
+        self.assertEqual(self.scm.native_revision(self.git_checkout_path), run_command(command).strip())
+
     def test_to_object_name(self):
         relpath = 'test_file_commit1'
         fullpath = os.path.realpath(os.path.join(self.git_checkout_path, relpath))
@@ -1672,3 +1685,15 @@ MOCK run_command: ['git', 'log', '-1', '--grep=git-svn-id:', '--date=iso', './MO
 
         scm._run_git = lambda args: 'Date: 2013-02-08 01:55:21 -0800'
         self.assertEqual(scm.timestamp_of_revision('some-path', '12345'), '2013-02-08T09:55:21Z')
+
+    def test_timestamp_of_native_revision(self):
+        scm = self.make_scm()
+        scm.find_checkout_root = lambda path: ''
+        scm._run_git = lambda args: '1360310749'
+        self.assertEqual(scm.timestamp_of_native_revision('some-path', '1a1c3b08814bc2a8c15b0f6db63cdce68f2aaa7a'), '2013-02-08T08:05:49Z')
+
+        scm._run_git = lambda args: '1360279923'
+        self.assertEqual(scm.timestamp_of_native_revision('some-path', '1a1c3b08814bc2a8c15b0f6db63cdce68f2aaa7a'), '2013-02-07T23:32:03Z')
+
+        scm._run_git = lambda args: '1360317321'
+        self.assertEqual(scm.timestamp_of_native_revision('some-path', '1a1c3b08814bc2a8c15b0f6db63cdce68f2aaa7a'), '2013-02-08T09:55:21Z')

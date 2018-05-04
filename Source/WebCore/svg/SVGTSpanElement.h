@@ -18,14 +18,14 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGTSpanElement_h
-#define SVGTSpanElement_h
+#pragma once
 
 #include "SVGTextPositioningElement.h"
 
 namespace WebCore {
 
 class SVGTSpanElement final : public SVGTextPositioningElement {
+    WTF_MAKE_ISO_ALLOCATED(SVGTSpanElement);
 public:
     static Ref<SVGTSpanElement> create(const QualifiedName&, Document&);
 
@@ -38,5 +38,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif

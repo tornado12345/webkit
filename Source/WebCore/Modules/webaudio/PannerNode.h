@@ -24,7 +24,8 @@
 
 #pragma once
 
-#include "AudioBus.h"
+#if ENABLE(WEB_AUDIO)
+
 #include "AudioListener.h"
 #include "AudioNode.h"
 #include "AudioParam.h"
@@ -148,3 +149,5 @@ private:
 };
 
 } // namespace WebCore
+
+#endif

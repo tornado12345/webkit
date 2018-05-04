@@ -27,12 +27,9 @@
 
 #if ENABLE(INDEXED_DATABASE)
 
-#include "Dictionary.h"
 #include "EventTarget.h"
-#include "ExceptionCode.h"
 #include "IDBActiveDOMObject.h"
 #include "IDBConnectionProxy.h"
-#include "IDBConnectionToServer.h"
 #include "IDBDatabaseInfo.h"
 #include "IDBKeyPath.h"
 #include "IDBTransactionMode.h"
@@ -45,6 +42,7 @@ class IDBOpenDBRequest;
 class IDBResultData;
 class IDBTransaction;
 class IDBTransactionInfo;
+
 struct EventNames;
 
 class IDBDatabase : public ThreadSafeRefCounted<IDBDatabase>, public EventTargetWithInlineData, public IDBActiveDOMObject {
@@ -59,7 +57,7 @@ public:
     RefPtr<DOMStringList> objectStoreNames() const;
 
     struct ObjectStoreParameters {
-        Optional<IDBKeyPath> keyPath;
+        std::optional<IDBKeyPath> keyPath;
         bool autoIncrement;
     };
 
@@ -108,7 +106,7 @@ public:
 
     bool isClosingOrClosed() const { return m_closePending || m_closedInServer; }
 
-    bool dispatchEvent(Event&) final;
+    void dispatchEvent(Event&) final;
 
     bool hasPendingActivity() const final;
 

@@ -26,6 +26,7 @@
 #include "config.h"
 #include "DragImage.h"
 
+#include "Element.h"
 #include "FloatRoundedRect.h"
 #include "FontCascade.h"
 #include "FontDescription.h"
@@ -35,9 +36,11 @@
 #include "Image.h"
 #include "URL.h"
 #include "StringTruncator.h"
+#include "TextIndicator.h"
 #include "TextRun.h"
 #include "WebCoreTextRenderer.h"
 #include <wtf/RetainPtr.h>
+#include <wtf/text/win/WCharStringExtras.h>
 #include <wtf/win/GDIObject.h>
 
 #include <windows.h>
@@ -72,8 +75,7 @@ DragImageRef createDragImageIconForCachedImageFilename(const String& filename)
 {
     SHFILEINFO shfi = {0};
     String fname = filename;
-    if (FAILED(SHGetFileInfo(static_cast<LPCWSTR>(fname.charactersWithNullTermination().data()), FILE_ATTRIBUTE_NORMAL,
-        &shfi, sizeof(shfi), SHGFI_ICON | SHGFI_USEFILEATTRIBUTES)))
+    if (FAILED(SHGetFileInfo(stringToNullTerminatedWChar(fname).data(), FILE_ATTRIBUTE_NORMAL, &shfi, sizeof(shfi), SHGFI_ICON | SHGFI_USEFILEATTRIBUTES)))
         return 0;
 
     ICONINFO iconInfo;
@@ -109,8 +111,8 @@ static FontCascade dragLabelFont(int size, bool bold, FontRenderingMode renderin
     SystemParametersInfo(SPI_GETNONCLIENTMETRICS, metrics.cbSize, &metrics, 0);
 
     FontCascadeDescription description;
-    description.setWeight(bold ? FontWeightBold : FontWeightNormal);
-    description.setOneFamily(metrics.lfSmCaptionFont.lfFaceName);
+    description.setWeight(bold ? boldWeightValue() : normalWeightValue());
+    description.setOneFamily(nullTerminatedWCharToString(metrics.lfSmCaptionFont.lfFaceName));
     description.setSpecifiedSize((float)size);
     description.setComputedSize((float)size);
     description.setRenderingMode(renderingMode);
@@ -119,7 +121,7 @@ static FontCascade dragLabelFont(int size, bool bold, FontRenderingMode renderin
     return result;
 }
 
-DragImageRef createDragImageForLink(URL& url, const String& inLabel, FontRenderingMode fontRenderingMode)
+DragImageRef createDragImageForLink(Element&, URL& url, const String& inLabel, TextIndicatorData&, FontRenderingMode fontRenderingMode, float)
 {
     // This is more or less an exact match for the Mac OS X code.
 

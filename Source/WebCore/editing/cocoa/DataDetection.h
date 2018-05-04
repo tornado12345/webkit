@@ -25,6 +25,8 @@
 
 #pragma once
 
+#if ENABLE(DATA_DETECTION)
+
 #import <wtf/RefPtr.h>
 #import <wtf/RetainPtr.h>
 #import <wtf/text/WTFString.h>
@@ -39,6 +41,7 @@ class Element;
 class FloatRect;
 class HitTestResult;
 class Range;
+class URL;
 
 enum DataDetectorTypes {
     DataDetectorTypeNone = 0,
@@ -59,11 +62,18 @@ public:
 #endif
     WEBCORE_EXPORT static NSArray *detectContentInRange(RefPtr<Range>& contextRange, DataDetectorTypes, NSDictionary *context);
 #if PLATFORM(IOS)
+    WEBCORE_EXPORT static bool canBePresentedByDataDetectors(const URL&);
     WEBCORE_EXPORT static bool isDataDetectorLink(Element&);
     WEBCORE_EXPORT static String dataDetectorIdentifier(Element&);
     WEBCORE_EXPORT static bool shouldCancelDefaultAction(Element&);
     WEBCORE_EXPORT static bool requiresExtendedContext(Element&);
 #endif
+
+    static const String& dataDetectorURLProtocol();
+    static bool isDataDetectorURL(const URL&);
 };
 
 } // namespace WebCore
+
+#endif
+

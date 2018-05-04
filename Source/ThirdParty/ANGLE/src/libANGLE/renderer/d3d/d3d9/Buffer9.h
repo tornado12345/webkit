@@ -20,31 +20,44 @@ class Renderer9;
 class Buffer9 : public BufferD3D
 {
   public:
-    Buffer9(Renderer9 *renderer);
-    virtual ~Buffer9();
+    Buffer9(const gl::BufferState &state, Renderer9 *renderer);
+    ~Buffer9() override;
 
     // BufferD3D implementation
-    virtual size_t getSize() const { return mSize; }
-    virtual bool supportsDirectBinding() const { return false; }
-    gl::Error getData(const uint8_t **outData) override;
+    size_t getSize() const override;
+    bool supportsDirectBinding() const override;
+    gl::Error getData(const gl::Context *context, const uint8_t **outData) override;
 
     // BufferImpl implementation
-    gl::Error setData(GLenum target, const void *data, size_t size, GLenum usage) override;
-    gl::Error setSubData(GLenum target, const void *data, size_t size, size_t offset) override;
-    gl::Error copySubData(BufferImpl *source,
+    gl::Error setData(const gl::Context *context,
+                      gl::BufferBinding target,
+                      const void *data,
+                      size_t size,
+                      gl::BufferUsage usage) override;
+    gl::Error setSubData(const gl::Context *context,
+                         gl::BufferBinding target,
+                         const void *data,
+                         size_t size,
+                         size_t offset) override;
+    gl::Error copySubData(const gl::Context *context,
+                          BufferImpl *source,
                           GLintptr sourceOffset,
                           GLintptr destOffset,
                           GLsizeiptr size) override;
-    gl::Error map(GLenum access, GLvoid **mapPtr) override;
-    gl::Error mapRange(size_t offset, size_t length, GLbitfield access, GLvoid **mapPtr) override;
-    gl::Error unmap(GLboolean *result) override;
-    gl::Error markTransformFeedbackUsage() override;
+    gl::Error map(const gl::Context *context, GLenum access, void **mapPtr) override;
+    gl::Error mapRange(const gl::Context *context,
+                       size_t offset,
+                       size_t length,
+                       GLbitfield access,
+                       void **mapPtr) override;
+    gl::Error unmap(const gl::Context *context, GLboolean *result) override;
+    gl::Error markTransformFeedbackUsage(const gl::Context *context) override;
 
   private:
-    MemoryBuffer mMemory;
+    angle::MemoryBuffer mMemory;
     size_t mSize;
 };
 
 }  // namespace rx
 
-#endif // LIBANGLE_RENDERER_D3D_D3D9_BUFFER9_H_
+#endif  // LIBANGLE_RENDERER_D3D_D3D9_BUFFER9_H_

@@ -32,8 +32,11 @@
 #include "SVGNames.h"
 #include "SVGPreserveAspectRatioValue.h"
 #include "XLinkNames.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(SVGFEImageElement);
 
 // Animated property definitions
 DEFINE_ANIMATED_PRESERVEASPECTRATIO(SVGFEImageElement, SVGNames::preserveAspectRatioAttr, PreserveAspectRatio, preserveAspectRatio)
@@ -88,8 +91,8 @@ void SVGFEImageElement::requestImageResource()
     options.contentSecurityPolicyImposition = isInUserAgentShadowTree() ? ContentSecurityPolicyImposition::SkipPolicyCheck : ContentSecurityPolicyImposition::DoPolicyCheck;
 
     CachedResourceRequest request(ResourceRequest(document().completeURL(href())), options);
-    request.setInitiator(this);
-    m_cachedImage = document().cachedResourceLoader().requestImage(WTFMove(request));
+    request.setInitiator(*this);
+    m_cachedImage = document().cachedResourceLoader().requestImage(WTFMove(request)).value_or(nullptr);
 
     if (m_cachedImage)
         m_cachedImage->addClient(*this);
@@ -98,11 +101,11 @@ void SVGFEImageElement::requestImageResource()
 void SVGFEImageElement::buildPendingResource()
 {
     clearResourceReferences();
-    if (!inDocument())
+    if (!isConnected())
         return;
 
     String id;
-    Element* target = SVGURIReference::targetElementFromIRIString(href(), document(), &id);
+    auto target = makeRefPtr(SVGURIReference::targetElementFromIRIString(href(), document(), &id));
     if (!target) {
         if (id.isEmpty())
             requestImageResource();
@@ -113,7 +116,7 @@ void SVGFEImageElement::buildPendingResource()
     } else if (target->isSVGElement()) {
         // Register us with the target in the dependencies map. Any change of hrefElement
         // that leads to relayout/repainting now informs us, so we can react to it.
-        document().accessSVGExtensions().addElementReferencingTarget(this, downcast<SVGElement>(target));
+        document().accessSVGExtensions().addElementReferencingTarget(this, downcast<SVGElement>(target.get()));
     }
 
     invalidate();
@@ -150,30 +153,30 @@ void SVGFEImageElement::svgAttributeChanged(const QualifiedName& attrName)
     SVGFilterPrimitiveStandardAttributes::svgAttributeChanged(attrName);
 }
 
-Node::InsertionNotificationRequest SVGFEImageElement::insertedInto(ContainerNode& rootParent)
+Node::InsertedIntoAncestorResult SVGFEImageElement::insertedIntoAncestor(InsertionType insertionType, ContainerNode& parentOfInsertedTree)
 {
-    SVGFilterPrimitiveStandardAttributes::insertedInto(rootParent);
-    return InsertionShouldCallFinishedInsertingSubtree;
+    SVGFilterPrimitiveStandardAttributes::insertedIntoAncestor(insertionType, parentOfInsertedTree);
+    return InsertedIntoAncestorResult::NeedsPostInsertionCallback;
 }
 
-void SVGFEImageElement::finishedInsertingSubtree()
+void SVGFEImageElement::didFinishInsertingNode()
 {
     buildPendingResource();
 }
 
-void SVGFEImageElement::removedFrom(ContainerNode& rootParent)
+void SVGFEImageElement::removedFromAncestor(RemovalType removalType, ContainerNode& oldParentOfRemovedTree)
 {
-    SVGFilterPrimitiveStandardAttributes::removedFrom(rootParent);
-    if (rootParent.inDocument())
+    SVGFilterPrimitiveStandardAttributes::removedFromAncestor(removalType, oldParentOfRemovedTree);
+    if (removalType.disconnectedFromDocument)
         clearResourceReferences();
 }
 
 void SVGFEImageElement::notifyFinished(CachedResource&)
 {
-    if (!inDocument())
+    if (!isConnected())
         return;
 
-    Element* parent = parentElement();
+    auto parent = makeRefPtr(parentElement());
 
     if (!parent || !parent->hasTagName(SVGNames::filterTag))
         return;

@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2011 Google Inc. All rights reserved.
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -41,10 +41,17 @@
 #include "CrossOriginAccessControl.h"
 #include "Document.h"
 #include "Frame.h"
+#include "FrameLoader.h"
 #include "FrameLoaderClient.h"
 #include "FrameView.h"
+#include "LinkHeader.h"
 #include "LinkPreloadResourceClients.h"
 #include "LinkRelAttribute.h"
+#include "LoaderStrategy.h"
+#include "MIMETypeRegistry.h"
+#include "MediaQueryEvaluator.h"
+#include "PlatformStrategies.h"
+#include "ResourceError.h"
 #include "RuntimeEnabledFeatures.h"
 #include "Settings.h"
 #include "StyleResolver.h"
@@ -53,7 +60,6 @@ namespace WebCore {
 
 LinkLoader::LinkLoader(LinkLoaderClient& client)
     : m_client(client)
-    , m_weakPtrFactory(this)
 {
 }
 
@@ -83,9 +89,32 @@ void LinkLoader::notifyFinished(CachedResource& resource)
     m_cachedLinkResource = nullptr;
 }
 
-Optional<CachedResource::Type> LinkLoader::resourceTypeFromAsAttribute(const String& as)
+void LinkLoader::loadLinksFromHeader(const String& headerValue, const URL& baseURL, Document& document, MediaAttributeCheck mediaAttributeCheck)
 {
-    if (as.isEmpty())
+    if (headerValue.isEmpty())
+        return;
+    LinkHeaderSet headerSet(headerValue);
+    for (auto& header : headerSet) {
+        if (!header.valid() || header.url().isEmpty() || header.rel().isEmpty())
+            continue;
+        if ((mediaAttributeCheck == MediaAttributeCheck::MediaAttributeNotEmpty && header.media().isEmpty())
+            || (mediaAttributeCheck == MediaAttributeCheck::MediaAttributeEmpty && !header.media().isEmpty())) {
+                continue;
+        }
+
+        LinkRelAttribute relAttribute(document, header.rel());
+        URL url(baseURL, header.url());
+        // Sanity check to avoid re-entrancy here.
+        if (equalIgnoringFragmentIdentifier(url, baseURL))
+            continue;
+        preconnectIfNeeded(relAttribute, url, document, header.crossOrigin());
+        preloadIfNeeded(relAttribute, url, document, header.as(), header.media(), header.mimeType(), header.crossOrigin(), nullptr);
+    }
+}
+
+std::optional<CachedResource::Type> LinkLoader::resourceTypeFromAsAttribute(const String& as)
+{
+    if (equalLettersIgnoringASCIICase(as, "fetch"))
         return CachedResource::RawResource;
     if (equalLettersIgnoringASCIICase(as, "image"))
         return CachedResource::ImageResource;
@@ -93,7 +122,7 @@ Optional<CachedResource::Type> LinkLoader::resourceTypeFromAsAttribute(const Str
         return CachedResource::Script;
     if (equalLettersIgnoringASCIICase(as, "style"))
         return CachedResource::CSSStyleSheet;
-    if (equalLettersIgnoringASCIICase(as, "media"))
+    if (RuntimeEnabledFeatures::sharedFeatures().mediaPreloadingEnabled() && (equalLettersIgnoringASCIICase(as, "video") || equalLettersIgnoringASCIICase(as, "audio")))
         return CachedResource::MediaResource;
     if (equalLettersIgnoringASCIICase(as, "font"))
         return CachedResource::FontResource;
@@ -101,27 +130,31 @@ Optional<CachedResource::Type> LinkLoader::resourceTypeFromAsAttribute(const Str
     if (equalLettersIgnoringASCIICase(as, "track"))
         return CachedResource::TextTrackResource;
 #endif
-    return Nullopt;
+    return std::nullopt;
 }
 
-static std::unique_ptr<LinkPreloadResourceClient> createLinkPreloadResourceClient(CachedResource& resource, LinkLoader& loader, CachedResource::Type type)
+static std::unique_ptr<LinkPreloadResourceClient> createLinkPreloadResourceClient(CachedResource& resource, LinkLoader& loader)
 {
-    switch (type) {
+    switch (resource.type()) {
     case CachedResource::ImageResource:
-        return LinkPreloadImageResourceClient::create(loader, static_cast<CachedImage&>(resource));
+        return std::make_unique<LinkPreloadImageResourceClient>(loader, downcast<CachedImage>(resource));
     case CachedResource::Script:
-        return LinkPreloadScriptResourceClient::create(loader, static_cast<CachedScript&>(resource));
+        return std::make_unique<LinkPreloadDefaultResourceClient>(loader, downcast<CachedScript>(resource));
     case CachedResource::CSSStyleSheet:
-        return LinkPreloadStyleResourceClient::create(loader, static_cast<CachedCSSStyleSheet&>(resource));
+        return std::make_unique<LinkPreloadStyleResourceClient>(loader, downcast<CachedCSSStyleSheet>(resource));
     case CachedResource::FontResource:
-        return LinkPreloadFontResourceClient::create(loader, static_cast<CachedFont&>(resource));
-    case CachedResource::MediaResource:
+        return std::make_unique<LinkPreloadFontResourceClient>(loader, downcast<CachedFont>(resource));
 #if ENABLE(VIDEO_TRACK)
     case CachedResource::TextTrackResource:
+        return std::make_unique<LinkPreloadDefaultResourceClient>(loader, downcast<CachedTextTrack>(resource));
 #endif
+    case CachedResource::MediaResource:
+        ASSERT(RuntimeEnabledFeatures::sharedFeatures().mediaPreloadingEnabled());
+        FALLTHROUGH;
     case CachedResource::RawResource:
-        return LinkPreloadRawResourceClient::create(loader, static_cast<CachedRawResource&>(resource));
+        return std::make_unique<LinkPreloadRawResourceClient>(loader, downcast<CachedRawResource>(resource));
     case CachedResource::MainResource:
+    case CachedResource::Icon:
 #if ENABLE(SVG_FONTS)
     case CachedResource::SVGFontResource:
 #endif
@@ -129,9 +162,10 @@ static std::unique_ptr<LinkPreloadResourceClient> createLinkPreloadResourceClien
 #if ENABLE(XSLT)
     case CachedResource::XSLStyleSheet:
 #endif
-#if ENABLE(LINK_PREFETCH)
-    case CachedResource::LinkSubresource:
+    case CachedResource::Beacon:
     case CachedResource::LinkPrefetch:
+#if ENABLE(APPLICATION_MANIFEST)
+    case CachedResource::ApplicationManifest:
 #endif
         // None of these values is currently supported as an `as` value.
         ASSERT_NOT_REACHED();
@@ -139,73 +173,141 @@ static std::unique_ptr<LinkPreloadResourceClient> createLinkPreloadResourceClien
     return nullptr;
 }
 
-void LinkLoader::preloadIfNeeded(const LinkRelAttribute& relAttribute, const URL& href, Document& document, const String& as, const String& crossOriginMode)
+bool LinkLoader::isSupportedType(CachedResource::Type resourceType, const String& mimeType)
+{
+    if (mimeType.isEmpty())
+        return true;
+    switch (resourceType) {
+    case CachedResource::ImageResource:
+        return MIMETypeRegistry::isSupportedImageVideoOrSVGMIMEType(mimeType);
+    case CachedResource::Script:
+        return MIMETypeRegistry::isSupportedJavaScriptMIMEType(mimeType);
+    case CachedResource::CSSStyleSheet:
+        return MIMETypeRegistry::isSupportedStyleSheetMIMEType(mimeType);
+    case CachedResource::FontResource:
+        return MIMETypeRegistry::isSupportedFontMIMEType(mimeType);
+    case CachedResource::MediaResource:
+        if (!RuntimeEnabledFeatures::sharedFeatures().mediaPreloadingEnabled())
+            ASSERT_NOT_REACHED();
+        return MIMETypeRegistry::isSupportedMediaMIMEType(mimeType);
+
+#if ENABLE(VIDEO_TRACK)
+    case CachedResource::TextTrackResource:
+        return MIMETypeRegistry::isSupportedTextTrackMIMEType(mimeType);
+#endif
+    case CachedResource::RawResource:
+#if ENABLE(APPLICATION_MANIFEST)
+    case CachedResource::ApplicationManifest:
+#endif
+        return true;
+    default:
+        ASSERT_NOT_REACHED();
+    }
+    return false;
+}
+
+void LinkLoader::preconnectIfNeeded(const LinkRelAttribute& relAttribute, const URL& href, Document& document, const String& crossOrigin)
+{
+    if (!relAttribute.isLinkPreconnect || !href.isValid() || !href.protocolIsInHTTPFamily() || !document.frame())
+        return;
+    ASSERT(document.settings().linkPreconnectEnabled());
+    StoredCredentialsPolicy storageCredentialsPolicy = StoredCredentialsPolicy::Use;
+    if (equalIgnoringASCIICase(crossOrigin, "anonymous") && document.securityOrigin().canAccess(SecurityOrigin::create(href)))
+        storageCredentialsPolicy = StoredCredentialsPolicy::DoNotUse;
+    ASSERT(document.frame()->loader().networkingContext());
+    platformStrategies()->loaderStrategy()->preconnectTo(document.frame()->loader(), href, storageCredentialsPolicy, [weakDocument = document.createWeakPtr(), href](ResourceError error) {
+        if (!weakDocument)
+            return;
+
+        if (!error.isNull())
+            weakDocument->addConsoleMessage(MessageSource::Network, MessageLevel::Error, makeString(ASCIILiteral("Failed to preconnect to "), href.string(), ASCIILiteral(". Error: "), error.localizedDescription()));
+        else
+            weakDocument->addConsoleMessage(MessageSource::Network, MessageLevel::Info, makeString(ASCIILiteral("Successfuly preconnected to "), href.string()));
+    });
+}
+
+std::unique_ptr<LinkPreloadResourceClient> LinkLoader::preloadIfNeeded(const LinkRelAttribute& relAttribute, const URL& href, Document& document, const String& as, const String& media, const String& mimeType, const String& crossOriginMode, LinkLoader* loader)
 {
     if (!document.loader() || !relAttribute.isLinkPreload)
-        return;
+        return nullptr;
 
     ASSERT(RuntimeEnabledFeatures::sharedFeatures().linkPreloadEnabled());
     if (!href.isValid()) {
         document.addConsoleMessage(MessageSource::Other, MessageLevel::Error, String("<link rel=preload> has an invalid `href` value"));
-        return;
+        return nullptr;
     }
     auto type = LinkLoader::resourceTypeFromAsAttribute(as);
     if (!type) {
         document.addConsoleMessage(MessageSource::Other, MessageLevel::Error, String("<link rel=preload> must have a valid `as` value"));
-        m_client.linkLoadingErrored();
-        return;
+        return nullptr;
     }
+    if (!MediaQueryEvaluator::mediaAttributeMatches(document, media))
+        return nullptr;
+    if (!isSupportedType(type.value(), mimeType))
+        return nullptr;
 
-    ResourceRequest resourceRequest(document.completeURL(href));
-    resourceRequest.setIgnoreForRequestCount(true);
-    CachedResourceRequest linkRequest(WTFMove(resourceRequest), CachedResourceLoader::defaultCachedResourceOptions(), CachedResource::defaultPriorityForResourceType(type.value()));
+    CachedResourceRequest linkRequest(document.completeURL(href), CachedResourceLoader::defaultCachedResourceOptions(), CachedResource::defaultPriorityForResourceType(type.value()));
     linkRequest.setInitiator("link");
+    linkRequest.setIgnoreForRequestCount(true);
+    linkRequest.setIsLinkPreload();
 
     linkRequest.setAsPotentiallyCrossOrigin(crossOriginMode, document);
-    CachedResourceHandle<CachedResource> cachedLinkResource = document.cachedResourceLoader().preload(type.value(), WTFMove(linkRequest));
+    auto cachedLinkResource = document.cachedResourceLoader().preload(type.value(), WTFMove(linkRequest)).value_or(nullptr);
 
-    if (cachedLinkResource)
-        m_preloadResourceClient = createLinkPreloadResourceClient(*cachedLinkResource, *this, type.value());
+    if (cachedLinkResource && cachedLinkResource->type() != *type)
+        return nullptr;
+
+    if (cachedLinkResource && loader)
+        return createLinkPreloadResourceClient(*cachedLinkResource, *loader);
+    return nullptr;
 }
 
-bool LinkLoader::loadLink(const LinkRelAttribute& relAttribute, const URL& href, const String& as, const String& crossOrigin, Document& document)
+void LinkLoader::prefetchIfNeeded(const LinkRelAttribute& relAttribute, const URL& href, Document& document)
+{
+    if (!relAttribute.isLinkPrefetch || !href.isValid() || !document.frame() || !m_client.shouldLoadLink())
+        return;
+
+    ASSERT(RuntimeEnabledFeatures::sharedFeatures().linkPrefetchEnabled());
+    std::optional<ResourceLoadPriority> priority;
+    CachedResource::Type type = CachedResource::LinkPrefetch;
+
+    if (m_cachedLinkResource) {
+        m_cachedLinkResource->removeClient(*this);
+        m_cachedLinkResource = nullptr;
+    }
+    ResourceLoaderOptions options = CachedResourceLoader::defaultCachedResourceOptions();
+    options.contentSecurityPolicyImposition = ContentSecurityPolicyImposition::SkipPolicyCheck;
+    m_cachedLinkResource = document.cachedResourceLoader().requestLinkResource(type, CachedResourceRequest(ResourceRequest(document.completeURL(href)), options, priority)).value_or(nullptr);
+    if (m_cachedLinkResource)
+        m_cachedLinkResource->addClient(*this);
+}
+
+void LinkLoader::cancelLoad()
+{
+    if (m_preloadResourceClient)
+        m_preloadResourceClient->clear();
+}
+
+bool LinkLoader::loadLink(const LinkRelAttribute& relAttribute, const URL& href, const String& as, const String& media, const String& mimeType, const String& crossOrigin, Document& document)
 {
     if (relAttribute.isDNSPrefetch) {
-        Settings* settings = document.settings();
         // FIXME: The href attribute of the link element can be in "//hostname" form, and we shouldn't attempt
         // to complete that as URL <https://bugs.webkit.org/show_bug.cgi?id=48857>.
-        if (settings && settings->dnsPrefetchingEnabled() && href.isValid() && !href.isEmpty() && document.frame())
+        if (document.settings().dnsPrefetchingEnabled() && href.isValid() && !href.isEmpty() && document.frame())
             document.frame()->loader().client().prefetchDNS(href.host());
     }
 
-    if (m_client.shouldLoadLink())
-        preloadIfNeeded(relAttribute, href, document, as, crossOrigin);
+    preconnectIfNeeded(relAttribute, href, document, crossOrigin);
 
-#if ENABLE(LINK_PREFETCH)
-    if ((relAttribute.isLinkPrefetch || relAttribute.isLinkSubresource) && href.isValid() && document.frame()) {
-        if (!m_client.shouldLoadLink())
-            return false;
-
-        Optional<ResourceLoadPriority> priority;
-        CachedResource::Type type = CachedResource::LinkPrefetch;
-        if (relAttribute.isLinkSubresource) {
-            // We only make one request to the cached resource loader if multiple rel types are specified;
-            // this is the higher priority, which should overwrite the lower priority.
-            priority = ResourceLoadPriority::Low;
-            type = CachedResource::LinkSubresource;
-        }
-
-        if (m_cachedLinkResource) {
-            m_cachedLinkResource->removeClient(*this);
-            m_cachedLinkResource = nullptr;
-        }
-        ResourceLoaderOptions options = CachedResourceLoader::defaultCachedResourceOptions();
-        options.contentSecurityPolicyImposition = ContentSecurityPolicyImposition::SkipPolicyCheck;
-        m_cachedLinkResource = document.cachedResourceLoader().requestLinkResource(type, CachedResourceRequest(ResourceRequest(document.completeURL(href)), options, priority));
-        if (m_cachedLinkResource)
-            m_cachedLinkResource->addClient(*this);
+    if (m_client.shouldLoadLink()) {
+        auto resourceClient = preloadIfNeeded(relAttribute, href, document, as, media, mimeType, crossOrigin, this);
+        if (resourceClient)
+            m_preloadResourceClient = WTFMove(resourceClient);
+        else if (m_preloadResourceClient)
+            m_preloadResourceClient->clear();
     }
-#endif
+
+    prefetchIfNeeded(relAttribute, href, document);
 
     return true;
 }

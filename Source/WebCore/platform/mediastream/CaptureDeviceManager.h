@@ -32,39 +32,22 @@
 
 namespace WebCore {
 
-struct CaptureDeviceInfo {
-public:
-    String m_persistentDeviceID;
-    String m_localizedName;
-    String m_groupID;
-
-    String m_sourceId;
-
-    bool m_enabled { false };
-    RealtimeMediaSource::Type m_sourceType { RealtimeMediaSource::None };
-    RealtimeMediaSourceSettings::VideoFacingMode m_position { RealtimeMediaSourceSettings::Unknown };
-};
-
-class CaptureSessionInfo {
-public:
-    virtual ~CaptureSessionInfo() { }
-    virtual bool supportsVideoSize(const String& /* videoSize */) const { return false; }
-    virtual String bestSessionPresetForVideoDimensions(int /* width */, int /* height */) const { return emptyString(); }
-};
-
 class CaptureDeviceManager {
 public:
-    virtual Vector<CaptureDeviceInfo>& captureDeviceList() = 0;
-    virtual void refreshCaptureDeviceList() { }
-    virtual Vector<CaptureDevice> getSourcesInfo();
-    virtual Vector<String> bestSourcesForTypeAndConstraints(RealtimeMediaSource::Type, const MediaConstraints&, String&);
-    virtual RefPtr<RealtimeMediaSource> sourceWithUID(const String&, RealtimeMediaSource::Type, const MediaConstraints*, String&);
+    using CaptureDeviceChangedCallback = WTF::Function<void()>;
+    using ObserverToken = uint32_t;
+    virtual ObserverToken addCaptureDeviceChangedObserver(CaptureDeviceChangedCallback&&);
+    virtual void removeCaptureDeviceChangedObserver(ObserverToken);
+
+    virtual const Vector<CaptureDevice>& captureDevices() = 0;
+    virtual std::optional<CaptureDevice> captureDeviceWithPersistentID(CaptureDevice::DeviceType, const String&) { return std::nullopt; }
+
+    virtual void refreshCaptureDevices() { }
 
 protected:
     virtual ~CaptureDeviceManager();
-    virtual RefPtr<RealtimeMediaSource> createMediaSourceForCaptureDeviceWithConstraints(const CaptureDeviceInfo&, const MediaConstraints*, String&) = 0;
-
-    bool captureDeviceFromDeviceID(const String& captureDeviceID, CaptureDeviceInfo& source);
+    CaptureDevice captureDeviceFromPersistentID(const String& captureDeviceID);
+    HashMap<ObserverToken, CaptureDeviceChangedCallback> m_observers;
 };
 
 } // namespace WebCore

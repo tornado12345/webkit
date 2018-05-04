@@ -27,28 +27,29 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#ifndef MediaQueryParser_h
-#define MediaQueryParser_h
+#pragma once
 
 #include "CSSParserToken.h"
 #include "CSSParserTokenRange.h"
-#include "MediaList.h"
 #include "MediaQuery.h"
 #include "MediaQueryBlockWatcher.h"
-#include "MediaQueryExp.h"
+#include "MediaQueryExpression.h"
+#include "MediaQueryParserContext.h"
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
 class MediaQuerySet;
+struct CSSParserContext;
 
 class MediaQueryData {
     WTF_MAKE_NONCOPYABLE(MediaQueryData);
 public:
-    MediaQueryData();
+    MediaQueryData(MediaQueryParserContext context);
     void clear();
-    bool addExpression();
-    bool tryAddParserToken(CSSParserTokenType, const CSSParserToken&);
+    void addExpression(CSSParserTokenRange&);
+    bool lastExpressionValid();
+    void removeLastExpression();
     void setMediaType(const String&);
     
     MediaQuery::Restrictor restrictor() const { return m_restrictor; };
@@ -64,22 +65,24 @@ public:
     inline void setRestrictor(MediaQuery::Restrictor restrictor) { m_restrictor = restrictor; }
 
     inline void setMediaFeature(const String& str) { m_mediaFeature = str; }
+    
+    inline void setMediaQueryParserContext(MediaQueryParserContext context) { m_context = context; }
 
 private:
     MediaQuery::Restrictor m_restrictor;
     String m_mediaType;
     Vector<MediaQueryExpression> m_expressions;
     String m_mediaFeature;
-    Vector<CSSParserToken, 4> m_valueList;
     bool m_mediaTypeSet;
+    MediaQueryParserContext m_context;
 };
 
 class MediaQueryParser {
     WTF_MAKE_NONCOPYABLE(MediaQueryParser);
 public:
-    static RefPtr<MediaQuerySet> parseMediaQuerySet(const String&);
-    static RefPtr<MediaQuerySet> parseMediaQuerySet(CSSParserTokenRange);
-    static RefPtr<MediaQuerySet> parseMediaCondition(CSSParserTokenRange);
+    static RefPtr<MediaQuerySet> parseMediaQuerySet(const String&, MediaQueryParserContext);
+    static RefPtr<MediaQuerySet> parseMediaQuerySet(CSSParserTokenRange, MediaQueryParserContext);
+    static RefPtr<MediaQuerySet> parseMediaCondition(CSSParserTokenRange, MediaQueryParserContext);
 
 private:
     enum ParserType {
@@ -87,27 +90,27 @@ private:
         MediaConditionParser,
     };
 
-    MediaQueryParser(ParserType);
+    MediaQueryParser(ParserType, MediaQueryParserContext);
     virtual ~MediaQueryParser();
 
     RefPtr<MediaQuerySet> parseInternal(CSSParserTokenRange);
 
-    void processToken(const CSSParserToken&);
+    void processToken(const CSSParserToken&, CSSParserTokenRange&);
 
-    void readRestrictor(CSSParserTokenType, const CSSParserToken&);
-    void readMediaNot(CSSParserTokenType, const CSSParserToken&);
-    void readMediaType(CSSParserTokenType, const CSSParserToken&);
-    void readAnd(CSSParserTokenType, const CSSParserToken&);
-    void readFeatureStart(CSSParserTokenType, const CSSParserToken&);
-    void readFeature(CSSParserTokenType, const CSSParserToken&);
-    void readFeatureColon(CSSParserTokenType, const CSSParserToken&);
-    void readFeatureValue(CSSParserTokenType, const CSSParserToken&);
-    void readFeatureEnd(CSSParserTokenType, const CSSParserToken&);
-    void skipUntilComma(CSSParserTokenType, const CSSParserToken&);
-    void skipUntilBlockEnd(CSSParserTokenType, const CSSParserToken&);
-    void done(CSSParserTokenType, const CSSParserToken&);
+    void readRestrictor(CSSParserTokenType, const CSSParserToken&, CSSParserTokenRange&);
+    void readMediaNot(CSSParserTokenType, const CSSParserToken&, CSSParserTokenRange&);
+    void readMediaType(CSSParserTokenType, const CSSParserToken&, CSSParserTokenRange&);
+    void readAnd(CSSParserTokenType, const CSSParserToken&, CSSParserTokenRange&);
+    void readFeatureStart(CSSParserTokenType, const CSSParserToken&, CSSParserTokenRange&);
+    void readFeature(CSSParserTokenType, const CSSParserToken&, CSSParserTokenRange&);
+    void readFeatureColon(CSSParserTokenType, const CSSParserToken&, CSSParserTokenRange&);
+    void readFeatureValue(CSSParserTokenType, const CSSParserToken&, CSSParserTokenRange&);
+    void readFeatureEnd(CSSParserTokenType, const CSSParserToken&, CSSParserTokenRange&);
+    void skipUntilComma(CSSParserTokenType, const CSSParserToken&, CSSParserTokenRange&);
+    void skipUntilBlockEnd(CSSParserTokenType, const CSSParserToken&, CSSParserTokenRange&);
+    void done(CSSParserTokenType, const CSSParserToken&, CSSParserTokenRange&);
 
-    using State = void (MediaQueryParser::*)(CSSParserTokenType, const CSSParserToken&);
+    using State = void (MediaQueryParser::*)(CSSParserTokenType, const CSSParserToken&, CSSParserTokenRange&);
 
     void setStateAndRestrict(State, MediaQuery::Restrictor);
     void handleBlocks(const CSSParserToken&);
@@ -132,9 +135,6 @@ private:
     const static State SkipUntilComma;
     const static State SkipUntilBlockEnd;
     const static State Done;
-
 };
 
 } // namespace WebCore
-
-#endif // MediaQueryParser_h

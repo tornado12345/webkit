@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013, 2015-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,7 +25,9 @@
 
 #pragma once
 
+#include "CalleeBits.h"
 #include "VMEntryRecord.h"
+#include "WasmIndexOrName.h"
 #include <functional>
 #include <wtf/Indenter.h>
 #include <wtf/text/WTFString.h>
@@ -37,10 +39,11 @@ struct InlineCallFrame;
 
 class CodeBlock;
 class ExecState;
+class JSCell;
 class JSFunction;
-class JSObject;
 class ClonedArguments;
 class Register;
+class RegisterAtOffsetList;
 
 typedef ExecState CallFrame;
 
@@ -53,14 +56,15 @@ public:
             Eval,
             Function,
             Module,
-            Native
+            Native,
+            Wasm
         };
 
         size_t index() const { return m_index; }
         size_t argumentCountIncludingThis() const { return m_argumentCountIncludingThis; }
-        bool callerIsVMEntryFrame() const { return m_callerIsVMEntryFrame; }
+        bool callerIsEntryFrame() const { return m_callerIsEntryFrame; }
         CallFrame* callerFrame() const { return m_callerFrame; }
-        JSObject* callee() const { return m_callee; }
+        CalleeBits callee() const { return m_callee; }
         CodeBlock* codeBlock() const { return m_codeBlock; }
         unsigned bytecodeOffset() const { return m_bytecodeOffset; }
         InlineCallFrame* inlineCallFrame() const {
@@ -71,20 +75,28 @@ public:
 #endif
         }
 
-        bool isJSFrame() const { return !!codeBlock(); }
+        bool isNativeFrame() const { return !codeBlock() && !isWasmFrame(); }
         bool isInlinedFrame() const { return !!inlineCallFrame(); }
+        bool isWasmFrame() const { return m_isWasmFrame; }
+        Wasm::IndexOrName const wasmFunctionIndexOrName()
+        {
+            ASSERT(isWasmFrame());
+            return m_wasmFunctionIndexOrName;
+        }
 
         JS_EXPORT_PRIVATE String functionName() const;
         JS_EXPORT_PRIVATE String sourceURL() const;
         JS_EXPORT_PRIVATE String toString() const;
 
-        intptr_t sourceID();
+        JS_EXPORT_PRIVATE intptr_t sourceID();
 
         CodeType codeType() const;
+        bool hasLineAndColumnInfo() const;
         JS_EXPORT_PRIVATE void computeLineAndColumn(unsigned& line, unsigned& column) const;
 
+        RegisterAtOffsetList* calleeSaveRegisters();
+
         ClonedArguments* createArguments();
-        VMEntryFrame* vmEntryFrame() const { return m_VMEntryFrame; }
         CallFrame* callFrame() const { return m_callFrame; }
         
         void dump(PrintStream&, Indenter = Indenter()) const;
@@ -97,19 +109,21 @@ public:
         void retrieveExpressionInfo(int& divot, int& startOffset, int& endOffset, unsigned& line, unsigned& column) const;
         void setToEnd();
 
-        size_t m_index;
-        size_t m_argumentCountIncludingThis;
-        VMEntryFrame* m_VMEntryFrame;
-        VMEntryFrame* m_CallerVMEntryFrame;
-        CallFrame* m_callerFrame;
-        JSObject* m_callee;
-        CodeBlock* m_codeBlock;
-        unsigned m_bytecodeOffset;
-        bool m_callerIsVMEntryFrame;
 #if ENABLE(DFG_JIT)
         InlineCallFrame* m_inlineCallFrame;
 #endif
         CallFrame* m_callFrame;
+        EntryFrame* m_entryFrame;
+        EntryFrame* m_callerEntryFrame;
+        CallFrame* m_callerFrame;
+        CalleeBits m_callee;
+        CodeBlock* m_codeBlock;
+        size_t m_index;
+        size_t m_argumentCountIncludingThis;
+        unsigned m_bytecodeOffset;
+        bool m_callerIsEntryFrame : 1;
+        bool m_isWasmFrame : 1;
+        Wasm::IndexOrName m_wasmFunctionIndexOrName;
 
         friend class StackVisitor;
     };
@@ -123,9 +137,9 @@ public:
     //     Status operator()(StackVisitor&) const;
 
     template <typename Functor>
-    static void visit(CallFrame* startFrame, const Functor& functor)
+    static void visit(CallFrame* startFrame, VM* vm, const Functor& functor)
     {
-        StackVisitor visitor(startFrame);
+        StackVisitor visitor(startFrame, vm);
         while (visitor->callFrame()) {
             Status status = functor(visitor);
             if (status != Continue)
@@ -139,7 +153,7 @@ public:
     void unwindToMachineCodeBlockFrame();
 
 private:
-    JS_EXPORT_PRIVATE StackVisitor(CallFrame* startFrame);
+    JS_EXPORT_PRIVATE StackVisitor(CallFrame* startFrame, VM*);
 
     JS_EXPORT_PRIVATE void gotoNextFrame();
 

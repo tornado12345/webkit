@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013, 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -62,27 +62,29 @@ JITByIdGenerator::JITByIdGenerator(
     
     m_stubInfo->patch.baseGPR = static_cast<int8_t>(base.payloadGPR());
     m_stubInfo->patch.valueGPR = static_cast<int8_t>(value.payloadGPR());
+    m_stubInfo->patch.thisGPR = static_cast<int8_t>(InvalidGPRReg);
 #if USE(JSVALUE32_64)
     m_stubInfo->patch.baseTagGPR = static_cast<int8_t>(base.tagGPR());
     m_stubInfo->patch.valueTagGPR = static_cast<int8_t>(value.tagGPR());
+    m_stubInfo->patch.thisTagGPR = static_cast<int8_t>(InvalidGPRReg);
 #endif
 }
 
 void JITByIdGenerator::finalize(LinkBuffer& fastPath, LinkBuffer& slowPath)
 {
     ASSERT(m_start.isSet());
-    CodeLocationLabel start = fastPath.locationOf(m_start);
+    CodeLocationLabel<JITStubRoutinePtrTag> start = fastPath.locationOf<JITStubRoutinePtrTag>(m_start);
     m_stubInfo->patch.start = start;
 
     int32_t inlineSize = MacroAssembler::differenceBetweenCodePtr(
-        start, fastPath.locationOf(m_done));
+        start, fastPath.locationOf<NoPtrTag>(m_done));
     ASSERT(inlineSize > 0);
     m_stubInfo->patch.inlineSize = inlineSize;
 
     m_stubInfo->patch.deltaFromStartToSlowPathCallLocation = MacroAssembler::differenceBetweenCodePtr(
-        start, slowPath.locationOf(m_slowPathCall));
+        start, slowPath.locationOf<NoPtrTag>(m_slowPathCall));
     m_stubInfo->patch.deltaFromStartToSlowPathStart = MacroAssembler::differenceBetweenCodePtr(
-        start, slowPath.locationOf(m_slowPathBegin));
+        start, slowPath.locationOf<NoPtrTag>(m_slowPathBegin));
 }
 
 void JITByIdGenerator::finalize(LinkBuffer& linkBuffer)
@@ -114,6 +116,24 @@ JITGetByIdGenerator::JITGetByIdGenerator(
 void JITGetByIdGenerator::generateFastPath(MacroAssembler& jit)
 {
     generateFastCommon(jit, m_isLengthAccess ? InlineAccess::sizeForLengthAccess() : InlineAccess::sizeForPropertyAccess());
+}
+
+JITGetByIdWithThisGenerator::JITGetByIdWithThisGenerator(
+    CodeBlock* codeBlock, CodeOrigin codeOrigin, CallSiteIndex callSite, const RegisterSet& usedRegisters,
+    UniquedStringImpl*, JSValueRegs value, JSValueRegs base, JSValueRegs thisRegs, AccessType accessType)
+    : JITByIdGenerator(codeBlock, codeOrigin, callSite, accessType, usedRegisters, base, value)
+{
+    RELEASE_ASSERT(thisRegs.payloadGPR() != thisRegs.tagGPR());
+
+    m_stubInfo->patch.thisGPR = static_cast<int8_t>(thisRegs.payloadGPR());
+#if USE(JSVALUE32_64)
+    m_stubInfo->patch.thisTagGPR = static_cast<int8_t>(thisRegs.tagGPR());
+#endif
+}
+
+void JITGetByIdWithThisGenerator::generateFastPath(MacroAssembler& jit)
+{
+    generateFastCommon(jit, InlineAccess::sizeForPropertyAccess());
 }
 
 JITPutByIdGenerator::JITPutByIdGenerator(

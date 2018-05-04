@@ -2,7 +2,7 @@
  * Copyright (C) 2001 Peter Kelly (pmk@post.com)
  * Copyright (C) 2001 Tobias Anton (anton@stud.fbi.fh-darmstadt.de)
  * Copyright (C) 2006 Samuel Weinig (sam.weinig@gmail.com)
- * Copyright (C) 2003, 2005, 2006, 2008, 2013 Apple Inc. All rights reserved.
+ * Copyright (C) 2003-2017 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -23,18 +23,20 @@
 #include "config.h"
 #include "Event.h"
 
+#include "DOMWindow.h"
+#include "Document.h"
 #include "EventNames.h"
 #include "EventPath.h"
 #include "EventTarget.h"
-#include "RuntimeApplicationChecks.h"
+#include "Performance.h"
 #include "UserGestureIndicator.h"
-#include <wtf/CurrentTime.h>
+#include "WorkerGlobalScope.h"
 
 namespace WebCore {
 
 Event::Event(IsTrusted isTrusted)
     : m_isTrusted(isTrusted == IsTrusted::Yes)
-    , m_createTime(convertSecondsToDOMTimeStamp(currentTime()))
+    , m_createTime(MonotonicTime::now())
 {
 }
 
@@ -44,17 +46,17 @@ Event::Event(const AtomicString& eventType, bool canBubbleArg, bool cancelableAr
     , m_canBubble(canBubbleArg)
     , m_cancelable(cancelableArg)
     , m_isTrusted(true)
-    , m_createTime(convertSecondsToDOMTimeStamp(currentTime()))
+    , m_createTime(MonotonicTime::now())
 {
 }
 
-Event::Event(const AtomicString& eventType, bool canBubbleArg, bool cancelableArg, double timestamp)
+Event::Event(const AtomicString& eventType, bool canBubbleArg, bool cancelableArg, MonotonicTime timestamp)
     : m_type(eventType)
     , m_isInitialized(true)
     , m_canBubble(canBubbleArg)
     , m_cancelable(cancelableArg)
     , m_isTrusted(true)
-    , m_createTime(convertSecondsToDOMTimeStamp(timestamp))
+    , m_createTime(timestamp)
 {
 }
 
@@ -65,12 +67,25 @@ Event::Event(const AtomicString& eventType, const EventInit& initializer, IsTrus
     , m_cancelable(initializer.cancelable)
     , m_composed(initializer.composed)
     , m_isTrusted(isTrusted == IsTrusted::Yes)
-    , m_createTime(convertSecondsToDOMTimeStamp(currentTime()))
+    , m_createTime(MonotonicTime::now())
 {
 }
 
-Event::~Event()
+Event::~Event() = default;
+
+Ref<Event> Event::create(const AtomicString& type, bool canBubble, bool cancelable)
 {
+    return adoptRef(*new Event(type, canBubble, cancelable));
+}
+
+Ref<Event> Event::createForBindings()
+{
+    return adoptRef(*new Event);
+}
+
+Ref<Event> Event::create(const AtomicString& type, const EventInit& initializer, IsTrusted isTrusted)
+{
+    return adoptRef(*new Event(type, initializer, isTrusted));
 }
 
 void Event::initEvent(const AtomicString& eventTypeArg, bool canBubbleArg, bool cancelableArg)
@@ -81,30 +96,14 @@ void Event::initEvent(const AtomicString& eventTypeArg, bool canBubbleArg, bool 
     m_isInitialized = true;
     m_propagationStopped = false;
     m_immediatePropagationStopped = false;
-    m_defaultPrevented = false;
+    m_wasCanceled = false;
     m_isTrusted = false;
     m_target = nullptr;
-
     m_type = eventTypeArg;
     m_canBubble = canBubbleArg;
     m_cancelable = cancelableArg;
-}
 
-ExceptionOr<void> Event::initEventForBindings(ScriptExecutionContext& scriptExecutionContext, const AtomicString& type, bool bubbles)
-{
-#if PLATFORM(IOS)
-    // FIXME: Temporary quirk for Baidu Nuomi App which calls initEvent() with too few parameters (rdar://problem/28707838).
-    if (IOSApplication::isBaiduNuomi()) {
-        scriptExecutionContext.addConsoleMessage(MessageSource::JS, MessageLevel::Warning, ASCIILiteral("Calling Event.prototype.initEvent() with less than 3 parameters is deprecated."));
-        initEvent(type, bubbles, false);
-        return { };
-    }
-#else
-    UNUSED_PARAM(scriptExecutionContext);
-    UNUSED_PARAM(type);
-    UNUSED_PARAM(bubbles);
-#endif
-    return Exception { TypeError, ASCIILiteral("Not enough arguments") };
+    m_underlyingEvent = nullptr;
 }
 
 bool Event::composed() const
@@ -128,86 +127,6 @@ bool Event::composed() const
         || isInputEvent();
 }
 
-EventInterface Event::eventInterface() const
-{
-    return EventInterfaceType;
-}
-
-bool Event::isUIEvent() const
-{
-    return false;
-}
-
-bool Event::isMouseEvent() const
-{
-    return false;
-}
-
-bool Event::isFocusEvent() const
-{
-    return false;
-}
-
-bool Event::isKeyboardEvent() const
-{
-    return false;
-}
-
-bool Event::isInputEvent() const
-{
-    return false;
-}
-
-bool Event::isCompositionEvent() const
-{
-    return false;
-}
-
-bool Event::isTouchEvent() const
-{
-    return false;
-}
-
-bool Event::isDragEvent() const
-{
-    return false;
-}
-
-bool Event::isClipboardEvent() const
-{
-    return false;
-}
-
-bool Event::isBeforeTextInsertedEvent() const
-{
-    return false;
-}
-
-bool Event::isBeforeUnloadEvent() const
-{
-    return false;
-}
-
-bool Event::isErrorEvent() const
-{
-    return false;
-}
-
-bool Event::isTextEvent() const
-{
-    return false;
-}
-
-bool Event::isWheelEvent() const
-{
-    return false;
-}
-
-Ref<Event> Event::cloneFor(HTMLIFrameElement*) const
-{
-    return Event::create(type(), bubbles(), cancelable());
-}
-
 void Event::setTarget(RefPtr<EventTarget>&& target)
 {
     if (m_target == target)
@@ -218,6 +137,11 @@ void Event::setTarget(RefPtr<EventTarget>&& target)
         receivedTarget();
 }
 
+void Event::setCurrentTarget(EventTarget* currentTarget)
+{
+    m_currentTarget = currentTarget;
+}
+
 Vector<EventTarget*> Event::composedPath() const
 {
     if (!m_eventPath)
@@ -225,18 +149,42 @@ Vector<EventTarget*> Event::composedPath() const
     return m_eventPath->computePathUnclosedToTarget(*m_currentTarget);
 }
 
-void Event::receivedTarget()
-{
-}
-
 void Event::setUnderlyingEvent(Event* underlyingEvent)
 {
-    // Prohibit creation of a cycle -- just do nothing in that case.
+    // Prohibit creation of a cycle by doing nothing if a cycle would be created.
     for (Event* event = underlyingEvent; event; event = event->underlyingEvent()) {
         if (event == this)
             return;
     }
     m_underlyingEvent = underlyingEvent;
+}
+
+DOMHighResTimeStamp Event::timeStampForBindings(ScriptExecutionContext& context) const
+{
+    Performance* performance = nullptr;
+    if (is<WorkerGlobalScope>(context))
+        performance = &downcast<WorkerGlobalScope>(context).performance();
+    else if (auto* window = downcast<Document>(context).domWindow())
+        performance = window->performance();
+
+    if (!performance)
+        return 0;
+
+    return std::max(performance->relativeTimeFromTimeOriginInReducedResolution(m_createTime), 0.);
+}
+
+void Event::resetBeforeDispatch()
+{
+    m_defaultHandled = false;
+}
+
+void Event::resetAfterDispatch()
+{
+    m_eventPath = nullptr;
+    m_currentTarget = nullptr;
+    m_eventPhase = NONE;
+    m_propagationStopped = false;
+    m_immediatePropagationStopped = false;
 }
 
 } // namespace WebCore

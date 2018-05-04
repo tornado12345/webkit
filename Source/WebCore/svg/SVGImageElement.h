@@ -18,8 +18,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGImageElement_h
-#define SVGImageElement_h
+#pragma once
 
 #include "SVGAnimatedBoolean.h"
 #include "SVGAnimatedLength.h"
@@ -31,13 +30,13 @@
 
 namespace WebCore {
 
-class SVGImageElement final : public SVGGraphicsElement,
-                              public SVGExternalResourcesRequired,
-                              public SVGURIReference {
+class SVGImageElement final : public SVGGraphicsElement, public SVGExternalResourcesRequired, public SVGURIReference {
+    WTF_MAKE_ISO_ALLOCATED(SVGImageElement);
 public:
     static Ref<SVGImageElement> create(const QualifiedName&, Document&);
 
     bool hasSingleSecurityOrigin() const;
+    const AtomicString& imageSourceURL() const final;
 
 private:
     SVGImageElement(const QualifiedName&, Document&);
@@ -49,17 +48,16 @@ private:
     void svgAttributeChanged(const QualifiedName&) final;
 
     void didAttachRenderers() final;
-    InsertionNotificationRequest insertedInto(ContainerNode&) final;
+    InsertedIntoAncestorResult insertedIntoAncestor(InsertionType, ContainerNode&) final;
 
     RenderPtr<RenderElement> createElementRenderer(RenderStyle&&, const RenderTreePosition&) final;
 
-    const AtomicString& imageSourceURL() const final;
     void addSubresourceAttributeURLs(ListHashSet<URL>&) const final;
 
     bool haveLoadedRequiredResources() final;
 
     bool selfHasRelativeLengths() const final { return true; }
-    void didMoveToNewDocument(Document* oldDocument) final;
+    void didMoveToNewDocument(Document& oldDocument, Document& newDocument) final;
 
     BEGIN_DECLARE_ANIMATED_PROPERTIES(SVGImageElement)
         DECLARE_ANIMATED_LENGTH(X, x)
@@ -75,5 +73,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif

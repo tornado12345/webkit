@@ -36,6 +36,7 @@
 
 #include "AccessibilityObject.h"
 #include "Document.h"
+#include "Editing.h"
 #include "FontCascade.h"
 #include "FrameView.h"
 #include "HTMLParserIdioms.h"
@@ -50,7 +51,6 @@
 #include "VisibleUnits.h"
 #include "WebKitAccessibleUtil.h"
 #include "WebKitAccessibleWrapperAtk.h"
-#include "htmlediting.h"
 #include <wtf/glib/GUniquePtr.h>
 #include <wtf/text/CString.h>
 
@@ -87,7 +87,7 @@ static AtkAttributeSet* getAttributeSetForAccessibilityObject(const Accessibilit
     auto* style = &renderer->style();
 
     AtkAttributeSet* result = nullptr;
-    GUniquePtr<gchar> buffer(g_strdup_printf("%i", style->fontSize()));
+    GUniquePtr<gchar> buffer(g_strdup_printf("%i", style->computedFontPixelSize()));
     result = addToAtkAttributeSet(result, atk_text_attribute_get_name(ATK_TEXT_ATTR_SIZE), buffer.get());
 
     Color bgColor = style->visitedDependentColor(CSSPropertyBackgroundColor);
@@ -136,35 +136,7 @@ static AtkAttributeSet* getAttributeSetForAccessibilityObject(const Accessibilit
 
     result = addToAtkAttributeSet(result, atk_text_attribute_get_name(ATK_TEXT_ATTR_FAMILY_NAME), fontFamilyName.utf8().data());
 
-    int fontWeight = -1;
-    switch (style->fontCascade().weight()) {
-    case FontWeight100:
-        fontWeight = 100;
-        break;
-    case FontWeight200:
-        fontWeight = 200;
-        break;
-    case FontWeight300:
-        fontWeight = 300;
-        break;
-    case FontWeight400:
-        fontWeight = 400;
-        break;
-    case FontWeight500:
-        fontWeight = 500;
-        break;
-    case FontWeight600:
-        fontWeight = 600;
-        break;
-    case FontWeight700:
-        fontWeight = 700;
-        break;
-    case FontWeight800:
-        fontWeight = 800;
-        break;
-    case FontWeight900:
-        fontWeight = 900;
-    }
+    int fontWeight = static_cast<float>(style->fontCascade().weight());
     if (fontWeight > 0) {
         buffer.reset(g_strdup_printf("%i", fontWeight));
         result = addToAtkAttributeSet(result, atk_text_attribute_get_name(ATK_TEXT_ATTR_WEIGHT), buffer.get());
@@ -419,13 +391,6 @@ static void getSelectionOffsetsForObject(AccessibilityObject* coreObject, Visibl
     Position firstValidPosition = firstPositionInOrBeforeNode(node->firstDescendant());
     Position lastValidPosition = lastPositionInOrAfterNode(node->lastDescendant());
 
-    // Early return with proper values if the selection falls entirely out of the object.
-    if (!selectionBelongsToObject(coreObject, selection)) {
-        startOffset = comparePositions(selection.start(), firstValidPosition) <= 0 ? 0 : accessibilityObjectLength(coreObject);
-        endOffset = startOffset;
-        return;
-    }
-
     // Find the proper range for the selection that falls inside the object.
     Position nodeRangeStart = selection.start();
     if (comparePositions(nodeRangeStart, firstValidPosition) < 0)
@@ -475,7 +440,7 @@ static gchar* webkitAccessibleTextGetText(AtkText* text, gint startOffset, gint 
     AccessibilityObject* coreObject = core(text);
 
 #if ENABLE(INPUT_TYPE_COLOR)
-    if (coreObject->roleValue() == ColorWellRole) {
+    if (coreObject->roleValue() == AccessibilityRole::ColorWell) {
         int r, g, b;
         coreObject->colorValue(r, g, b);
         return g_strdup_printf("rgb %7.5f %7.5f %7.5f 1", r / 255., g / 255., b / 255.);
@@ -493,7 +458,7 @@ static gchar* webkitAccessibleTextGetText(AtkText* text, gint startOffset, gint 
 
     // Prefix a item number/bullet if needed
     int actualEndOffset = endOffset == -1 ? ret.length() : endOffset;
-    if (coreObject->roleValue() == ListItemRole) {
+    if (coreObject->roleValue() == AccessibilityRole::ListItem) {
         RenderObject* objRenderer = coreObject->renderer();
         if (is<RenderListItem>(objRenderer)) {
             String markerText = downcast<RenderListItem>(*objRenderer).markerTextWithSuffix();

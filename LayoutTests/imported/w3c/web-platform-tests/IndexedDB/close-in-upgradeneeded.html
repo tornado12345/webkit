@@ -1,5 +1,5 @@
 <!doctype html>
-<!--  Submitted from TestTWF Paris  -->
+<!-- Submitted from TestTWF Paris -->
 <title>When db.close is called in upgradeneeded, the db is cleaned up on refresh</title>
 <script src=/resources/testharness.js></script>
 <script src=/resources/testharnessreport.js></script>
@@ -7,6 +7,7 @@
 
 <script>
 
+var db
 var open_rq = createdb(async_test())
 var sawTransactionComplete = false
 

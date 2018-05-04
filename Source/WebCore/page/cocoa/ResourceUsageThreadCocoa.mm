@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,27 +28,24 @@
 
 #if ENABLE(RESOURCE_USAGE)
 
-#include "MachVMSPI.h"
 #include <JavaScriptCore/GCActivityCallback.h>
-#include <heap/Heap.h>
+#include <JavaScriptCore/Heap.h>
+#include <JavaScriptCore/VM.h>
 #include <mach/mach.h>
 #include <mach/vm_statistics.h>
-#include <runtime/VM.h>
-#include <sys/sysctl.h>
+#include <pal/spi/cocoa/MachVMSPI.h>
+#include <wtf/MachSendRight.h>
 
 namespace WebCore {
 
-static size_t vmPageSize()
+size_t vmPageSize()
 {
-    static size_t pageSize;
-    static std::once_flag onceFlag;
-    std::call_once(onceFlag, [&] {
-        size_t outputSize = sizeof(pageSize);
-        int status = sysctlbyname("vm.pagesize", &pageSize, &outputSize, nullptr, 0);
-        ASSERT_UNUSED(status, status != -1);
-        ASSERT(pageSize);
-    });
-    return pageSize;
+#if PLATFORM(IOS)
+    return vm_kernel_page_size;
+#else
+    static size_t cached = sysconf(_SC_PAGESIZE);
+    return cached;
+#endif
 }
 
 void logFootprintComparison(const std::array<TagInfo, 256>& before, const std::array<TagInfo, 256>& after)
@@ -84,6 +81,7 @@ const char* displayNameForVMTag(unsigned tag)
     case VM_MEMORY_IMAGEIO: return "ImageIO";
     case VM_MEMORY_CGIMAGE: return "CG image";
     case VM_MEMORY_JAVASCRIPT_JIT_EXECUTABLE_ALLOCATOR: return "JSC JIT";
+    case VM_MEMORY_JAVASCRIPT_CORE: return "WebAssembly";
     case VM_MEMORY_MALLOC: return "malloc";
     case VM_MEMORY_MALLOC_HUGE: return "malloc (huge)";
     case VM_MEMORY_MALLOC_LARGE: return "malloc (large)";
@@ -141,35 +139,41 @@ std::array<TagInfo, 256> pagesPerVMTag()
     return tags;
 }
 
-static float cpuUsage()
+static Vector<MachSendRight> threadSendRights()
 {
-    thread_array_t threadList;
-    mach_msg_type_number_t threadCount;
+    thread_array_t threadList = nullptr;
+    mach_msg_type_number_t threadCount = 0;
     kern_return_t kr = task_threads(mach_task_self(), &threadList, &threadCount);
     if (kr != KERN_SUCCESS)
-        return -1;
+        return { };
 
-    float usage = 0;
-
-    for (mach_msg_type_number_t i = 0; i < threadCount; ++i) {
-        thread_info_data_t threadInfo;
-        thread_basic_info_t threadBasicInfo;
-
-        mach_msg_type_number_t threadInfoCount = THREAD_INFO_MAX;
-        kr = thread_info(threadList[i], THREAD_BASIC_INFO, static_cast<thread_info_t>(threadInfo), &threadInfoCount);
-        if (kr != KERN_SUCCESS)
-            return -1;
-
-        threadBasicInfo = reinterpret_cast<thread_basic_info_t>(threadInfo);
-
-        if (!(threadBasicInfo->flags & TH_FLAGS_IDLE))
-            usage += threadBasicInfo->cpu_usage / static_cast<float>(TH_USAGE_SCALE) * 100.0;
-
-        mach_port_deallocate(mach_task_self(), threadList[i]);
-    }
+    Vector<MachSendRight> machThreads;
+    for (mach_msg_type_number_t i = 0; i < threadCount; ++i)
+        machThreads.append(MachSendRight::adopt(threadList[i]));
 
     kr = vm_deallocate(mach_task_self(), (vm_offset_t)threadList, threadCount * sizeof(thread_t));
     ASSERT(kr == KERN_SUCCESS);
+
+    return machThreads;
+}
+
+static float cpuUsage()
+{
+    auto machThreads = threadSendRights();
+
+    float usage = 0;
+
+    for (auto& machThread : machThreads) {
+        thread_info_data_t threadInfo;
+        mach_msg_type_number_t threadInfoCount = THREAD_INFO_MAX;
+        auto kr = thread_info(machThread.sendRight(), THREAD_BASIC_INFO, static_cast<thread_info_t>(threadInfo), &threadInfoCount);
+        if (kr != KERN_SUCCESS)
+            return -1;
+
+        auto threadBasicInfo = reinterpret_cast<thread_basic_info_t>(threadInfo);
+        if (!(threadBasicInfo->flags & TH_FLAGS_IDLE))
+            usage += threadBasicInfo->cpu_usage / static_cast<float>(TH_USAGE_SCALE) * 100.0;
+    }
 
     return usage;
 }
@@ -185,6 +189,8 @@ static unsigned categoryForVMTag(unsigned tag)
         return MemoryCategory::Images;
     case VM_MEMORY_JAVASCRIPT_JIT_EXECUTABLE_ALLOCATOR:
         return MemoryCategory::JSJIT;
+    case VM_MEMORY_JAVASCRIPT_CORE:
+        return MemoryCategory::WebAssembly;
     case VM_MEMORY_MALLOC:
     case VM_MEMORY_MALLOC_HUGE:
     case VM_MEMORY_MALLOC_LARGE:

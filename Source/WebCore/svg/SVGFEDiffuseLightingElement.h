@@ -19,8 +19,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGFEDiffuseLightingElement_h
-#define SVGFEDiffuseLightingElement_h
+#pragma once
 
 #include "SVGFELightElement.h"
 #include "SVGFilterPrimitiveStandardAttributes.h"
@@ -31,6 +30,7 @@ class FEDiffuseLighting;
 class SVGColor;
 
 class SVGFEDiffuseLightingElement final : public SVGFilterPrimitiveStandardAttributes {
+    WTF_MAKE_ISO_ALLOCATED(SVGFEDiffuseLightingElement);
 public:
     static Ref<SVGFEDiffuseLightingElement> create(const QualifiedName&, Document&);
     void lightElementAttributeChanged(const SVGFELightElement*, const QualifiedName&);
@@ -56,5 +56,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif

@@ -23,8 +23,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef CSSSelectorList_h
-#define CSSSelectorList_h
+#pragma once
 
 #include "CSSSelector.h"
 #include <memory>
@@ -67,6 +66,7 @@ public:
     void buildSelectorsText(StringBuilder&) const;
 
     unsigned componentCount() const;
+    unsigned listSize() const;
 
     CSSSelectorList& operator=(CSSSelectorList&&);
 
@@ -87,5 +87,3 @@ inline const CSSSelector* CSSSelectorList::next(const CSSSelector* current)
 }
 
 } // namespace WebCore
-
-#endif // CSSSelectorList_h

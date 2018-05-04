@@ -27,7 +27,6 @@
 
 #include "MediaStreamTrackEvent.h"
 
-#include "EventNames.h"
 #include "MediaStreamTrack.h"
 
 namespace WebCore {
@@ -54,9 +53,7 @@ MediaStreamTrackEvent::MediaStreamTrackEvent(const AtomicString& type, const Ini
 {
 }
 
-MediaStreamTrackEvent::~MediaStreamTrackEvent()
-{
-}
+MediaStreamTrackEvent::~MediaStreamTrackEvent() = default;
 
 MediaStreamTrack* MediaStreamTrackEvent::track() const
 {

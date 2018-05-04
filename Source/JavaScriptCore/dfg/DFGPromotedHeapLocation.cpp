@@ -114,6 +114,26 @@ void printInternal(PrintStream& out, PromotedLocationKind kind)
     case VectorLengthPLoc:
         out.print("VectorLengthPLoc");
         return;
+
+    case SpreadPLoc:
+        out.print("SpreadPLoc");
+        return;
+
+    case NewArrayWithSpreadArgumentPLoc:
+        out.print("NewArrayWithSpreadArgumentPLoc");
+        return;
+
+    case NewArrayBufferPLoc:
+        out.print("NewArrayBufferPLoc");
+        return;
+
+    case RegExpObjectRegExpPLoc:
+        out.print("RegExpObjectRegExpPLoc");
+        return;
+
+    case RegExpObjectLastIndexPLoc:
+        out.print("RegExpObjectLastIndexPLoc");
+        return;
     }
     
     RELEASE_ASSERT_NOT_REACHED();

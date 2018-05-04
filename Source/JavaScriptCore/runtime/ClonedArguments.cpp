@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,7 +34,7 @@ namespace JSC {
 
 STATIC_ASSERT_IS_TRIVIALLY_DESTRUCTIBLE(ClonedArguments);
 
-const ClassInfo ClonedArguments::s_info = { "Arguments", &Base::s_info, 0, CREATE_METHOD_TABLE(ClonedArguments) };
+const ClassInfo ClonedArguments::s_info = { "Arguments", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(ClonedArguments) };
 
 ClonedArguments::ClonedArguments(VM& vm, Structure* structure, Butterfly* butterfly)
     : Base(vm, structure, butterfly)
@@ -49,20 +49,19 @@ ClonedArguments* ClonedArguments::createEmpty(
         return 0;
 
     Butterfly* butterfly;
-    if (UNLIKELY(structure->needsSlowPutIndexing())) {
+    if (UNLIKELY(structure->mayInterceptIndexedAccesses() || structure->storedPrototypeObject()->needsSlowPutIndexing())) {
         butterfly = createArrayStorageButterfly(vm, nullptr, structure, length, vectorLength);
         butterfly->arrayStorage()->m_numValuesInVector = vectorLength;
-
     } else {
-        void* temp = vm.heap.tryAllocateAuxiliary(nullptr, Butterfly::totalSize(0, structure->outOfLineCapacity(), true, vectorLength * sizeof(EncodedJSValue)));
-        if (!temp)
+        IndexingHeader indexingHeader;
+        indexingHeader.setVectorLength(vectorLength);
+        indexingHeader.setPublicLength(length);
+        butterfly = Butterfly::tryCreate(vm, 0, 0, structure->outOfLineCapacity(), true, indexingHeader, vectorLength * sizeof(EncodedJSValue));
+        if (!butterfly)
             return 0;
-        butterfly = Butterfly::fromBase(temp, 0, structure->outOfLineCapacity());
-        butterfly->setVectorLength(vectorLength);
-        butterfly->setPublicLength(length);
-        
+
         for (unsigned i = length; i < vectorLength; ++i)
-            butterfly->contiguous()[i].clear();
+            butterfly->contiguous().at(i).clear();
     }
     
     ClonedArguments* result =
@@ -81,20 +80,18 @@ ClonedArguments* ClonedArguments::createEmpty(ExecState* exec, JSFunction* calle
     // NB. Some clients might expect that the global object of of this object is the global object
     // of the callee. We don't do this for now, but maybe we should.
     ClonedArguments* result = createEmpty(vm, exec->lexicalGlobalObject()->clonedArgumentsStructure(), callee, length);
-    ASSERT(!result->structure(vm)->needsSlowPutIndexing() || shouldUseSlowPut(result->structure(vm)->indexingType()));
+    ASSERT(!result->needsSlowPutIndexing() || shouldUseSlowPut(result->structure(vm)->indexingType()));
     return result;
 }
 
 ClonedArguments* ClonedArguments::createWithInlineFrame(ExecState* myFrame, ExecState* targetFrame, InlineCallFrame* inlineCallFrame, ArgumentsMode mode)
 {
-    VM& vm = myFrame->vm();
-    
     JSFunction* callee;
     
     if (inlineCallFrame)
         callee = jsCast<JSFunction*>(inlineCallFrame->calleeRecovery.recover(targetFrame));
     else
-        callee = jsCast<JSFunction*>(targetFrame->callee());
+        callee = jsCast<JSFunction*>(targetFrame->jsCallee());
 
     ClonedArguments* result = nullptr;
     
@@ -105,18 +102,18 @@ ClonedArguments* ClonedArguments::createWithInlineFrame(ExecState* myFrame, Exec
             if (inlineCallFrame->argumentCountRegister.isValid())
                 length = targetFrame->r(inlineCallFrame->argumentCountRegister).unboxedInt32();
             else
-                length = inlineCallFrame->arguments.size();
+                length = inlineCallFrame->argumentCountIncludingThis;
             length--;
             result = createEmpty(myFrame, callee, length);
 
             for (unsigned i = length; i--;)
-                result->initializeIndex(vm, i, inlineCallFrame->arguments[i + 1].recover(targetFrame));
+                result->putDirectIndex(myFrame, i, inlineCallFrame->argumentsWithFixup[i + 1].recover(targetFrame));
         } else {
             length = targetFrame->argumentCount();
             result = createEmpty(myFrame, callee, length);
 
             for (unsigned i = length; i--;)
-                result->initializeIndex(vm, i, targetFrame->uncheckedArgument(i));
+                result->putDirectIndex(myFrame, i, targetFrame->uncheckedArgument(i));
         }
         break;
     }
@@ -127,14 +124,14 @@ ClonedArguments* ClonedArguments::createWithInlineFrame(ExecState* myFrame, Exec
     } }
 
     ASSERT(myFrame->lexicalGlobalObject()->clonedArgumentsStructure() == result->structure());
-    ASSERT(!result->structure(vm)->needsSlowPutIndexing() || shouldUseSlowPut(result->structure(vm)->indexingType()));
+    ASSERT(!result->needsSlowPutIndexing() || shouldUseSlowPut(result->structure()->indexingType()));
     return result;
 }
 
 ClonedArguments* ClonedArguments::createWithMachineFrame(ExecState* myFrame, ExecState* targetFrame, ArgumentsMode mode)
 {
     ClonedArguments* result = createWithInlineFrame(myFrame, targetFrame, nullptr, mode);
-    ASSERT(!result->structure()->needsSlowPutIndexing() || shouldUseSlowPut(result->structure()->indexingType()));
+    ASSERT(!result->needsSlowPutIndexing() || shouldUseSlowPut(result->structure()->indexingType()));
     return result;
 }
 
@@ -146,16 +143,16 @@ ClonedArguments* ClonedArguments::createByCopyingFrom(
     ClonedArguments* result = createEmpty(vm, structure, callee, length);
     
     for (unsigned i = length; i--;)
-        result->initializeIndex(vm, i, argumentStart[i].jsValue());
-    ASSERT(!result->structure(vm)->needsSlowPutIndexing() || shouldUseSlowPut(result->structure(vm)->indexingType()));
+        result->putDirectIndex(exec, i, argumentStart[i].jsValue());
+    ASSERT(!result->needsSlowPutIndexing() || shouldUseSlowPut(result->structure(vm)->indexingType()));
     return result;
 }
 
 Structure* ClonedArguments::createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype, IndexingType indexingType)
 {
-    Structure* structure = Structure::create(vm, globalObject, prototype, TypeInfo(ObjectType, StructureFlags), info(), indexingType);
+    Structure* structure = Structure::create(vm, globalObject, prototype, TypeInfo(ClonedArgumentsType, StructureFlags), info(), indexingType);
     PropertyOffset offset;
-    structure = structure->addPropertyTransition(vm, structure, vm.propertyNames->length, DontEnum, offset);
+    structure = structure->addPropertyTransition(vm, structure, vm.propertyNames->length, static_cast<unsigned>(PropertyAttribute::DontEnum), offset);
     ASSERT(offset == clonedArgumentsLengthPropertyOffset);
     return structure;
 }
@@ -180,23 +177,17 @@ bool ClonedArguments::getOwnPropertySlot(JSObject* object, ExecState* exec, Prop
         FunctionExecutable* executable = jsCast<FunctionExecutable*>(thisObject->m_callee->executable());
         bool isStrictMode = executable->isStrictMode();
 
-        if (isStrictMode) {
-            if (ident == vm.propertyNames->callee) {
-                slot.setGetterSlot(thisObject, DontDelete | DontEnum | Accessor, thisObject->globalObject()->throwTypeErrorArgumentsCalleeAndCallerGetterSetter());
+        if (ident == vm.propertyNames->callee) {
+            if (isStrictMode) {
+                slot.setGetterSlot(thisObject, PropertyAttribute::DontDelete | PropertyAttribute::DontEnum | PropertyAttribute::Accessor, thisObject->globalObject()->throwTypeErrorArgumentsCalleeAndCallerGetterSetter());
                 return true;
             }
-            if (ident == vm.propertyNames->caller) {
-                slot.setGetterSlot(thisObject, DontDelete | DontEnum | Accessor, thisObject->globalObject()->throwTypeErrorArgumentsCalleeAndCallerGetterSetter());
-                return true;
-            }
-
-        } else if (ident == vm.propertyNames->callee) {
             slot.setValue(thisObject, 0, thisObject->m_callee.get());
             return true;
         }
 
         if (ident == vm.propertyNames->iteratorSymbol) {
-            slot.setValue(thisObject, DontEnum, thisObject->globalObject()->arrayProtoValuesFunction());
+            slot.setValue(thisObject, static_cast<unsigned>(PropertyAttribute::DontEnum), thisObject->globalObject()->arrayProtoValuesFunction());
             return true;
         }
     }
@@ -217,7 +208,6 @@ bool ClonedArguments::put(JSCell* cell, ExecState* exec, PropertyName ident, JSV
     VM& vm = exec->vm();
     
     if (ident == vm.propertyNames->callee
-        || ident == vm.propertyNames->caller
         || ident == vm.propertyNames->iteratorSymbol) {
         thisObject->materializeSpecialsIfNecessary(exec);
         PutPropertySlot dummy = slot; // Shadow the given PutPropertySlot to prevent caching.
@@ -233,7 +223,6 @@ bool ClonedArguments::deleteProperty(JSCell* cell, ExecState* exec, PropertyName
     VM& vm = exec->vm();
     
     if (ident == vm.propertyNames->callee
-        || ident == vm.propertyNames->caller
         || ident == vm.propertyNames->iteratorSymbol)
         thisObject->materializeSpecialsIfNecessary(exec);
     
@@ -246,7 +235,6 @@ bool ClonedArguments::defineOwnProperty(JSObject* object, ExecState* exec, Prope
     VM& vm = exec->vm();
     
     if (ident == vm.propertyNames->callee
-        || ident == vm.propertyNames->caller
         || ident == vm.propertyNames->iteratorSymbol)
         thisObject->materializeSpecialsIfNecessary(exec);
     
@@ -261,13 +249,12 @@ void ClonedArguments::materializeSpecials(ExecState* exec)
     FunctionExecutable* executable = jsCast<FunctionExecutable*>(m_callee->executable());
     bool isStrictMode = executable->isStrictMode();
     
-    if (isStrictMode) {
-        putDirectAccessor(exec, vm.propertyNames->callee, globalObject()->throwTypeErrorArgumentsCalleeAndCallerGetterSetter(), DontDelete | DontEnum | Accessor);
-        putDirectAccessor(exec, vm.propertyNames->caller, globalObject()->throwTypeErrorArgumentsCalleeAndCallerGetterSetter(), DontDelete | DontEnum | Accessor);
-    } else
+    if (isStrictMode)
+        putDirectAccessor(exec, vm.propertyNames->callee, globalObject()->throwTypeErrorArgumentsCalleeAndCallerGetterSetter(), PropertyAttribute::DontDelete | PropertyAttribute::DontEnum | PropertyAttribute::Accessor);
+    else
         putDirect(vm, vm.propertyNames->callee, JSValue(m_callee.get()));
 
-    putDirect(vm, vm.propertyNames->iteratorSymbol, globalObject()->arrayProtoValuesFunction(), DontEnum);
+    putDirect(vm, vm.propertyNames->iteratorSymbol, globalObject()->arrayProtoValuesFunction(), static_cast<unsigned>(PropertyAttribute::DontEnum));
     
     m_callee.clear();
 }
@@ -283,7 +270,7 @@ void ClonedArguments::visitChildren(JSCell* cell, SlotVisitor& visitor)
     ClonedArguments* thisObject = jsCast<ClonedArguments*>(cell);
     ASSERT_GC_OBJECT_INHERITS(thisObject, info());
     Base::visitChildren(thisObject, visitor);
-    visitor.append(&thisObject->m_callee);
+    visitor.append(thisObject->m_callee);
 }
 
 } // namespace JSC

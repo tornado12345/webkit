@@ -1,5 +1,5 @@
 <!doctype html>
-<!--  Submitted from TestTWF Paris  -->
+<!-- Submitted from TestTWF Paris -->
 <title>Test that an abort in the initial upgradeneeded sets version back to 0</title>
 <script src=/resources/testharness.js></script>
 <script src=/resources/testharnessreport.js></script>
@@ -12,7 +12,7 @@ var db, open_rq = createdb(async_test(), undefined, 2);
 open_rq.onupgradeneeded = function(e) {
     db = e.target.result;
     assert_equals(db.version, 2);
-    transaction = e.target.transaction;
+    var transaction = e.target.transaction;
     transaction.oncomplete = fail(this, "unexpected transaction.complete");
     transaction.onabort = function(e) {
         assert_equals(e.target.db.version, 0);

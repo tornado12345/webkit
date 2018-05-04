@@ -16,6 +16,10 @@
 #include "angle_gl.h"
 #include "compiler/translator/TranslatorESSL.h"
 #include "GLSLANG/ShaderLang.h"
+#include "compiler/translator/FindSymbolNode.h"
+
+namespace sh
+{
 
 bool compileTestShader(GLenum type,
                        ShShaderSpec spec,
@@ -60,6 +64,9 @@ class MatchOutputCodeTest : public testing::Test
     }
 
     bool foundInCode(ShShaderOutput output, const char *stringToFind) const;
+    // Returns the position of the first character of the first match in the translated output
+    // source. If no matches are found, then string::npos is returned.
+    size_t findInCode(ShShaderOutput output, const char *stringToFind) const;
 
     // Test that the string occurs for exactly expectedOccurrences times
     bool foundInCode(ShShaderOutput output,
@@ -89,8 +96,8 @@ class MatchOutputCodeTest : public testing::Test
     std::map<ShShaderOutput, std::string> mOutputCode;
 };
 
-const TIntermSymbol *FindSymbolNode(TIntermNode *root,
-                                    const TString &symbolName,
-                                    TBasicType basicType);
+// Returns a pointer to a function call node with a mangled name functionName.
+const TIntermAggregate *FindFunctionCallNode(TIntermNode *root, const TString &functionName);
+}
 
 #endif // TESTS_TEST_UTILS_COMPILER_TEST_H_

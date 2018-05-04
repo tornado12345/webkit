@@ -20,8 +20,9 @@
  *
 */
 
-#ifndef HitTestRequest_h
-#define HitTestRequest_h
+#pragma once
+
+#include <wtf/Assertions.h>
 
 namespace WebCore {
 
@@ -39,7 +40,11 @@ public:
         AllowFrameScrollbars = 1 << 9,
         AllowChildFrameContent = 1 << 10,
         ChildFrameHitTest = 1 << 11,
-        AccessibilityHitTest = 1 << 12
+        AccessibilityHitTest = 1 << 12,
+        // Collect a list of nodes instead of just one. Used for elementsFromPoint and rect-based tests.
+        CollectMultipleElements = 1 << 13,
+        // When using list-based testing, continue hit testing even after a hit has been found.
+        IncludeAllElementsUnderPoint = 1 << 14
     };
 
     typedef unsigned HitTestRequestType;
@@ -47,6 +52,7 @@ public:
     HitTestRequest(HitTestRequestType requestType = ReadOnly | Active | DisallowUserAgentShadowContent)
         : m_requestType(requestType)
     {
+        ASSERT(!(requestType & IncludeAllElementsUnderPoint) || (requestType & CollectMultipleElements));
     }
 
     bool readOnly() const { return m_requestType & ReadOnly; }
@@ -61,6 +67,8 @@ public:
     bool allowsFrameScrollbars() const { return m_requestType & AllowFrameScrollbars; }
     bool allowsChildFrameContent() const { return m_requestType & AllowChildFrameContent; }
     bool isChildFrameHitTest() const { return m_requestType & ChildFrameHitTest; }
+    bool resultIsElementList() const { return m_requestType & CollectMultipleElements; }
+    bool includesAllElementsUnderPoint() const { return m_requestType & IncludeAllElementsUnderPoint; }
 
     // Convenience functions
     bool touchMove() const { return move() && touchEvent(); }
@@ -73,5 +81,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif // HitTestRequest_h

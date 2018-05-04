@@ -130,7 +130,7 @@ class Command(object):
         return help_text
 
     def execute(self, options, args, tool):
-        raise NotImplementedError, "subclasses must implement"
+        raise NotImplementedError('subclasses must implement')
 
     # main() exists so that Commands can be turned into stand-alone scripts.
     # Other parts of the code will likely require modification to work stand-alone.
@@ -197,7 +197,7 @@ class HelpCommand(Command):
         if args:
             command = self._tool.command_by_name(args[0])
             if command:
-                print command.standalone_help()
+                print(command.standalone_help())
                 return 0
 
         self.show_all_commands = options.show_all_commands
@@ -262,7 +262,7 @@ class MultiCommandTool(object):
         return None
 
     def path(self):
-        raise NotImplementedError, "subclasses must implement"
+        raise NotImplementedError('subclasses must implement')
 
     def command_completed(self):
         pass
@@ -304,7 +304,7 @@ class MultiCommandTool(object):
             try:
                 result = command.check_arguments_and_execute(options, args, self)
                 break
-            except TryAgain, e:
+            except TryAgain as e:
                 pass
 
         self.command_completed()

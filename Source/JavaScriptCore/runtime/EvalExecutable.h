@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009, 2010, 2013-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2009-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,27 +25,26 @@
 
 #pragma once
 
+#include "ExecutableToCodeBlockEdge.h"
 #include "ScriptExecutable.h"
 #include "UnlinkedEvalCodeBlock.h"
 
 namespace JSC {
 
-class EvalExecutable final : public ScriptExecutable {
+class EvalExecutable : public ScriptExecutable {
     friend class LLIntOffsetsExtractor;
 public:
     typedef ScriptExecutable Base;
     static const unsigned StructureFlags = Base::StructureFlags | StructureIsImmortal;
 
     static void destroy(JSCell*);
-
+    
     EvalCodeBlock* codeBlock()
     {
-        return m_evalCodeBlock.get();
+        return bitwise_cast<EvalCodeBlock*>(ExecutableToCodeBlockEdge::unwrap(m_evalCodeBlock.get()));
     }
 
-    static EvalExecutable* create(ExecState*, const SourceCode&, bool isInStrictContext, DerivedContextType, bool isArrowFunctionContext, EvalContextType, const VariableEnvironment*);
-
-    PassRefPtr<JITCode> generatedJITCode()
+    Ref<JITCode> generatedJITCode()
     {
         return generatedJITCodeForCall();
     }
@@ -54,23 +53,26 @@ public:
     {
         return Structure::create(vm, globalObject, proto, TypeInfo(EvalExecutableType, StructureFlags), info());
     }
-        
+
     DECLARE_INFO;
 
     ExecutableInfo executableInfo() const { return ExecutableInfo(usesEval(), isStrictMode(), false, false, ConstructorKind::None, JSParserScriptMode::Classic, SuperBinding::NotNeeded, SourceParseMode::ProgramMode, derivedContextType(), isArrowFunctionContext(), false, evalContextType()); }
 
     unsigned numVariables() { return m_unlinkedEvalCodeBlock->numVariables(); }
-    unsigned numberOfFunctionDecls() { return m_unlinkedEvalCodeBlock->numberOfFunctionDecls(); }
+    unsigned numFunctionHoistingCandidates() { return m_unlinkedEvalCodeBlock->numFunctionHoistingCandidates(); }
+    unsigned numTopLevelFunctionDecls() { return m_unlinkedEvalCodeBlock->numberOfFunctionDecls(); }
+    bool allowDirectEvalCache() const { return m_unlinkedEvalCodeBlock->allowDirectEvalCache(); }
 
-private:
+protected:
     friend class ExecutableBase;
     friend class ScriptExecutable;
 
+    using Base::finishCreation;
     EvalExecutable(ExecState*, const SourceCode&, bool inStrictContext, DerivedContextType, bool isArrowFunctionContext, EvalContextType);
 
     static void visitChildren(JSCell*, SlotVisitor&);
 
-    WriteBarrier<EvalCodeBlock> m_evalCodeBlock;
+    WriteBarrier<ExecutableToCodeBlockEdge> m_evalCodeBlock;
     WriteBarrier<UnlinkedEvalCodeBlock> m_unlinkedEvalCodeBlock;
 };
 

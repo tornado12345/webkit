@@ -23,12 +23,13 @@
 
 #include "Document.h"
 #include "Event.h"
-#include "EventNames.h"
-#include "HTMLNames.h"
 #include "SVGAnimatedStaticPropertyTearOff.h"
 #include "XLinkNames.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(SVGScriptElement);
 
 // Animated property definitions
 DEFINE_ANIMATED_STRING(SVGScriptElement, XLinkNames::hrefAttr, Href, href)
@@ -73,23 +74,23 @@ void SVGScriptElement::svgAttributeChanged(const QualifiedName& attrName)
     SVGElement::svgAttributeChanged(attrName);
 }
 
-Node::InsertionNotificationRequest SVGScriptElement::insertedInto(ContainerNode& rootParent)
+Node::InsertedIntoAncestorResult SVGScriptElement::insertedIntoAncestor(InsertionType insertionType, ContainerNode& parentOfInsertedTree)
 {
-    SVGElement::insertedInto(rootParent);
-    if (rootParent.inDocument())
+    SVGElement::insertedIntoAncestor(insertionType, parentOfInsertedTree);
+    if (insertionType.connectedToDocument)
         SVGExternalResourcesRequired::insertedIntoDocument(this);
-    return shouldCallFinishedInsertingSubtree(rootParent) ? InsertionShouldCallFinishedInsertingSubtree : InsertionDone;
+    return ScriptElement::insertedIntoAncestor(insertionType, parentOfInsertedTree);
 }
 
-void SVGScriptElement::finishedInsertingSubtree()
+void SVGScriptElement::didFinishInsertingNode()
 {
-    ScriptElement::finishedInsertingSubtree();
+    ScriptElement::didFinishInsertingNode();
 }
 
 void SVGScriptElement::childrenChanged(const ChildChange& change)
 {
     SVGElement::childrenChanged(change);
-    ScriptElement::childrenChanged();
+    ScriptElement::childrenChanged(change);
 }
 
 bool SVGScriptElement::isURLAttribute(const Attribute& attribute) const
@@ -140,12 +141,17 @@ String SVGScriptElement::eventAttributeValue() const
     return String();
 }
 
-bool SVGScriptElement::asyncAttributeValue() const
+bool SVGScriptElement::hasAsyncAttribute() const
 {
     return false;
 }
 
-bool SVGScriptElement::deferAttributeValue() const
+bool SVGScriptElement::hasDeferAttribute() const
+{
+    return false;
+}
+
+bool SVGScriptElement::hasNoModuleAttribute() const
 {
     return false;
 }

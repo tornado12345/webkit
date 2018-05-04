@@ -33,17 +33,18 @@
 
 #include "RenderRubyText.h"
 #include "RenderRubyRun.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(RenderRubyText);
 
 RenderRubyText::RenderRubyText(Element& element, RenderStyle&& style)
     : RenderBlockFlow(element, WTFMove(style))
 {
 }
 
-RenderRubyText::~RenderRubyText()
-{
-}
+RenderRubyText::~RenderRubyText() = default;
 
 RenderRubyRun* RenderRubyText::rubyRun() const
 {
@@ -82,7 +83,7 @@ void RenderRubyText::adjustInlineDirectionLineBounds(int expansionOpportunityCou
     // ruby character on each side.
     float inset = (logicalWidth - maxPreferredLogicalWidth) / (expansionOpportunityCount + 1);
     if (expansionOpportunityCount)
-        inset = std::min<float>(2 * style().fontSize(), inset);
+        inset = std::min<float>(2 * style().computedFontPixelSize(), inset);
 
     logicalLeft += inset / 2;
     logicalWidth -= inset;

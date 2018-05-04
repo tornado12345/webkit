@@ -25,9 +25,12 @@
 #include "RenderView.h"
 #include "SVGRenderingContext.h"
 #include "SVGResourcesCache.h"
+#include <wtf/IsoMallocInlines.h>
 #include <wtf/StackStats.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(RenderSVGResourceContainer);
 
 static inline SVGDocumentExtensions& svgExtensionsFromElement(SVGElement& element)
 {
@@ -37,16 +40,10 @@ static inline SVGDocumentExtensions& svgExtensionsFromElement(SVGElement& elemen
 RenderSVGResourceContainer::RenderSVGResourceContainer(SVGElement& element, RenderStyle&& style)
     : RenderSVGHiddenContainer(element, WTFMove(style))
     , m_id(element.getIdAttribute())
-    , m_registered(false)
-    , m_isInvalidating(false)
 {
 }
 
-RenderSVGResourceContainer::~RenderSVGResourceContainer()
-{
-    if (m_registered)
-        svgExtensionsFromElement(element()).removeResource(m_id);
-}
+RenderSVGResourceContainer::~RenderSVGResourceContainer() = default;
 
 void RenderSVGResourceContainer::layout()
 {
@@ -61,6 +58,12 @@ void RenderSVGResourceContainer::layout()
 void RenderSVGResourceContainer::willBeDestroyed()
 {
     SVGResourcesCache::resourceDestroyed(*this);
+
+    if (m_registered) {
+        svgExtensionsFromElement(element()).removeResource(m_id);
+        m_registered = false;
+    }
+
     RenderSVGHiddenContainer::willBeDestroyed();
 }
 
@@ -133,7 +136,7 @@ void RenderSVGResourceContainer::markClientForInvalidation(RenderObject& client,
         client.setNeedsBoundariesUpdate();
         break;
     case RepaintInvalidation:
-        if (!client.documentBeingDestroyed())
+        if (!client.renderTreeBeingDestroyed())
             client.repaint();
         break;
     case ParentOnlyInvalidation:

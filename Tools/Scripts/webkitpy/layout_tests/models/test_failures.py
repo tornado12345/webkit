@@ -62,7 +62,8 @@ def determine_result_type(failure_list):
     elif (FailureMissingResult in failure_types or
           FailureMissingImage in failure_types or
           FailureMissingImageHash in failure_types or
-          FailureMissingAudio in failure_types):
+          FailureMissingAudio in failure_types or
+          FailureNotTested in failure_types):
         return test_expectations.MISSING
     else:
         is_text_failure = FailureTextMismatch in failure_types
@@ -162,6 +163,11 @@ class FailureCrash(TestFailure):
 class FailureMissingResult(FailureText):
     def message(self):
         return "-expected.txt was missing"
+
+
+class FailureNotTested(FailureText):
+    def message(self):
+        return 'test was not run'
 
 
 class FailureTextMismatch(FailureText):
@@ -265,7 +271,7 @@ class FailureEarlyExit(TestFailure):
 
 # Convenient collection of all failure classes for anything that might
 # need to enumerate over them all.
-ALL_FAILURE_CLASSES = (FailureTimeout, FailureCrash, FailureMissingResult,
+ALL_FAILURE_CLASSES = (FailureTimeout, FailureCrash, FailureMissingResult, FailureNotTested,
                        FailureTextMismatch, FailureMissingImageHash,
                        FailureMissingImage, FailureImageHashMismatch,
                        FailureImageHashIncorrect, FailureReftestMismatch,

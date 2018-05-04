@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2006 Nikolas Zimmermann <zimmermann@kde.org>
- * Copyright (C) 2008, 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2008-2017 Apple Inc. All rights reserved.
  * Copyright (C) 2010 Torch Mobile (Beijing) Co. Ltd. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -47,23 +47,18 @@
 #include <wtf/text/WTFString.h>
 
 #if PLATFORM(COCOA)
-#include "WebCoreSystemInterface.h"
+#include "UTIUtilities.h"
 #endif
 
 #if USE(IOSURFACE_CANVAS_BACKING_STORE)
 #include "IOSurface.h"
-#include "IOSurfaceSPI.h"
+#include <pal/spi/cocoa/IOSurfaceSPI.h>
 #endif
 
 // CA uses ARGB32 for textures and ARGB32 -> ARGB32 resampling is optimized.
 #define USE_ARGB32 PLATFORM(IOS)
 
 namespace WebCore {
-
-static void releaseImageData(void*, const void* data, size_t)
-{
-    fastFree(const_cast<void*>(data));
-}
 
 static FloatSize scaleSizeToUserSpace(const FloatSize& logicalSize, const IntSize& backingStoreSize, const IntSize& internalSize)
 {
@@ -84,7 +79,7 @@ std::unique_ptr<ImageBuffer> ImageBuffer::createCompatibleBuffer(const FloatSize
     case kCGContextTypeBitmap:
         colorSpace = CGBitmapContextGetColorSpace(cgContext);
         break;
-#if USE(IOSURFACE)
+#if HAVE(IOSURFACE)
     case kCGContextTypeIOSurface:
         colorSpace = CGIOSurfaceContextGetColorSpace(cgContext);
         break;
@@ -107,7 +102,7 @@ std::unique_ptr<ImageBuffer> ImageBuffer::createCompatibleBuffer(const FloatSize
         return nullptr;
 
     // Set up a corresponding scale factor on the graphics context.
-    buffer->context().scale(FloatSize(scaledSize.width() / size.width(), scaledSize.height() / size.height()));
+    buffer->context().scale(scaledSize / size);
     return buffer;
 }
 
@@ -179,6 +174,9 @@ ImageBuffer::ImageBuffer(const FloatSize& size, float resolutionScale, CGColorSp
         m_data.bitmapInfo = kCGImageAlphaPremultipliedLast;
 #endif
         cgContext = adoptCF(CGBitmapContextCreate(m_data.data, m_data.backingStoreSize.width(), m_data.backingStoreSize.height(), 8, m_data.bytesPerRow.unsafeGet(), m_data.colorSpace, m_data.bitmapInfo));
+        const auto releaseImageData = [] (void*, const void* data, size_t) {
+            fastFree(const_cast<void*>(data));
+        };
         // Create a live image that wraps the data.
         m_data.dataProvider = adoptCF(CGDataProviderCreateWithData(0, m_data.data, numBytes.unsafeGet(), releaseImageData));
 
@@ -200,9 +198,7 @@ ImageBuffer::ImageBuffer(const FloatSize& size, float resolutionScale, ColorSpac
 {
 }
 
-ImageBuffer::~ImageBuffer()
-{
-}
+ImageBuffer::~ImageBuffer() = default;
 
 FloatSize ImageBuffer::sizeForDestinationSize(FloatSize destinationSize) const
 {
@@ -212,6 +208,10 @@ FloatSize ImageBuffer::sizeForDestinationSize(FloatSize destinationSize) const
 #if USE(IOSURFACE_CANVAS_BACKING_STORE)
 size_t ImageBuffer::memoryCost() const
 {
+    // memoryCost() may be invoked concurrently from a GC thread, and we need to be careful about what data we access here and how.
+    // It's safe to access internalSize() because it doesn't do any pointer chasing.
+    // It's safe to access m_data.surface because the surface can only be assigned during construction of this ImageBuffer.
+    // It's safe to access m_data.surface->totalBytes() because totalBytes() doesn't chase pointers.
     if (m_data.surface)
         return m_data.surface->totalBytes();
     return 4 * internalSize().width() * internalSize().height();
@@ -219,6 +219,9 @@ size_t ImageBuffer::memoryCost() const
 
 size_t ImageBuffer::externalMemoryCost() const
 {
+    // externalMemoryCost() may be invoked concurrently from a GC thread, and we need to be careful about what data we access here and how.
+    // It's safe to access m_data.surface because the surface can only be assigned during construction of this ImageBuffer.
+    // It's safe to access m_data.surface->totalBytes() because totalBytes() doesn't chase pointers.
     if (m_data.surface)
         return m_data.surface->totalBytes();
     return 0;
@@ -246,9 +249,9 @@ static RetainPtr<CGImageRef> createCroppedImageIfNecessary(CGImageRef image, con
     return image;
 }
 
-static RefPtr<Image> createBitmapImageAfterScalingIfNeeded(RetainPtr<CGImageRef>&& image, IntSize internalSize, IntSize logicalSize, IntSize backingStoreSize, float resolutionScale, ScaleBehavior scaleBehavior)
+static RefPtr<Image> createBitmapImageAfterScalingIfNeeded(RetainPtr<CGImageRef>&& image, IntSize internalSize, IntSize logicalSize, IntSize backingStoreSize, float resolutionScale, PreserveResolution preserveResolution)
 {
-    if (resolutionScale == 1 || scaleBehavior == Unscaled)
+    if (resolutionScale == 1 || preserveResolution == PreserveResolution::Yes)
         image = createCroppedImageIfNecessary(image.get(), internalSize);
     else {
         auto context = adoptCF(CGBitmapContextCreate(0, logicalSize.width(), logicalSize.height(), 8, 4 * logicalSize.width(), sRGBColorSpaceRef(), kCGImageAlphaPremultipliedLast));
@@ -265,25 +268,25 @@ static RefPtr<Image> createBitmapImageAfterScalingIfNeeded(RetainPtr<CGImageRef>
     return BitmapImage::create(WTFMove(image));
 }
 
-RefPtr<Image> ImageBuffer::copyImage(BackingStoreCopy copyBehavior, ScaleBehavior scaleBehavior) const
+RefPtr<Image> ImageBuffer::copyImage(BackingStoreCopy copyBehavior, PreserveResolution preserveResolution) const
 {
     RetainPtr<CGImageRef> image;
-    if (m_resolutionScale == 1 || scaleBehavior == Unscaled)
+    if (m_resolutionScale == 1 || preserveResolution == PreserveResolution::Yes)
         image = copyNativeImage(copyBehavior);
     else
         image = copyNativeImage(DontCopyBackingStore);
 
-    return createBitmapImageAfterScalingIfNeeded(WTFMove(image), internalSize(), logicalSize(), m_data.backingStoreSize, m_resolutionScale, scaleBehavior);
+    return createBitmapImageAfterScalingIfNeeded(WTFMove(image), internalSize(), logicalSize(), m_data.backingStoreSize, m_resolutionScale, preserveResolution);
 }
 
-RefPtr<Image> ImageBuffer::sinkIntoImage(std::unique_ptr<ImageBuffer> imageBuffer, ScaleBehavior scaleBehavior)
+RefPtr<Image> ImageBuffer::sinkIntoImage(std::unique_ptr<ImageBuffer> imageBuffer, PreserveResolution preserveResolution)
 {
     IntSize internalSize = imageBuffer->internalSize();
     IntSize logicalSize = imageBuffer->logicalSize();
     IntSize backingStoreSize = imageBuffer->m_data.backingStoreSize;
     float resolutionScale = imageBuffer->m_resolutionScale;
 
-    return createBitmapImageAfterScalingIfNeeded(sinkIntoNativeImage(WTFMove(imageBuffer)), internalSize, logicalSize, backingStoreSize, resolutionScale, scaleBehavior);
+    return createBitmapImageAfterScalingIfNeeded(sinkIntoNativeImage(WTFMove(imageBuffer)), internalSize, logicalSize, backingStoreSize, resolutionScale, preserveResolution);
 }
 
 BackingStoreCopy ImageBuffer::fastCopyImageMode()
@@ -382,7 +385,7 @@ void ImageBuffer::drawPattern(GraphicsContext& destContext, const FloatRect& des
     }
 }
 
-RefPtr<Uint8ClampedArray> ImageBuffer::getUnmultipliedImageData(const IntRect& rect, CoordinateSystem coordinateSystem) const
+RefPtr<Uint8ClampedArray> ImageBuffer::getUnmultipliedImageData(const IntRect& rect, IntSize* pixelArrayDimensions, CoordinateSystem coordinateSystem) const
 {
     if (context().isAcceleratedContext())
         flushContext();
@@ -391,10 +394,13 @@ RefPtr<Uint8ClampedArray> ImageBuffer::getUnmultipliedImageData(const IntRect& r
     if (coordinateSystem == LogicalCoordinateSystem)
         srcRect.scale(m_resolutionScale);
 
-    return m_data.getData(srcRect, internalSize(), context().isAcceleratedContext(), true, 1);
+    if (pixelArrayDimensions)
+        *pixelArrayDimensions = srcRect.size();
+
+    return m_data.getData(AlphaPremultiplication::Unpremultiplied, srcRect, internalSize(), context().isAcceleratedContext());
 }
 
-RefPtr<Uint8ClampedArray> ImageBuffer::getPremultipliedImageData(const IntRect& rect, CoordinateSystem coordinateSystem) const
+RefPtr<Uint8ClampedArray> ImageBuffer::getPremultipliedImageData(const IntRect& rect, IntSize* pixelArrayDimensions, CoordinateSystem coordinateSystem) const
 {
     if (context().isAcceleratedContext())
         flushContext();
@@ -403,10 +409,13 @@ RefPtr<Uint8ClampedArray> ImageBuffer::getPremultipliedImageData(const IntRect& 
     if (coordinateSystem == LogicalCoordinateSystem)
         srcRect.scale(m_resolutionScale);
 
-    return m_data.getData(srcRect, internalSize(), context().isAcceleratedContext(), false, 1);
+    if (pixelArrayDimensions)
+        *pixelArrayDimensions = srcRect.size();
+
+    return m_data.getData(AlphaPremultiplication::Premultiplied, srcRect, internalSize(), context().isAcceleratedContext());
 }
 
-void ImageBuffer::putByteArray(Multiply multiplied, Uint8ClampedArray* source, const IntSize& sourceSize, const IntRect& sourceRect, const IntPoint& destPoint, CoordinateSystem coordinateSystem)
+void ImageBuffer::putByteArray(const Uint8ClampedArray& source, AlphaPremultiplication sourceFormat, const IntSize& sourceSize, const IntRect& sourceRect, const IntPoint& destPoint, CoordinateSystem coordinateSystem)
 {
     if (context().isAcceleratedContext())
         flushContext();
@@ -418,7 +427,7 @@ void ImageBuffer::putByteArray(Multiply multiplied, Uint8ClampedArray* source, c
         scaledSourceSize.scale(m_resolutionScale);
     }
 
-    m_data.putData(source, scaledSourceSize, scaledSourceRect, destPoint, internalSize(), context().isAcceleratedContext(), multiplied == Unmultiplied, 1);
+    m_data.putData(source, sourceFormat, scaledSourceSize, scaledSourceRect, destPoint, internalSize(), context().isAcceleratedContext());
     
     // Force recreating the IOSurface cached image if it is requested through CGIOSurfaceContextCreateImage().
     // See https://bugs.webkit.org/show_bug.cgi?id=157966 for explaining why this is necessary.
@@ -434,10 +443,11 @@ static inline CFStringRef jpegUTI()
     return kUTTypeJPEG;
 }
     
-static RetainPtr<CFStringRef> utiFromMIMEType(const String& mimeType)
+static RetainPtr<CFStringRef> utiFromImageBufferMIMEType(const String& mimeType)
 {
+    // FIXME: Why doesn't iOS use the CoreServices version?
 #if PLATFORM(MAC)
-    return adoptCF(UTTypeCreatePreferredIdentifierForTag(kUTTagClassMIMEType, mimeType.createCFString().get(), 0));
+    return UTIFromMIMEType(mimeType).createCFString();
 #else
     ASSERT(isMainThread()); // It is unclear if CFSTR is threadsafe.
 
@@ -458,7 +468,7 @@ static RetainPtr<CFStringRef> utiFromMIMEType(const String& mimeType)
 #endif
 }
 
-static bool encodeImage(CGImageRef image, CFStringRef uti, Optional<double> quality, CFMutableDataRef data)
+static bool encodeImage(CGImageRef image, CFStringRef uti, std::optional<double> quality, CFMutableDataRef data)
 {
     if (!image || !uti || !data)
         return false;
@@ -483,47 +493,61 @@ static bool encodeImage(CGImageRef image, CFStringRef uti, Optional<double> qual
     return CGImageDestinationFinalize(destination.get());
 }
 
-static String dataURL(CGImageRef image, const String& mimeType, Optional<double> quality)
+static String dataURL(CFDataRef data, const String& mimeType)
 {
-    auto uti = utiFromMIMEType(mimeType);
-    ASSERT(uti);
-
-    auto data = adoptCF(CFDataCreateMutable(kCFAllocatorDefault, 0));
-    if (!encodeImage(image, uti.get(), quality, data.get()))
-        return ASCIILiteral("data:,");
-
     Vector<char> base64Data;
-    base64Encode(CFDataGetBytePtr(data.get()), CFDataGetLength(data.get()), base64Data);
+    base64Encode(CFDataGetBytePtr(data), CFDataGetLength(data), base64Data);
 
     return "data:" + mimeType + ";base64," + base64Data;
 }
 
-String ImageBuffer::toDataURL(const String& mimeType, Optional<double> quality, CoordinateSystem) const
+static Vector<uint8_t> dataVector(CFDataRef cfData)
+{
+    Vector<uint8_t> data;
+    data.append(CFDataGetBytePtr(cfData), CFDataGetLength(cfData));
+    return data;
+}
+
+String ImageBuffer::toDataURL(const String& mimeType, std::optional<double> quality, PreserveResolution preserveResolution) const
+{
+    if (auto data = toCFData(mimeType, quality, preserveResolution))
+        return dataURL(data.get(), mimeType);
+    return ASCIILiteral("data:,");
+}
+
+Vector<uint8_t> ImageBuffer::toData(const String& mimeType, std::optional<double> quality) const
+{
+    if (auto data = toCFData(mimeType, quality, PreserveResolution::No))
+        return dataVector(data.get());
+    return { };
+}
+
+RetainPtr<CFDataRef> ImageBuffer::toCFData(const String& mimeType, std::optional<double> quality, PreserveResolution preserveResolution) const
 {
     ASSERT(MIMETypeRegistry::isSupportedImageMIMETypeForEncoding(mimeType));
 
     if (context().isAcceleratedContext())
         flushContext();
 
-    auto uti = utiFromMIMEType(mimeType);
+    auto uti = utiFromImageBufferMIMEType(mimeType);
     ASSERT(uti);
 
-    RefPtr<Uint8ClampedArray> premultipliedData;
     RetainPtr<CGImageRef> image;
+    RefPtr<Uint8ClampedArray> premultipliedData;
 
     if (CFEqual(uti.get(), jpegUTI())) {
         // JPEGs don't have an alpha channel, so we have to manually composite on top of black.
-        premultipliedData = getPremultipliedImageData(IntRect(IntPoint(0, 0), logicalSize()));
+        premultipliedData = getPremultipliedImageData(IntRect(IntPoint(), logicalSize()));
         if (!premultipliedData)
-            return ASCIILiteral("data:,");
+            return nullptr;
 
-        auto dataProvider = adoptCF(CGDataProviderCreateWithData(0, premultipliedData->data(), 4 * logicalSize().width() * logicalSize().height(), 0));
+        size_t dataSize = 4 * logicalSize().width() * logicalSize().height();
+        auto dataProvider = adoptCF(CGDataProviderCreateWithData(nullptr, premultipliedData->data(), dataSize, nullptr));
         if (!dataProvider)
-            return ASCIILiteral("data:,");
+            return nullptr;
 
-        image = adoptCF(CGImageCreate(logicalSize().width(), logicalSize().height(), 8, 32, 4 * logicalSize().width(),
-            sRGBColorSpaceRef(), kCGBitmapByteOrderDefault | kCGImageAlphaNoneSkipLast, dataProvider.get(), 0, false, kCGRenderingIntentDefault));
-    } else if (m_resolutionScale == 1) {
+        image = adoptCF(CGImageCreate(logicalSize().width(), logicalSize().height(), 8, 32, 4 * logicalSize().width(), sRGBColorSpaceRef(), kCGBitmapByteOrderDefault | kCGImageAlphaNoneSkipLast, dataProvider.get(), 0, false, kCGRenderingIntentDefault));
+    } else if (m_resolutionScale == 1 || preserveResolution == PreserveResolution::Yes) {
         image = copyNativeImage(CopyBackingStore);
         image = createCroppedImageIfNecessary(image.get(), internalSize());
     } else {
@@ -536,14 +560,18 @@ String ImageBuffer::toDataURL(const String& mimeType, Optional<double> quality, 
         image = adoptCF(CGBitmapContextCreateImage(context.get()));
     }
 
-    return dataURL(image.get(), mimeType, quality);
+    auto cfData = adoptCF(CFDataCreateMutable(kCFAllocatorDefault, 0));
+    if (!encodeImage(image.get(), uti.get(), quality, cfData.get()))
+        return nullptr;
+
+    return WTFMove(cfData);
 }
 
-String dataURL(const ImageData& source, const String& mimeType, Optional<double> quality)
+static RetainPtr<CFDataRef> cfData(const ImageData& source, const String& mimeType, std::optional<double> quality)
 {
     ASSERT(MIMETypeRegistry::isSupportedImageMIMETypeForEncoding(mimeType));
 
-    auto uti = utiFromMIMEType(mimeType);
+    auto uti = utiFromImageBufferMIMEType(mimeType);
     ASSERT(uti);
 
     CGImageAlphaInfo dataAlphaInfo = kCGImageAlphaLast;
@@ -554,9 +582,9 @@ String dataURL(const ImageData& source, const String& mimeType, Optional<double>
         // JPEGs don't have an alpha channel, so we have to manually composite on top of black.
         size_t size = 4 * source.width() * source.height();
         if (!premultipliedData.tryReserveCapacity(size))
-            return ASCIILiteral("data:,");
+            return nullptr;
 
-        premultipliedData.resize(size);
+        premultipliedData.grow(size);
         unsigned char *buffer = premultipliedData.data();
         for (size_t i = 0; i < size; i += 4) {
             unsigned alpha = data[i + 3];
@@ -577,11 +605,29 @@ String dataURL(const ImageData& source, const String& mimeType, Optional<double>
 
     auto dataProvider = adoptCF(CGDataProviderCreateWithData(0, data, 4 * source.width() * source.height(), 0));
     if (!dataProvider)
-        return ASCIILiteral("data:,");
+        return nullptr;
 
-    auto image = adoptCF(CGImageCreate(source.width(), source.height(), 8, 32, 4 * source.width(),
-        sRGBColorSpaceRef(), kCGBitmapByteOrderDefault | dataAlphaInfo, dataProvider.get(), 0, false, kCGRenderingIntentDefault));
-    return dataURL(image.get(), mimeType, quality);
+    auto image = adoptCF(CGImageCreate(source.width(), source.height(), 8, 32, 4 * source.width(), sRGBColorSpaceRef(), kCGBitmapByteOrderDefault | dataAlphaInfo, dataProvider.get(), 0, false, kCGRenderingIntentDefault));
+
+    auto cfData = adoptCF(CFDataCreateMutable(kCFAllocatorDefault, 0));
+    if (!encodeImage(image.get(), uti.get(), quality, cfData.get()))
+        return nullptr;
+
+    return WTFMove(cfData);
+}
+
+String dataURL(const ImageData& source, const String& mimeType, std::optional<double> quality)
+{
+    if (auto data = cfData(source, mimeType, quality))
+        return dataURL(data.get(), mimeType);
+    return ASCIILiteral("data:,");
+}
+
+Vector<uint8_t> data(const ImageData& source, const String& mimeType, std::optional<double> quality)
+{
+    if (auto data = cfData(source, mimeType, quality))
+        return dataVector(data.get());
+    return { };
 }
 
 } // namespace WebCore

@@ -29,12 +29,15 @@
 #ifndef WebAccessibilityObjectWrapperBase_h
 #define WebAccessibilityObjectWrapperBase_h
 
+#include "AccessibilityObject.h"
 #include <CoreGraphics/CoreGraphics.h>
 
 namespace WebCore {
 class AccessibilityObject;
+struct AccessibilitySearchCriteria;
 class IntRect;
 class FloatPoint;
+class HTMLTextFormControlElement;
 class Path;
 class VisiblePosition;
 }
@@ -52,6 +55,7 @@ class VisiblePosition;
 - (NSString *)baseAccessibilityTitle;
 - (NSString *)baseAccessibilityDescription;
 - (NSString *)baseAccessibilityHelpText;
+- (NSArray<NSString *> *)baseAccessibilitySpeechHint;
 
 - (NSString *)ariaLandmarkRoleDescription;
 
@@ -66,6 +70,9 @@ class VisiblePosition;
 // Math related functions
 - (NSArray *)accessibilityMathPostscriptPairs;
 - (NSArray *)accessibilityMathPrescriptPairs;
+
+extern WebCore::AccessibilitySearchCriteria accessibilitySearchCriteriaForSearchPredicateParameterizedAttribute(const NSDictionary *);
+extern NSArray *convertToNSArray(const WebCore::AccessibilityObject::AccessibilityChildrenVector&);
 
 @end
 

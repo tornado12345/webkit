@@ -33,8 +33,11 @@
 #include "SVGFilterElement.h"
 #include "SVGFilterPrimitiveStandardAttributes.h"
 #include "SVGNames.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(SVGFELightElement);
 
 // Animated property definitions
 DEFINE_ANIMATED_NUMBER(SVGFELightElement, SVGNames::azimuthAttr, Azimuth, azimuth)
@@ -75,14 +78,6 @@ SVGFELightElement* SVGFELightElement::findLightElement(const SVGElement* svgElem
             return static_cast<SVGFELightElement*>(const_cast<SVGElement*>(&child));
     }
     return nullptr;
-}
-
-RefPtr<LightSource> SVGFELightElement::findLightSource(const SVGElement* svgElement)
-{
-    SVGFELightElement* lightNode = findLightElement(svgElement);
-    if (!lightNode)
-        return 0;
-    return lightNode->lightSource();
 }
 
 void SVGFELightElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
@@ -147,7 +142,7 @@ void SVGFELightElement::svgAttributeChanged(const QualifiedName& attrName)
         || attrName == SVGNames::pointsAtXAttr || attrName == SVGNames::pointsAtYAttr || attrName == SVGNames::pointsAtZAttr
         || attrName == SVGNames::specularExponentAttr || attrName == SVGNames::limitingConeAngleAttr) {
 
-        auto* parent = parentElement();
+        auto parent = makeRefPtr(parentElement());
         if (!parent)
             return;
 
@@ -173,9 +168,9 @@ void SVGFELightElement::childrenChanged(const ChildChange& change)
 {
     SVGElement::childrenChanged(change);
 
-    if (change.source == ChildChangeSourceParser)
+    if (change.source == ChildChangeSource::Parser)
         return;
-    ContainerNode* parent = parentNode();
+    auto parent = makeRefPtr(parentNode());
     if (!parent)
         return;
     RenderElement* renderer = parent->renderer();

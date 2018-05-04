@@ -21,8 +21,7 @@
  *
  */
 
-#ifndef StyleImage_h
-#define StyleImage_h
+#pragma once
 
 #include "CSSValue.h"
 #include "FloatSize.h"
@@ -44,7 +43,7 @@ typedef const void* WrappedImagePtr;
 
 class StyleImage : public RefCounted<StyleImage> {
 public:
-    virtual ~StyleImage() { }
+    virtual ~StyleImage() = default;
 
     virtual bool operator==(const StyleImage& other) const = 0;
 
@@ -60,7 +59,7 @@ public:
     virtual bool imageHasRelativeWidth() const = 0;
     virtual bool imageHasRelativeHeight() const = 0;
     virtual bool usesImageContainerSize() const = 0;
-    virtual void setContainerSizeForRenderer(const RenderElement*, const FloatSize&, float) = 0;
+    virtual void setContainerContextForRenderer(const RenderElement&, const FloatSize&, float) = 0;
     virtual void addClient(RenderElement*) = 0;
     virtual void removeClient(RenderElement*) = 0;
     virtual RefPtr<Image> image(RenderElement*, const FloatSize&) const = 0;
@@ -88,5 +87,3 @@ protected:
 SPECIALIZE_TYPE_TRAITS_BEGIN(WebCore::ToClassName) \
     static bool isType(const WebCore::StyleImage& image) { return image.predicate(); } \
 SPECIALIZE_TYPE_TRAITS_END()
-
-#endif // StyleImage_h

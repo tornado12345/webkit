@@ -17,10 +17,10 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef SVGFontFaceUriElement_h
-#define SVGFontFaceUriElement_h
+#pragma once
 
 #if ENABLE(SVG_FONTS)
+
 #include "CachedFontClient.h"
 #include "CachedResourceHandle.h"
 #include "SVGElement.h"
@@ -30,6 +30,7 @@ namespace WebCore {
 class CSSFontFaceSrcValue;
 
 class SVGFontFaceUriElement final : public SVGElement, public CachedFontClient {
+    WTF_MAKE_ISO_ALLOCATED(SVGFontFaceUriElement);
 public:
     static Ref<SVGFontFaceUriElement> create(const QualifiedName&, Document&);
 
@@ -42,7 +43,7 @@ private:
     
     void parseAttribute(const QualifiedName&, const AtomicString&) final;
     void childrenChanged(const ChildChange&) final;
-    InsertionNotificationRequest insertedInto(ContainerNode&) final;
+    InsertedIntoAncestorResult insertedIntoAncestor(InsertionType, ContainerNode&) final;
     bool rendererIsNeeded(const RenderStyle&) final { return false; }
 
     void loadFont();
@@ -53,5 +54,3 @@ private:
 } // namespace WebCore
 
 #endif // ENABLE(SVG_FONTS)
-
-#endif // SVGFontFaceUriElement_h

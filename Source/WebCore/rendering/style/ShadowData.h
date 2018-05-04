@@ -22,8 +22,7 @@
  *
  */
 
-#ifndef ShadowData_h
-#define ShadowData_h
+#pragma once
 
 #include "Color.h"
 #include "FloatRect.h"
@@ -56,7 +55,10 @@ public:
     {
     }
 
-    ShadowData(const ShadowData& o);
+    ShadowData(const ShadowData&);
+    static std::optional<ShadowData> clone(const ShadowData*);
+
+    ShadowData& operator=(ShadowData&&) = default;
 
     bool operator==(const ShadowData& o) const;
     bool operator!=(const ShadowData& o) const
@@ -98,5 +100,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif // ShadowData_h

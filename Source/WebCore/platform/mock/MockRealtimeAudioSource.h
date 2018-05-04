@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,27 +28,35 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef MockRealtimeAudioSource_h
-#define MockRealtimeAudioSource_h
+#pragma once
 
 #if ENABLE(MEDIA_STREAM)
 
-#include "FontCascade.h"
 #include "ImageBuffer.h"
 #include "MockRealtimeMediaSource.h"
+#include <wtf/RunLoop.h>
 
 namespace WebCore {
 
 class MockRealtimeAudioSource : public MockRealtimeMediaSource {
 public:
 
-    static RefPtr<MockRealtimeAudioSource> create(const String&, const MediaConstraints*);
-    static RefPtr<MockRealtimeAudioSource> createMuted(const String& name);
+    static CaptureSourceOrError create(const String& deviceID, const String& name, const MediaConstraints*);
 
-    virtual ~MockRealtimeAudioSource() { }
+    static AudioCaptureFactory& factory();
+
+    virtual ~MockRealtimeAudioSource();
 
 protected:
-    MockRealtimeAudioSource(const String& name = ASCIILiteral("Mock audio device"));
+    MockRealtimeAudioSource(const String& deviceID, const String& name);
+
+    void startProducingData() final;
+    void stopProducingData() final;
+
+    virtual void render(Seconds) { }
+
+    Seconds elapsedTime();
+    static Seconds renderInterval() { return 60_ms; }
 
 private:
 
@@ -60,10 +68,20 @@ private:
     void updateSettings(RealtimeMediaSourceSettings&) override;
     void initializeCapabilities(RealtimeMediaSourceCapabilities&) override;
     void initializeSupportedConstraints(RealtimeMediaSourceSupportedConstraints&) override;
+
+    void tick();
+
+    bool isCaptureSource() const final { return true; }
+
+    void delaySamples(Seconds) final;
+
+    RunLoop::Timer<MockRealtimeAudioSource> m_timer;
+    MonotonicTime m_startTime { MonotonicTime::nan() };
+    MonotonicTime m_lastRenderTime { MonotonicTime::nan() };
+    Seconds m_elapsedTime { 0_s };
+    MonotonicTime m_delayUntil;
 };
 
 } // namespace WebCore
 
 #endif // ENABLE(MEDIA_STREAM)
-
-#endif // MockRealtimeAudioSource_h

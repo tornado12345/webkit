@@ -134,17 +134,29 @@ public:
                     if (!iter->value.m_structure && !iter->value.m_arrayModeIsValid)
                         break;
 
-                    // Currently we should only be doing this hoisting for SetArguments at the prologue.
-                    ASSERT(!blockIndex);
+                    // Currently we should only be doing this hoisting for SetArguments at a CFG root.
+                    ASSERT(m_graph.isRoot(block));
 
                     NodeOrigin origin = node->origin;
+                    RELEASE_ASSERT(origin.exitOK);
                     
                     Node* getLocal = insertionSet.insertNode(
                         indexInBlock + 1, variable->prediction(), GetLocal, origin,
                         OpInfo(variable), Edge(node));
                     if (iter->value.m_structure) {
+                        auto checkOp = CheckStructure;
+                        if (SpecCellCheck & SpecEmpty) {
+                            VirtualRegister local = node->variableAccessData()->local();
+                            auto* inlineCallFrame = node->origin.semantic.inlineCallFrame;
+                            if ((local - (inlineCallFrame ? inlineCallFrame->stackOffset : 0)) == virtualRegisterForArgument(0)) {
+                                // |this| can be the TDZ value. The call entrypoint won't have |this| as TDZ,
+                                // but a catch or a loop OSR entry may have |this| be TDZ.
+                                checkOp = CheckStructureOrEmpty;
+                            }
+                        }
+
                         insertionSet.insertNode(
-                            indexInBlock + 1, SpecNone, CheckStructure, origin,
+                            indexInBlock + 1, SpecNone, checkOp, origin,
                             OpInfo(m_graph.addStructureSet(iter->value.m_structure)),
                             Edge(getLocal, CellUse));
                     } else if (iter->value.m_arrayModeIsValid) {
@@ -177,8 +189,13 @@ public:
                     Edge child1 = node->child1();
                     
                     if (iter->value.m_structure) {
+                        // Note: On 64-bit platforms, cell checks allow the empty value to flow through.
+                        // This means that this structure check may see the empty value as input. We need
+                        // to emit a node that explicitly handles the empty value. Most of the time, CheckStructureOrEmpty
+                        // will be folded to CheckStructure because AI proves that the incoming value is
+                        // definitely not empty.
                         insertionSet.insertNode(
-                            indexForChecks, SpecNone, CheckStructure,
+                            indexForChecks, SpecNone, (SpecCellCheck & SpecEmpty) ? CheckStructureOrEmpty : CheckStructure,
                             originForChecks.withSemantic(origin.semantic),
                             OpInfo(m_graph.addStructureSet(iter->value.m_structure)),
                             Edge(child1.node(), CellUse));
@@ -246,6 +263,7 @@ private:
                 case PutStructure:
                 case AllocatePropertyStorage:
                 case ReallocatePropertyStorage:
+                case NukeStructureAndSetButterfly:
                 case GetButterfly:
                 case GetByVal:
                 case PutByValDirect:
@@ -271,8 +289,7 @@ private:
                     if (!shouldConsiderForHoisting<StructureTypeCheck>(variable))
                         break;
                     Node* source = node->child1().node();
-                    for (unsigned subIndexInBlock = 0; subIndexInBlock < block->size(); ++subIndexInBlock) {
-                        Node* subNode = block->at(subIndexInBlock);
+                    for (auto* subNode : *block) {
                         switch (subNode->op()) {
                         case CheckStructure: {
                             if (subNode->child1() != source)
@@ -304,8 +321,7 @@ private:
             BasicBlock* block = m_graph.block(blockIndex);
             if (!block)
                 continue;
-            for (unsigned indexInBlock = 0; indexInBlock < block->size(); ++indexInBlock) {
-                Node* node = block->at(indexInBlock);
+            for (auto* node : *block) {
                 switch (node->op()) {
                 case CheckArray: {
                     Node* child = node->child1().node();
@@ -363,8 +379,7 @@ private:
                     if (!shouldConsiderForHoisting<ArrayTypeCheck>(variable))
                         break;
                     Node* source = node->child1().node();
-                    for (unsigned subIndexInBlock = 0; subIndexInBlock < block->size(); ++subIndexInBlock) {
-                        Node* subNode = block->at(subIndexInBlock);
+                    for (auto subNode : *block) {
                         switch (subNode->op()) {
                         case CheckStructure: {
                             if (subNode->child1() != source)
@@ -467,23 +482,23 @@ private:
         return true;
     }
     
-    void noticeStructureCheck(VariableAccessData* variable, Structure* structure)
+    void noticeStructureCheck(VariableAccessData* variable, RegisteredStructure structure)
     {
-        HashMap<VariableAccessData*, CheckData>::AddResult result = m_map.add(variable, CheckData(structure));
+        HashMap<VariableAccessData*, CheckData>::AddResult result = m_map.add(variable, CheckData(structure.get()));
         if (result.isNewEntry)
             return;
-        if (result.iterator->value.m_structure == structure)
+        if (result.iterator->value.m_structure == structure.get())
             return;
         result.iterator->value.m_structure = 0;
     }
     
-    void noticeStructureCheck(VariableAccessData* variable, const StructureSet& set)
+    void noticeStructureCheck(VariableAccessData* variable, RegisteredStructureSet set)
     {
         if (set.size() != 1) {
-            noticeStructureCheck(variable, 0);
+            noticeStructureCheck(variable, RegisteredStructure());
             return;
         }
-        noticeStructureCheck(variable, set.onlyStructure());
+        noticeStructureCheck(variable, set.at(0));
     }
 
     void noticeCheckArray(VariableAccessData* variable, ArrayMode arrayMode)
@@ -503,22 +518,22 @@ private:
         result.iterator->value.disableCheckArrayHoisting();
     }
 
-    void noticeStructureCheckAccountingForArrayMode(VariableAccessData* variable, Structure* structure)
+    void noticeStructureCheckAccountingForArrayMode(VariableAccessData* variable, RegisteredStructure structure)
     {
         HashMap<VariableAccessData*, CheckData>::iterator result = m_map.find(variable);
         if (result == m_map.end())
             return;
         if (!result->value.m_arrayModeHoistingOkay || !result->value.m_arrayModeIsValid)
             return;
-        if (result->value.m_arrayMode.structureWouldPassArrayModeFiltering(structure))
+        if (result->value.m_arrayMode.structureWouldPassArrayModeFiltering(structure.get()))
             return;
         result->value.disableCheckArrayHoisting();
     }
 
-    void noticeStructureCheckAccountingForArrayMode(VariableAccessData* variable, const StructureSet& set)
+    void noticeStructureCheckAccountingForArrayMode(VariableAccessData* variable, RegisteredStructureSet set)
     {
         for (unsigned i = 0; i < set.size(); i++)
-            noticeStructureCheckAccountingForArrayMode(variable, set[i]);
+            noticeStructureCheckAccountingForArrayMode(variable, set.at(i));
     }
 
     HashMap<VariableAccessData*, CheckData> m_map;

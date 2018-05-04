@@ -26,8 +26,6 @@
 #include "config.h"
 #include "WebGLContextEvent.h"
 
-#include "EventNames.h"
-
 #if ENABLE(WEBGL)
 
 namespace WebCore {
@@ -44,9 +42,7 @@ WebGLContextEvent::WebGLContextEvent(const AtomicString& type, const Init& initi
 {
 }
 
-WebGLContextEvent::~WebGLContextEvent()
-{
-}
+WebGLContextEvent::~WebGLContextEvent() = default;
 
 EventInterface WebGLContextEvent::eventInterface() const
 {

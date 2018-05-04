@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,25 +27,51 @@
 
 #if ENABLE(WEBASSEMBLY)
 
+#include "JSCPoison.h"
 #include "JSDestructibleObject.h"
 #include "JSObject.h"
+#include "WasmLimits.h"
+#include "WasmTable.h"
+#include "WebAssemblyWrapperFunction.h"
+#include "WebAssemblyFunction.h"
+#include <wtf/MallocPtr.h>
+#include <wtf/Ref.h>
 
 namespace JSC {
 
-class JSWebAssemblyTable : public JSDestructibleObject {
+class JSWebAssemblyTable final : public JSDestructibleObject {
 public:
     typedef JSDestructibleObject Base;
 
-    static JSWebAssemblyTable* create(VM&, Structure*);
+    static JSWebAssemblyTable* create(ExecState*, VM&, Structure*, Ref<Wasm::Table>&&);
     static Structure* createStructure(VM&, JSGlobalObject*, JSValue);
 
     DECLARE_INFO;
 
-protected:
-    JSWebAssemblyTable(VM&, Structure*);
+    static bool isValidLength(uint32_t length) { return Wasm::Table::isValidLength(length); }
+    std::optional<uint32_t> maximum() const { return m_table->maximum(); }
+    uint32_t length() const { return m_table->length(); }
+    uint32_t allocatedLength() const { return m_table->allocatedLength(length()); }
+    bool grow(uint32_t delta) WARN_UNUSED_RETURN;
+    JSObject* getFunction(uint32_t);
+    void clearFunction(uint32_t);
+    void setFunction(VM&, uint32_t, WebAssemblyFunction*);
+    void setFunction(VM&, uint32_t, WebAssemblyWrapperFunction*);
+
+    Wasm::Table* table() { return m_table.ptr(); }
+
+private:
+    JSWebAssemblyTable(VM&, Structure*, Ref<Wasm::Table>&&);
     void finishCreation(VM&);
     static void destroy(JSCell*);
     static void visitChildren(JSCell*, SlotVisitor&);
+
+    PoisonedRef<JSWebAssemblyTablePoison, Wasm::Table> m_table;
+
+    template<typename T>
+    using PoisonedBarrier = PoisonedWriteBarrier<JSWebAssemblyTablePoison, T>;
+
+    MallocPtr<PoisonedBarrier<JSObject>> m_jsFunctions;
 };
 
 } // namespace JSC

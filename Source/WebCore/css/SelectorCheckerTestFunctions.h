@@ -24,8 +24,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef SelectorCheckerTestFunctions_h
-#define SelectorCheckerTestFunctions_h
+#pragma once
 
 #include "FocusController.h"
 #include "HTMLInputElement.h"
@@ -44,6 +43,11 @@ namespace WebCore {
 ALWAYS_INLINE bool isAutofilled(const Element& element)
 {
     return is<HTMLInputElement>(element) && downcast<HTMLInputElement>(element).isAutoFilled();
+}
+
+ALWAYS_INLINE bool isAutofilledStrongPassword(const Element& element)
+{
+    return is<HTMLInputElement>(element) && downcast<HTMLInputElement>(element).isAutoFilled() && downcast<HTMLInputElement>(element).hasAutoFillStrongPasswordButton();
 }
 
 ALWAYS_INLINE bool matchesDefaultPseudoClass(const Element& element)
@@ -376,5 +380,3 @@ ALWAYS_INLINE bool matchesPastCuePseudoClass(const Element& element)
 #endif
 
 } // namespace WebCore
-
-#endif // SelectorCheckerTestFunctions_h

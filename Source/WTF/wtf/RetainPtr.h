@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2005, 2006, 2007, 2008, 2010, 2013, 2014 Apple Inc. All rights reserved.
+ *  Copyright (C) 2005-2018 Apple Inc. All rights reserved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Library General Public
@@ -35,6 +35,10 @@
 
 #ifdef __OBJC__
 #import <Foundation/Foundation.h>
+#endif
+
+#ifndef CF_BRIDGED_TYPE
+#define CF_BRIDGED_TYPE(T)
 #endif
 
 #ifndef CF_RELEASES_ARGUMENT
@@ -88,18 +92,6 @@ public:
 
     bool operator!() const { return !m_ptr; }
 
-#if !(defined (__OBJC__) && __has_feature(objc_arc))
-    // This function is useful for passing RetainPtrs to functions that return
-    // CF types as out parameters.
-    PtrType* operator&()
-    {
-        // Require that the pointer is null, to prevent leaks.
-        ASSERT(!m_ptr);
-
-        return (PtrType*)&m_ptr;
-    }
-#endif
-
     // This conversion operator allows implicit conversion to bool but not to other integer types.
     typedef StorageType RetainPtr::*UnspecifiedBoolType;
     operator UnspecifiedBoolType() const { return m_ptr ? &RetainPtr::m_ptr : nullptr; }
@@ -128,21 +120,24 @@ private:
     typename std::enable_if<std::is_convertible<U, id>::value, PtrType>::type
     fromStorageTypeHelper(StorageType ptr) const
     {
-        return (__bridge PtrType)ptr;
+        return (__bridge PtrType)const_cast<CF_BRIDGED_TYPE(id) void*>(ptr);
     }
 
     template<typename U>
     typename std::enable_if<!std::is_convertible<U, id>::value, PtrType>::type
     fromStorageTypeHelper(StorageType ptr) const
     {
-        return (PtrType)ptr;
+        return (PtrType)const_cast<CF_BRIDGED_TYPE(id) void*>(ptr);
     }
 
     PtrType fromStorageType(StorageType ptr) const { return fromStorageTypeHelper<PtrType>(ptr); }
     StorageType toStorageType(id ptr) const { return (__bridge StorageType)ptr; }
     StorageType toStorageType(CFTypeRef ptr) const { return (StorageType)ptr; }
 #else
-    PtrType fromStorageType(StorageType ptr) const { return (PtrType)ptr; }
+    PtrType fromStorageType(StorageType ptr) const
+    {
+        return (PtrType)const_cast<CF_BRIDGED_TYPE(id) void*>(ptr);
+    }
     StorageType toStorageType(PtrType ptr) const { return (StorageType)ptr; }
 #endif
 

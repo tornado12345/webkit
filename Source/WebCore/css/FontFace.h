@@ -27,8 +27,14 @@
 
 #include "CSSFontFace.h"
 #include "CSSPropertyNames.h"
-#include "JSDOMPromise.h"
+#include "DOMPromiseProxy.h"
+#include <wtf/Variant.h>
 #include <wtf/WeakPtr.h>
+
+namespace JSC {
+class ArrayBuffer;
+class ArrayBufferView;
+}
 
 namespace WebCore {
 
@@ -41,8 +47,11 @@ public:
         String unicodeRange;
         String variant;
         String featureSettings;
+        String display;
     };
-    static ExceptionOr<Ref<FontFace>> create(JSC::ExecState&, Document&, const String& family, JSC::JSValue source, const Descriptors&);
+    
+    using Source = Variant<String, RefPtr<JSC::ArrayBuffer>, RefPtr<JSC::ArrayBufferView>>;
+    static ExceptionOr<Ref<FontFace>> create(Document&, const String& family, Source&&, const Descriptors&);
     static Ref<FontFace> create(CSSFontFace&);
     virtual ~FontFace();
 
@@ -53,6 +62,7 @@ public:
     ExceptionOr<void> setUnicodeRange(const String&);
     ExceptionOr<void> setVariant(const String&);
     ExceptionOr<void> setFeatureSettings(const String&);
+    ExceptionOr<void> setDisplay(const String&);
 
     String family() const;
     String style() const;
@@ -61,17 +71,16 @@ public:
     String unicodeRange() const;
     String variant() const;
     String featureSettings() const;
+    String display() const;
 
     enum class LoadStatus { Unloaded, Loading, Loaded, Error };
     LoadStatus status() const;
 
-    typedef DOMPromise<FontFace&> Promise;
-    Optional<Promise>& promise() { return m_promise; }
-    void registerLoaded(Promise&&);
+    using LoadedPromise = DOMPromiseProxyWithResolveCallback<IDLInterface<FontFace>>;
+    LoadedPromise& loaded() { return m_loadedPromise; }
+    LoadedPromise& load();
 
     void adopt(CSSFontFace&);
-
-    void load();
 
     CSSFontFace& backing() { return m_backing; }
 
@@ -79,7 +88,7 @@ public:
 
     void fontStateChanged(CSSFontFace&, CSSFontFace::Status oldState, CSSFontFace::Status newState) final;
 
-    WeakPtr<FontFace> createWeakPtr() const;
+    WeakPtr<FontFace> createWeakPtr();
 
     void ref() final { RefCounted::ref(); }
     void deref() final { RefCounted::deref(); }
@@ -88,9 +97,12 @@ private:
     explicit FontFace(CSSFontSelector&);
     explicit FontFace(CSSFontFace&);
 
+    // Callback for LoadedPromise.
+    FontFace& loadedPromiseResolve();
+
     WeakPtrFactory<FontFace> m_weakPtrFactory;
     Ref<CSSFontFace> m_backing;
-    Optional<Promise> m_promise;
+    LoadedPromise m_loadedPromise;
 };
 
 }

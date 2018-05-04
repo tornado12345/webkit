@@ -30,6 +30,8 @@
 
 @implementation BrowserWindowController
 
+@synthesize editable=_editable;
+
 - (id)initWithWindow:(NSWindow *)window
 {
     self = [super initWithWindow:window];
@@ -38,14 +40,7 @@
 
 - (void)windowDidLoad
 {
-    self.window.styleMask |= NSWindowStyleMaskFullSizeContentView;
-
-#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 101200
     [share sendActionOn:NSEventMaskLeftMouseDown];
-#else
-    [share sendActionOn:NSLeftMouseDownMask];
-#endif
-
     [super windowDidLoad];
 }
 
@@ -58,7 +53,7 @@
 {
 }
 
-- (void)applicationTerminating
+- (void)loadHTMLString:(NSString *)HTMLString
 {
 }
 
@@ -77,11 +72,7 @@
 {
     NSSharingServicePicker *picker = [[NSSharingServicePicker alloc] initWithItems:@[ self.currentURL ]];
     picker.delegate = self;
-#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 101200
     [picker showRelativeToRect:NSZeroRect ofView:sender preferredEdge:NSRectEdgeMinY];
-#else
-    [picker showRelativeToRect:NSZeroRect ofView:sender preferredEdge:NSMinYEdge];
-#endif
 }
 
 - (IBAction)fetch:(id)sender
@@ -111,12 +102,15 @@
 
 - (IBAction)showHideWebView:(id)sender
 {
-    [self doesNotRecognizeSelector:_cmd];
+    self.mainContentView.hidden = !self.mainContentView.isHidden;
 }
 
 - (IBAction)removeReinsertWebView:(id)sender
 {
-    [self doesNotRecognizeSelector:_cmd];
+    if (self.mainContentView.window)
+        [self.mainContentView removeFromSuperview];
+    else
+        [containerView addSubview:self.mainContentView];
 }
 
 - (IBAction)zoomIn:(id)sender
@@ -191,7 +185,7 @@
     [self doesNotRecognizeSelector:_cmd];
 }
 
-- (IBAction)find:(id)sender
+- (IBAction)showHideWebInspector:(id)sender
 {
     [self doesNotRecognizeSelector:_cmd];
 }
@@ -211,6 +205,11 @@
 {
     [self doesNotRecognizeSelector:_cmd];
     return nil;
+}
+
+- (IBAction)toggleEditable:(id)sender
+{
+    self.editable = !self.isEditable;
 }
 
 #pragma mark -
@@ -259,7 +258,7 @@ static CGRect coreGraphicsScreenRectForAppKitScreenRect(NSRect rect)
     NSImage *image = [[NSImage alloc] initWithCGImage:imageRef size:NSZeroSize];
     CGImageRelease(imageRef);
 
-    return image;
+    return [image autorelease];
 }
 
 - (nullable NSWindow *)sharingService:(NSSharingService *)sharingService sourceWindowForShareItems:(NSArray *)items sharingContentScope:(NSSharingContentScope *)sharingContentScope

@@ -17,8 +17,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef RenderSVGResourceSolidColor_h
-#define RenderSVGResourceSolidColor_h
+#pragma once
 
 #include "Color.h"
 #include "RenderSVGResource.h"
@@ -34,8 +33,8 @@ public:
     void removeAllClientsFromCache(bool = true) override { }
     void removeClientFromCache(RenderElement&, bool = true) override { }
 
-    bool applyResource(RenderElement&, const RenderStyle&, GraphicsContext*&, unsigned short resourceMode) override;
-    void postApplyResource(RenderElement&, GraphicsContext*&, unsigned short resourceMode, const Path*, const RenderSVGShape*) override;
+    bool applyResource(RenderElement&, const RenderStyle&, GraphicsContext*&, OptionSet<RenderSVGResourceMode>) override;
+    void postApplyResource(RenderElement&, GraphicsContext*&, OptionSet<RenderSVGResourceMode>, const Path*, const RenderSVGShape*) override;
     FloatRect resourceBoundingBox(const RenderObject&) override { return FloatRect(); }
 
     RenderSVGResourceType resourceType() const override { return SolidColorResourceType; }
@@ -47,8 +46,6 @@ private:
     Color m_color;
 };
 
-}
+} // namespace WebCore
 
 SPECIALIZE_TYPE_TRAITS_RENDER_SVG_RESOURCE(RenderSVGResourceSolidColor, SolidColorResourceType)
-
-#endif

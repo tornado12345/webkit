@@ -26,7 +26,6 @@
 #include "config.h"
 #include "StorageEvent.h"
 
-#include "EventNames.h"
 #include "Storage.h"
 
 namespace WebCore {
@@ -36,13 +35,9 @@ Ref<StorageEvent> StorageEvent::createForBindings()
     return adoptRef(*new StorageEvent);
 }
 
-StorageEvent::StorageEvent()
-{
-}
+StorageEvent::StorageEvent() = default;
 
-StorageEvent::~StorageEvent()
-{
-}
+StorageEvent::~StorageEvent() = default;
 
 Ref<StorageEvent> StorageEvent::create(const AtomicString& type, const String& key, const String& oldValue, const String& newValue, const String& url, Storage* storageArea)
 {
@@ -76,7 +71,7 @@ StorageEvent::StorageEvent(const AtomicString& type, const Init& initializer, Is
 
 void StorageEvent::initStorageEvent(const AtomicString& type, bool canBubble, bool cancelable, const String& key, const String& oldValue, const String& newValue, const String& url, Storage* storageArea)
 {
-    if (dispatched())
+    if (isBeingDispatched())
         return;
 
     initEvent(type, canBubble, cancelable);

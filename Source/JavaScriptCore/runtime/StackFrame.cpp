@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,19 +33,41 @@
 
 namespace JSC {
 
+StackFrame::StackFrame(VM& vm, JSCell* owner, JSCell* callee)
+    : m_callee(vm, owner, callee)
+{
+}
+
+StackFrame::StackFrame(VM& vm, JSCell* owner, JSCell* callee, CodeBlock* codeBlock, unsigned bytecodeOffset)
+    : m_callee(vm, owner, callee)
+    , m_codeBlock(vm, owner, codeBlock)
+    , m_bytecodeOffset(bytecodeOffset)
+{
+}
+
+StackFrame::StackFrame(Wasm::IndexOrName indexOrName)
+    : m_wasmFunctionIndexOrName(indexOrName)
+    , m_isWasmFrame(true)
+{
+}
+
 intptr_t StackFrame::sourceID() const
 {
-    if (!codeBlock)
+    if (!m_codeBlock)
         return noSourceID;
-    return codeBlock->ownerScriptExecutable()->sourceID();
+    return m_codeBlock->ownerScriptExecutable()->sourceID();
 }
 
 String StackFrame::sourceURL() const
 {
-    if (!codeBlock)
-        return ASCIILiteral("[native code]");
+    if (m_isWasmFrame)
+        return ASCIILiteral("[wasm code]");
 
-    String sourceURL = codeBlock->ownerScriptExecutable()->sourceURL();
+    if (!m_codeBlock) {
+        return ASCIILiteral("[native code]");
+    }
+
+    String sourceURL = m_codeBlock->ownerScriptExecutable()->sourceURL();
     if (!sourceURL.isNull())
         return sourceURL;
     return emptyString();
@@ -53,8 +75,11 @@ String StackFrame::sourceURL() const
 
 String StackFrame::functionName(VM& vm) const
 {
-    if (codeBlock) {
-        switch (codeBlock->codeType()) {
+    if (m_isWasmFrame)
+        return makeString(m_wasmFunctionIndexOrName);
+
+    if (m_codeBlock) {
+        switch (m_codeBlock->codeType()) {
         case EvalCode:
             return ASCIILiteral("eval code");
         case ModuleCode:
@@ -68,14 +93,16 @@ String StackFrame::functionName(VM& vm) const
         }
     }
     String name;
-    if (callee)
-        name = getCalculatedDisplayName(vm, callee.get()).impl();
+    if (m_callee) {
+        if (m_callee->isObject())
+            name = getCalculatedDisplayName(vm, jsCast<JSObject*>(m_callee.get())).impl();
+    }
     return name.isNull() ? emptyString() : name;
 }
 
 void StackFrame::computeLineAndColumn(unsigned& line, unsigned& column) const
 {
-    if (!codeBlock) {
+    if (!m_codeBlock) {
         line = 0;
         column = 0;
         return;
@@ -84,9 +111,9 @@ void StackFrame::computeLineAndColumn(unsigned& line, unsigned& column) const
     int divot = 0;
     int unusedStartOffset = 0;
     int unusedEndOffset = 0;
-    codeBlock->expressionRangeForBytecodeOffset(bytecodeOffset, divot, unusedStartOffset, unusedEndOffset, line, column);
+    m_codeBlock->expressionRangeForBytecodeOffset(m_bytecodeOffset, divot, unusedStartOffset, unusedEndOffset, line, column);
 
-    ScriptExecutable* executable = codeBlock->ownerScriptExecutable();
+    ScriptExecutable* executable = m_codeBlock->ownerScriptExecutable();
     if (executable->hasOverrideLineNumber())
         line = executable->overrideLineNumber();
 }
@@ -101,7 +128,7 @@ String StackFrame::toString(VM& vm) const
         if (!functionName.isEmpty())
             traceBuild.append('@');
         traceBuild.append(sourceURL);
-        if (codeBlock) {
+        if (hasLineAndColumnInfo()) {
             unsigned line;
             unsigned column;
             computeLineAndColumn(line, column);
@@ -113,6 +140,14 @@ String StackFrame::toString(VM& vm) const
         }
     }
     return traceBuild.toString().impl();
+}
+
+void StackFrame::visitChildren(SlotVisitor& visitor)
+{
+    if (m_callee)
+        visitor.append(m_callee);
+    if (m_codeBlock)
+        visitor.append(m_codeBlock);
 }
 
 } // namespace JSC

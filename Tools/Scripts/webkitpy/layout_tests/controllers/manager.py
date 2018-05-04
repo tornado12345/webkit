@@ -78,13 +78,14 @@ class Manager(object):
         self._options = options
         self._printer = printer
         self._expectations = None
-        self.HTTP_SUBDIR = 'http' + port.TEST_PATH_SEPARATOR
+        self.HTTP_SUBDIR = 'http' + port.TEST_PATH_SEPARATOR + 'test'
         self.WEBSOCKET_SUBDIR = 'websocket' + port.TEST_PATH_SEPARATOR
         self.web_platform_test_subdir = self._port.web_platform_test_server_doc_root()
+        self.webkit_specific_web_platform_test_subdir = 'http' + port.TEST_PATH_SEPARATOR + 'wpt' + port.TEST_PATH_SEPARATOR
         self.LAYOUT_TESTS_DIRECTORY = 'LayoutTests'
         self._results_directory = self._port.results_directory()
         self._finder = LayoutTestFinder(self._port, self._options)
-        self._runner = LayoutTestRunner(self._options, self._port, self._printer, self._results_directory, self._test_is_slow)
+        self._runner = None
 
         test_options_json_path = self._port.path_from_webkit_base(self.LAYOUT_TESTS_DIRECTORY, "tests-options.json")
         self._tests_options = json.loads(self._filesystem.read_text_file(test_options_json_path)) if self._filesystem.exists(test_options_json_path) else {}
@@ -93,17 +94,17 @@ class Manager(object):
         return self._finder.find_tests(self._options, args)
 
     def _is_http_test(self, test):
-        return self.HTTP_SUBDIR in test or self._is_websocket_test(test) or self._is_web_platform_test(test)
+        return self.HTTP_SUBDIR in test or self._is_websocket_test(test) or self._needs_web_platform_test(test)
 
     def _is_websocket_test(self, test):
         return self.WEBSOCKET_SUBDIR in test
 
-    def _is_web_platform_test(self, test):
-        return self.web_platform_test_subdir in test
+    def _needs_web_platform_test(self, test):
+        return self.web_platform_test_subdir in test or self.webkit_specific_web_platform_test_subdir in test
 
     def _custom_device_for_test(self, test):
         for device_class in self._port.CUSTOM_DEVICE_CLASSES:
-            directory_suffix = device_class + self._port.TEST_PATH_SEPARATOR
+            directory_suffix = device_class.lower().replace(' ', '') + self._port.TEST_PATH_SEPARATOR
             if directory_suffix in test:
                 return device_class
         return None
@@ -131,12 +132,16 @@ class Manager(object):
     def _test_input_for_file(self, test_file):
         return TestInput(test_file,
             self._options.slow_time_out_ms if self._test_is_slow(test_file) else self._options.time_out_ms,
-            self._is_http_test(test_file))
+            self._is_http_test(test_file),
+            should_dump_jsconsolelog_in_stderr=self._test_should_dump_jsconsolelog_in_stderr(test_file))
 
     def _test_is_slow(self, test_file):
         if self._expectations.model().has_modifier(test_file, test_expectations.SLOW):
             return True
         return "slow" in self._tests_options.get(test_file, [])
+
+    def _test_should_dump_jsconsolelog_in_stderr(self, test_file):
+        return self._expectations.model().has_modifier(test_file, test_expectations.DUMPJSCONSOLELOGINSTDERR)
 
     def needs_servers(self, test_names):
         return any(self._is_http_test(test_name) for test_name in test_names) and self._options.http
@@ -228,6 +233,12 @@ class Manager(object):
         retry_results = None
         enabled_pixel_tests_in_retry = False
 
+        needs_http = any((self._is_http_test(test) and not self._needs_web_platform_test(test)) for test in tests_to_run)
+        needs_web_platform_test_server = any(self._needs_web_platform_test(test) for test in tests_to_run)
+        needs_websockets = any(self._is_websocket_test(test) for test in tests_to_run)
+        self._runner = LayoutTestRunner(self._options, self._port, self._printer, self._results_directory, self._test_is_slow,
+                                        needs_http=needs_http, needs_web_platform_test_server=needs_web_platform_test_server, needs_websockets=needs_websockets)
+
         if default_device_tests:
             _log.info('')
             _log.info("Running %s", pluralize(len(tests_to_run), "test"))
@@ -252,6 +263,7 @@ class Manager(object):
                 retry_results = retry_results.merge(device_retry_results) if retry_results else device_retry_results
                 enabled_pixel_tests_in_retry |= device_enabled_pixel_tests_in_retry
 
+        self._runner.stop_servers()
         end_time = time.time()
         return self._end_test_run(start_time, end_time, initial_results, retry_results, enabled_pixel_tests_in_retry)
 
@@ -313,13 +325,9 @@ class Manager(object):
         return test_run_results.RunDetails(exit_code, summarized_results, initial_results, retry_results, enabled_pixel_tests_in_retry)
 
     def _run_tests(self, tests_to_run, tests_to_skip, repeat_each, iterations, num_workers, retrying):
-        needs_http = any((self._is_http_test(test) and not self._is_web_platform_test(test)) for test in tests_to_run)
-        needs_web_platform_test_server = any(self._is_web_platform_test(test) for test in tests_to_run)
-        needs_websockets = any(self._is_websocket_test(test) for test in tests_to_run)
-
         test_inputs = self._get_test_inputs(tests_to_run, repeat_each, iterations)
 
-        return self._runner.run_tests(self._expectations, test_inputs, tests_to_skip, num_workers, needs_http, needs_websockets, needs_web_platform_test_server, retrying)
+        return self._runner.run_tests(self._expectations, test_inputs, tests_to_skip, num_workers, retrying)
 
     def _clean_up_run(self):
         _log.debug("Flushing stdout")
@@ -452,8 +460,7 @@ class Manager(object):
             self._filesystem.remove(results_json_path)
 
     def upload_results(self, results_json_path, start_time, end_time):
-        hostname = self._options.results_server_host
-        if not hostname:
+        if not self._options.results_server_host:
             return
         master_name = self._options.master_name
         builder_name = self._options.builder_name
@@ -467,47 +474,48 @@ class Manager(object):
         # FIXME: This code is duplicated in PerfTestRunner._generate_results_dict
         for (name, path) in self._port.repository_paths():
             scm = SCMDetector(self._port.host.filesystem, self._port.host.executive).detect_scm_system(path) or self._port.host.scm()
-            revision = scm.svn_revision(path)
-            revisions[name] = {'revision': revision, 'timestamp': scm.timestamp_of_revision(path, revision)}
+            revision = scm.native_revision(path)
+            revisions[name] = {'revision': revision, 'timestamp': scm.timestamp_of_native_revision(path, revision)}
 
-        _log.info("Uploading JSON files for master: %s builder: %s build: %s slave: %s to %s", master_name, builder_name, build_number, build_slave, hostname)
+        for hostname in self._options.results_server_host:
+            _log.info("Uploading JSON files for master: %s builder: %s build: %s slave: %s to %s", master_name, builder_name, build_number, build_slave, hostname)
 
-        attrs = [
-            ('master', 'build.webkit.org' if master_name == 'webkit.org' else master_name),  # FIXME: Pass in build.webkit.org.
-            ('builder_name', builder_name),
-            ('build_number', build_number),
-            ('build_slave', build_slave),
-            ('revisions', json.dumps(revisions)),
-            ('start_time', str(start_time)),
-            ('end_time', str(end_time)),
-        ]
+            attrs = [
+                ('master', 'build.webkit.org' if master_name == 'webkit.org' else master_name),  # FIXME: Pass in build.webkit.org.
+                ('builder_name', builder_name),
+                ('build_number', build_number),
+                ('build_slave', build_slave),
+                ('revisions', json.dumps(revisions)),
+                ('start_time', str(start_time)),
+                ('end_time', str(end_time)),
+            ]
 
-        uploader = FileUploader("http://%s/api/report" % hostname, 360)
-        try:
-            response = uploader.upload_as_multipart_form_data(self._filesystem, [('results.json', results_json_path)], attrs)
-            if not response:
-                _log.error("JSON upload failed; no response returned")
-                return
-
-            if response.code != 200:
-                _log.error("JSON upload failed, %d: '%s'" % (response.code, response.read()))
-                return
-
-            response_text = response.read()
+            uploader = FileUploader("http://%s/api/report" % hostname, 360)
             try:
-                response_json = json.loads(response_text)
-            except ValueError, error:
-                _log.error("JSON upload failed; failed to parse the response: %s", response_text)
-                return
+                response = uploader.upload_as_multipart_form_data(self._filesystem, [('results.json', results_json_path)], attrs)
+                if not response:
+                    _log.error("JSON upload failed; no response returned")
+                    continue
 
-            if response_json['status'] != 'OK':
-                _log.error("JSON upload failed, %s: %s", response_json['status'], response_text)
-                return
+                if response.code != 200:
+                    _log.error("JSON upload failed, %d: '%s'" % (response.code, response.read()))
+                    continue
 
-            _log.info("JSON uploaded.")
-        except Exception, error:
-            _log.error("Upload failed: %s" % error)
-            return
+                response_text = response.read()
+                try:
+                    response_json = json.loads(response_text)
+                except ValueError as error:
+                    _log.error("JSON upload failed; failed to parse the response: %s", response_text)
+                    continue
+
+                if response_json['status'] != 'OK':
+                    _log.error("JSON upload failed, %s: %s", response_json['status'], response_text)
+                    continue
+
+                _log.info("JSON uploaded.")
+            except Exception as error:
+                _log.error("Upload failed: %s" % error)
+                continue
 
     def _copy_results_html_file(self, destination_path):
         base_dir = self._port.path_from_webkit_base('LayoutTests', 'fast', 'harness')
@@ -532,18 +540,18 @@ class Manager(object):
 
     def _print_expectation_line_for_test(self, format_string, test):
         line = self._expectations.model().get_expectation_line(test)
-        print format_string.format(test, line.expected_behavior, self._expectations.readable_filename_and_line_number(line), line.original_string or '')
+        print(format_string.format(test, line.expected_behavior, self._expectations.readable_filename_and_line_number(line), line.original_string or ''))
     
     def _print_expectations_for_subset(self, device_class, test_col_width, tests_to_run, tests_to_skip={}):
         format_string = '{{:{width}}} {{}} {{}} {{}}'.format(width=test_col_width)
         if tests_to_skip:
-            print ''
-            print 'Tests to skip ({})'.format(len(tests_to_skip))
+            print('')
+            print('Tests to skip ({})'.format(len(tests_to_skip)))
             for test in sorted(tests_to_skip):
                 self._print_expectation_line_for_test(format_string, test)
 
-        print ''
-        print 'Tests to run{} ({})'.format(' for ' + device_class if device_class else '', len(tests_to_run))
+        print('')
+        print('Tests to run{} ({})'.format(' for ' + device_class if device_class else '', len(tests_to_run)))
         for test in sorted(tests_to_run):
             self._print_expectation_line_for_test(format_string, test)
 

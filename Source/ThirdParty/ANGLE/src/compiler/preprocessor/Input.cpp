@@ -18,9 +18,12 @@ Input::Input() : mCount(0), mString(0)
 {
 }
 
-Input::Input(size_t count, const char *const string[], const int length[]) :
-    mCount(count),
-    mString(string)
+Input::~Input()
+{
+}
+
+Input::Input(size_t count, const char *const string[], const int length[])
+    : mCount(count), mString(string)
 {
     mLength.reserve(mCount);
     for (size_t i = 0; i < mCount; ++i)
@@ -62,6 +65,11 @@ size_t Input::read(char *buf, size_t maxSize, int *lineNo)
             {
                 // Line continuation of backslash + newline.
                 skipChar();
+                // Fake an EOF if the line number would overflow.
+                if (*lineNo == INT_MAX)
+                {
+                    return 0;
+                }
                 ++(*lineNo);
             }
             else if (c != nullptr && (*c) == '\r')
@@ -71,6 +79,11 @@ size_t Input::read(char *buf, size_t maxSize, int *lineNo)
                 if (c != nullptr && (*c) == '\n')
                 {
                     skipChar();
+                }
+                // Fake an EOF if the line number would overflow.
+                if (*lineNo == INT_MAX)
+                {
+                    return 0;
                 }
                 ++(*lineNo);
             }
@@ -87,7 +100,7 @@ size_t Input::read(char *buf, size_t maxSize, int *lineNo)
     while ((nRead < maxRead) && (mReadLoc.sIndex < mCount))
     {
         size_t size = mLength[mReadLoc.sIndex] - mReadLoc.cIndex;
-        size = std::min(size, maxSize);
+        size        = std::min(size, maxSize);
         for (size_t i = 0; i < size; ++i)
         {
             // Stop if a possible line continuation is encountered.
@@ -95,7 +108,7 @@ size_t Input::read(char *buf, size_t maxSize, int *lineNo)
             // and increments line number if necessary.
             if (*(mString[mReadLoc.sIndex] + mReadLoc.cIndex + i) == '\\')
             {
-                size = i;
+                size    = i;
                 maxRead = nRead + size;  // Stop reading right before the backslash.
             }
         }
@@ -114,4 +127,3 @@ size_t Input::read(char *buf, size_t maxSize, int *lineNo)
 }
 
 }  // namespace pp
-

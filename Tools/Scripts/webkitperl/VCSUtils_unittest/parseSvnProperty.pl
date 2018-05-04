@@ -1,4 +1,4 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl
 #
 # Copyright (C) Research in Motion Limited 2010. All Rights Reserved.
 # Copyright (C) 2010 Chris Jerdonek (chris.jerdonek@gmail.com)
@@ -235,6 +235,45 @@ END
 },
 "Added: svn:executable\n"],
     expectedNextLine => "## -0,0 +1 ##\n",
+},
+###
+# Property value using SVN 1.7 syntax followed by start of next diff
+##
+{
+    # New test
+    diffName => "add svn:ignore using SVN 1.7 syntax, followed by start of next diff",
+    inputText => <<'END',
+Added: svn:ignore
+## -0,0 +1 ##
++*
+Index: Makefile.shared
+END
+    expectedReturn => [
+{
+    name => "svn:ignore",
+    propertyChangeDelta => 1,
+    value => "*",
+},
+"Index: Makefile.shared\n"],
+    expectedNextLine => undef,
+},
+{
+    # New test
+    diffName => "remove svn:ignore using SVN 1.7 syntax, followed by start of next diff",
+    inputText => <<'END',
+Deleted: svn:ignore
+## -1 +0,0 ##
+-*
+Index: Makefile.shared
+END
+    expectedReturn => [
+{
+    name => "svn:ignore",
+    propertyChangeDelta => -1,
+    value => "*",
+},
+"Index: Makefile.shared\n"],
+    expectedNextLine => undef,
 },
 ####
 # Property value followed by empty line and start of next diff

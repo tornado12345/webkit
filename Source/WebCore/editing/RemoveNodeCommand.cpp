@@ -26,9 +26,8 @@
 #include "config.h"
 #include "RemoveNodeCommand.h"
 
-#include "ExceptionCodePlaceholder.h"
+#include "Editing.h"
 #include "RenderElement.h"
-#include "htmlediting.h"
 #include <wtf/Assertions.h>
 
 namespace WebCore {

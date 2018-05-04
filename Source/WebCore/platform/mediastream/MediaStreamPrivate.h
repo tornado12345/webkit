@@ -44,18 +44,20 @@
 #include <wtf/MediaTime.h>
 #include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
+#include <wtf/UUID.h>
 #include <wtf/Vector.h>
 #include <wtf/WeakPtr.h>
 
 namespace WebCore {
 
 class MediaStream;
+class OrientationNotifier;
 
 class MediaStreamPrivate : public MediaStreamTrackPrivate::Observer, public RefCounted<MediaStreamPrivate> {
 public:
     class Observer {
     public:
-        virtual ~Observer() { }
+        virtual ~Observer() = default;
 
         virtual void characteristicsChanged() { }
         virtual void activeStatusChanged() { }
@@ -63,8 +65,8 @@ public:
         virtual void didRemoveTrack(MediaStreamTrackPrivate&) { }
     };
 
-    static RefPtr<MediaStreamPrivate> create(const Vector<RefPtr<RealtimeMediaSource>>& audioSources, const Vector<RefPtr<RealtimeMediaSource>>& videoSources);
-    static RefPtr<MediaStreamPrivate> create(const MediaStreamTrackPrivateVector&);
+    static Ref<MediaStreamPrivate> create(const Vector<Ref<RealtimeMediaSource>>& audioSources, const Vector<Ref<RealtimeMediaSource>>& videoSources);
+    static Ref<MediaStreamPrivate> create(const MediaStreamTrackPrivateVector& tracks, String&& id = createCanonicalUUIDString()) { return adoptRef(*new MediaStreamPrivate(tracks, WTFMove(id))); }
 
     virtual ~MediaStreamPrivate();
 
@@ -88,22 +90,27 @@ public:
     void stopProducingData();
     bool isProducingData() const;
 
-    PlatformLayer* platformLayer() const;
-    RefPtr<Image> currentFrameImage();
-    void paintCurrentFrameInContext(GraphicsContext&, const FloatRect&);
+    void endStream();
 
     bool hasVideo() const;
     bool hasAudio() const;
     bool muted() const;
 
+    bool hasCaptureVideoSource() const;
+    bool hasCaptureAudioSource() const;
+    void setCaptureTracksMuted(bool);
+
     FloatSize intrinsicSize() const;
 
-    WeakPtr<MediaStreamPrivate> createWeakPtr() { return m_weakPtrFactory.createWeakPtr(); }
+    WeakPtr<MediaStreamPrivate> createWeakPtr() { return m_weakPtrFactory.createWeakPtr(*this); }
+
+    void monitorOrientation(OrientationNotifier&);
 
 private:
-    MediaStreamPrivate(const String&, const MediaStreamTrackPrivateVector&);
+    MediaStreamPrivate(const MediaStreamTrackPrivateVector&, String&&);
 
     // MediaStreamTrackPrivate::Observer
+    void trackStarted(MediaStreamTrackPrivate&) override;
     void trackEnded(MediaStreamTrackPrivate&) override;
     void trackMutedChanged(MediaStreamTrackPrivate&) override;
     void trackSettingsChanged(MediaStreamTrackPrivate&) override;

@@ -29,6 +29,7 @@
 #include "DocumentOrderedMap.h"
 #include <memory>
 #include <wtf/Forward.h>
+#include <wtf/Vector.h>
 #include <wtf/text/AtomicString.h>
 
 namespace WebCore {
@@ -36,6 +37,7 @@ namespace WebCore {
 class ContainerNode;
 class Document;
 class Element;
+class HTMLImageElement;
 class HTMLLabelElement;
 class HTMLMapElement;
 class LayoutPoint;
@@ -45,15 +47,17 @@ class ShadowRoot;
 
 class TreeScope {
     friend class Document;
-    friend class TreeScopeAdopter;
 
 public:
     TreeScope* parentTreeScope() const { return m_parentTreeScope; }
-    void setParentTreeScope(TreeScope*);
+    void setParentTreeScope(TreeScope&);
 
-    Element* focusedElement();
+    Element* focusedElementInScope();
+    Element* pointerLockElement() const;
+
     WEBCORE_EXPORT Element* getElementById(const AtomicString&) const;
     WEBCORE_EXPORT Element* getElementById(const String&) const;
+    Element* getElementById(StringView) const;
     const Vector<Element*>* getAllElementsById(const AtomicString&) const;
     bool hasElementWithId(const AtomicStringImpl&) const;
     bool containsMultipleElementsWithId(const AtomicString& id) const;
@@ -66,17 +70,22 @@ public:
     void addElementByName(const AtomicStringImpl&, Element&);
     void removeElementByName(const AtomicStringImpl&, Element&);
 
-    Document& documentScope() const { return *m_documentScope; }
+    Document& documentScope() const { return m_documentScope.get(); }
     static ptrdiff_t documentScopeMemoryOffset() { return OBJECT_OFFSETOF(TreeScope, m_documentScope); }
 
     // https://dom.spec.whatwg.org/#retarget
     Node& retargetToScope(Node&) const;
 
-    Node* ancestorInThisScope(Node*) const;
+    Node* ancestorNodeInThisScope(Node*) const;
+    WEBCORE_EXPORT Element* ancestorElementInThisScope(Element*) const;
 
     void addImageMap(HTMLMapElement&);
     void removeImageMap(HTMLMapElement&);
-    HTMLMapElement* getImageMap(const String& url) const;
+    HTMLMapElement* getImageMap(const AtomicString&) const;
+
+    void addImageElementByUsemap(const AtomicStringImpl&, HTMLImageElement&);
+    void removeImageElementByUsemap(const AtomicStringImpl&, HTMLImageElement&);
+    HTMLImageElement* imageElementByUsemap(const AtomicStringImpl&) const;
 
     // For accessibility.
     bool shouldCacheLabelsByForAttribute() const { return !!m_labelsByForAttribute; }
@@ -84,7 +93,8 @@ public:
     void removeLabel(const AtomicStringImpl& forAttributeValue, HTMLLabelElement&);
     HTMLLabelElement* labelElementForId(const AtomicString& forAttributeValue);
 
-    WEBCORE_EXPORT Element* elementFromPoint(int x, int y);
+    WEBCORE_EXPORT RefPtr<Element> elementFromPoint(double clientX, double clientY);
+    WEBCORE_EXPORT Vector<RefPtr<Element>> elementsFromPoint(double clientX, double clientY);
 
     // Find first anchor with the given name.
     // First searches for an element with the given ID, but if that fails, then looks
@@ -92,9 +102,6 @@ public:
     // Anchor name matching is case sensitive in strict mode and not case sensitive in
     // quirks mode for historical compatibility reasons.
     Element* findAnchor(const String& name);
-
-    // Used by the basic DOM mutation methods (e.g., appendChild()).
-    void adoptIfNeeded(Node*);
 
     ContainerNode& rootNode() const { return m_rootNode; }
 
@@ -106,22 +113,23 @@ protected:
     ~TreeScope();
 
     void destroyTreeScopeData();
-    void setDocumentScope(Document* document)
+    void setDocumentScope(Document& document)
     {
-        ASSERT(document);
         m_documentScope = document;
     }
 
     Node* nodeFromPoint(const LayoutPoint& clientPoint, LayoutPoint* localPoint);
 
 private:
+
     ContainerNode& m_rootNode;
-    Document* m_documentScope;
+    std::reference_wrapper<Document> m_documentScope;
     TreeScope* m_parentTreeScope;
 
     std::unique_ptr<DocumentOrderedMap> m_elementsById;
     std::unique_ptr<DocumentOrderedMap> m_elementsByName;
     std::unique_ptr<DocumentOrderedMap> m_imageMapsByName;
+    std::unique_ptr<DocumentOrderedMap> m_imagesByUsemap;
     std::unique_ptr<DocumentOrderedMap> m_labelsByForAttribute;
 
     std::unique_ptr<IdTargetObserverRegistry> m_idTargetObserverRegistry;

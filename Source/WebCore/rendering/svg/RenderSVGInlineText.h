@@ -19,8 +19,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef RenderSVGInlineText_h
-#define RenderSVGInlineText_h
+#pragma once
 
 #include "FontCascade.h"
 #include "RenderText.h"
@@ -32,6 +31,7 @@ namespace WebCore {
 class SVGInlineTextBox;
 
 class RenderSVGInlineText final : public RenderText {
+    WTF_MAKE_ISO_ALLOCATED(RenderSVGInlineText);
 public:
     RenderSVGInlineText(Text&, const String&);
 
@@ -59,7 +59,7 @@ private:
 
     bool isSVGInlineText() const override { return true; }
 
-    VisiblePosition positionForPoint(const LayoutPoint&, const RenderRegion*) override;
+    VisiblePosition positionForPoint(const LayoutPoint&, const RenderFragmentContainer*) override;
     LayoutRect localCaretRect(InlineBox*, unsigned caretOffset, LayoutUnit* extraWidthToEndOfLine = 0) override;
     IntRect linesBoundingBox() const override;
     std::unique_ptr<InlineTextBox> createTextBox() override;
@@ -72,5 +72,3 @@ private:
 } // namespace WebCore
 
 SPECIALIZE_TYPE_TRAITS_RENDER_OBJECT(RenderSVGInlineText, isSVGInlineText())
-
-#endif // RenderSVGInlineText_h

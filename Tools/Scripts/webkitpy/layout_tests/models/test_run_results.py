@@ -120,6 +120,7 @@ class TestRunResults(object):
         self.keyboard_interrupted |= test_run_results.keyboard_interrupted
         return self
 
+
 class RunDetails(object):
     def __init__(self, exit_code, summarized_results=None, initial_results=None, retry_results=None, enabled_pixel_tests_in_retry=False):
         self.exit_code = exit_code
@@ -303,7 +304,7 @@ def summarize_results(port_obj, expectations, initial_results, retry_results, en
         if port_obj.get_option("builder_name"):
             port_obj.host.initialize_scm()
             results['revision'] = port_obj.host.scm().head_svn_revision()
-    except Exception, e:
+    except Exception as e:
         _log.warn("Failed to determine svn revision for checkout (cwd: %s, webkit_base: %s), leaving 'revision' key blank in full_results.json.\n%s" % (port_obj._filesystem.getcwd(), port_obj.path_from_webkit_base(), e))
         # Handle cases where we're running outside of version control.
         import traceback

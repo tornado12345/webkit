@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003, 2008, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2003-2017 Apple Inc. All rights reserved.
  * Copyright (C) 2011 Google Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
@@ -37,11 +37,13 @@ namespace WebCore {
 class DOMTokenList;
 class HTMLLinkElement;
 class URL;
+struct MediaQueryParserContext;
 
 template<typename T> class EventSender;
 typedef EventSender<HTMLLinkElement> LinkEventSender;
 
 class HTMLLinkElement final : public HTMLElement, public CachedStyleSheetClient, public LinkLoaderClient {
+    WTF_MAKE_ISO_ALLOCATED(HTMLLinkElement);
 public:
     static Ref<HTMLLinkElement> create(const QualifiedName&, Document&, bool createdByParser);
     virtual ~HTMLLinkElement();
@@ -53,7 +55,7 @@ public:
 
     const AtomicString& type() const;
 
-    Optional<LinkIconType> iconType() const;
+    std::optional<LinkIconType> iconType() const;
 
     CSSStyleSheet* sheet() const { return m_sheet.get(); }
 
@@ -65,11 +67,17 @@ public:
 
     WEBCORE_EXPORT void setCrossOrigin(const AtomicString&);
     WEBCORE_EXPORT String crossOrigin() const;
+    WEBCORE_EXPORT void setAs(const AtomicString&);
+    WEBCORE_EXPORT String as() const;
 
     void dispatchPendingEvent(LinkEventSender*);
     static void dispatchPendingLoadEvents();
 
     WEBCORE_EXPORT DOMTokenList& relList();
+
+#if ENABLE(APPLICATION_MANIFEST)
+    bool isApplicationManifest() const { return m_relAttribute.isApplicationManifest; }
+#endif
 
 private:
     void parseAttribute(const QualifiedName&, const AtomicString&) final;
@@ -79,10 +87,11 @@ private:
     static void processCallback(Node*);
     void clearSheet();
 
-    InsertionNotificationRequest insertedInto(ContainerNode&) final;
-    void removedFrom(ContainerNode&) final;
+    InsertedIntoAncestorResult insertedIntoAncestor(InsertionType, ContainerNode&) final;
+    void didFinishInsertingNode() final;
+    void removedFromAncestor(RemovalType, ContainerNode&) final;
 
-    void initializeStyleSheet(Ref<StyleSheetContents>&&, const CachedCSSStyleSheet&);
+    void initializeStyleSheet(Ref<StyleSheetContents>&&, const CachedCSSStyleSheet&, MediaQueryParserContext);
 
     // from CachedResourceClient
     void setCSSStyleSheet(const String& href, const URL& baseURL, const String& charset, const CachedCSSStyleSheet*) final;
@@ -111,12 +120,7 @@ private:
     enum PendingSheetType { Unknown, ActiveSheet, InactiveSheet };
     void addPendingSheet(PendingSheetType);
 
-    enum RemovePendingSheetNotificationType {
-        RemovePendingSheetNotifyImmediately,
-        RemovePendingSheetNotifyLater
-    };
-
-    void removePendingSheet(RemovePendingSheetNotificationType = RemovePendingSheetNotifyImmediately);
+    void removePendingSheet();
 
     LinkLoader m_linkLoader;
     Style::Scope* m_styleScope { nullptr };
@@ -137,10 +141,12 @@ private:
     bool m_createdByParser;
     bool m_firedLoad;
     bool m_loadedResource;
+    bool m_isHandlingBeforeLoad { false };
 
     PendingSheetType m_pendingSheetType;
+    String m_integrityMetadataForPendingSheetRequest;
 
     std::unique_ptr<DOMTokenList> m_relList;
 };
 
-} //namespace
+}

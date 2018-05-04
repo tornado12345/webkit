@@ -31,7 +31,7 @@
 #include "Timer.h"
 #include <wtf/HashMap.h>
 #include <wtf/IteratorRange.h>
-#include <wtf/PassRefPtr.h>
+#include <wtf/Ref.h>
 #include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
 #include <wtf/RetainPtr.h>
@@ -47,7 +47,7 @@ class MediaSelectionGroupAVFObjC;
 
 class MediaSelectionOptionAVFObjC : public RefCounted<MediaSelectionOptionAVFObjC> {
 public:
-    static PassRefPtr<MediaSelectionOptionAVFObjC> create(MediaSelectionGroupAVFObjC&, AVMediaSelectionOption *);
+    static Ref<MediaSelectionOptionAVFObjC> create(MediaSelectionGroupAVFObjC&, AVMediaSelectionOption *);
 
     void setSelected(bool);
     bool selected() const;
@@ -68,7 +68,7 @@ private:
 
 class MediaSelectionGroupAVFObjC : public RefCounted<MediaSelectionGroupAVFObjC> {
 public:
-    static PassRefPtr<MediaSelectionGroupAVFObjC> create(AVPlayerItem*, AVMediaSelectionGroup*, const Vector<String>& characteristics);
+    static Ref<MediaSelectionGroupAVFObjC> create(AVPlayerItem*, AVMediaSelectionGroup*, const Vector<String>& characteristics);
     ~MediaSelectionGroupAVFObjC();
 
     void setSelectedOption(MediaSelectionOptionAVFObjC*);
@@ -76,8 +76,8 @@ public:
 
     void updateOptions(const Vector<String>& characteristics);
 
-    typedef HashMap<AVMediaSelectionOption*, RefPtr<MediaSelectionOptionAVFObjC>> OptionContainer;
-    WTF::IteratorRange<OptionContainer::iterator::Values> options() { return m_options.values(); }
+    using OptionContainer = HashMap<AVMediaSelectionOption*, RefPtr<MediaSelectionOptionAVFObjC>>;
+    typename OptionContainer::ValuesIteratorRange options() { return m_options.values(); }
 
     AVMediaSelectionGroup *avMediaSelectionGroup() const { return m_mediaSelectionGroup.get(); }
 

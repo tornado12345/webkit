@@ -33,7 +33,6 @@
 #include "Document.h"
 #include "IDBFactory.h"
 #include "Page.h"
-#include "SecurityOrigin.h"
 
 namespace WebCore {
 
@@ -43,9 +42,7 @@ DOMWindowIndexedDatabase::DOMWindowIndexedDatabase(DOMWindow* window)
 {
 }
 
-DOMWindowIndexedDatabase::~DOMWindowIndexedDatabase()
-{
-}
+DOMWindowIndexedDatabase::~DOMWindowIndexedDatabase() = default;
 
 const char* DOMWindowIndexedDatabase::supplementName()
 {

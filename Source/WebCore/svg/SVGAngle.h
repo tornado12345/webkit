@@ -22,9 +22,9 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
+
 #pragma once
 
-#include "ExceptionCode.h"
 #include "SVGAngleValue.h"
 #include "SVGPropertyTearOff.h"
 
@@ -32,18 +32,12 @@ namespace WebCore {
 
 class SVGAngle : public SVGPropertyTearOff<SVGAngleValue> {
 public:
-    static Ref<SVGAngle> create(SVGAnimatedProperty* animatedProperty, SVGPropertyRole role, SVGAngleValue& value)
+    static Ref<SVGAngle> create(SVGAnimatedProperty& animatedProperty, SVGPropertyRole role, SVGAngleValue& value)
     {
-        ASSERT(animatedProperty);
         return adoptRef(*new SVGAngle(animatedProperty, role, value));
     }
 
     static Ref<SVGAngle> create(const SVGAngleValue& initialValue = { })
-    {
-        return adoptRef(*new SVGAngle(initialValue));
-    }
-
-    static Ref<SVGAngle> create(const SVGAngleValue* initialValue)
     {
         return adoptRef(*new SVGAngle(initialValue));
     }
@@ -63,7 +57,7 @@ public:
     ExceptionOr<void> setValueForBindings(float value)
     {
         if (isReadOnly())
-            return Exception { NO_MODIFICATION_ALLOWED_ERR };
+            return Exception { NoModificationAllowedError };
 
         propertyReference().setValue(value);
         commitChange();
@@ -79,7 +73,7 @@ public:
     ExceptionOr<void> setValueInSpecifiedUnits(float valueInSpecifiedUnits)
     {
         if (isReadOnly())
-            return Exception { NO_MODIFICATION_ALLOWED_ERR };
+            return Exception { NoModificationAllowedError };
 
         propertyReference().setValueInSpecifiedUnits(valueInSpecifiedUnits);
         commitChange();
@@ -95,7 +89,7 @@ public:
     ExceptionOr<void> setValueAsString(const String& value)
     {
         if (isReadOnly())
-            return Exception { NO_MODIFICATION_ALLOWED_ERR };
+            return Exception { NoModificationAllowedError };
 
         auto result = propertyReference().setValueAsString(value);
         if (result.hasException())
@@ -113,7 +107,7 @@ public:
     ExceptionOr<void> newValueSpecifiedUnits(unsigned short unitType, float valueInSpecifiedUnits)
     {
         if (isReadOnly())
-            return Exception { NO_MODIFICATION_ALLOWED_ERR };
+            return Exception { NoModificationAllowedError };
 
         auto result = propertyReference().newValueSpecifiedUnits(unitType, valueInSpecifiedUnits);
         if (result.hasException())
@@ -126,7 +120,7 @@ public:
     ExceptionOr<void> convertToSpecifiedUnits(unsigned short unitType)
     {
         if (isReadOnly())
-            return Exception { NO_MODIFICATION_ALLOWED_ERR };
+            return Exception { NoModificationAllowedError };
 
         auto result = propertyReference().convertToSpecifiedUnits(unitType);
         if (result.hasException())
@@ -137,17 +131,12 @@ public:
     }
 
 private:
-    SVGAngle(SVGAnimatedProperty* animatedProperty, SVGPropertyRole role, SVGAngleValue& value)
-        : SVGPropertyTearOff<SVGAngleValue>(animatedProperty, role, value)
+    SVGAngle(SVGAnimatedProperty& animatedProperty, SVGPropertyRole role, SVGAngleValue& value)
+        : SVGPropertyTearOff<SVGAngleValue>(&animatedProperty, role, value)
     {
     }
 
     explicit SVGAngle(const SVGAngleValue& initialValue)
-        : SVGPropertyTearOff<SVGAngleValue>(initialValue)
-    {
-    }
-
-    explicit SVGAngle(const SVGAngleValue* initialValue)
         : SVGPropertyTearOff<SVGAngleValue>(initialValue)
     {
     }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,11 +28,11 @@
 
 #if ENABLE(APPLE_PAY)
 
-#import "JSMainThreadExecState.h"
-#import "PassKitSPI.h"
-#import "SoftLinking.h"
+#import "ApplePayPaymentContact.h"
 #import <Contacts/Contacts.h>
-#import <runtime/JSONObject.h>
+#import <pal/spi/cocoa/PassKitSPI.h>
+#import <wtf/SoftLinking.h>
+#import <wtf/text/StringBuilder.h>
 
 SOFT_LINK_FRAMEWORK(Contacts)
 SOFT_LINK_CLASS(Contacts, CNMutablePostalAddress)
@@ -48,55 +48,128 @@ SOFT_LINK_CLASS(PassKit, PKContact)
 
 namespace WebCore {
 
-static bool isValidPaymentContactPropertyName(NSString* propertyName)
+static NSString *subLocality(CNPostalAddress *address)
 {
-    static NSSet *validPropertyNames = [[NSSet alloc] initWithObjects:@"familyName", @"givenName", @"emailAddress", @"phoneNumber", @"addressLines", @"locality", @"postalCode", @"administrativeArea", @"country", @"countryCode", nil ];
-
-    return [validPropertyNames containsObject:propertyName];
+#if PLATFORM(IOS) || (PLATFORM(MAC) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 101204)
+#if PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED < 101300
+    if (![address respondsToSelector:@selector(subLocality)])
+        return nil;
+#endif
+    return address.subLocality;
+#else
+    UNUSED_PARAM(address);
+    return nil;
+#endif
 }
 
-static RetainPtr<PKContact> fromDictionary(NSDictionary *dictionary, String& errorMessage)
+static void setSubLocality(CNMutablePostalAddress *address, NSString *subLocality)
 {
-    for (NSString *propertyName in dictionary) {
-        if (!isValidPaymentContactPropertyName(propertyName)) {
-            errorMessage = makeString("\"" + String(propertyName), "\" is not a valid payment contact property name.");
-            return nullptr;
-        }
-    }
+#if PLATFORM(IOS) || (PLATFORM(MAC) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 101204)
+#if PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED < 101300
+    if (![address respondsToSelector:@selector(setSubLocality:)])
+        return;
+#endif
+    address.subLocality = subLocality;
+#else
+    UNUSED_PARAM(address);
+    UNUSED_PARAM(subLocality);
+#endif
+}
 
+static NSString *subAdministrativeArea(CNPostalAddress *address)
+{
+#if PLATFORM(IOS) || (PLATFORM(MAC) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 101204)
+#if PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED < 101300
+    if (![address respondsToSelector:@selector(subAdministrativeArea)])
+        return nil;
+#endif
+    return address.subAdministrativeArea;
+#else
+    UNUSED_PARAM(address);
+    return nil;
+#endif
+}
+
+static void setSubAdministrativeArea(CNMutablePostalAddress *address, NSString *subAdministrativeArea)
+{
+#if PLATFORM(IOS) || (PLATFORM(MAC) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 101204)
+#if PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED < 101300
+    if (![address respondsToSelector:@selector(setSubAdministrativeArea:)])
+        return;
+#endif
+    address.subAdministrativeArea = subAdministrativeArea;
+#else
+    UNUSED_PARAM(address);
+    UNUSED_PARAM(subAdministrativeArea);
+#endif
+}
+
+static RetainPtr<PKContact> convert(unsigned version, const ApplePayPaymentContact& contact)
+{
     auto result = adoptNS([allocPKContactInstance() init]);
 
-    NSString *familyName = dynamic_objc_cast<NSString>(dictionary[@"familyName"]);
-    NSString *givenName = dynamic_objc_cast<NSString>(dictionary[@"givenName"]);
+    NSString *familyName = nil;
+    NSString *phoneticFamilyName = nil;
+    if (!contact.familyName.isEmpty()) {
+        familyName = contact.familyName;
+        if (version >= 3 && !contact.phoneticFamilyName.isEmpty())
+            phoneticFamilyName = contact.phoneticFamilyName;
+    }
+
+    NSString *givenName = nil;
+    NSString *phoneticGivenName = nil;
+    if (!contact.givenName.isEmpty()) {
+        givenName = contact.givenName;
+        if (version >= 3 && !contact.phoneticGivenName.isEmpty())
+            phoneticGivenName = contact.phoneticGivenName;
+    }
 
     if (familyName || givenName) {
         auto name = adoptNS([[NSPersonNameComponents alloc] init]);
         [name setFamilyName:familyName];
         [name setGivenName:givenName];
+        if (phoneticFamilyName || phoneticGivenName) {
+            auto phoneticName = adoptNS([[NSPersonNameComponents alloc] init]);
+            [phoneticName setFamilyName:phoneticFamilyName];
+            [phoneticName setGivenName:phoneticGivenName];
+            [name setPhoneticRepresentation:phoneticName.get()];
+        }
         [result setName:name.get()];
     }
 
-    [result setEmailAddress:dynamic_objc_cast<NSString>(dictionary[@"emailAddress"])];
+    if (!contact.emailAddress.isEmpty())
+        [result setEmailAddress:contact.emailAddress];
 
-    if (NSString *phoneNumber = dynamic_objc_cast<NSString>(dictionary[@"phoneNumber"]))
-        [result setPhoneNumber:adoptNS([allocCNPhoneNumberInstance() initWithStringValue:phoneNumber]).get()];
+    if (!contact.phoneNumber.isEmpty())
+        [result setPhoneNumber:adoptNS([allocCNPhoneNumberInstance() initWithStringValue:contact.phoneNumber]).get()];
 
-    NSArray *addressLines = dynamic_objc_cast<NSArray>(dictionary[@"addressLines"]);
-    if (addressLines.count) {
+    if (contact.addressLines && !contact.addressLines->isEmpty()) {
         auto address = adoptNS([allocCNMutablePostalAddressInstance() init]);
 
-        [address setStreet:[addressLines componentsJoinedByString:@"\n"]];
+        StringBuilder builder;
+        for (unsigned i = 0; i < contact.addressLines->size(); ++i) {
+            builder.append(contact.addressLines->at(i));
+            if (i != contact.addressLines->size() - 1)
+                builder.append('\n');
+        }
 
-        if (NSString *locality = dynamic_objc_cast<NSString>(dictionary[@"locality"]))
-            [address setCity:locality];
-        if (NSString *postalCode = dynamic_objc_cast<NSString>(dictionary[@"postalCode"]))
-            [address setPostalCode:postalCode];
-        if (NSString *administrativeArea = dynamic_objc_cast<NSString>(dictionary[@"administrativeArea"]))
-            [address setState:administrativeArea];
-        if (NSString *country = dynamic_objc_cast<NSString>(dictionary[@"country"]))
-            [address setCountry:country];
-        if (NSString *countryCode = dynamic_objc_cast<NSString>(dictionary[@"countryCode"]))
-            [address setISOCountryCode:countryCode];
+        // FIXME: StringBuilder should hava a toNSString() function to avoid the extra String allocation.
+        [address setStreet:builder.toString()];
+
+        if (!contact.subLocality.isEmpty())
+            setSubLocality(address.get(), contact.subLocality);
+        if (!contact.locality.isEmpty())
+            [address setCity:contact.locality];
+        if (!contact.postalCode.isEmpty())
+            [address setPostalCode:contact.postalCode];
+        if (!contact.subAdministrativeArea.isEmpty())
+            setSubAdministrativeArea(address.get(), contact.subAdministrativeArea);
+        if (!contact.administrativeArea.isEmpty())
+            [address setState:contact.administrativeArea];
+        if (!contact.country.isEmpty())
+            [address setCountry:contact.country];
+        if (!contact.countryCode.isEmpty())
+            [address setISOCountryCode:contact.countryCode];
 
         [result setPostalAddress:address.get()];
     }
@@ -104,64 +177,55 @@ static RetainPtr<PKContact> fromDictionary(NSDictionary *dictionary, String& err
     return result;
 }
 
-Optional<PaymentContact> PaymentContact::fromJS(JSC::ExecState& state, JSC::JSValue value, String& errorMessage)
-{
-    // FIXME: Don't round-trip using NSString.
-    auto jsonString = JSONStringify(&state, value, 0);
-    if (!jsonString)
-        return Nullopt;
-
-    auto dictionary = dynamic_objc_cast<NSDictionary>([NSJSONSerialization JSONObjectWithData:[(NSString *)jsonString dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil]);
-    if (!dictionary || ![dictionary isKindOfClass:[NSDictionary class]])
-        return Nullopt;
-
-    auto pkContact = fromDictionary(dictionary, errorMessage);
-    if (!pkContact)
-        return Nullopt;
-
-    return PaymentContact(pkContact.get());
-}
-
-// FIXME: This should use the PassKit SPI.
-RetainPtr<NSDictionary> toDictionary(PKContact *contact)
+static ApplePayPaymentContact convert(unsigned version, PKContact *contact)
 {
     ASSERT(contact);
 
-    auto result = adoptNS([[NSMutableDictionary alloc] init]);
+    ApplePayPaymentContact result;
 
-    if (contact.phoneNumber)
-        [result setObject:contact.phoneNumber.stringValue forKey:@"phoneNumber"];
-    if (contact.emailAddress)
-        [result setObject:contact.emailAddress forKey:@"emailAddress"];
-    if (contact.name.givenName)
-        [result setObject:contact.name.givenName forKey:@"givenName"];
-    if (contact.name.familyName)
-        [result setObject:contact.name.familyName forKey:@"familyName"];
-    if (contact.postalAddress.street.length)
-        [result setObject:[contact.postalAddress.street componentsSeparatedByString:@"\n"] forKey:@"addressLines"];
-    if (contact.postalAddress.city)
-        [result setObject:contact.postalAddress.city forKey:@"locality"];
-    if (contact.postalAddress.city)
-        [result setObject:contact.postalAddress.postalCode forKey:@"postalCode"];
-    if (contact.postalAddress.city)
-        [result setObject:contact.postalAddress.state forKey:@"administrativeArea"];
-    if (contact.postalAddress.city)
-        [result setObject:contact.postalAddress.country forKey:@"country"];
-    if (contact.postalAddress.city)
-        [result setObject:contact.postalAddress.ISOCountryCode forKey:@"countryCode"];
+    result.phoneNumber = contact.phoneNumber.stringValue;
+    result.emailAddress = contact.emailAddress;
+
+    NSPersonNameComponents *name = contact.name;
+    result.givenName = name.givenName;
+    result.familyName = name.familyName;
+    if (name)
+        result.localizedName = [NSPersonNameComponentsFormatter localizedStringFromPersonNameComponents:name style:NSPersonNameComponentsFormatterStyleDefault options:0];
+
+    if (version >= 3) {
+        NSPersonNameComponents *phoneticName = name.phoneticRepresentation;
+        result.phoneticGivenName = phoneticName.givenName;
+        result.phoneticFamilyName = phoneticName.familyName;
+        if (phoneticName)
+            result.localizedPhoneticName = [NSPersonNameComponentsFormatter localizedStringFromPersonNameComponents:name style:NSPersonNameComponentsFormatterStyleDefault options:NSPersonNameComponentsFormatterPhonetic];
+    }
+
+    CNPostalAddress *postalAddress = contact.postalAddress;
+    if (postalAddress.street.length) {
+        Vector<String> addressLines;
+        String(postalAddress.street).split("\n", addressLines);
+        result.addressLines = WTFMove(addressLines);
+    }
+    result.subLocality = subLocality(postalAddress);
+    result.locality = postalAddress.city;
+    result.postalCode = postalAddress.postalCode;
+    result.subAdministrativeArea = subAdministrativeArea(postalAddress);
+    result.administrativeArea = postalAddress.state;
+    result.country = postalAddress.country;
+    result.countryCode = postalAddress.ISOCountryCode;
 
     return result;
 }
 
-JSC::JSValue PaymentContact::toJS(JSC::ExecState& exec) const
+PaymentContact PaymentContact::fromApplePayPaymentContact(unsigned version, const ApplePayPaymentContact& contact)
 {
-    auto dictionary = toDictionary(m_pkContact.get());
-
-    // FIXME: Don't round-trip using NSString.
-    auto jsonString = adoptNS([[NSString alloc] initWithData:[NSJSONSerialization dataWithJSONObject:dictionary.get() options:0 error:nullptr] encoding:NSUTF8StringEncoding]);
-    return JSONParse(&exec, jsonString.get());
+    return PaymentContact(convert(version, contact).get());
 }
 
+ApplePayPaymentContact PaymentContact::toApplePayPaymentContact(unsigned version) const
+{
+    return convert(version, m_pkContact.get());
+}
 
 }
 

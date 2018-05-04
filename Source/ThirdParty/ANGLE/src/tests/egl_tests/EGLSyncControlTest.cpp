@@ -1,16 +1,11 @@
 //
-// Copyright 2016 The ANGLE Project Authors. All rights reserved.
+// Copyright (c) 2016 The ANGLE Project Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
 
-#ifndef ANGLE_ENABLE_D3D9
-#define ANGLE_ENABLE_D3D9
-#endif
-
-#ifndef ANGLE_ENABLE_D3D11
-#define ANGLE_ENABLE_D3D11
-#endif
+// EGLSyncControlTest.cpp:
+//   Tests pertaining to eglGetSyncValuesCHROMIUM.
 
 #include <d3d11.h>
 #include <EGL/egl.h>
@@ -189,7 +184,7 @@ class EGLSyncControlTest : public testing::Test
 
 // Basic test for eglGetSyncValuesCHROMIUM extension. Verifies that eglGetSyncValuesCHROMIUM
 // can be called on DX11 with direct composition and that it returns reasonable enough values.
-TEST_F(EGLSyncControlTest, SyncValuesTest)
+TEST_F(EGLSyncControlTest, DISABLED_SyncValuesTest)
 {
     static const DWORD kPollInterval    = 10;
     static const int kNumPollIterations = 100;
@@ -265,6 +260,6 @@ TEST_F(EGLSyncControlTest, SyncValuesTest)
 
     // sbc2 should be 2. msc2 and ust2 should be greater than previous msc and ust values.
     ASSERT_EQ(2ull, sbc2);
-    ASSERT_GT((ust2 - ust), 0ull);
-    ASSERT_GT((msc2 - msc), 0ull);
+    ASSERT_GT(ust2, ust);
+    ASSERT_GT(msc2, msc);
 }

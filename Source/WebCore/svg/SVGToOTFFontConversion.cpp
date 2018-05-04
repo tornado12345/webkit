@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -39,6 +39,7 @@
 #include "SVGPathParser.h"
 #include "SVGPathStringSource.h"
 #include "SVGVKernElement.h"
+#include <wtf/text/StringView.h>
 
 namespace WebCore {
 
@@ -195,7 +196,7 @@ private:
 
     uint32_t calculateChecksum(size_t startingOffset, size_t endingOffset) const;
 
-    void processGlyphElement(const SVGElement& glyphOrMissingGlyphElement, const SVGGlyphElement*, float defaultHorizontalAdvance, float defaultVerticalAdvance, const String& codepoints, Optional<FloatRect>& boundingBox);
+    void processGlyphElement(const SVGElement& glyphOrMissingGlyphElement, const SVGGlyphElement*, float defaultHorizontalAdvance, float defaultVerticalAdvance, const String& codepoints, std::optional<FloatRect>& boundingBox);
 
     typedef void (SVGToOTFFontConverter::*FontAppendingFunction)();
     void appendTable(const char identifier[4], FontAppendingFunction);
@@ -221,7 +222,7 @@ private:
 
     void appendValidCFFString(const String&);
 
-    Vector<char> transcodeGlyphPaths(float width, const SVGElement& glyphOrMissingGlyphElement, Optional<FloatRect>& boundingBox) const;
+    Vector<char> transcodeGlyphPaths(float width, const SVGElement& glyphOrMissingGlyphElement, std::optional<FloatRect>& boundingBox) const;
 
     void addCodepointRanges(const UnicodeRanges&, HashSet<Glyph>& glyphSet) const;
     void addCodepoints(const HashSet<String>& codepoints, HashSet<Glyph>& glyphSet) const;
@@ -263,7 +264,7 @@ private:
     int m_descent;
     unsigned m_featureCountGSUB;
     unsigned m_tablesAppendedCount;
-    char m_weight;
+    uint8_t m_weight;
     bool m_italic;
     bool m_error { false };
 };
@@ -420,14 +421,6 @@ void SVGToOTFFontConverter::appendHEADTable()
     append16(0); // Glyph data format
 }
 
-// Assumption: T2 can hold every value that a T1 can hold.
-template<typename T1, typename T2> static inline T1 clampTo(T2 x)
-{
-    x = std::min(x, static_cast<T2>(std::numeric_limits<T1>::max()));
-    x = std::max(x, static_cast<T2>(std::numeric_limits<T1>::min()));
-    return static_cast<T1>(x);
-}
-
 void SVGToOTFFontConverter::appendHHEATable()
 {
     append32(0x00010000); // Version
@@ -506,7 +499,7 @@ void SVGToOTFFontConverter::appendOS2Table()
 
     append16(2); // Version
     append16(clampTo<int16_t>(averageAdvance));
-    append16(clampTo<uint16_t>(m_weight)); // Weight class
+    append16(m_weight); // Weight class
     append16(5); // Width class
     append16(0); // Protected font
     // WebKit handles these superscripts and subscripts
@@ -532,7 +525,7 @@ void SVGToOTFFontConverter::appendOS2Table()
             for (auto& segment : segments) {
                 bool ok;
                 int value = segment.toInt(&ok);
-                if (ok && value >= 0 && value <= 0xFF)
+                if (ok && value >= std::numeric_limits<uint8_t>::min() && value <= std::numeric_limits<uint8_t>::max())
                     panoseBytes[numPanoseBytes++] = value;
             }
         }
@@ -733,7 +726,7 @@ Glyph SVGToOTFFontConverter::firstGlyph(const Vector<Glyph, 1>& v, UChar32 codep
     auto codePoints = StringView(m_glyphs[v[0]].codepoints).codePoints();
     auto codePointsIterator = codePoints.begin();
     ASSERT(codePointsIterator != codePoints.end());
-    ASSERT(codepoint = *codePointsIterator);
+    ASSERT(codepoint == *codePointsIterator);
 #endif
     return v[0];
 }
@@ -1122,12 +1115,6 @@ void SVGToOTFFontConverter::appendKERNTable()
     ASSERT_UNUSED(sizeOfHorizontalSubtable, subtablesOffset + sizeOfHorizontalSubtable == m_result.size());
     size_t sizeOfVerticalSubtable = appendKERNSubtable<SVGVKernElement>(&SVGVKernElement::buildVerticalKerningPair, 0);
     ASSERT_UNUSED(sizeOfVerticalSubtable, subtablesOffset + sizeOfHorizontalSubtable + sizeOfVerticalSubtable == m_result.size());
-
-#if PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED <= 101000
-    // Work around a bug in Apple's font parser by adding some padding bytes. <rdar://problem/18401901>
-    for (int i = 0; i < 6; ++i)
-        m_result.append(0);
-#endif
 }
 
 template <typename V>
@@ -1149,13 +1136,13 @@ public:
         : m_cffData(cffData)
         , m_unitsPerEmScalar(unitsPerEmScalar)
     {
-        writeCFFEncodedNumber(m_cffData, width);
+        writeCFFEncodedNumber(m_cffData, std::floor(width)); // hmtx table can't encode fractional FUnit values, and the CFF table needs to agree with hmtx.
         writeCFFEncodedNumber(m_cffData, origin.x());
         writeCFFEncodedNumber(m_cffData, origin.y());
         m_cffData.append(rMoveTo);
     }
 
-    Optional<FloatRect> boundingBox() const
+    std::optional<FloatRect> boundingBox() const
     {
         return m_boundingBox;
     }
@@ -1246,11 +1233,11 @@ private:
     Vector<char>& m_cffData;
     FloatPoint m_startingPoint;
     FloatPoint m_current;
-    Optional<FloatRect> m_boundingBox;
+    std::optional<FloatRect> m_boundingBox;
     float m_unitsPerEmScalar;
 };
 
-Vector<char> SVGToOTFFontConverter::transcodeGlyphPaths(float width, const SVGElement& glyphOrMissingGlyphElement, Optional<FloatRect>& boundingBox) const
+Vector<char> SVGToOTFFontConverter::transcodeGlyphPaths(float width, const SVGElement& glyphOrMissingGlyphElement, std::optional<FloatRect>& boundingBox) const
 {
     Vector<char> result;
 
@@ -1286,7 +1273,7 @@ Vector<char> SVGToOTFFontConverter::transcodeGlyphPaths(float width, const SVGEl
     return result;
 }
 
-void SVGToOTFFontConverter::processGlyphElement(const SVGElement& glyphOrMissingGlyphElement, const SVGGlyphElement* glyphElement, float defaultHorizontalAdvance, float defaultVerticalAdvance, const String& codepoints, Optional<FloatRect>& boundingBox)
+void SVGToOTFFontConverter::processGlyphElement(const SVGElement& glyphOrMissingGlyphElement, const SVGGlyphElement* glyphElement, float defaultHorizontalAdvance, float defaultVerticalAdvance, const String& codepoints, std::optional<FloatRect>& boundingBox)
 {
     bool ok;
     float horizontalAdvance = scaleUnitsPerEm(glyphOrMissingGlyphElement.attributeWithoutSynchronization(SVGNames::horiz_adv_xAttr).toFloat(&ok));
@@ -1298,7 +1285,7 @@ void SVGToOTFFontConverter::processGlyphElement(const SVGElement& glyphOrMissing
         verticalAdvance = defaultVerticalAdvance;
     m_advanceHeightMax = std::max(m_advanceHeightMax, verticalAdvance);
 
-    Optional<FloatRect> glyphBoundingBox;
+    std::optional<FloatRect> glyphBoundingBox;
     auto path = transcodeGlyphPaths(horizontalAdvance, glyphOrMissingGlyphElement, glyphBoundingBox);
     if (!path.size()) {
         // It's better to use a fallback font rather than use a font without all its glyphs.
@@ -1311,7 +1298,7 @@ void SVGToOTFFontConverter::processGlyphElement(const SVGElement& glyphOrMissing
     if (glyphBoundingBox)
         m_minRightSideBearing = std::min(m_minRightSideBearing, horizontalAdvance - glyphBoundingBox.value().maxX());
 
-    m_glyphs.append(GlyphData(WTFMove(path), glyphElement, horizontalAdvance, verticalAdvance, glyphBoundingBox.valueOr(FloatRect()), codepoints));
+    m_glyphs.append(GlyphData(WTFMove(path), glyphElement, horizontalAdvance, verticalAdvance, glyphBoundingBox.value_or(FloatRect()), codepoints));
 }
 
 void SVGToOTFFontConverter::appendLigatureGlyphs()
@@ -1421,7 +1408,7 @@ SVGToOTFFontConverter::SVGToOTFFontConverter(const SVGFontElement& fontElement)
 
     populateEmptyGlyphCharString(m_emptyGlyphCharString, s_outputUnitsPerEm);
 
-    Optional<FloatRect> boundingBox;
+    std::optional<FloatRect> boundingBox;
     if (m_missingGlyphElement)
         processGlyphElement(*m_missingGlyphElement, nullptr, defaultHorizontalAdvance, defaultVerticalAdvance, String(), boundingBox);
     else {
@@ -1435,13 +1422,7 @@ SVGToOTFFontConverter::SVGToOTFFontConverter(const SVGFontElement& fontElement)
             processGlyphElement(glyphElement, &glyphElement, defaultHorizontalAdvance, defaultVerticalAdvance, unicodeAttribute, boundingBox);
     }
 
-    m_boundingBox = boundingBox.valueOr(FloatRect());
-
-#if PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED <= 101000
-    // <rdar://problem/20086223> Cocoa has a bug where glyph bounding boxes are not correctly respected for frustum culling. Work around this by
-    // inflating the font's bounding box
-    m_boundingBox.extend(FloatPoint(0, 0));
-#endif
+    m_boundingBox = boundingBox.value_or(FloatRect());
 
     appendLigatureGlyphs();
 
@@ -1471,22 +1452,21 @@ SVGToOTFFontConverter::SVGToOTFFontConverter(const SVGFontElement& fontElement)
 
     // FIXME: Handle commas.
     if (m_fontFaceElement) {
-        Vector<String> segments;
-        m_fontFaceElement->attributeWithoutSynchronization(SVGNames::font_weightAttr).string().split(' ', segments);
-        for (auto& segment : segments) {
+        auto& fontWeightAttribute = m_fontFaceElement->attributeWithoutSynchronization(SVGNames::font_weightAttr);
+        for (auto segment : StringView(fontWeightAttribute).split(' ')) {
             if (equalLettersIgnoringASCIICase(segment, "bold")) {
                 m_weight = 7;
                 break;
             }
             bool ok;
-            int value = segment.toInt(&ok);
+            int value = segment.toInt(ok);
             if (ok && value >= 0 && value < 1000) {
-                m_weight = (value + 50) / 100;
+                m_weight = std::max(std::min((value + 50) / 100, static_cast<int>(std::numeric_limits<uint8_t>::max())), static_cast<int>(std::numeric_limits<uint8_t>::min()));
                 break;
             }
         }
-        m_fontFaceElement->attributeWithoutSynchronization(SVGNames::font_styleAttr).string().split(' ', segments);
-        for (auto& segment : segments) {
+        auto& fontStyleAttribute = m_fontFaceElement->attributeWithoutSynchronization(SVGNames::font_styleAttr);
+        for (auto segment : StringView(fontStyleAttribute).split(' ')) {
             if (equalLettersIgnoringASCIICase(segment, "italic") || equalLettersIgnoringASCIICase(segment, "oblique")) {
                 m_italic = true;
                 break;
@@ -1584,13 +1564,13 @@ bool SVGToOTFFontConverter::convertSVGToOTFFont()
     return true;
 }
 
-Optional<Vector<char>> convertSVGToOTFFont(const SVGFontElement& element)
+std::optional<Vector<char>> convertSVGToOTFFont(const SVGFontElement& element)
 {
     SVGToOTFFontConverter converter(element);
     if (converter.error())
-        return Nullopt;
+        return std::nullopt;
     if (!converter.convertSVGToOTFFont())
-        return Nullopt;
+        return std::nullopt;
     return converter.releaseResult();
 }
 

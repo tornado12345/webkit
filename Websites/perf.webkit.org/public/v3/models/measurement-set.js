@@ -22,6 +22,7 @@ class MeasurementSet {
     }
 
     platformId() { return this._platformId; }
+    metricId() { return this._metricId; }
 
     static findSet(platformId, metricId, lastModified)
     {
@@ -93,10 +94,10 @@ class MeasurementSet {
     _constructUrl(useCache, clusterEndTime)
     {
         if (!useCache) {
-            return `../api/measurement-set?platform=${this._platformId}&metric=${this._metricId}`;
+            return `/api/measurement-set?platform=${this._platformId}&metric=${this._metricId}`;
         }
         var url;
-        url = `../data/measurement-set-${this._platformId}-${this._metricId}`;
+        url = `/data/measurement-set-${this._platformId}-${this._metricId}`;
         if (clusterEndTime)
             url += '-' + +clusterEndTime;
         url += '.json';
@@ -161,12 +162,13 @@ class MeasurementSet {
     hasFetchedRange(startTime, endTime)
     {
         console.assert(startTime < endTime);
-        var foundStart = false;
-        var previousEndTime = null;
+        let foundStart = false;
+        let previousEndTime = null;
+        endTime = Math.min(endTime, this._primaryClusterEndTime);
         for (var cluster of this._sortedClusters) {
-            var containsStart = cluster.startTime() <= startTime && startTime <= cluster.endTime();
-            var containsEnd = cluster.startTime() <= endTime && endTime <= cluster.endTime();
-            var preceedingClusterIsMissing = previousEndTime !== null && previousEndTime != cluster.startTime();
+            const containsStart = cluster.startTime() <= startTime && startTime <= cluster.endTime();
+            const containsEnd = cluster.startTime() <= endTime && endTime <= cluster.endTime();
+            const preceedingClusterIsMissing = previousEndTime !== null && previousEndTime != cluster.startTime();
             if (containsStart && containsEnd)
                 return true;
             if (containsStart)
@@ -224,8 +226,8 @@ class MeasurementSet {
             var segmentationSeries = [];
             var addSegment = function (startingPoint, endingPoint) {
                 var value = Statistics.mean(timeSeries.valuesBetweenRange(startingPoint.seriesIndex, endingPoint.seriesIndex));
-                segmentationSeries.push({value: value, time: startingPoint.time, interval: function () { return null; }});
-                segmentationSeries.push({value: value, time: endingPoint.time, interval: function () { return null; }});
+                segmentationSeries.push({value: value, time: startingPoint.time, seriesIndex: startingPoint.seriesIndex, interval: function () { return null; }});
+                segmentationSeries.push({value: value, time: endingPoint.time, seriesIndex: endingPoint.seriesIndex, interval: function () { return null; }});
             };
 
             var startingIndex = 0;
@@ -288,7 +290,7 @@ class MeasurementSet {
         var args = [timeSeriesValues].concat(parameters || []);
 
         var timeSeriesIsShortEnoughForSyncComputation = timeSeriesValues.length < 100;
-        if (timeSeriesIsShortEnoughForSyncComputation) {
+        if (timeSeriesIsShortEnoughForSyncComputation || !AsyncTask.isAvailable()) {
             Instrumentation.startMeasuringTime('_invokeSegmentationAlgorithm', 'syncSegmentation');
             var segmentation = Statistics[segmentationName].apply(timeSeriesValues, args);
             Instrumentation.endMeasuringTime('_invokeSegmentationAlgorithm', 'syncSegmentation');

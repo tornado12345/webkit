@@ -19,18 +19,26 @@
 #pragma once
 
 #include "JSDOMWindow.h"
-#include "JSDOMWindowShell.h"
 
 namespace WebCore {
+
+class AbstractFrame;
 
 inline JSDOMWindow* asJSDOMWindow(JSC::JSGlobalObject* globalObject)
 {
     return JSC::jsCast<JSDOMWindow*>(globalObject);
 }
- 
+
 inline const JSDOMWindow* asJSDOMWindow(const JSC::JSGlobalObject* globalObject)
 {
     return static_cast<const JSDOMWindow*>(globalObject);
 }
+
+enum class DOMWindowType { Local, Remote };
+
+template <DOMWindowType windowType>
+bool jsDOMWindowGetOwnPropertySlotRestrictedAccess(JSDOMGlobalObject*, AbstractFrame*, JSC::ExecState*, JSC::PropertyName, JSC::PropertySlot&, const String&);
+
+void addCrossOriginWindowOwnPropertyNames(JSC::ExecState&, JSC::PropertyNameArray&);
 
 } // namespace WebCore

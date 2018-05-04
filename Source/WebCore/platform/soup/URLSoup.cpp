@@ -43,11 +43,8 @@ URL::URL(SoupURI* soupURI)
     }
 
     GUniquePtr<gchar> urlString(soup_uri_to_string(soupURI, FALSE));
-    if (URLParser::enabled()) {
-        URLParser parser(String::fromUTF8(urlString.get()));
-        *this = parser.result();
-    } else
-        parse(String::fromUTF8(urlString.get()));
+    URLParser parser(String::fromUTF8(urlString.get()));
+    *this = parser.result();
 
     if (!isValid())
         return;
@@ -67,6 +64,11 @@ GUniquePtr<SoupURI> URL::createSoupURI() const
         return nullptr;
 
     return GUniquePtr<SoupURI>(soup_uri_new(string().utf8().data()));
+}
+
+bool URL::hostIsIPAddress(const String& host)
+{
+    return !host.isEmpty() && g_hostname_is_ip_address(host.utf8().data());
 }
 
 } // namespace WebCore

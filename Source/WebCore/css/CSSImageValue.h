@@ -22,12 +22,15 @@
 
 #include "CSSValue.h"
 #include "CachedResourceHandle.h"
+#include <wtf/Function.h>
 #include <wtf/Ref.h>
 
 namespace WebCore {
 
 class CachedImage;
 class CachedResourceLoader;
+class DeprecatedCSSOMValue;
+class CSSStyleDeclaration;
 class RenderElement;
 struct ResourceLoaderOptions;
 
@@ -45,13 +48,13 @@ public:
 
     String customCSSText() const;
 
-    Ref<CSSValue> cloneForCSSOM() const;
+    Ref<DeprecatedCSSOMValue> createDeprecatedCSSOMWrapper(CSSStyleDeclaration&) const;
 
-    bool traverseSubresources(const std::function<bool (const CachedResource&)>& handler) const;
+    bool traverseSubresources(const WTF::Function<bool (const CachedResource&)>& handler) const;
 
     bool equals(const CSSImageValue&) const;
 
-    bool knownToBeOpaque(const RenderElement*) const;
+    bool knownToBeOpaque(const RenderElement&) const;
 
     void setInitiator(const AtomicString& name) { m_initiatorName = name; }
 

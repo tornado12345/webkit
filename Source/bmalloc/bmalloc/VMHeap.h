@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,6 +28,7 @@
 
 #include "Chunk.h"
 #include "FixedVector.h"
+#include "HeapKind.h"
 #include "LargeRange.h"
 #include "Map.h"
 #include "Vector.h"
@@ -41,41 +42,14 @@ class BeginTag;
 class EndTag;
 class Heap;
 
+typedef enum { Sync, Async } ScavengeMode;
+
 class VMHeap {
 public:
-    SmallPage* allocateSmallPage(std::lock_guard<StaticMutex>&, size_t);
-    void deallocateSmallPage(std::unique_lock<StaticMutex>&, size_t, SmallPage*);
-
-    LargeRange tryAllocateLargeChunk(std::lock_guard<StaticMutex>&, size_t alignment, size_t);
+    VMHeap(std::lock_guard<Mutex>&);
     
-private:
-    void allocateSmallChunk(std::lock_guard<StaticMutex>&, size_t);
-
-    std::array<List<SmallPage>, pageClassCount> m_smallPages;
-    
-#if BOS(DARWIN)
-    Zone m_zone;
-#endif
+    LargeRange tryAllocateLargeChunk(size_t alignment, size_t);
 };
-
-inline SmallPage* VMHeap::allocateSmallPage(std::lock_guard<StaticMutex>& lock, size_t pageClass)
-{
-    if (m_smallPages[pageClass].isEmpty())
-        allocateSmallChunk(lock, pageClass);
-
-    SmallPage* page = m_smallPages[pageClass].pop();
-    vmAllocatePhysicalPagesSloppy(page->begin()->begin(), pageSize(pageClass));
-    return page;
-}
-
-inline void VMHeap::deallocateSmallPage(std::unique_lock<StaticMutex>& lock, size_t pageClass, SmallPage* page)
-{
-    lock.unlock();
-    vmDeallocatePhysicalPagesSloppy(page->begin()->begin(), pageSize(pageClass));
-    lock.lock();
-    
-    m_smallPages[pageClass].push(page);
-}
 
 } // namespace bmalloc
 

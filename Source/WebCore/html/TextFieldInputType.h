@@ -36,7 +36,7 @@
 
 namespace WebCore {
 
-class FormDataList;
+class DOMFormData;
 class TextControlInnerTextElement;
 
 // The class represents types of which UI contain text fields.
@@ -50,7 +50,7 @@ protected:
 
     HTMLElement* containerElement() const final;
     HTMLElement* innerBlockElement() const final;
-    TextControlInnerTextElement* innerTextElement() const final;
+    RefPtr<TextControlInnerTextElement> innerTextElement() const final;
     HTMLElement* innerSpinButtonElement() const final;
     HTMLElement* capsLockIndicatorElement() const final;
     HTMLElement* autoFillButtonElement() const final;
@@ -59,7 +59,7 @@ protected:
     virtual bool needsContainer() const;
     void createShadowSubtree() override;
     void destroyShadowSubtree() override;
-    void attributeChanged() final;
+    void attributeChanged(const QualifiedName&) final;
     void disabledAttributeChanged() final;
     void readonlyAttributeChanged() final;
     bool supportsReadOnly() const final;
@@ -73,7 +73,7 @@ protected:
     virtual void didSetValueByUserEdit();
 
 private:
-    bool isKeyboardFocusable(KeyboardEvent&) const final;
+    bool isKeyboardFocusable(KeyboardEvent*) const final;
     bool isMouseFocusable() const final;
     bool isTextField() const final;
     bool isEmptyValue() const final;
@@ -86,10 +86,11 @@ private:
     bool shouldRespectListAttribute() override;
     HTMLElement* placeholderElement() const final;
     void updatePlaceholderText() final;
-    bool appendFormData(FormDataList&, bool multipart) const final;
+    bool appendFormData(DOMFormData&, bool multipart) const final;
     void subtreeHasChanged() final;
     void capsLockStateMayHaveChanged() final;
     void updateAutoFillButton() final;
+    void elementDidBlur() final;
 
     // SpinButtonElement::SpinButtonOwner functions.
     void focusAndSelectSpinButtonOwner() final;
