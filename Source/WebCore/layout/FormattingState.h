@@ -28,6 +28,10 @@
 #if ENABLE(LAYOUT_FORMATTING_CONTEXT)
 
 #include "FloatingState.h"
+#include "FormattingContext.h"
+#include "LayoutBox.h"
+#include "LayoutState.h"
+#include "LayoutUnit.h"
 #include <wtf/IsoMalloc.h>
 
 namespace WebCore {
@@ -47,17 +51,46 @@ public:
     void markNeedsLayout(const Box&, StyleDiff);
     bool needsLayout(const Box&);
 
+    void setIntrinsicWidthConstraints(const Box&,  FormattingContext::IntrinsicWidthConstraints);
+    void clearIntrinsicWidthConstraints(const Box&);
+    Optional<FormattingContext::IntrinsicWidthConstraints> intrinsicWidthConstraints(const Box&) const;
+
     bool isBlockFormattingState() const { return m_type == Type::Block; }
     bool isInlineFormattingState() const { return m_type == Type::Inline; }
 
+    LayoutState& layoutState() const { return m_layoutState; }
+
 protected:
     enum class Type { Block, Inline };
-    FormattingState(Ref<FloatingState>&&, Type);
+    FormattingState(Ref<FloatingState>&&, Type, LayoutState&);
 
 private:
+    LayoutState& m_layoutState;
     Ref<FloatingState> m_floatingState;
+    HashMap<const Box*, FormattingContext::IntrinsicWidthConstraints> m_intrinsicWidthConstraints;
     Type m_type;
 };
+
+inline void FormattingState::setIntrinsicWidthConstraints(const Box& layoutBox, FormattingContext::IntrinsicWidthConstraints intrinsicWidthConstraints)
+{
+    ASSERT(!m_intrinsicWidthConstraints.contains(&layoutBox));
+    ASSERT(&m_layoutState.formattingStateForBox(layoutBox) == this);
+    m_intrinsicWidthConstraints.set(&layoutBox, intrinsicWidthConstraints);
+}
+
+inline void FormattingState::clearIntrinsicWidthConstraints(const Box& layoutBox)
+{
+    m_intrinsicWidthConstraints.remove(&layoutBox);
+}
+
+inline Optional<FormattingContext::IntrinsicWidthConstraints> FormattingState::intrinsicWidthConstraints(const Box& layoutBox) const
+{
+    ASSERT(&m_layoutState.formattingStateForBox(layoutBox) == this);
+    auto iterator = m_intrinsicWidthConstraints.find(&layoutBox);
+    if (iterator == m_intrinsicWidthConstraints.end())
+        return { };
+    return iterator->value;
+}
 
 }
 }

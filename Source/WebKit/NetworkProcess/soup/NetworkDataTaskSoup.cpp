@@ -26,10 +26,10 @@
 #include "config.h"
 #include "NetworkDataTaskSoup.h"
 
+#include "AuthenticationChallengeDisposition.h"
 #include "AuthenticationManager.h"
 #include "DataReference.h"
 #include "Download.h"
-#include "DownloadSoupErrors.h"
 #include "NetworkLoad.h"
 #include "NetworkProcess.h"
 #include "NetworkSessionSoup.h"
@@ -40,6 +40,7 @@
 #include <WebCore/NetworkStorageSession.h>
 #include <WebCore/SharedBuffer.h>
 #include <WebCore/SoupNetworkSession.h>
+#include <WebCore/TextEncoding.h>
 #include <wtf/MainThread.h>
 #include <wtf/glib/RunLoopSourcePriority.h>
 
@@ -133,7 +134,7 @@ void NetworkDataTaskSoup::createRequest(ResourceRequest&& request)
     unsigned messageFlags = SOUP_MESSAGE_NO_REDIRECT;
 
     m_currentRequest.updateSoupMessage(soupMessage.get());
-    if (m_shouldContentSniff == DoNotSniffContent)
+    if (m_shouldContentSniff == ContentSniffingPolicy::DoNotSniffContent)
         soup_message_disable_feature(soupMessage.get(), SOUP_TYPE_CONTENT_SNIFFER);
     if (m_user.isEmpty() && m_password.isEmpty() && m_storedCredentialsPolicy == StoredCredentialsPolicy::DoNotUse) {
 #if SOUP_CHECK_VERSION(2, 57, 1)
@@ -234,16 +235,6 @@ void NetworkDataTaskSoup::resume()
     }
 }
 
-void NetworkDataTaskSoup::suspend()
-{
-    ASSERT(m_state != State::Suspended);
-    if (m_state == State::Canceling || m_state == State::Completed)
-        return;
-    m_state = State::Suspended;
-
-    stopTimeout();
-}
-
 void NetworkDataTaskSoup::cancel()
 {
     if (m_state == State::Canceling || m_state == State::Completed)
@@ -320,7 +311,7 @@ void NetworkDataTaskSoup::sendRequestCallback(SoupRequest* soupRequest, GAsyncRe
 void NetworkDataTaskSoup::didSendRequest(GRefPtr<GInputStream>&& inputStream)
 {
     if (m_soupMessage) {
-        if (m_shouldContentSniff == SniffContent && m_soupMessage->status_code != SOUP_STATUS_NOT_MODIFIED)
+        if (m_shouldContentSniff == ContentSniffingPolicy::SniffContent && m_soupMessage->status_code != SOUP_STATUS_NOT_MODIFIED)
             m_response.setSniffedContentType(soup_request_get_content_type(m_soupRequest.get()));
         m_response.updateFromSoupMessage(m_soupMessage.get());
         if (m_response.mimeType().isEmpty() && m_soupMessage->status_code != SOUP_STATUS_NOT_MODIFIED)
@@ -384,14 +375,14 @@ void NetworkDataTaskSoup::dispatchDidReceiveResponse()
                 ASSERT_NOT_REACHED();
 
             break;
-        case PolicyAction::Suspend:
-            LOG_ERROR("PolicyAction::Suspend encountered - Treating as PolicyAction::Ignore for now");
-            FALLTHROUGH;
         case PolicyAction::Ignore:
             clearRequest();
             break;
         case PolicyAction::Download:
             download();
+            break;
+        case PolicyAction::StopAllLoads:
+            ASSERT_NOT_REACHED();
             break;
         }
     });
@@ -422,7 +413,7 @@ gboolean NetworkDataTaskSoup::tlsConnectionAcceptCertificateCallback(GTlsConnect
 bool NetworkDataTaskSoup::tlsConnectionAcceptCertificate(GTlsCertificate* certificate, GTlsCertificateFlags tlsErrors)
 {
     ASSERT(m_soupRequest);
-    URL url(soup_request_get_uri(m_soupRequest.get()));
+    URL url = soupURIToURL(soup_request_get_uri(m_soupRequest.get()));
     auto error = SoupNetworkSession::checkTLSErrors(url, certificate, tlsErrors);
     if (!error)
         return true;
@@ -521,7 +512,7 @@ void NetworkDataTaskSoup::authenticate(AuthenticationChallenge&& challenge)
 
 void NetworkDataTaskSoup::continueAuthenticate(AuthenticationChallenge&& challenge)
 {
-    m_client->didReceiveChallenge(challenge, [this, protectedThis = makeRef(*this), challenge](AuthenticationChallengeDisposition disposition, const Credential& credential) {
+    m_client->didReceiveChallenge(AuthenticationChallenge(challenge), [this, protectedThis = makeRef(*this), challenge](AuthenticationChallengeDisposition disposition, const Credential& credential) {
         if (m_state == State::Canceling || m_state == State::Completed) {
             clearRequest();
             return;
@@ -909,7 +900,7 @@ void NetworkDataTaskSoup::download()
     }
     m_downloadOutputStream = adoptGRef(G_OUTPUT_STREAM(outputStream.leakRef()));
 
-    auto& downloadManager = NetworkProcess::singleton().downloadManager();
+    auto& downloadManager = m_session->networkProcess().downloadManager();
     auto download = std::make_unique<Download>(downloadManager, m_pendingDownloadID, *this, m_session->sessionID(), suggestedFilename());
     auto* downloadPtr = download.get();
     downloadManager.dataTaskBecameDownloadTask(m_pendingDownloadID, WTFMove(download));
@@ -976,7 +967,7 @@ void NetworkDataTaskSoup::writeDownload()
 void NetworkDataTaskSoup::didWriteDownload(gsize bytesWritten)
 {
     ASSERT(bytesWritten == m_readBuffer.size());
-    auto* download = NetworkProcess::singleton().downloadManager().download(m_pendingDownloadID);
+    auto* download = m_session->networkProcess().downloadManager().download(m_pendingDownloadID);
     ASSERT(download);
     download->didReceiveData(bytesWritten);
     read();
@@ -1004,7 +995,7 @@ void NetworkDataTaskSoup::didFinishDownload()
     g_file_set_attributes_async(m_downloadDestinationFile.get(), info.get(), G_FILE_QUERY_INFO_NONE, RunLoopSourcePriority::AsyncIONetwork, nullptr, nullptr, nullptr);
 
     clearRequest();
-    auto* download = NetworkProcess::singleton().downloadManager().download(m_pendingDownloadID);
+    auto* download = m_session->networkProcess().downloadManager().download(m_pendingDownloadID);
     ASSERT(download);
     download->didFinish();
 }
@@ -1016,7 +1007,7 @@ void NetworkDataTaskSoup::didFailDownload(const ResourceError& error)
     if (m_client)
         dispatchDidCompleteWithError(error);
     else {
-        auto* download = NetworkProcess::singleton().downloadManager().download(m_pendingDownloadID);
+        auto* download = m_session->networkProcess().downloadManager().download(m_pendingDownloadID);
         ASSERT(download);
         download->didFail(error, IPC::DataReference());
     }

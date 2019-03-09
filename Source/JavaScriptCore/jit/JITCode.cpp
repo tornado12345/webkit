@@ -26,7 +26,6 @@
 #include "config.h"
 #include "JITCode.h"
 
-#include "LLIntThunks.h"
 #include "JSCInlines.h"
 #include "ProtoCallFrame.h"
 #include <wtf/PrintStream.h>
@@ -65,15 +64,6 @@ const char* JITCode::typeName(JITType jitType)
 
 void JITCode::validateReferences(const TrackedReferences&)
 {
-}
-
-JSValue JITCode::execute(VM* vm, ProtoCallFrame* protoCallFrame)
-{
-    auto scope = DECLARE_THROW_SCOPE(*vm);
-    void* entryAddress;
-    entryAddress = addressForCall(MustCheckArity).executableAddress();
-    JSValue result = JSValue::decode(vmEntryToJavaScript(entryAddress, vm, protoCallFrame));
-    return scope.exception() ? jsNull() : result;
 }
 
 DFG::CommonData* JITCode::dfgCommon()
@@ -169,11 +159,20 @@ DirectJITCode::DirectJITCode(JITCode::CodeRef<JSEntryPtrTag> ref, JITCode::CodeP
     ASSERT(m_withArityCheck);
 }
 
+DirectJITCode::DirectJITCode(JITCode::CodeRef<JSEntryPtrTag> ref, JITCode::CodePtr<JSEntryPtrTag> withArityCheck, JITType jitType, Intrinsic intrinsic)
+    : JITCodeWithCodeRef(ref, jitType)
+    , m_withArityCheck(withArityCheck)
+{
+    m_intrinsic = intrinsic;
+    ASSERT(m_ref);
+    ASSERT(m_withArityCheck);
+}
+
 DirectJITCode::~DirectJITCode()
 {
 }
 
-void DirectJITCode::initializeCodeRef(JITCode::CodeRef<JSEntryPtrTag> ref, JITCode::CodePtr<JSEntryPtrTag> withArityCheck)
+void DirectJITCode::initializeCodeRefForDFG(JITCode::CodeRef<JSEntryPtrTag> ref, JITCode::CodePtr<JSEntryPtrTag> withArityCheck)
 {
     RELEASE_ASSERT(!m_ref);
     m_ref = ref;
@@ -201,19 +200,14 @@ NativeJITCode::NativeJITCode(JITType jitType)
 {
 }
 
-NativeJITCode::NativeJITCode(CodeRef<JSEntryPtrTag> ref, JITType jitType)
+NativeJITCode::NativeJITCode(CodeRef<JSEntryPtrTag> ref, JITType jitType, Intrinsic intrinsic)
     : JITCodeWithCodeRef(ref, jitType)
 {
+    m_intrinsic = intrinsic;
 }
 
 NativeJITCode::~NativeJITCode()
 {
-}
-
-void NativeJITCode::initializeCodeRef(CodeRef<JSEntryPtrTag> ref)
-{
-    ASSERT(!m_ref);
-    m_ref = ref;
 }
 
 JITCode::CodePtr<JSEntryPtrTag> NativeJITCode::addressForCall(ArityCheckMode arity)
@@ -227,6 +221,12 @@ JITCode::CodePtr<JSEntryPtrTag> NativeJITCode::addressForCall(ArityCheckMode ari
     }
     RELEASE_ASSERT_NOT_REACHED();
     return CodePtr<JSEntryPtrTag>();
+}
+
+NativeDOMJITCode::NativeDOMJITCode(CodeRef<JSEntryPtrTag> ref, JITType type, Intrinsic intrinsic, const DOMJIT::Signature* signature)
+    : NativeJITCode(ref, type, intrinsic)
+    , m_signature(signature)
+{
 }
 
 #if ENABLE(JIT)

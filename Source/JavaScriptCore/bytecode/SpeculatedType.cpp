@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2011-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,6 +32,7 @@
 #include "DirectArguments.h"
 #include "JSArray.h"
 #include "JSBigInt.h"
+#include "JSBoundFunction.h"
 #include "JSCInlines.h"
 #include "JSFunction.h"
 #include "JSMap.h"
@@ -200,6 +201,11 @@ void dumpSpeculation(PrintStream& outStream, SpeculatedType value)
 
             if (value & SpecDerivedArray)
                 strOut.print("DerivedArray");
+            else
+                isTop = false;
+
+            if (value & SpecDataViewObject)
+                strOut.print("DataView");
             else
                 isTop = false;
         }
@@ -431,9 +437,15 @@ SpeculatedType speculationFromClassInfo(const ClassInfo* classInfo)
 
     if (classInfo == ProxyObject::info())
         return SpecProxyObject;
+
+    if (classInfo == JSDataView::info())
+        return SpecDataViewObject;
     
-    if (classInfo->isSubClassOf(JSFunction::info()))
-        return SpecFunction;
+    if (classInfo->isSubClassOf(JSFunction::info())) {
+        if (classInfo == JSBoundFunction::info())
+            return SpecFunctionWithNonDefaultHasInstance;
+        return SpecFunctionWithDefaultHasInstance;
+    }
     
     if (isTypedView(classInfo->typedArrayStorageType))
         return speculationFromTypedArrayType(classInfo->typedArrayStorageType);
@@ -468,7 +480,7 @@ SpeculatedType speculationFromCell(JSCell* cell)
             if (impl->isAtomic())
                 return SpecStringIdent;
         }
-        return SpecStringVar;
+        return SpecString;
     }
     return speculationFromStructure(cell->structure());
 }
@@ -555,6 +567,8 @@ SpeculatedType speculationFromJSType(JSType type)
         return SpecWeakMapObject;
     case JSWeakSetType:
         return SpecWeakSetObject;
+    case DataViewType:
+        return SpecDataViewObject;
     default:
         ASSERT_NOT_REACHED();
     }
@@ -563,8 +577,10 @@ SpeculatedType speculationFromJSType(JSType type)
 
 SpeculatedType leastUpperBoundOfStrictlyEquivalentSpeculations(SpeculatedType type)
 {
-    if (type & (SpecAnyInt | SpecAnyIntAsDouble))
-        type |= (SpecAnyInt | SpecAnyIntAsDouble);
+    // SpecNonIntAsDouble includes negative zero (-0.0), which can be equal to 0 and 0.0 in the context of == and ===.
+    if (type & (SpecAnyInt | SpecAnyIntAsDouble | SpecNonIntAsDouble))
+        type |= (SpecAnyInt | SpecAnyIntAsDouble | SpecNonIntAsDouble);
+
     if (type & SpecString)
         type |= SpecString;
     return type;
@@ -681,6 +697,9 @@ SpeculatedType typeOfDoublePow(SpeculatedType xValue, SpeculatedType yValue)
     // We always set a pure NaN in that case.
     if (yValue & SpecDoubleNaN)
         xValue |= SpecDoublePureNaN;
+    // Handle the wierd case of NaN ^ 0, which returns 1. See https://tc39.github.io/ecma262/#sec-applying-the-exp-operator
+    if (xValue & SpecDoubleNaN)
+        xValue |= SpecFullDouble;
     return polluteDouble(xValue);
 }
 
@@ -744,6 +763,8 @@ SpeculatedType speculationFromString(const char* speculation)
         return SpecProxyObject;
     if (!strncmp(speculation, "SpecDerivedArray", strlen("SpecDerivedArray")))
         return SpecDerivedArray;
+    if (!strncmp(speculation, "SpecDataViewObject", strlen("SpecDataViewObject")))
+        return SpecDataViewObject;
     if (!strncmp(speculation, "SpecObjectOther", strlen("SpecObjectOther")))
         return SpecObjectOther;
     if (!strncmp(speculation, "SpecObject", strlen("SpecObject")))

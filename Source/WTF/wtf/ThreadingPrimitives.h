@@ -28,8 +28,7 @@
  *
  */
 
-#ifndef ThreadingPrimitives_h
-#define ThreadingPrimitives_h
+#pragma once
 
 #include <wtf/FastMalloc.h>
 #include <wtf/Locker.h>
@@ -65,7 +64,7 @@ class Mutex {
     WTF_MAKE_NONCOPYABLE(Mutex);
     WTF_MAKE_FAST_ALLOCATED;
 public:
-    WTF_EXPORT_PRIVATE Mutex();
+    constexpr Mutex() = default;
     WTF_EXPORT_PRIVATE ~Mutex();
 
     WTF_EXPORT_PRIVATE void lock();
@@ -75,7 +74,11 @@ public:
     PlatformMutex& impl() { return m_mutex; }
 
 private:
-    PlatformMutex m_mutex;
+#if USE(PTHREADS)
+    PlatformMutex m_mutex = PTHREAD_MUTEX_INITIALIZER;
+#elif OS(WINDOWS)
+    PlatformMutex m_mutex = SRWLOCK_INIT;
+#endif
 };
 
 typedef Locker<Mutex> MutexLocker;
@@ -84,7 +87,7 @@ class ThreadCondition {
     WTF_MAKE_NONCOPYABLE(ThreadCondition);
     WTF_MAKE_FAST_ALLOCATED;
 public:
-    WTF_EXPORT_PRIVATE ThreadCondition();
+    constexpr ThreadCondition() = default;
     WTF_EXPORT_PRIVATE ~ThreadCondition();
     
     WTF_EXPORT_PRIVATE void wait(Mutex& mutex);
@@ -94,7 +97,11 @@ public:
     WTF_EXPORT_PRIVATE void broadcast();
     
 private:
-    PlatformCondition m_condition;
+#if USE(PTHREADS)
+    PlatformCondition m_condition = PTHREAD_COND_INITIALIZER;
+#elif OS(WINDOWS)
+    PlatformCondition m_condition = CONDITION_VARIABLE_INIT;
+#endif
 };
 
 } // namespace WTF
@@ -102,5 +109,3 @@ private:
 using WTF::Mutex;
 using WTF::MutexLocker;
 using WTF::ThreadCondition;
-
-#endif // ThreadingPrimitives_h

@@ -26,8 +26,6 @@
 #import "config.h"
 #import "WKNavigationResponseInternal.h"
 
-#if WK_API_ENABLED
-
 #import "WKFrameInfoInternal.h"
 
 @implementation WKNavigationResponse
@@ -77,10 +75,7 @@
 
 - (NSURLRequest *)_request
 {
-    return _navigationResponse->request().nsURLRequest(WebCore::DoNotUpdateHTTPBody);
+    return _navigationResponse->request().nsURLRequest(WebCore::HTTPBodyUpdatePolicy::DoNotUpdateHTTPBody);
 }
 
 @end
-
-
-#endif

@@ -34,8 +34,6 @@
 #include "JSCInlines.h"
 #include "JSFunction.h"
 
-using namespace std;
-
 namespace JSC {
 
 const ClassInfo JSModuleEnvironment::s_info = { "JSModuleEnvironment", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(JSModuleEnvironment) };
@@ -122,11 +120,10 @@ bool JSModuleEnvironment::put(JSCell* cell, ExecState* exec, PropertyName proper
     AbstractModuleRecord::Resolution resolution = thisObject->moduleRecord()->resolveImport(exec, Identifier::fromUid(exec, propertyName.uid()));
     RETURN_IF_EXCEPTION(scope, false);
     if (resolution.type == AbstractModuleRecord::Resolution::Type::Resolved) {
-        throwTypeError(exec, scope, ASCIILiteral(ReadonlyPropertyWriteError));
+        throwTypeError(exec, scope, ReadonlyPropertyWriteError);
         return false;
     }
-    scope.release();
-    return Base::put(thisObject, exec, propertyName, value, slot);
+    RELEASE_AND_RETURN(scope, Base::put(thisObject, exec, propertyName, value, slot));
 }
 
 bool JSModuleEnvironment::deleteProperty(JSCell* cell, ExecState* exec, PropertyName propertyName)

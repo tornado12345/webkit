@@ -55,6 +55,7 @@
 #include "MemoryCache.h"
 #include "Page.h"
 #include "RenderObject.h"
+#include "RenderTheme.h"
 #include "ScriptController.h"
 #include "SecurityOrigin.h"
 #include "Settings.h"
@@ -81,6 +82,17 @@
 namespace WebCore {
 
 using namespace Inspector;
+
+// Keep this in sync with Page.Setting
+#define FOR_EACH_INSPECTOR_OVERRIDE_SETTING(macro) \
+    macro(AuthorAndUserStylesEnabled) \
+    macro(ICECandidateFilteringEnabled) \
+    macro(ImagesEnabled) \
+    macro(MediaCaptureRequiresSecureConnection) \
+    macro(MockCaptureDevicesEnabled) \
+    macro(NeedsSiteSpecificQuirks) \
+    macro(ScriptEnabled) \
+    macro(WebSecurityEnabled)
 
 static bool decodeBuffer(const char* buffer, unsigned size, const String& textEncodingName, String* result)
 {
@@ -136,7 +148,7 @@ void InspectorPageAgent::resourceContent(ErrorString& errorString, Frame* frame,
     }
 
     if (!success)
-        errorString = ASCIILiteral("No resource with given URL found");
+        errorString = "No resource with given URL found"_s;
 }
 
 String InspectorPageAgent::sourceMapURLForResource(CachedResource* cachedResource)
@@ -145,7 +157,7 @@ String InspectorPageAgent::sourceMapURLForResource(CachedResource* cachedResourc
         return String();
 
     // Scripts are handled in a separate path.
-    if (cachedResource->type() != CachedResource::CSSStyleSheet)
+    if (cachedResource->type() != CachedResource::Type::CSSStyleSheet)
         return String();
 
     String sourceMapHeader = cachedResource->response().httpHeaderField(HTTPHeaderName::SourceMap);
@@ -215,31 +227,31 @@ Inspector::Protocol::Page::ResourceType InspectorPageAgent::resourceTypeJSON(Ins
 InspectorPageAgent::ResourceType InspectorPageAgent::inspectorResourceType(CachedResource::Type type)
 {
     switch (type) {
-    case CachedResource::ImageResource:
+    case CachedResource::Type::ImageResource:
         return InspectorPageAgent::ImageResource;
 #if ENABLE(SVG_FONTS)
-    case CachedResource::SVGFontResource:
+    case CachedResource::Type::SVGFontResource:
 #endif
-    case CachedResource::FontResource:
+    case CachedResource::Type::FontResource:
         return InspectorPageAgent::FontResource;
 #if ENABLE(XSLT)
-    case CachedResource::XSLStyleSheet:
+    case CachedResource::Type::XSLStyleSheet:
 #endif
-    case CachedResource::CSSStyleSheet:
+    case CachedResource::Type::CSSStyleSheet:
         return InspectorPageAgent::StylesheetResource;
-    case CachedResource::Script:
+    case CachedResource::Type::Script:
         return InspectorPageAgent::ScriptResource;
-    case CachedResource::MainResource:
+    case CachedResource::Type::MainResource:
         return InspectorPageAgent::DocumentResource;
-    case CachedResource::Beacon:
+    case CachedResource::Type::Beacon:
         return InspectorPageAgent::BeaconResource;
 #if ENABLE(APPLICATION_MANIFEST)
-    case CachedResource::ApplicationManifest:
+    case CachedResource::Type::ApplicationManifest:
         return InspectorPageAgent::ApplicationManifestResource;
 #endif
-    case CachedResource::MediaResource:
-    case CachedResource::Icon:
-    case CachedResource::RawResource:
+    case CachedResource::Type::MediaResource:
+    case CachedResource::Type::Icon:
+    case CachedResource::Type::RawResource:
     default:
         return InspectorPageAgent::OtherResource;
     }
@@ -247,7 +259,7 @@ InspectorPageAgent::ResourceType InspectorPageAgent::inspectorResourceType(Cache
 
 InspectorPageAgent::ResourceType InspectorPageAgent::inspectorResourceType(const CachedResource& cachedResource)
 {
-    if (cachedResource.type() == CachedResource::RawResource) {
+    if (cachedResource.type() == CachedResource::Type::RawResource) {
         switch (cachedResource.resourceRequest().requester()) {
         case ResourceRequest::Requester::Fetch:
             return InspectorPageAgent::FetchResource;
@@ -267,7 +279,7 @@ Inspector::Protocol::Page::ResourceType InspectorPageAgent::cachedResourceTypeJS
 }
 
 InspectorPageAgent::InspectorPageAgent(PageAgentContext& context, InspectorClient* client, InspectorOverlay* overlay)
-    : InspectorAgentBase(ASCIILiteral("Page"), context)
+    : InspectorAgentBase("Page"_s, context)
     , m_frontendDispatcher(std::make_unique<Inspector::PageFrontendDispatcher>(context.frontendRouter))
     , m_backendDispatcher(Inspector::PageBackendDispatcher::create(context.backendDispatcher, this))
     , m_page(context.inspectedPage)
@@ -299,6 +311,10 @@ void InspectorPageAgent::enable(ErrorString&)
     auto stopwatch = m_environment.executionStopwatch();
     stopwatch->reset();
     stopwatch->start();
+
+#if HAVE(OS_DARK_MODE_SUPPORT)
+    defaultAppearanceDidChange(m_page.defaultUseDarkAppearance());
+#endif
 }
 
 void InspectorPageAgent::disable(ErrorString&)
@@ -308,7 +324,17 @@ void InspectorPageAgent::disable(ErrorString&)
 
     ErrorString unused;
     setShowPaintRects(unused, false);
+    setShowRulers(unused, false);
+    overrideUserAgent(unused, nullptr);
     setEmulatedMedia(unused, emptyString());
+    setForcedAppearance(unused, emptyString());
+
+#define DISABLE_INSPECTOR_OVERRIDE_SETTING(name) \
+    m_page.settings().set##name##InspectorOverride(WTF::nullopt);
+
+    FOR_EACH_INSPECTOR_OVERRIDE_SETTING(DISABLE_INSPECTOR_OVERRIDE_SETTING)
+
+#undef DISABLE_INSPECTOR_OVERRIDE_SETTING
 }
 
 void InspectorPageAgent::reload(ErrorString&, const bool* optionalReloadFromOrigin, const bool* optionalRevalidateAllResources)
@@ -318,9 +344,9 @@ void InspectorPageAgent::reload(ErrorString&, const bool* optionalReloadFromOrig
 
     OptionSet<ReloadOption> reloadOptions;
     if (reloadFromOrigin)
-        reloadOptions |= ReloadOption::FromOrigin;
+        reloadOptions.add(ReloadOption::FromOrigin);
     if (!revalidateAllResources)
-        reloadOptions |= ReloadOption::ExpiredOnly;
+        reloadOptions.add(ReloadOption::ExpiredOnly);
 
     m_page.mainFrame().loader().reload(reloadOptions);
 }
@@ -331,8 +357,58 @@ void InspectorPageAgent::navigate(ErrorString&, const String& url)
     Frame& frame = m_page.mainFrame();
 
     ResourceRequest resourceRequest { frame.document()->completeURL(url) };
-    FrameLoadRequest frameLoadRequest { *frame.document(), frame.document()->securityOrigin(), resourceRequest, ASCIILiteral("_self"), LockHistory::No, LockBackForwardList::No, MaybeSendReferrer, AllowNavigationToInvalidURL::No, NewFrameOpenerPolicy::Allow, ShouldOpenExternalURLsPolicy::ShouldNotAllow, InitiatedByMainFrame::Unknown };
+    FrameLoadRequest frameLoadRequest { *frame.document(), frame.document()->securityOrigin(), resourceRequest, "_self"_s, LockHistory::No, LockBackForwardList::No, MaybeSendReferrer, AllowNavigationToInvalidURL::No, NewFrameOpenerPolicy::Allow, ShouldOpenExternalURLsPolicy::ShouldNotAllow, InitiatedByMainFrame::Unknown };
     frame.loader().changeLocation(WTFMove(frameLoadRequest));
+}
+
+void InspectorPageAgent::overrideUserAgent(ErrorString&, const String* value)
+{
+    m_userAgentOverride = value ? *value : String();
+}
+
+void InspectorPageAgent::overrideSetting(ErrorString& errorString, const String& settingString, const bool* value)
+{
+    if (settingString.isEmpty()) {
+        errorString = "Preference is empty"_s;
+        return;
+    }
+
+    auto setting = Inspector::Protocol::InspectorHelpers::parseEnumValueFromString<Inspector::Protocol::Page::Setting>(settingString);
+    if (!setting) {
+        errorString = makeString("Unknown setting: "_s, settingString);
+        return;
+    }
+
+    switch (setting.value()) {
+#define CASE_INSPECTOR_OVERRIDE_SETTING(name) \
+    case Inspector::Protocol::Page::Setting::name: { \
+        if (value) \
+            m_page.settings().set##name##InspectorOverride(*value); \
+        else \
+            m_page.settings().set##name##InspectorOverride(WTF::nullopt); \
+        return; \
+    } \
+
+    FOR_EACH_INSPECTOR_OVERRIDE_SETTING(CASE_INSPECTOR_OVERRIDE_SETTING)
+
+#undef CASE_INSPECTOR_OVERRIDE_SETTING
+    }
+
+    ASSERT_NOT_REACHED();
+}
+
+static Inspector::Protocol::Page::CookieSameSitePolicy cookieSameSitePolicyJSON(Cookie::SameSitePolicy policy)
+{
+    switch (policy) {
+    case Cookie::SameSitePolicy::None:
+        return Inspector::Protocol::Page::CookieSameSitePolicy::None;
+    case Cookie::SameSitePolicy::Lax:
+        return Inspector::Protocol::Page::CookieSameSitePolicy::Lax;
+    case Cookie::SameSitePolicy::Strict:
+        return Inspector::Protocol::Page::CookieSameSitePolicy::Strict;
+    }
+    ASSERT_NOT_REACHED();
+    return Inspector::Protocol::Page::CookieSameSitePolicy::None;
 }
 
 static Ref<Inspector::Protocol::Page::Cookie> buildObjectForCookie(const Cookie& cookie)
@@ -347,6 +423,7 @@ static Ref<Inspector::Protocol::Page::Cookie> buildObjectForCookie(const Cookie&
         .setHttpOnly(cookie.httpOnly)
         .setSecure(cookie.secure)
         .setSession(cookie.session)
+        .setSameSite(cookieSameSitePolicyJSON(cookie.sameSite))
         .release();
 }
 
@@ -370,12 +447,12 @@ static Vector<CachedResource*> cachedResourcesForFrame(Frame* frame)
             continue;
 
         switch (cachedResource->type()) {
-        case CachedResource::ImageResource:
+        case CachedResource::Type::ImageResource:
             // Skip images that were not auto loaded (images disabled in the user agent).
 #if ENABLE(SVG_FONTS)
-        case CachedResource::SVGFontResource:
+        case CachedResource::Type::SVGFontResource:
 #endif
-        case CachedResource::FontResource:
+        case CachedResource::Type::FontResource:
             // Skip fonts that were referenced in CSS but never used/downloaded.
             if (cachedResource->stillNeedsLoad())
                 continue;
@@ -418,12 +495,12 @@ void InspectorPageAgent::getCookies(ErrorString&, RefPtr<JSON::ArrayOf<Inspector
 
     for (Frame* frame = &mainFrame(); frame; frame = frame->tree().traverseNext()) {
         Document* document = frame->document();
-        if (!document)
+        if (!document || !document->page())
             continue;
 
         for (auto& url : allResourcesURLsForFrame(frame)) {
             Vector<Cookie> docCookiesList;
-            rawCookiesImplemented = getRawCookies(*document, URL(ParsedURLString, url), docCookiesList);
+            rawCookiesImplemented = document->page()->cookieJar().getRawCookies(*document, URL({ }, url), docCookiesList);
 
             if (!rawCookiesImplemented) {
                 // FIXME: We need duplication checking for the String representation of cookies.
@@ -446,10 +523,12 @@ void InspectorPageAgent::getCookies(ErrorString&, RefPtr<JSON::ArrayOf<Inspector
 
 void InspectorPageAgent::deleteCookie(ErrorString&, const String& cookieName, const String& url)
 {
-    URL parsedURL(ParsedURLString, url);
+    URL parsedURL({ }, url);
     for (Frame* frame = &m_page.mainFrame(); frame; frame = frame->tree().traverseNext()) {
-        if (auto* document = frame->document())
-            WebCore::deleteCookie(*document, parsedURL, cookieName);
+        if (auto* document = frame->document()) {
+            if (auto* page = document->page())
+                page->cookieJar().deleteCookie(*document, parsedURL, cookieName);
+        }
     }
 }
 
@@ -464,7 +543,7 @@ void InspectorPageAgent::getResourceContent(ErrorString& errorString, const Stri
     if (!frame)
         return;
 
-    resourceContent(errorString, frame, URL(ParsedURLString, url), content, base64Encoded);
+    resourceContent(errorString, frame, URL({ }, url), content, base64Encoded);
 }
 
 void InspectorPageAgent::searchInResource(ErrorString& errorString, const String& frameId, const String& url, const String& query, const bool* optionalCaseSensitive, const bool* optionalIsRegex, const String* optionalRequestId, RefPtr<JSON::ArrayOf<Inspector::Protocol::GenericTypes::SearchMatch>>& results)
@@ -489,7 +568,7 @@ void InspectorPageAgent::searchInResource(ErrorString& errorString, const String
     if (!loader)
         return;
 
-    URL kurl(ParsedURLString, url);
+    URL kurl({ }, url);
 
     String content;
     bool success = false;
@@ -542,6 +621,11 @@ void InspectorPageAgent::searchInResources(ErrorString&, const String& text, con
         networkAgent->searchOtherRequests(regex, result);
 }
 
+void InspectorPageAgent::setShowRulers(ErrorString&, bool showRulers)
+{
+    m_overlay->setShowRulers(showRulers);
+}
+
 void InspectorPageAgent::setShowPaintRects(ErrorString&, bool show)
 {
     m_showPaintRects = show;
@@ -550,7 +634,7 @@ void InspectorPageAgent::setShowPaintRects(ErrorString&, bool show)
     if (m_client->overridesShowPaintRects())
         return;
 
-    m_overlay->setShowingPaintRects(show);
+    m_overlay->setShowPaintRects(show);
 }
 
 void InspectorPageAgent::domContentEventFired()
@@ -626,7 +710,7 @@ Frame* InspectorPageAgent::assertFrame(ErrorString& errorString, const String& f
 {
     Frame* frame = frameForId(frameId);
     if (!frame)
-        errorString = ASCIILiteral("No frame for given id found");
+        errorString = "No frame for given id found"_s;
     return frame;
 }
 
@@ -635,7 +719,7 @@ DocumentLoader* InspectorPageAgent::assertDocumentLoader(ErrorString& errorStrin
     FrameLoader& frameLoader = frame->loader();
     DocumentLoader* documentLoader = frameLoader.documentLoader();
     if (!documentLoader)
-        errorString = ASCIILiteral("No documentLoader for given frame found");
+        errorString = "No documentLoader for given frame found"_s;
     return documentLoader;
 }
 
@@ -662,6 +746,11 @@ void InspectorPageAgent::frameScheduledNavigation(Frame& frame, Seconds delay)
 void InspectorPageAgent::frameClearedScheduledNavigation(Frame& frame)
 {
     m_frontendDispatcher->frameClearedScheduledNavigation(frameId(&frame));
+}
+
+void InspectorPageAgent::defaultAppearanceDidChange(bool useDarkAppearance)
+{
+    m_frontendDispatcher->defaultAppearanceDidChange(useDarkAppearance ? Inspector::Protocol::Page::Appearance::Dark : Inspector::Protocol::Page::Appearance::Light);
 }
 
 void InspectorPageAgent::didPaint(RenderObject& renderer, const LayoutRect& rect)
@@ -780,11 +869,32 @@ void InspectorPageAgent::setEmulatedMedia(ErrorString&, const String& media)
         return;
 
     m_emulatedMedia = media;
-    Document* document = m_page.mainFrame().document();
-    if (document) {
-        document->styleScope().didChangeStyleSheetEnvironment();
+
+    m_page.updateStyleAfterChangeInEnvironment();
+
+    if (auto* document = m_page.mainFrame().document())
         document->updateLayout();
-    }
+}
+
+void InspectorPageAgent::setForcedAppearance(ErrorString&, const String& appearance)
+{
+    if (appearance == m_forcedAppearance)
+        return;
+
+    m_forcedAppearance = appearance;
+
+    if (appearance == "Light"_s)
+        m_page.setUseDarkAppearanceOverride(false);
+    else if (appearance == "Dark"_s)
+        m_page.setUseDarkAppearanceOverride(true);
+    else
+        m_page.setUseDarkAppearanceOverride(WTF::nullopt);
+}
+
+void InspectorPageAgent::applyUserAgentOverride(String& userAgent)
+{
+    if (!m_userAgentOverride.isEmpty())
+        userAgent = m_userAgentOverride;
 }
 
 void InspectorPageAgent::applyEmulatedMedia(String& media)
@@ -816,11 +926,11 @@ void InspectorPageAgent::snapshotNode(ErrorString& errorString, int nodeId, Stri
 
     std::unique_ptr<ImageBuffer> snapshot = WebCore::snapshotNode(frame, *node);
     if (!snapshot) {
-        errorString = ASCIILiteral("Could not capture snapshot");
+        errorString = "Could not capture snapshot"_s;
         return;
     }
 
-    *outDataURL = snapshot->toDataURL(ASCIILiteral("image/png"), std::nullopt, PreserveResolution::Yes);
+    *outDataURL = snapshot->toDataURL("image/png"_s, WTF::nullopt, PreserveResolution::Yes);
 }
 
 void InspectorPageAgent::snapshotRect(ErrorString& errorString, int x, int y, int width, int height, const String& coordinateSystem, String* outDataURL)
@@ -835,20 +945,20 @@ void InspectorPageAgent::snapshotRect(ErrorString& errorString, int x, int y, in
     std::unique_ptr<ImageBuffer> snapshot = snapshotFrameRect(frame, rectangle, options);
 
     if (!snapshot) {
-        errorString = ASCIILiteral("Could not capture snapshot");
+        errorString = "Could not capture snapshot"_s;
         return;
     }
 
-    *outDataURL = snapshot->toDataURL(ASCIILiteral("image/png"), std::nullopt, PreserveResolution::Yes);
+    *outDataURL = snapshot->toDataURL("image/png"_s, WTF::nullopt, PreserveResolution::Yes);
 }
 
 void InspectorPageAgent::archive(ErrorString& errorString, String* data)
 {
 #if ENABLE(WEB_ARCHIVE) && USE(CF)
     Frame& frame = mainFrame();
-    RefPtr<LegacyWebArchive> archive = LegacyWebArchive::create(frame);
+    auto archive = LegacyWebArchive::create(frame);
     if (!archive) {
-        errorString = ASCIILiteral("Could not create web archive for main frame");
+        errorString = "Could not create web archive for main frame"_s;
         return;
     }
 
@@ -856,7 +966,7 @@ void InspectorPageAgent::archive(ErrorString& errorString, String* data)
     *data = base64Encode(CFDataGetBytePtr(buffer.get()), CFDataGetLength(buffer.get()));
 #else
     UNUSED_PARAM(data);
-    errorString = ASCIILiteral("No support for creating archives");
+    errorString = "No support for creating archives"_s;
 #endif
 }
 

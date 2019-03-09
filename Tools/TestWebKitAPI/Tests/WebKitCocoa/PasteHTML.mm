@@ -25,7 +25,7 @@
 
 #include "config.h"
 
-#if WK_API_ENABLED && PLATFORM(COCOA)
+#if PLATFORM(COCOA)
 
 #import "PlatformUtilities.h"
 #import "TestWKWebView.h"
@@ -36,7 +36,7 @@
 #import <wtf/RetainPtr.h>
 #import <wtf/text/WTFString.h>
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 #include <MobileCoreServices/MobileCoreServices.h>
 #endif
 
@@ -53,14 +53,14 @@ void writeHTMLToPasteboard(NSString *html)
 #else
 void writeHTMLToPasteboard(NSString *html)
 {
-    [[UIPasteboard generalPasteboard] setItems:@[@{ (NSString *)kUTTypeHTML : html}]];
+    [[UIPasteboard generalPasteboard] setItems:@[@{ (__bridge NSString *)kUTTypeHTML : html}]];
 }
 #endif
 
 static RetainPtr<TestWKWebView> createWebViewWithCustomPasteboardDataSetting(bool enabled)
 {
     auto webView = adoptNS([[TestWKWebView alloc] initWithFrame:NSMakeRect(0, 0, 400, 400)]);
-    auto preferences = (WKPreferencesRef)[[webView configuration] preferences];
+    auto preferences = (__bridge WKPreferencesRef)[[webView configuration] preferences];
     WKPreferencesSetDataTransferItemsEnabled(preferences, true);
     WKPreferencesSetCustomPasteboardDataEnabled(preferences, enabled);
     return webView;
@@ -328,4 +328,4 @@ TEST(PasteHTML, StripsMSOListWhenMissingMSOHTMLElement)
 }
 
 
-#endif // WK_API_ENABLED && PLATFORM(COCOA)
+#endif // PLATFORM(COCOA)

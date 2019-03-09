@@ -26,7 +26,7 @@
 #import "config.h"
 #import "MediaPlaybackTargetPickerMac.h"
 
-#if ENABLE(WIRELESS_PLAYBACK_TARGET) && !PLATFORM(IOS)
+#if ENABLE(WIRELESS_PLAYBACK_TARGET) && !PLATFORM(IOS_FAMILY)
 
 #import "Logging.h"
 #import <WebCore/FloatRect.h>
@@ -110,7 +110,7 @@ AVOutputDeviceMenuControllerWKType *MediaPlaybackTargetPickerMac::devicePicker()
     return m_outputDeviceMenuController.get();
 }
 
-void MediaPlaybackTargetPickerMac::showPlaybackTargetPicker(const FloatRect& location, bool checkActiveRoute)
+void MediaPlaybackTargetPickerMac::showPlaybackTargetPicker(const FloatRect& location, bool checkActiveRoute, bool useDarkAppearance)
 {
     if (!client() || m_showingMenu)
         return;
@@ -119,7 +119,7 @@ void MediaPlaybackTargetPickerMac::showPlaybackTargetPicker(const FloatRect& loc
 
     m_showingMenu = true;
 
-    if ([devicePicker() showMenuForRect:location appearanceName:NSAppearanceNameVibrantLight allowReselectionOfSelectedOutputDevice:!checkActiveRoute]) {
+    if ([devicePicker() showMenuForRect:location appearanceName:(useDarkAppearance ? NSAppearanceNameVibrantDark : NSAppearanceNameVibrantLight) allowReselectionOfSelectedOutputDevice:!checkActiveRoute]) {
         if (!checkActiveRoute)
             currentDeviceDidChange();
     }

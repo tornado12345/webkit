@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -10,17 +10,17 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY APPLE INC. ``AS IS'' AND ANY
- * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE INC. OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
- * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS''
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
+ * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "config.h"
@@ -28,74 +28,72 @@
 
 #if ENABLE(WEBGPU)
 
+#include "GPUBindGroupLayout.h"
+#include "GPUBindGroupLayoutDescriptor.h"
 #include "GPUBuffer.h"
-#include "GPUCommandQueue.h"
-#include "GPUDrawable.h"
-#include "GPULibrary.h"
+#include "GPUBufferDescriptor.h"
+#include "GPUCommandBuffer.h"
+#include "GPUPipelineLayout.h"
+#include "GPUPipelineLayoutDescriptor.h"
+#include "GPURenderPipeline.h"
+#include "GPURenderPipelineDescriptor.h"
+#include "GPUSampler.h"
+#include "GPUSamplerDescriptor.h"
+#include "GPUShaderModule.h"
+#include "GPUShaderModuleDescriptor.h"
 #include "GPUTexture.h"
 #include "GPUTextureDescriptor.h"
-#include "Logging.h"
 
 namespace WebCore {
 
-RefPtr<GPUDevice> GPUDevice::create()
+RefPtr<GPUBuffer> GPUDevice::tryCreateBuffer(GPUBufferDescriptor&& descriptor)
 {
-    RefPtr<GPUDevice> device = adoptRef(new GPUDevice());
-
-#if PLATFORM(COCOA)
-    if (!device->platformDevice()) {
-        LOG(WebGPU, "GPUDevice::create() was unable to create the low-level device");
-        return nullptr;
-    }
-#endif
-
-    LOG(WebGPU, "GPUDevice::create() device is %p", device.get());
-    return device;
+    return GPUBuffer::tryCreate(makeRef(*this), WTFMove(descriptor));
 }
 
-GPUDevice::~GPUDevice()
+RefPtr<GPUTexture> GPUDevice::tryCreateTexture(GPUTextureDescriptor&& descriptor) const
 {
-    LOG(WebGPU, "GPUDevice::~GPUDevice()");
+    return GPUTexture::tryCreate(*this, WTFMove(descriptor));
 }
 
-RefPtr<GPUCommandQueue> GPUDevice::createCommandQueue()
+RefPtr<GPUSampler> GPUDevice::tryCreateSampler(const GPUSamplerDescriptor& descriptor) const
 {
-    return GPUCommandQueue::create(this);
+    return GPUSampler::tryCreate(*this, descriptor);
 }
 
-RefPtr<GPULibrary> GPUDevice::createLibrary(const String& sourceCode)
+RefPtr<GPUBindGroupLayout> GPUDevice::tryCreateBindGroupLayout(const GPUBindGroupLayoutDescriptor& descriptor) const
 {
-    return GPULibrary::create(this, sourceCode);
+    return GPUBindGroupLayout::tryCreate(*this, descriptor);
 }
 
-RefPtr<GPUBuffer> GPUDevice::createBufferFromData(ArrayBufferView* data)
+Ref<GPUPipelineLayout> GPUDevice::createPipelineLayout(GPUPipelineLayoutDescriptor&& descriptor) const
 {
-    return GPUBuffer::create(this, data);
+    return GPUPipelineLayout::create(WTFMove(descriptor));
 }
 
-RefPtr<GPUTexture> GPUDevice::createTexture(GPUTextureDescriptor* descriptor)
+RefPtr<GPUShaderModule> GPUDevice::createShaderModule(GPUShaderModuleDescriptor&& descriptor) const
 {
-    return GPUTexture::create(this, descriptor);
+    return GPUShaderModule::create(*this, WTFMove(descriptor));
 }
 
-RefPtr<GPUDrawable> GPUDevice::getFramebuffer()
+RefPtr<GPURenderPipeline> GPUDevice::createRenderPipeline(GPURenderPipelineDescriptor&& descriptor) const
 {
-    return GPUDrawable::create(this);
+    return GPURenderPipeline::create(*this, WTFMove(descriptor));
 }
 
-#if !PLATFORM(COCOA)
-
-GPUDevice::GPUDevice()
+RefPtr<GPUCommandBuffer> GPUDevice::createCommandBuffer()
 {
-
+    return GPUCommandBuffer::create(*this);
 }
 
-void GPUDevice::reshape(int, int)
+RefPtr<GPUQueue> GPUDevice::getQueue()
 {
-}
+    if (!m_queue)
+        m_queue = GPUQueue::create(*this);
 
-#endif
+    return m_queue;
+}
 
 } // namespace WebCore
 
-#endif
+#endif // ENABLE(WEBGPU)

@@ -37,12 +37,15 @@
 namespace WebKit {
 
 class LibWebRTCNetwork {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     LibWebRTCNetwork() = default;
 
 #if USE(LIBWEBRTC)
     WebRTCMonitor& monitor() { return m_webNetworkMonitor; }
     LibWebRTCSocketFactory& socketFactory() { return m_socketFactory; }
+
+    void disableNonLocalhostConnections() { socketFactory().disableNonLocalhostConnections(); }
 
     WebRTCSocket socket(uint64_t identifier) { return WebRTCSocket(socketFactory(), identifier); }
     WebRTCResolver resolver(uint64_t identifier) { return WebRTCResolver(socketFactory(), identifier); }

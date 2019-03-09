@@ -39,7 +39,7 @@ class Factory(factory.BuildFactory):
         self.addStep(DeleteStaleBuildFiles())
         if platform == "win":
             self.addStep(InstallWin32Dependencies())
-        if platform == "gtk" and additionalArguments != ["--no-experimental-features"]:
+        if platform == "gtk" and "--no-experimental-features" not in (additionalArguments or []):
             self.addStep(InstallGtkDependencies())
         if platform == "wpe":
             self.addStep(InstallWpeDependencies())
@@ -80,13 +80,17 @@ class TestFactory(Factory):
     def __init__(self, platform, configuration, architectures, additionalArguments=None, SVNMirror=None, **kwargs):
         Factory.__init__(self, platform, configuration, architectures, False, additionalArguments, SVNMirror, **kwargs)
         self.getProduct()
+
+        if platform == 'wincairo':
+            self.addStep(InstallWinCairoDependencies())
+
         if self.JSCTestClass:
             self.addStep(self.JSCTestClass())
         if self.LayoutTestClass:
             self.addStep(self.LayoutTestClass())
 
         if platform.startswith('win') or platform.startswith('mac') or platform.startswith('ios-simulator'):
-            self.addStep(RunUnitTests())
+            self.addStep(RunAPITests())
         self.addStep(RunPythonTests())
         self.addStep(RunPerlTests())
         self.addStep(RunBindingsTests())
@@ -196,7 +200,7 @@ class BuildAndPerfTestFactory(Factory):
         self.addStep(CompileWebKit())
         self.addStep(RunAndUploadPerfTests())
         if platform == "gtk":
-            self.addStep(RunBenchmarkTests())
+            self.addStep(RunBenchmarkTests(timeout=2000))
 
 
 class DownloadAndPerfTestFactory(Factory):
@@ -206,4 +210,4 @@ class DownloadAndPerfTestFactory(Factory):
         self.addStep(ExtractBuiltProduct())
         self.addStep(RunAndUploadPerfTests())
         if platform == "gtk":
-            self.addStep(RunBenchmarkTests())
+            self.addStep(RunBenchmarkTests(timeout=2000))

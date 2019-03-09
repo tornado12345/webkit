@@ -28,6 +28,8 @@
 
 #if ENABLE(LAYOUT_FORMATTING_CONTEXT)
 
+#include "BlockFormattingContext.h"
+#include "LayoutBox.h"
 #include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
@@ -35,8 +37,8 @@ namespace Layout {
 
 WTF_MAKE_ISO_ALLOCATED_IMPL(BlockFormattingState);
 
-BlockFormattingState::BlockFormattingState(Ref<FloatingState>&& floatingState)
-    : FormattingState(WTFMove(floatingState), Type::Block)
+BlockFormattingState::BlockFormattingState(Ref<FloatingState>&& floatingState, LayoutState& layoutState)
+    : FormattingState(WTFMove(floatingState), Type::Block, layoutState)
 {
 }
 

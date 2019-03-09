@@ -11,11 +11,11 @@
 #ifndef MODULES_PACING_BITRATE_PROBER_H_
 #define MODULES_PACING_BITRATE_PROBER_H_
 
+#include <stddef.h>
+#include <stdint.h>
 #include <queue>
 
-#include "modules/include/module_common_types.h"
-#include "rtc_base/basictypes.h"
-#include "typedefs.h"  // NOLINT(build/include)
+#include "api/transport/network_types.h"
 
 namespace webrtc {
 class RtcEventLog;
@@ -26,6 +26,7 @@ class BitrateProber {
  public:
   BitrateProber();
   explicit BitrateProber(RtcEventLog* event_log);
+  ~BitrateProber();
 
   void SetEnabled(bool enable);
 

@@ -47,7 +47,7 @@ class FunctionRareData final : public JSCell {
     
 public:
     typedef JSCell Base;
-    static const unsigned StructureFlags = StructureIsImmortal | Base::StructureFlags;
+    static const unsigned StructureFlags = Base::StructureFlags | StructureIsImmortal;
 
     static FunctionRareData* create(VM&);
 
@@ -122,7 +122,7 @@ private:
             : m_rareData(rareData)
         { }
     protected:
-        void fireInternal(const FireDetail&) override;
+        void fireInternal(VM&, const FireDetail&) override;
     private:
         FunctionRareData* m_rareData;
     };

@@ -36,6 +36,7 @@
 #include "ImageBitmap.h"
 #include "ImageData.h"
 #include "Path2D.h"
+#include "TypedOMCSSImageValue.h"
 #include <JavaScriptCore/ArrayBuffer.h>
 #include <JavaScriptCore/ArrayBufferView.h>
 #include <JavaScriptCore/Float32Array.h>
@@ -57,7 +58,7 @@
 
 namespace WebCore {
 
-typedef Variant<
+using RecordCanvasActionVariant = Variant<
     CanvasDirection,
     CanvasFillRule,
     CanvasLineCap,
@@ -91,6 +92,9 @@ typedef Variant<
     RefPtr<HTMLVideoElement>,
 #endif
     RefPtr<ImageBitmap>,
+#if ENABLE(CSS_TYPED_OM)
+    RefPtr<TypedOMCSSImageValue>,
+#endif
     RefPtr<ImageData>,
     RefPtr<Int32Array>,
     Vector<float>,
@@ -103,6 +107,6 @@ typedef Variant<
     int32_t,
     uint8_t,
     bool
-> RecordCanvasActionVariant;
+>;
 
 } // namespace WebCore

@@ -27,7 +27,9 @@
 
 #include "WebResourceLoader.h"
 #include <WebCore/LoaderStrategy.h>
+#include <WebCore/ResourceError.h>
 #include <WebCore/ResourceLoader.h>
+#include <WebCore/ResourceResponse.h>
 #include <wtf/HashSet.h>
 #include <wtf/RunLoop.h>
 
@@ -52,21 +54,19 @@ public:
     void pageLoadCompleted(uint64_t webPageID) final;
 
     void remove(WebCore::ResourceLoader*) final;
-    void setDefersLoading(WebCore::ResourceLoader*, bool) final;
-    void crossOriginRedirectReceived(WebCore::ResourceLoader*, const WebCore::URL& redirectURL) final;
+    void setDefersLoading(WebCore::ResourceLoader&, bool) final;
+    void crossOriginRedirectReceived(WebCore::ResourceLoader*, const URL& redirectURL) final;
     
     void servePendingRequests(WebCore::ResourceLoadPriority minimumPriority) final;
 
     void suspendPendingRequests() final;
     void resumePendingRequests() final;
 
-    void startPingLoad(WebCore::Frame&, WebCore::ResourceRequest&, const WebCore::HTTPHeaderMap& originalRequestHeaders, const WebCore::FetchOptions&, PingLoadCompletionHandler&&) final;
+    void startPingLoad(WebCore::Frame&, WebCore::ResourceRequest&, const WebCore::HTTPHeaderMap& originalRequestHeaders, const WebCore::FetchOptions&, WebCore::ContentSecurityPolicyImposition, PingLoadCompletionHandler&&) final;
     void didFinishPingLoad(uint64_t pingLoadIdentifier, WebCore::ResourceError&&, WebCore::ResourceResponse&&);
 
-    void preconnectTo(WebCore::FrameLoader&, const WebCore::URL&, WebCore::StoredCredentialsPolicy, PreconnectCompletionHandler&&) final;
+    void preconnectTo(WebCore::FrameLoader&, const URL&, WebCore::StoredCredentialsPolicy, PreconnectCompletionHandler&&) final;
     void didFinishPreconnection(uint64_t preconnectionIdentifier, WebCore::ResourceError&&);
-
-    void storeDerivedDataToCache(const SHA1::Digest& bodyHash, const String& type, const String& partition, WebCore::SharedBuffer&) final;
 
     void setCaptureExtraNetworkLoadMetricsEnabled(bool) final;
 
@@ -90,11 +90,27 @@ private:
     void internallyFailedLoadTimerFired();
     void startLocalLoad(WebCore::ResourceLoader&);
     bool tryLoadingUsingURLSchemeHandler(WebCore::ResourceLoader&);
+    
+    struct SyncLoadResult {
+        WebCore::ResourceResponse response;
+        WebCore::ResourceError error;
+        Vector<char> data;
+    };
+    Optional<SyncLoadResult> tryLoadingSynchronouslyUsingURLSchemeHandler(WebCore::FrameLoader&, ResourceLoadIdentifier, const WebCore::ResourceRequest&);
 
     WebCore::ResourceResponse responseFromResourceLoadIdentifier(uint64_t resourceLoadIdentifier) final;
+    Vector<WebCore::NetworkTransactionInformation> intermediateLoadInformationFromResourceLoadIdentifier(uint64_t resourceLoadIdentifier) final;
     WebCore::NetworkLoadMetrics networkMetricsFromResourceLoadIdentifier(uint64_t resourceLoadIdentifier) final;
 
-    bool isDoingLoadingSecurityChecks() const final;
+    bool shouldPerformSecurityChecks() const final;
+    bool havePerformedSecurityChecks(const WebCore::ResourceResponse&) const final;
+
+    Vector<uint64_t> ongoingLoads() const final
+    {
+        return WTF::map(m_webResourceLoaders, [](auto&& keyValue) -> uint64_t {
+            return keyValue.key;
+        });
+    }
 
     HashSet<RefPtr<WebCore::ResourceLoader>> m_internallyFailedResourceLoaders;
     RunLoop::Timer<WebLoaderStrategy> m_internallyFailedLoadTimer;

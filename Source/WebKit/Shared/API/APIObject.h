@@ -37,7 +37,7 @@
 #endif
 #endif
 
-#define DELEGATE_REF_COUNTING_TO_COCOA (PLATFORM(COCOA) && WK_API_ENABLED)
+#define DELEGATE_REF_COUNTING_TO_COCOA PLATFORM(COCOA)
 
 #if DELEGATE_REF_COUNTING_TO_COCOA
 OBJC_CLASS NSObject;
@@ -110,6 +110,7 @@ public:
         ContentRuleListStore,
         ContextMenuListener,
         CookieManager,
+        InternalDebugFeature,
         Download,
         ExperimentalFeature,
         FormSubmissionListener,
@@ -144,6 +145,7 @@ public:
         ProcessPoolConfiguration,
         PluginSiteDataManager,
         Preferences,
+        RequestStorageAccessConfirmResultListener,
         ResourceLoadStatisticsStore,
         RunBeforeUnloadConfirmPanelResultListener,
         RunJavaScriptAlertResultListener,
@@ -161,6 +163,7 @@ public:
         WebResourceLoadStatisticsManager,
         WebsiteDataRecord,
         WebsiteDataStore,
+        WebsiteDataStoreConfiguration,
         WebsitePolicies,
         WindowFeatures,
 
@@ -175,7 +178,6 @@ public:
         BundleBackForwardListItem,
         BundleCSSStyleDeclarationHandle,
         BundleDOMWindowExtension,
-        BundleFileHandle,
         BundleFrame,
         BundleHitTestResult,
         BundleInspector,
@@ -214,16 +216,16 @@ public:
     }
 #endif
 
-    NSObject *wrapper() { return m_wrapper; }
+    NSObject *wrapper() const { return m_wrapper; }
 
-    void ref();
-    void deref();
+    void ref() const;
+    void deref() const;
 #endif // DELEGATE_REF_COUNTING_TO_COCOA
 
     static void* wrap(API::Object*);
     static API::Object* unwrap(void*);
 
-#if PLATFORM(COCOA) && WK_API_ENABLED && defined(__OBJC__)
+#if PLATFORM(COCOA) && defined(__OBJC__)
     static API::Object& fromWKObjectExtraSpace(id <WKObject>);
 #endif
 

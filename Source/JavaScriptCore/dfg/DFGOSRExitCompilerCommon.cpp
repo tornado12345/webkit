@@ -49,13 +49,13 @@ void handleExitCounts(CCallHelpers& jit, const OSRExitBase& exit)
 
     jit.add32(AssemblyHelpers::TrustedImm32(1), AssemblyHelpers::AbsoluteAddress(&exit.m_count));
     
-    jit.move(AssemblyHelpers::TrustedImmPtr(jit.codeBlock()), GPRInfo::regT0);
+    jit.move(AssemblyHelpers::TrustedImmPtr(jit.codeBlock()), GPRInfo::regT3);
     
     AssemblyHelpers::Jump tooFewFails;
     
-    jit.load32(AssemblyHelpers::Address(GPRInfo::regT0, CodeBlock::offsetOfOSRExitCounter()), GPRInfo::regT2);
+    jit.load32(AssemblyHelpers::Address(GPRInfo::regT3, CodeBlock::offsetOfOSRExitCounter()), GPRInfo::regT2);
     jit.add32(AssemblyHelpers::TrustedImm32(1), GPRInfo::regT2);
-    jit.store32(GPRInfo::regT2, AssemblyHelpers::Address(GPRInfo::regT0, CodeBlock::offsetOfOSRExitCounter()));
+    jit.store32(GPRInfo::regT2, AssemblyHelpers::Address(GPRInfo::regT3, CodeBlock::offsetOfOSRExitCounter()));
     
     jit.move(AssemblyHelpers::TrustedImmPtr(jit.baselineCodeBlock()), GPRInfo::regT0);
     AssemblyHelpers::Jump reoptimizeNow = jit.branch32(
@@ -78,7 +78,7 @@ void handleExitCounts(CCallHelpers& jit, const OSRExitBase& exit)
             jit.branchTest8(
                 AssemblyHelpers::NonZero,
                 AssemblyHelpers::AbsoluteAddress(
-                    inlineCallFrame->baselineCodeBlock->ownerScriptExecutable()->addressOfDidTryToEnterInLoop())));
+                    inlineCallFrame->baselineCodeBlock->ownerExecutable()->addressOfDidTryToEnterInLoop())));
     }
     
     jit.move(
@@ -101,14 +101,7 @@ void handleExitCounts(CCallHelpers& jit, const OSRExitBase& exit)
     
     reoptimizeNow.link(&jit);
     
-    // Reoptimize as soon as possible.
-#if !NUMBER_OF_ARGUMENT_REGISTERS
-    jit.poke(GPRInfo::regT0);
-    jit.poke(AssemblyHelpers::TrustedImmPtr(&exit), 1);
-#else
-    jit.move(GPRInfo::regT0, GPRInfo::argumentGPR0);
-    jit.move(AssemblyHelpers::TrustedImmPtr(&exit), GPRInfo::argumentGPR1);
-#endif
+    jit.setupArguments<decltype(triggerReoptimizationNow)>(GPRInfo::regT0, GPRInfo::regT3, AssemblyHelpers::TrustedImmPtr(&exit));
     jit.move(AssemblyHelpers::TrustedImmPtr(tagCFunctionPtr<OperationPtrTag>(triggerReoptimizationNow)), GPRInfo::nonArgGPR0);
     jit.call(GPRInfo::nonArgGPR0, OperationPtrTag);
     AssemblyHelpers::Jump doneAdjusting = jit.jump();
@@ -237,14 +230,14 @@ void reifyInlinedCallFrames(CCallHelpers& jit, const OSRExitBase& exit)
         if (!inlineCallFrame->isVarargs())
             jit.store32(AssemblyHelpers::TrustedImm32(inlineCallFrame->argumentCountIncludingThis), AssemblyHelpers::payloadFor((VirtualRegister)(inlineCallFrame->stackOffset + CallFrameSlot::argumentCount)));
 #if USE(JSVALUE64)
-        jit.store64(callerFrameGPR, AssemblyHelpers::addressForByteOffset(inlineCallFrame->callerFrameOffset()));
+        jit.storePtr(callerFrameGPR, AssemblyHelpers::addressForByteOffset(inlineCallFrame->callerFrameOffset()));
         uint32_t locationBits = CallSiteIndex(codeOrigin->bytecodeIndex).bits();
         jit.store32(AssemblyHelpers::TrustedImm32(locationBits), AssemblyHelpers::tagFor((VirtualRegister)(inlineCallFrame->stackOffset + CallFrameSlot::argumentCount)));
         if (!inlineCallFrame->isClosureCall)
             jit.store64(AssemblyHelpers::TrustedImm64(JSValue::encode(JSValue(inlineCallFrame->calleeConstant()))), AssemblyHelpers::addressFor((VirtualRegister)(inlineCallFrame->stackOffset + CallFrameSlot::callee)));
 #else // USE(JSVALUE64) // so this is the 32-bit part
         jit.storePtr(callerFrameGPR, AssemblyHelpers::addressForByteOffset(inlineCallFrame->callerFrameOffset()));
-        Instruction* instruction = &baselineCodeBlock->instructions()[codeOrigin->bytecodeIndex];
+        const Instruction* instruction = baselineCodeBlock->instructions().at(codeOrigin->bytecodeIndex).ptr();
         uint32_t locationBits = CallSiteIndex(instruction).bits();
         jit.store32(AssemblyHelpers::TrustedImm32(locationBits), AssemblyHelpers::tagFor((VirtualRegister)(inlineCallFrame->stackOffset + CallFrameSlot::argumentCount)));
         jit.store32(AssemblyHelpers::TrustedImm32(JSValue::CellTag), AssemblyHelpers::tagFor((VirtualRegister)(inlineCallFrame->stackOffset + CallFrameSlot::callee)));
@@ -258,7 +251,7 @@ void reifyInlinedCallFrames(CCallHelpers& jit, const OSRExitBase& exit)
 #if USE(JSVALUE64)
         uint32_t locationBits = CallSiteIndex(codeOrigin->bytecodeIndex).bits();
 #else
-        Instruction* instruction = &jit.baselineCodeBlock()->instructions()[codeOrigin->bytecodeIndex];
+        const Instruction* instruction = jit.baselineCodeBlock()->instructions().at(codeOrigin->bytecodeIndex).ptr();
         uint32_t locationBits = CallSiteIndex(instruction).bits();
 #endif
         jit.store32(AssemblyHelpers::TrustedImm32(locationBits), AssemblyHelpers::tagFor((VirtualRegister)(CallFrameSlot::argumentCount)));

@@ -55,15 +55,25 @@ ALWAYS_INLINE VM& VMTraps::vm() const
 #if ENABLE(SIGNAL_BASED_VM_TRAPS)
 
 struct SignalContext {
-    SignalContext(PlatformRegisters& registers)
+private:
+    SignalContext(PlatformRegisters& registers, MacroAssemblerCodePtr<PlatformRegistersPCPtrTag> trapPC)
         : registers(registers)
-        , trapPC(MachineContext::instructionPointer(registers))
+        , trapPC(trapPC)
         , stackPointer(MachineContext::stackPointer(registers))
         , framePointer(MachineContext::framePointer(registers))
     { }
 
+public:
+    static Optional<SignalContext> tryCreate(PlatformRegisters& registers)
+    {
+        auto instructionPointer = MachineContext::instructionPointer(registers);
+        if (!instructionPointer)
+            return WTF::nullopt;
+        return SignalContext(registers, *instructionPointer);
+    }
+
     PlatformRegisters& registers;
-    MacroAssemblerCodePtr<CFunctionPtrTag> trapPC;
+    MacroAssemblerCodePtr<PlatformRegistersPCPtrTag> trapPC;
     void* stackPointer;
     void* framePointer;
 };
@@ -116,7 +126,7 @@ void VMTraps::tryInstallTrapBreakpoints(SignalContext& context, StackBounds stac
         if (!isSaneFrame(callFrame, calleeFrame, entryFrame, stackBounds))
             return; // Let the SignalSender try again later.
 
-        CodeBlock* candidateCodeBlock = callFrame->codeBlock();
+        CodeBlock* candidateCodeBlock = callFrame->unsafeCodeBlock();
         if (candidateCodeBlock && vm.heap.codeBlockSet().contains(codeBlockSetLocker, candidateCodeBlock)) {
             foundCodeBlock = candidateCodeBlock;
             break;
@@ -137,6 +147,11 @@ void VMTraps::tryInstallTrapBreakpoints(SignalContext& context, StackBounds stac
         auto locker = tryHoldLock(*m_lock);
         if (!locker)
             return; // Let the SignalSender try again later.
+
+        if (!needTrapHandling()) {
+            // Too late. Someone else already handled the trap.
+            return;
+        }
 
         if (!foundCodeBlock->hasInstalledVMTrapBreakpoints())
             foundCodeBlock->installVMTrapBreakpoints();
@@ -180,15 +195,17 @@ class VMTraps::SignalSender final : public AutomaticThread {
 public:
     using Base = AutomaticThread;
     SignalSender(const AbstractLocker& locker, VM& vm)
-        : Base(locker, vm.traps().m_lock, vm.traps().m_trapSet)
+        : Base(locker, vm.traps().m_lock, vm.traps().m_condition.copyRef())
         , m_vm(vm)
     {
         static std::once_flag once;
         std::call_once(once, [] {
             installSignalHandler(Signal::BadAccess, [] (Signal, SigInfo&, PlatformRegisters& registers) -> SignalAction {
-                SignalContext context(registers);
+                auto signalContext = SignalContext::tryCreate(registers);
+                if (!signalContext)
+                    return SignalAction::NotHandled;
 
-                void* trapPC = context.trapPC.untaggedExecutableAddress();
+                void* trapPC = signalContext->trapPC.untaggedExecutableAddress();
                 if (!isJITPC(trapPC))
                     return SignalAction::NotHandled;
 
@@ -199,9 +216,8 @@ public:
                 }
                 ASSERT(currentCodeBlock->hasInstalledVMTrapBreakpoints());
                 VM& vm = *currentCodeBlock->vm();
-                ASSERT(vm.traps().needTrapHandling()); // We should have already jettisoned this code block when we handled the trap.
 
-                // We are in JIT code so it's safe to aquire this lock.
+                // We are in JIT code so it's safe to acquire this lock.
                 auto codeBlockSetLocker = holdLock(vm.heap.codeBlockSet().getLock());
                 bool sawCurrentCodeBlock = false;
                 vm.heap.forEachCodeBlockIgnoringJITPlans(codeBlockSetLocker, [&] (CodeBlock* codeBlock) {
@@ -218,6 +234,11 @@ public:
                 return SignalAction::Handled; // We've successfully jettisoned the codeBlocks.
             });
         });
+    }
+
+    const char* name() const override
+    {
+        return "JSC VMTraps Signal Sender Thread";
     }
 
     VMTraps& traps() { return m_vm.traps(); }
@@ -244,7 +265,9 @@ protected:
         auto optionalOwnerThread = vm.ownerThread();
         if (optionalOwnerThread) {
             sendMessage(*optionalOwnerThread.value().get(), [&] (PlatformRegisters& registers) -> void {
-                SignalContext context(registers);
+                auto signalContext = SignalContext::tryCreate(registers);
+                if (!signalContext)
+                    return;
 
                 auto ownerThread = vm.apiLock().ownerThread();
                 // We can't mess with a thread unless it's the one we suspended.
@@ -252,7 +275,7 @@ protected:
                     return;
 
                 Thread& thread = *ownerThread->get();
-                vm.traps().tryInstallTrapBreakpoints(context, thread.stack());
+                vm.traps().tryInstallTrapBreakpoints(*signalContext, thread.stack());
             });
         }
 
@@ -260,7 +283,7 @@ protected:
             auto locker = holdLock(*traps().m_lock);
             if (traps().m_isShuttingDown)
                 return WorkResult::Stop;
-            traps().m_trapSet->waitFor(*traps().m_lock, 1_ms);
+            traps().m_condition->waitFor(*traps().m_lock, 1_ms);
         }
         return WorkResult::Continue;
     }
@@ -280,7 +303,7 @@ void VMTraps::willDestroyVM()
         {
             auto locker = holdLock(*m_lock);
             if (!m_signalSender->tryStop(locker))
-                m_trapSet->notifyAll(locker);
+                m_condition->notifyAll(locker);
         }
         m_signalSender->join();
         m_signalSender = nullptr;
@@ -301,12 +324,12 @@ void VMTraps::fireTrap(VMTraps::EventType eventType)
 #if ENABLE(SIGNAL_BASED_VM_TRAPS)
     if (!Options::usePollingTraps()) {
         // sendSignal() can loop until it has confirmation that the mutator thread
-        // has received the trap request. We'll call it from another trap so that
+        // has received the trap request. We'll call it from another thread so that
         // fireTrap() does not block.
         auto locker = holdLock(*m_lock);
         if (!m_signalSender)
             m_signalSender = adoptRef(new SignalSender(locker, vm()));
-        m_trapSet->notifyAll(locker);
+        m_condition->notifyAll(locker);
     }
 #endif
 }
@@ -365,7 +388,7 @@ auto VMTraps::takeTopPriorityTrap(VMTraps::Mask mask) -> EventType
 
 VMTraps::VMTraps()
     : m_lock(Box<Lock>::create())
-    , m_trapSet(AutomaticThreadCondition::create())
+    , m_condition(AutomaticThreadCondition::create())
 {
 }
 

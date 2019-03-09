@@ -39,7 +39,14 @@ namespace Layout {
 class InlineBox : public Box {
     WTF_MAKE_ISO_ALLOCATED(InlineBox);
 public:
-    InlineBox(RenderStyle&&, BaseTypeFlags);
+    InlineBox(Optional<ElementAttributes>, RenderStyle&&, BaseTypeFlags = InlineBoxFlag);
+
+    void setTextContent(String text) { m_textContent = text; }
+    bool hasTextContent() const { return !m_textContent.isNull(); }
+    String textContent() const { return m_textContent; }
+
+private:
+    String m_textContent;
 };
 
 }

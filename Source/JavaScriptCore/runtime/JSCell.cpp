@@ -46,7 +46,7 @@ void JSCell::destroy(JSCell* cell)
 
 void JSCell::dump(PrintStream& out) const
 {
-    methodTable()->dumpToStream(this, out);
+    methodTable(*vm())->dumpToStream(this, out);
 }
 
 void JSCell::dumpToStream(const JSCell* cell, PrintStream& out)
@@ -54,19 +54,14 @@ void JSCell::dumpToStream(const JSCell* cell, PrintStream& out)
     out.printf("<%p, %s>", cell, cell->className(*cell->vm()));
 }
 
-size_t JSCell::estimatedSizeInBytes() const
+size_t JSCell::estimatedSizeInBytes(VM& vm) const
 {
-    return methodTable()->estimatedSize(const_cast<JSCell*>(this));
+    return methodTable(vm)->estimatedSize(const_cast<JSCell*>(this), vm);
 }
 
-size_t JSCell::estimatedSize(JSCell* cell)
+size_t JSCell::estimatedSize(JSCell* cell, VM&)
 {
     return cell->cellSize();
-}
-
-PropertyReificationResult JSCell::reifyPropertyNameIfNeeded(JSCell*, ExecState*, PropertyName&)
-{
-    return PropertyReificationResult::Nothing;
 }
 
 void JSCell::heapSnapshot(JSCell*, HeapSnapshotBuilder&)
@@ -227,7 +222,7 @@ void JSCell::getOwnNonIndexPropertyNames(JSObject*, ExecState*, PropertyNameArra
     RELEASE_ASSERT_NOT_REACHED();
 }
 
-String JSCell::className(const JSObject*)
+String JSCell::className(const JSObject*, VM&)
 {
     RELEASE_ASSERT_NOT_REACHED();
     return String();
@@ -259,18 +254,6 @@ bool JSCell::defineOwnProperty(JSObject*, ExecState*, PropertyName, const Proper
 {
     RELEASE_ASSERT_NOT_REACHED();
     return false;
-}
-
-ArrayBuffer* JSCell::slowDownAndWasteMemory(JSArrayBufferView*)
-{
-    RELEASE_ASSERT_NOT_REACHED();
-    return nullptr;
-}
-
-RefPtr<ArrayBufferView> JSCell::getTypedArrayImpl(JSArrayBufferView*)
-{
-    RELEASE_ASSERT_NOT_REACHED();
-    return nullptr;
 }
 
 uint32_t JSCell::getEnumerableLength(ExecState*, JSObject*)

@@ -23,13 +23,17 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 #import <UIKit/UITextInputTraits.h>
 
 #if USE(APPLE_INTERNAL_SDK)
 
 #import <UIKit/UIApplication_Private.h>
+#import <UIKit/UICalloutBar.h>
+#import <UIKit/UIKeyboard_Private.h>
+#import <UIKit/UIResponder_Private.h>
+#import <UIKit/UITextInputMultiDocument.h>
 #import <UIKit/UITextInputTraits_Private.h>
 #import <UIKit/UITextInput_Private.h>
 #import <UIKit/UIViewController_Private.h>
@@ -38,6 +42,7 @@
 @protocol UIDragSession;
 @class UIDragInteraction;
 @class UIDragItem;
+#import <UIKit/NSItemProvider+UIKitAdditions_Private.h>
 #import <UIKit/UIDragInteraction_Private.h>
 #endif // ENABLE(DRAG_SUPPORT)
 
@@ -53,6 +58,9 @@ WTF_EXTERN_C_END
 
 @end
 
+@interface UITextInputTraits : NSObject <UITextInputTraits>
+@end
+
 @protocol UIDragInteractionDelegate_ForWebKitOnly <UIDragInteractionDelegate>
 @optional
 - (void)_dragInteraction:(UIDragInteraction *)interaction prepareForSession:(id<UIDragSession>)session completion:(void(^)(void))completion;
@@ -60,10 +68,34 @@ WTF_EXTERN_C_END
 
 @protocol UITextInputTraits_Private <NSObject, UITextInputTraits>
 @property (nonatomic, readonly) UIColor *insertionPointColor;
+@property (nonatomic, readonly) UIColor *selectionBarColor;
 @end
 
+@class WebEvent;
+
 @protocol UITextInputPrivate <UITextInput, UITextInputTraits_Private>
+- (UITextInputTraits *)textInputTraits;
 - (void)insertTextSuggestion:(UITextSuggestion *)textSuggestion;
+- (void)handleKeyWebEvent:(WebEvent *)theEvent withCompletionHandler:(void (^)(WebEvent *, BOOL))completionHandler;
+- (BOOL)_shouldSuppressSelectionCommands;
+@end
+
+@protocol UITextInputMultiDocument <NSObject>
+@optional
+- (void)_preserveFocusWithToken:(id <NSCopying, NSSecureCoding>)token destructively:(BOOL)destructively;
+- (BOOL)_restoreFocusWithToken:(id <NSCopying, NSSecureCoding>)token;
+- (void)_clearToken:(id <NSCopying, NSSecureCoding>)token;
+@end
+
+@interface NSURL ()
+@property (nonatomic, copy, setter=_setTitle:) NSString *_title;
+@end
+
+@interface UIKeyboard : UIView
+@end
+
+@interface UICalloutBar : UIView
++ (UICalloutBar *)sharedCalloutBar;
 @end
 
 #endif
@@ -100,4 +132,13 @@ WTF_EXTERN_C_END
 + (UIViewController *)_viewControllerForFullScreenPresentationFromView:(UIView *)view;
 @end
 
-#endif // PLATFORM(IOS)
+@interface UIResponder (UIKitSPI)
+- (UIResponder *)firstResponder;
+- (void)makeTextWritingDirectionNatural:(id)sender;
+@end
+
+@interface UIKeyboard ()
++ (BOOL)isInHardwareKeyboardMode;
+@end
+
+#endif // PLATFORM(IOS_FAMILY)

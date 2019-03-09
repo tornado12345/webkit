@@ -25,8 +25,6 @@
 
 #import <WebKit/WKFoundation.h>
 
-#if WK_API_ENABLED
-
 #import <WebKit/WKWebProcessPlugInBrowserContextController.h>
 #import <WebKit/WKWebProcessPlugInNodeHandle.h>
 #import <WebKit/WKWebProcessPlugInRangeHandle.h>
@@ -61,10 +59,7 @@ WK_API_AVAILABLE(macosx(10.12.3), ios(10.3))
 - (NSDictionary<NSString *, NSData *> *)_webProcessPlugInBrowserContextController:(WKWebProcessPlugInBrowserContextController *)controller pasteboardDataForRange:(WKWebProcessPlugInRangeHandle *)range;
 - (void)_webProcessPlugInBrowserContextControllerDidWriteToPasteboard:(WKWebProcessPlugInBrowserContextController *)controller;
 - (BOOL)_webProcessPlugInBrowserContextController:(WKWebProcessPlugInBrowserContextController *)controller performTwoStepDrop:(WKWebProcessPlugInNodeHandle *)fragment atDestination:(WKWebProcessPlugInRangeHandle *)destination isMove:(BOOL)isMove WK_API_AVAILABLE(macosx(10.13), ios(11.0));
-- (NSString *)_webProcessPlugInBrowserContextController:(WKWebProcessPlugInBrowserContextController *)controller replacementURLForResource:(NSData *)resourceData mimeType:(NSString *)mimeType WK_API_AVAILABLE(macosx(WK_MAC_TBA), ios(WK_IOS_TBA));
 
 @end
 
 NS_ASSUME_NONNULL_END
-
-#endif // WK_API_ENABLED

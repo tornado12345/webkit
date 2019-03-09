@@ -25,21 +25,23 @@
 
 #include "config.h"
 
-#if WK_API_ENABLED
-
 #import "PlatformUtilities.h"
 #import "Test.h"
 #import <WebKit/WKNavigationDelegatePrivate.h>
 #import <WebKit/WKNavigationPrivate.h>
 #import <WebKit/WKProcessPoolPrivate.h>
 #import <WebKit/WKWebView.h>
+#import <WebKit/WKWebViewPrivate.h>
 #import <wtf/RetainPtr.h>
 
 static bool didCrash;
 static _WKProcessTerminationReason expectedCrashReason;
+static bool startedLoad;
 static bool finishedLoad;
 static bool shouldLoadAgainOnCrash;
 static bool receivedScriptMessage;
+static bool calledAllCallbacks;
+static unsigned callbackCount;
 
 static NSString *testHTML = @"<script>window.webkit.messageHandlers.testHandler.postMessage('LOADED');</script>";
 
@@ -65,6 +67,22 @@ static NSString *testHTML = @"<script>window.webkit.messageHandlers.testHandler.
     finishedLoad = true;
 }
 
+@end
+
+@interface BasicNavigationDelegateWithoutCrashHandler : NSObject <WKNavigationDelegate>
+@end
+
+@implementation BasicNavigationDelegateWithoutCrashHandler
+
+- (void)webView:(WKWebView *)webView didStartProvisionalNavigation:(null_unspecified WKNavigation *)navigation
+{
+    startedLoad = true;
+}
+
+- (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation
+{
+    finishedLoad = true;
+}
 @end
 
 @interface CrashRecoveryScriptMessageHandler : NSObject <WKScriptMessageHandler>
@@ -154,4 +172,108 @@ TEST(WKNavigation, FailureToStartWebProcessAfterCrashRecovery)
     EXPECT_TRUE(receivedScriptMessage);
 }
 
-#endif // WK_API_ENABLED
+TEST(WKNavigation, AutomaticViewReloadAfterWebProcessCrash)
+{
+    RetainPtr<WKWebView> webView = adoptNS([[WKWebView alloc] initWithFrame:NSMakeRect(0, 0, 100, 100)]);
+
+    auto delegate = adoptNS([[BasicNavigationDelegateWithoutCrashHandler alloc] init]);
+    [webView setNavigationDelegate:delegate.get()];
+
+    startedLoad = false;
+    finishedLoad = false;
+
+    [webView loadRequest:[NSURLRequest requestWithURL:[[NSBundle mainBundle] URLForResource:@"rich-and-plain-text" withExtension:@"html" subdirectory:@"TestWebKitAPI.resources"]]];
+    TestWebKitAPI::Util::run(&finishedLoad);
+
+    startedLoad = false;
+    finishedLoad = false;
+
+    // Simulate crash.
+    [webView _killWebContentProcess];
+
+    // Since we do not deal with the crash, WebKit should attempt a reload.
+    TestWebKitAPI::Util::run(&finishedLoad);
+
+    startedLoad = false;
+    finishedLoad = false;
+
+    // Simulate another crash.
+    [webView _killWebContentProcess];
+
+    // WebKit should not attempt to reload again.
+    EXPECT_FALSE(startedLoad);
+    TestWebKitAPI::Util::sleep(0.5);
+    EXPECT_FALSE(startedLoad);
+}
+
+TEST(WKNavigation, ProcessCrashDuringCallback)
+{
+    auto webView = adoptNS([[WKWebView alloc] initWithFrame:NSMakeRect(0, 0, 800, 600)]);
+
+    auto delegate = adoptNS([[BasicNavigationDelegateWithoutCrashHandler alloc] init]);
+    [webView setNavigationDelegate:delegate.get()];
+
+    startedLoad = false;
+    finishedLoad = false;
+
+    [webView loadRequest:[NSURLRequest requestWithURL:[[NSBundle mainBundle] URLForResource:@"rich-and-plain-text" withExtension:@"html" subdirectory:@"TestWebKitAPI.resources"]]];
+    TestWebKitAPI::Util::run(&finishedLoad);
+
+    startedLoad = false;
+    finishedLoad = false;
+
+    callbackCount = 0;
+    calledAllCallbacks = false;
+
+    __block WKWebView *view = webView.get();
+    [webView _getContentsAsStringWithCompletionHandler:^(NSString *contents, NSError *error) {
+        if (!!error)
+            EXPECT_TRUE(error.code == WKErrorWebContentProcessTerminated || error.code == WKErrorWebViewInvalidated);
+        ++callbackCount;
+        if (callbackCount == 6)
+            calledAllCallbacks = true;
+    }];
+    [webView _getContentsAsStringWithCompletionHandler:^(NSString *contents, NSError *error) {
+        if (!!error)
+            EXPECT_TRUE(error.code == WKErrorWebContentProcessTerminated || error.code == WKErrorWebViewInvalidated);
+        ++callbackCount;
+        if (callbackCount == 6)
+            calledAllCallbacks = true;
+    }];
+    [webView _getContentsAsStringWithCompletionHandler:^(NSString *contents, NSError *error) {
+        if (!!error)
+            EXPECT_TRUE(error.code == WKErrorWebContentProcessTerminated || error.code == WKErrorWebViewInvalidated);
+        [view _close]; // Calling _close will also invalidate all callbacks.
+        ++callbackCount;
+        if (callbackCount == 6)
+            calledAllCallbacks = true;
+    }];
+    [webView _getContentsAsStringWithCompletionHandler:^(NSString *contents, NSError *error) {
+        if (!!error)
+            EXPECT_TRUE(error.code == WKErrorWebContentProcessTerminated || error.code == WKErrorWebViewInvalidated);
+        ++callbackCount;
+        if (callbackCount == 6)
+            calledAllCallbacks = true;
+    }];
+    [webView _getContentsAsStringWithCompletionHandler:^(NSString *contents, NSError *error) {
+        if (!!error)
+            EXPECT_TRUE(error.code == WKErrorWebContentProcessTerminated || error.code == WKErrorWebViewInvalidated);
+        ++callbackCount;
+        if (callbackCount == 6)
+            calledAllCallbacks = true;
+    }];
+    [webView _getContentsAsStringWithCompletionHandler:^(NSString *contents, NSError *error) {
+        if (!!error)
+            EXPECT_TRUE(error.code == WKErrorWebContentProcessTerminated || error.code == WKErrorWebViewInvalidated);
+        ++callbackCount;
+        if (callbackCount == 6)
+            calledAllCallbacks = true;
+    }];
+
+    // Simulate a crash, which should invalidate all pending callbacks.
+    [webView _killWebContentProcess];
+
+    TestWebKitAPI::Util::run(&calledAllCallbacks);
+    TestWebKitAPI::Util::sleep(0.5);
+    EXPECT_EQ(6U, callbackCount);
+}

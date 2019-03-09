@@ -40,10 +40,14 @@ public:
     RenderIFrame* renderer() const;
     const String& allow() const { return m_allow; }
 
+    void setReferrerPolicyForBindings(const AtomicString&);
+    String referrerPolicyForBindings() const;
+    ReferrerPolicy referrerPolicy() const final;
+
 private:
     HTMLIFrameElement(const QualifiedName&, Document&);
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
     bool isKeyboardFocusable(KeyboardEvent*) const final { return false; }
 #endif
 

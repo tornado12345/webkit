@@ -33,22 +33,21 @@
 #include <WebCore/SQLiteDatabaseTracker.h>
 #include <wtf/MainThread.h>
 
+namespace WebKit {
 using namespace WebCore;
 
-namespace WebKit {
-
-WebSQLiteDatabaseTracker::WebSQLiteDatabaseTracker(NetworkProcess& process)
+WebSQLiteDatabaseTracker::WebSQLiteDatabaseTracker(WebProcess& process)
     : m_process(process)
+    , m_processType(AuxiliaryProcess::ProcessType::WebContent)
     , m_hysteresis([this](PAL::HysteresisState state) { hysteresisUpdated(state); })
-    , m_childProcessType(ChildProcessType::Network)
 {
     SQLiteDatabaseTracker::setClient(this);
 }
 
-WebSQLiteDatabaseTracker::WebSQLiteDatabaseTracker(WebProcess& process)
+WebSQLiteDatabaseTracker::WebSQLiteDatabaseTracker(NetworkProcess& process)
     : m_process(process)
+    , m_processType(AuxiliaryProcess::ProcessType::Network)
     , m_hysteresis([this](PAL::HysteresisState state) { hysteresisUpdated(state); })
-    , m_childProcessType(ChildProcessType::WebContent)
 {
     SQLiteDatabaseTracker::setClient(this);
 }
@@ -69,13 +68,15 @@ void WebSQLiteDatabaseTracker::didFinishLastTransaction()
 
 void WebSQLiteDatabaseTracker::hysteresisUpdated(PAL::HysteresisState state)
 {
-    switch (m_childProcessType) {
-    case ChildProcessType::WebContent:
+    switch (m_processType) {
+    case AuxiliaryProcess::ProcessType::WebContent:
         m_process.parentProcessConnection()->send(Messages::WebProcessProxy::SetIsHoldingLockedFiles(state == PAL::HysteresisState::Started), 0);
         break;
-    case ChildProcessType::Network:
+    case AuxiliaryProcess::ProcessType::Network:
         m_process.parentProcessConnection()->send(Messages::NetworkProcessProxy::SetIsHoldingLockedFiles(state == PAL::HysteresisState::Started), 0);
         break;
+    default:
+        ASSERT_NOT_REACHED();
     }
 }
 

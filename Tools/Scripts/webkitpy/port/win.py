@@ -110,7 +110,7 @@ class WinPort(ApplePort):
         actual_text = delegate_regexp.sub("", actual_text)
         return expected_text != actual_text
 
-    def default_baseline_search_path(self):
+    def default_baseline_search_path(self, **kwargs):
         version_name_map = VersionNameMap.map(self.host.platform)
         if self._os_version < self.VERSION_MIN or self._os_version > self.VERSION_MAX:
             fallback_versions = [self._os_version]
@@ -212,7 +212,12 @@ class WinPort(ApplePort):
 
         return self._build_path('ImageDiff.exe')
 
-    def test_search_path(self):
+    API_TEST_BINARY_NAMES = ['TestWTF.exe', 'TestWebCore.exe', 'TestWebKitLegacy.exe']
+
+    def path_to_api_test_binaries(self):
+        return {binary.split('.')[0]: self._build_path(binary) for binary in self.API_TEST_BINARY_NAMES}
+
+    def test_search_path(self, **kwargs):
         test_fallback_names = [path for path in self.baseline_search_path() if not path.startswith(self._webkit_baseline_path('mac'))]
         return map(self._webkit_baseline_path, test_fallback_names)
 
@@ -390,13 +395,13 @@ class WinPort(ApplePort):
         except:
             _log.warn("Failed to delete preference files.")
 
-    def setup_test_run(self, device_class=None):
+    def setup_test_run(self, device_type=None):
         atexit.register(self.restore_crash_log_saving)
         self.setup_crash_log_saving()
         self.prevent_error_dialogs()
         self.delete_sem_locks()
         self.delete_preference_files()
-        super(WinPort, self).setup_test_run(device_class)
+        super(WinPort, self).setup_test_run(device_type)
 
     def clean_up_test_run(self):
         self.allow_error_dialogs()
@@ -452,27 +457,8 @@ class WinPort(ApplePort):
                 crash_logs[test_name] = crash_log
         return crash_logs
 
-
-class WinCairoPort(WinPort):
-    port_name = "wincairo"
-
-    DEFAULT_ARCHITECTURE = 'x86_64'
-
-    TEST_PATH_SEPARATOR = os.sep
-
-    def default_baseline_search_path(self):
-        version_name_map = VersionNameMap.map(self.host.platform)
-        if self._os_version < self.VERSION_MIN or self._os_version > self.VERSION_MAX:
-            fallback_versions = [self._os_version]
-        else:
-            sorted_versions = sorted(version_name_map.mapping_for_platform(platform=self.port_name).values())
-            fallback_versions = sorted_versions[sorted_versions.index(self._os_version):]
-        fallback_names = ['wincairo-' + version_name_map.to_name(version, platform=self.port_name).lower().replace(' ', '') for version in fallback_versions]
-        fallback_names.append('wincairo')
-        return map(self._webkit_baseline_path, fallback_names)
-
     def check_httpd(self):
-        if not super(WinCairoPort, self).check_httpd():
+        if not super(WinPort, self).check_httpd():
             return False
 
         path = self._path_to_apache()
@@ -482,7 +468,44 @@ class WinCairoPort(WinPort):
         # To launch Apache as a daemon, service installation is required.
         exit_code = self._executive.run_command([path, '-k', 'install', '-T'], return_exit_code=True)
         # 0=success, 2=already installed, 720005=permission error, etc.
-        if exit_code == 0 or exit_code == 2:
-            return True
-        _log.error('Httpd cannot run as a service. Perhaps you forgot to log in as an adminstrator user? (exit code=%s)' % exit_code)
-        return False
+        if exit_code not in (0, 2):
+            _log.error('Could not install httpd as a service. Perhaps you forgot to run as adminstrator? (exit code={})'.format(exit_code))
+            return False
+
+        return True
+
+
+class WinCairoPort(WinPort):
+    port_name = "wincairo"
+
+    DEFAULT_ARCHITECTURE = 'x86_64'
+
+    def default_baseline_search_path(self, **kwargs):
+        return map(self._webkit_baseline_path, self._search_paths())
+
+    def _port_specific_expectations_files(self, **kwargs):
+        return map(lambda x: self._filesystem.join(self._webkit_baseline_path(x), 'TestExpectations'), reversed(self._search_paths()))
+
+    def _search_paths(self):
+        paths = []
+        version_name_map = VersionNameMap.map(self.host.platform)
+        if self._os_version < self.VERSION_MIN or self._os_version > self.VERSION_MAX:
+            versions = [self._os_version]
+        else:
+            sorted_versions = sorted(version_name_map.mapping_for_platform(platform=self.port_name).values())
+            versions = sorted_versions[sorted_versions.index(self._os_version):]
+
+        normalize = lambda version: version.lower().replace(' ', '')
+        to_name = lambda version: version_name_map.to_name(version, platform=self.port_name)
+
+        wk_version = 'wk2' if self.get_option('webkit_test_runner') else 'wk1'
+
+        for version in versions:
+            name = self.port_name + '-' + normalize(to_name(version))
+            paths.append(name + '-' + wk_version)
+            paths.append(name)
+
+        paths.append(self.port_name + '-' + wk_version)
+        paths.append(self.port_name)
+
+        return paths

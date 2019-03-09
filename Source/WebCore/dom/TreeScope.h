@@ -26,7 +26,7 @@
 
 #pragma once
 
-#include "DocumentOrderedMap.h"
+#include "TreeScopeOrderedMap.h"
 #include <memory>
 #include <wtf/Forward.h>
 #include <wtf/Vector.h>
@@ -76,7 +76,7 @@ public:
     // https://dom.spec.whatwg.org/#retarget
     Node& retargetToScope(Node&) const;
 
-    Node* ancestorNodeInThisScope(Node*) const;
+    WEBCORE_EXPORT Node* ancestorNodeInThisScope(Node*) const;
     WEBCORE_EXPORT Element* ancestorElementInThisScope(Element*) const;
 
     void addImageMap(HTMLMapElement&);
@@ -126,11 +126,11 @@ private:
     std::reference_wrapper<Document> m_documentScope;
     TreeScope* m_parentTreeScope;
 
-    std::unique_ptr<DocumentOrderedMap> m_elementsById;
-    std::unique_ptr<DocumentOrderedMap> m_elementsByName;
-    std::unique_ptr<DocumentOrderedMap> m_imageMapsByName;
-    std::unique_ptr<DocumentOrderedMap> m_imagesByUsemap;
-    std::unique_ptr<DocumentOrderedMap> m_labelsByForAttribute;
+    std::unique_ptr<TreeScopeOrderedMap> m_elementsById;
+    std::unique_ptr<TreeScopeOrderedMap> m_elementsByName;
+    std::unique_ptr<TreeScopeOrderedMap> m_imageMapsByName;
+    std::unique_ptr<TreeScopeOrderedMap> m_imagesByUsemap;
+    std::unique_ptr<TreeScopeOrderedMap> m_labelsByForAttribute;
 
     std::unique_ptr<IdTargetObserverRegistry> m_idTargetObserverRegistry;
 };

@@ -26,6 +26,7 @@
 #include "config.h"
 #include "AbstractDOMWindow.h"
 
+#include "HTTPParsers.h"
 #include <wtf/NeverDestroyed.h>
 
 namespace WebCore {

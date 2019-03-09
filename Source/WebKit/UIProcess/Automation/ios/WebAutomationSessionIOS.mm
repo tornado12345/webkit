@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017, 2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,18 +26,19 @@
 #import "config.h"
 #import "WebAutomationSession.h"
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 #import "NativeWebKeyboardEvent.h"
 #import "WebAutomationSessionMacros.h"
 #import "WebPageProxy.h"
+#import "_WKTouchEventGenerator.h"
 #import <WebCore/KeyEventCodesIOS.h>
 #import <WebCore/NotImplemented.h>
 #import <WebCore/WebEvent.h>
-
-using namespace WebCore;
+#import <wtf/BlockPtr.h>
 
 namespace WebKit {
+using namespace WebCore;
 
 void WebAutomationSession::sendSynthesizedEventsToPage(WebPageProxy& page, NSArray *eventsToSend)
 {
@@ -65,49 +66,49 @@ void WebAutomationSession::sendSynthesizedEventsToPage(WebPageProxy& page, NSArr
 
 #pragma mark Commands for Platform: 'iOS'
 
-void WebAutomationSession::platformSimulateKeyboardInteraction(WebPageProxy& page, KeyboardInteraction interaction, std::optional<VirtualKey> virtualKey, std::optional<CharKey> charKey)
+#if ENABLE(WEBDRIVER_KEYBOARD_INTERACTIONS)
+void WebAutomationSession::platformSimulateKeyboardInteraction(WebPageProxy& page, KeyboardInteraction interaction, WTF::Variant<VirtualKey, CharKey>&& key)
 {
-    ASSERT(virtualKey.has_value() || charKey.has_value());
-
     // The modifiers changed by the virtual key when it is pressed or released.
     WebEventFlags changedModifiers = 0;
 
     // UIKit does not send key codes for virtual keys even for a hardware keyboard.
     // Instead, it sends single unichars and WebCore maps these to "windows" key codes.
     // Synthesize a single unichar such that the correct key code is inferred.
-    std::optional<unichar> charCode;
-    std::optional<unichar> charCodeIgnoringModifiers;
+    Optional<unichar> charCode;
+    Optional<unichar> charCodeIgnoringModifiers;
 
     // Figure out the effects of sticky modifiers.
-    if (virtualKey.has_value()) {
-        charCode = charCodeForVirtualKey(virtualKey.value());
-        charCodeIgnoringModifiers = charCodeIgnoringModifiersForVirtualKey(virtualKey.value());
+    WTF::switchOn(key,
+        [&] (VirtualKey virtualKey) {
+            charCode = charCodeForVirtualKey(virtualKey);
+            charCodeIgnoringModifiers = charCodeIgnoringModifiersForVirtualKey(virtualKey);
 
-        switch (virtualKey.value()) {
-        case VirtualKey::Shift:
-            changedModifiers |= WebEventFlagMaskShift;
-            break;
-        case VirtualKey::Control:
-            changedModifiers |= WebEventFlagMaskControl;
-            break;
-        case VirtualKey::Alternate:
-            changedModifiers |= WebEventFlagMaskAlternate;
-            break;
-        case VirtualKey::Meta:
-            // The 'meta' key does not exist on Apple keyboards and is usually
-            // mapped to the Command key when using third-party keyboards.
-        case VirtualKey::Command:
-            changedModifiers |= WebEventFlagMaskCommand;
-            break;
-        default:
-            break;
+            switch (virtualKey) {
+            case VirtualKey::Shift:
+                changedModifiers |= WebEventFlagMaskShiftKey;
+                break;
+            case VirtualKey::Control:
+                changedModifiers |= WebEventFlagMaskControlKey;
+                break;
+            case VirtualKey::Alternate:
+                changedModifiers |= WebEventFlagMaskOptionKey;
+                break;
+            case VirtualKey::Meta:
+                // The 'meta' key does not exist on Apple keyboards and is usually
+                // mapped to the Command key when using third-party keyboards.
+            case VirtualKey::Command:
+                changedModifiers |= WebEventFlagMaskCommandKey;
+                break;
+            default:
+                break;
+            }
+        },
+        [&] (CharKey charKey) {
+            charCode = (unichar)charKey;
+            charCodeIgnoringModifiers = (unichar)charKey;
         }
-    }
-
-    if (charKey.has_value()) {
-        charCode = (unichar)charKey.value();
-        charCodeIgnoringModifiers = (unichar)charKey.value();
-    }
+    );
 
     // FIXME: consider using UIKit SPI to normalize 'characters', i.e., changing * to Shift-8,
     // and passing that in to charactersIgnoringModifiers. This is probably not worth the trouble
@@ -163,13 +164,40 @@ void WebAutomationSession::platformSimulateKeySequence(WebPageProxy& page, const
     BOOL isTabKey = [text isEqualToString:@"\t"];
 
     [text enumerateSubstringsInRange:NSMakeRange(0, text.length) options:NSStringEnumerationByComposedCharacterSequences usingBlock:^(NSString *substring, NSRange substringRange, NSRange enclosingRange, BOOL *stop) {
-        [eventsToBeSent addObject:[[::WebEvent alloc] initWithKeyEventType:WebEventKeyDown timeStamp:CFAbsoluteTimeGetCurrent() characters:substring charactersIgnoringModifiers:substring modifiers:m_currentModifiers isRepeating:NO withFlags:0 withInputManagerHint:nil keyCode:0 isTabKey:isTabKey]];
-        [eventsToBeSent addObject:[[::WebEvent alloc] initWithKeyEventType:WebEventKeyUp timeStamp:CFAbsoluteTimeGetCurrent() characters:substring charactersIgnoringModifiers:substring modifiers:m_currentModifiers isRepeating:NO withFlags:0 withInputManagerHint:nil keyCode:0 isTabKey:isTabKey]];
+        auto keyDownEvent = adoptNS([[::WebEvent alloc] initWithKeyEventType:WebEventKeyDown timeStamp:CFAbsoluteTimeGetCurrent() characters:substring charactersIgnoringModifiers:substring modifiers:m_currentModifiers isRepeating:NO withFlags:0 withInputManagerHint:nil keyCode:0 isTabKey:isTabKey]);
+        [eventsToBeSent addObject:keyDownEvent.get()];
+        auto keyUpEvent = adoptNS([[::WebEvent alloc] initWithKeyEventType:WebEventKeyUp timeStamp:CFAbsoluteTimeGetCurrent() characters:substring charactersIgnoringModifiers:substring modifiers:m_currentModifiers isRepeating:NO withFlags:0 withInputManagerHint:nil keyCode:0 isTabKey:isTabKey]);
+        [eventsToBeSent addObject:keyUpEvent.get()];
     }];
 
     sendSynthesizedEventsToPage(page, eventsToBeSent.get());
 }
+#endif // ENABLE(WEBDRIVER_KEYBOARD_INTERACTIONS)
+
+#if ENABLE(WEBDRIVER_TOUCH_INTERACTIONS)
+void WebAutomationSession::platformSimulateTouchInteraction(WebPageProxy& page, TouchInteraction interaction, const WebCore::IntPoint& locationInViewport, Optional<Seconds> duration, AutomationCompletionHandler&& completionHandler)
+{
+    WebCore::IntPoint locationOnScreen = page.syncRootViewToScreen(IntRect(locationInViewport, IntSize())).location();
+    _WKTouchEventGenerator *generator = [_WKTouchEventGenerator sharedTouchEventGenerator];
+
+    auto interactionFinished = makeBlockPtr([completionHandler = WTFMove(completionHandler)] () mutable {
+        completionHandler(WTF::nullopt);
+    });
+    
+    switch (interaction) {
+    case TouchInteraction::TouchDown:
+        [generator touchDown:locationOnScreen completionBlock:interactionFinished.get()];
+        break;
+    case TouchInteraction::LiftUp:
+        [generator liftUp:locationOnScreen completionBlock:interactionFinished.get()];
+        break;
+    case TouchInteraction::MoveTo:
+        [generator moveToPoint:locationOnScreen duration:duration.valueOr(0_s).seconds() completionBlock:interactionFinished.get()];
+        break;
+    }
+}
+#endif // ENABLE(WEBDRIVER_TOUCH_INTERACTIONS)
 
 } // namespace WebKit
 
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)

@@ -42,7 +42,7 @@ const Vector<PluginInfo>& PluginData::webVisiblePlugins() const
     auto documentURL = m_page.mainFrame().document() ? m_page.mainFrame().document()->url() : URL { };
     if (!documentURL.isNull() && !protocolHostAndPortAreEqual(m_cachedVisiblePlugins.pageURL, documentURL)) {
         m_cachedVisiblePlugins.pageURL = WTFMove(documentURL);
-        m_cachedVisiblePlugins.pluginList = std::nullopt;
+        m_cachedVisiblePlugins.pluginList = WTF::nullopt;
     }
 
     if (!m_cachedVisiblePlugins.pluginList)
@@ -52,9 +52,9 @@ const Vector<PluginInfo>& PluginData::webVisiblePlugins() const
 }
 
 #if PLATFORM(COCOA)
-static inline bool isBuiltInPDFPlugIn(const PluginInfo& plugIn)
+static inline bool isBuiltInPDFPlugIn(const PluginInfo& plugin)
 {
-    return plugIn.name == builtInPDFPluginName();
+    return equalLettersIgnoringASCIICase(plugin.bundleIdentifier, "com.apple.webkit.builtinpdfplugin");
 }
 #else
 static inline bool isBuiltInPDFPlugIn(const PluginInfo&)
@@ -124,6 +124,8 @@ bool PluginData::supportsWebVisibleMimeTypeForURL(const String& mimeType, const 
 {
     if (!protocolHostAndPortAreEqual(m_cachedVisiblePlugins.pageURL, url))
         m_cachedVisiblePlugins = { url, m_page.pluginInfoProvider().webVisiblePluginInfo(m_page, url) };
+    if (!m_cachedVisiblePlugins.pluginList)
+        return false;
     return supportsWebVisibleMimeType(mimeType, allowedPluginTypes, *m_cachedVisiblePlugins.pluginList);
 }
 
@@ -190,7 +192,7 @@ void PluginData::initPlugins()
 {
     ASSERT(m_plugins.isEmpty());
 
-    m_plugins = m_page.pluginInfoProvider().pluginInfo(m_page, m_supportedPluginNames);
+    m_plugins = m_page.pluginInfoProvider().pluginInfo(m_page, m_supportedPluginIdentifiers);
 }
 
 } // namespace WebCore

@@ -46,10 +46,6 @@ ScrollingStateFrameScrollingNode::ScrollingStateFrameScrollingNode(ScrollingStat
 
 ScrollingStateFrameScrollingNode::ScrollingStateFrameScrollingNode(const ScrollingStateFrameScrollingNode& stateNode, ScrollingStateTree& adoptiveTree)
     : ScrollingStateScrollingNode(stateNode, adoptiveTree)
-#if PLATFORM(MAC)
-    , m_verticalScrollerImp(stateNode.verticalScrollerImp())
-    , m_horizontalScrollerImp(stateNode.horizontalScrollerImp())
-#endif
     , m_eventTrackingRegions(stateNode.eventTrackingRegions())
     , m_requestedScrollPosition(stateNode.requestedScrollPosition())
     , m_layoutViewport(stateNode.layoutViewport())
@@ -63,8 +59,11 @@ ScrollingStateFrameScrollingNode::ScrollingStateFrameScrollingNode(const Scrolli
     , m_behaviorForFixed(stateNode.scrollBehaviorForFixedElements())
     , m_requestedScrollPositionRepresentsProgrammaticScroll(stateNode.requestedScrollPositionRepresentsProgrammaticScroll())
     , m_fixedElementsLayoutRelativeToFrame(stateNode.fixedElementsLayoutRelativeToFrame())
-    , m_visualViewportEnabled(stateNode.visualViewportEnabled())
+    , m_asyncFrameOrOverflowScrollingEnabled(stateNode.asyncFrameOrOverflowScrollingEnabled())
 {
+    if (hasChangedProperty(RootContentsLayer))
+        setRootContentsLayer(stateNode.rootContentsLayer().toRepresentation(adoptiveTree.preferredLayerRepresentation()));
+
     if (hasChangedProperty(CounterScrollingLayer))
         setCounterScrollingLayer(stateNode.counterScrollingLayer().toRepresentation(adoptiveTree.preferredLayerRepresentation()));
 
@@ -86,6 +85,31 @@ ScrollingStateFrameScrollingNode::~ScrollingStateFrameScrollingNode() = default;
 Ref<ScrollingStateNode> ScrollingStateFrameScrollingNode::clone(ScrollingStateTree& adoptiveTree)
 {
     return adoptRef(*new ScrollingStateFrameScrollingNode(*this, adoptiveTree));
+}
+
+void ScrollingStateFrameScrollingNode::setAllPropertiesChanged()
+{
+    setPropertyChangedBit(FrameScaleFactor);
+    setPropertyChangedBit(EventTrackingRegion);
+    setPropertyChangedBit(ReasonsForSynchronousScrolling);
+    setPropertyChangedBit(RootContentsLayer);
+    setPropertyChangedBit(ScrolledContentsLayer);
+    setPropertyChangedBit(CounterScrollingLayer);
+    setPropertyChangedBit(InsetClipLayer);
+    setPropertyChangedBit(ContentShadowLayer);
+    setPropertyChangedBit(HeaderHeight);
+    setPropertyChangedBit(FooterHeight);
+    setPropertyChangedBit(HeaderLayer);
+    setPropertyChangedBit(FooterLayer);
+    setPropertyChangedBit(BehaviorForFixedElements);
+    setPropertyChangedBit(TopContentInset);
+    setPropertyChangedBit(FixedElementsLayoutRelativeToFrame);
+    setPropertyChangedBit(AsyncFrameOrOverflowScrollingEnabled);
+    setPropertyChangedBit(LayoutViewport);
+    setPropertyChangedBit(MinLayoutViewportOrigin);
+    setPropertyChangedBit(MaxLayoutViewportOrigin);
+
+    ScrollingStateScrollingNode::setAllPropertiesChanged();
 }
 
 void ScrollingStateFrameScrollingNode::setFrameScaleFactor(float scaleFactor)
@@ -179,6 +203,15 @@ void ScrollingStateFrameScrollingNode::setTopContentInset(float topContentInset)
     setPropertyChanged(TopContentInset);
 }
 
+void ScrollingStateFrameScrollingNode::setRootContentsLayer(const LayerRepresentation& layerRepresentation)
+{
+    if (layerRepresentation == m_rootContentsLayer)
+        return;
+
+    m_rootContentsLayer = layerRepresentation;
+    setPropertyChanged(RootContentsLayer);
+}
+
 void ScrollingStateFrameScrollingNode::setCounterScrollingLayer(const LayerRepresentation& layerRepresentation)
 {
     if (layerRepresentation == m_counterScrollingLayer)
@@ -233,21 +266,14 @@ void ScrollingStateFrameScrollingNode::setFixedElementsLayoutRelativeToFrame(boo
     setPropertyChanged(FixedElementsLayoutRelativeToFrame);
 }
 
-// Only needed while visual viewports are runtime-switchable.
-void ScrollingStateFrameScrollingNode::setVisualViewportEnabled(bool visualViewportEnabled)
+void ScrollingStateFrameScrollingNode::setAsyncFrameOrOverflowScrollingEnabled(bool enabled)
 {
-    if (visualViewportEnabled == m_visualViewportEnabled)
+    if (enabled == m_asyncFrameOrOverflowScrollingEnabled)
         return;
     
-    m_visualViewportEnabled = visualViewportEnabled;
-    setPropertyChanged(VisualViewportEnabled);
+    m_asyncFrameOrOverflowScrollingEnabled = enabled;
+    setPropertyChanged(AsyncFrameOrOverflowScrollingEnabled);
 }
-
-#if !PLATFORM(MAC)
-void ScrollingStateFrameScrollingNode::setScrollerImpsFromScrollbars(Scrollbar*, Scrollbar*)
-{
-}
-#endif
 
 void ScrollingStateFrameScrollingNode::dumpProperties(TextStream& ts, ScrollingStateTreeAsTextBehavior behavior) const
 {
@@ -256,6 +282,7 @@ void ScrollingStateFrameScrollingNode::dumpProperties(TextStream& ts, ScrollingS
     ScrollingStateScrollingNode::dumpProperties(ts, behavior);
     
     if (behavior & ScrollingStateTreeAsTextBehaviorIncludeLayerIDs) {
+        ts.dumpProperty("root contents layer ID", m_rootContentsLayer.layerID());
         ts.dumpProperty("counter scrolling layer ID", m_counterScrollingLayer.layerID());
         ts.dumpProperty("inset clip layer ID", m_insetClipLayer.layerID());
         ts.dumpProperty("content shadow layer ID", m_contentShadowLayer.layerID());
@@ -272,12 +299,9 @@ void ScrollingStateFrameScrollingNode::dumpProperties(TextStream& ts, ScrollingS
     if (m_footerHeight)
         ts.dumpProperty("footer height", m_footerHeight);
     
-    if (m_visualViewportEnabled) {
-        ts.dumpProperty("visual viewport enabled", m_visualViewportEnabled);
-        ts.dumpProperty("layout viewport", m_layoutViewport);
-        ts.dumpProperty("min layout viewport origin", m_minLayoutViewportOrigin);
-        ts.dumpProperty("max layout viewport origin", m_maxLayoutViewportOrigin);
-    }
+    ts.dumpProperty("layout viewport", m_layoutViewport);
+    ts.dumpProperty("min layout viewport origin", m_minLayoutViewportOrigin);
+    ts.dumpProperty("max layout viewport origin", m_maxLayoutViewportOrigin);
     
     if (m_behaviorForFixed == StickToViewportBounds)
         ts.dumpProperty("behavior for fixed", m_behaviorForFixed);

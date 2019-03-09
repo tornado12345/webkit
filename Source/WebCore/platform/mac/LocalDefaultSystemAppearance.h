@@ -38,12 +38,24 @@ namespace WebCore {
 // functions which call out into AppKit and rely on the current NSAppearance being set
 class LocalDefaultSystemAppearance {
     WTF_MAKE_NONCOPYABLE(LocalDefaultSystemAppearance);
+
 public:
-    LocalDefaultSystemAppearance(bool useSystemAppearance);
-    ~LocalDefaultSystemAppearance();
+    WEBCORE_EXPORT LocalDefaultSystemAppearance(bool useDarkAppearance);
+    WEBCORE_EXPORT ~LocalDefaultSystemAppearance();
+
+    bool usingDarkAppearance() const
+    {
+#if HAVE(OS_DARK_MODE_SUPPORT)
+        return m_usingDarkAppearance;
+#else
+        return false;
+#endif
+    }
+
 private:
-#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 101400
+#if HAVE(OS_DARK_MODE_SUPPORT)
     RetainPtr<NSAppearance> m_savedSystemAppearance;
+    bool m_usingDarkAppearance { false };
 #endif
 };
     

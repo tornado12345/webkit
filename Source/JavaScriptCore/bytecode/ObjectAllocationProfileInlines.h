@@ -65,7 +65,7 @@ ALWAYS_INLINE void ObjectAllocationProfile::initializeProfile(VM& vm, JSGlobalOb
         if (Options::forcePolyProto())
             isPolyProto = true;
         else
-            isPolyProto = executable->ensurePolyProtoWatchpoint().hasBeenInvalidated() && executable->singletonFunction()->hasBeenInvalidated();
+            isPolyProto = executable->ensurePolyProtoWatchpoint().hasBeenInvalidated() && executable->singletonFunctionHasBeenInvalidated();
     }
 
     unsigned inlineCapacity = 0;
@@ -105,7 +105,7 @@ ALWAYS_INLINE void ObjectAllocationProfile::initializeProfile(VM& vm, JSGlobalOb
 
     // Take advantage of extra inline capacity available in the size class.
     if (allocator) {
-        size_t slop = (allocator.cellSize(vm.heap) - allocationSize) / sizeof(WriteBarrier<Unknown>);
+        size_t slop = (allocator.cellSize() - allocationSize) / sizeof(WriteBarrier<Unknown>);
         inlineCapacity += slop;
         if (inlineCapacity > JSFinalObject::maxInlineCapacity())
             inlineCapacity = JSFinalObject::maxInlineCapacity();
@@ -144,12 +144,12 @@ ALWAYS_INLINE void ObjectAllocationProfile::initializeProfile(VM& vm, JSGlobalOb
 
 ALWAYS_INLINE unsigned ObjectAllocationProfile::possibleDefaultPropertyCount(VM& vm, JSObject* prototype)
 {
-    if (prototype == prototype->globalObject()->objectPrototype())
+    if (prototype == prototype->globalObject(vm)->objectPrototype())
         return 0;
 
     size_t count = 0;
     PropertyNameArray propertyNameArray(&vm, PropertyNameMode::StringsAndSymbols, PrivateSymbolMode::Include);
-    prototype->structure()->getPropertyNamesFromStructure(vm, propertyNameArray, EnumerationMode());
+    prototype->structure(vm)->getPropertyNamesFromStructure(vm, propertyNameArray, EnumerationMode());
     PropertyNameArrayData::PropertyNameVector& propertyNameVector = propertyNameArray.data()->propertyNameVector();
     for (size_t i = 0; i < propertyNameVector.size(); ++i) {
         JSValue value = prototype->getDirect(vm, propertyNameVector[i]);

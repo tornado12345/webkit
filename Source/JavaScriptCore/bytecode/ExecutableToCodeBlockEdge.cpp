@@ -44,10 +44,18 @@ ExecutableToCodeBlockEdge* ExecutableToCodeBlockEdge::create(VM& vm, CodeBlock* 
     return result;
 }
 
+void ExecutableToCodeBlockEdge::finishCreation(VM& vm)
+{
+    Base::finishCreation(vm);
+    ASSERT(!isActive());
+}
+
 void ExecutableToCodeBlockEdge::visitChildren(JSCell* cell, SlotVisitor& visitor)
 {
     VM& vm = visitor.vm();
     ExecutableToCodeBlockEdge* edge = jsCast<ExecutableToCodeBlockEdge*>(cell);
+    Base::visitChildren(cell, visitor);
+
     CodeBlock* codeBlock = edge->m_codeBlock.get();
     
     // It's possible for someone to hold a pointer to the edge after the edge has cleared its weak
@@ -57,7 +65,7 @@ void ExecutableToCodeBlockEdge::visitChildren(JSCell* cell, SlotVisitor& visitor
     if (!codeBlock)
         return;
     
-    if (!edge->m_isActive) {
+    if (!edge->isActive()) {
         visitor.appendUnbarriered(codeBlock);
         return;
     }
@@ -129,14 +137,19 @@ void ExecutableToCodeBlockEdge::finalizeUnconditionally(VM& vm)
     vm.executableToCodeBlockEdgesWithConstraints.remove(this);
 }
 
-void ExecutableToCodeBlockEdge::activate()
+inline void ExecutableToCodeBlockEdge::activate()
 {
-    m_isActive = true;
+    setPerCellBit(true);
 }
 
-void ExecutableToCodeBlockEdge::deactivate()
+inline void ExecutableToCodeBlockEdge::deactivate()
 {
-    m_isActive = false;
+    setPerCellBit(false);
+}
+
+inline bool ExecutableToCodeBlockEdge::isActive() const
+{
+    return perCellBit();
 }
 
 CodeBlock* ExecutableToCodeBlockEdge::deactivateAndUnwrap(ExecutableToCodeBlockEdge* edge)

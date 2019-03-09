@@ -160,6 +160,14 @@ class DeleteStaleBuildFiles(shell.Compile):
         return shell.Compile.start(self)
 
 
+class InstallWinCairoDependencies(shell.ShellCommand):
+    name = 'wincairo-requirements'
+    description = ['updating wincairo dependencies']
+    descriptionDone = ['updated wincairo dependencies']
+    command = ['python', './Tools/Scripts/update-webkit-wincairo-libs.py']
+    haltOnFailure = True
+
+
 class InstallGtkDependencies(shell.ShellCommand):
     name = "jhbuild"
     description = ["updating gtk dependencies"]
@@ -359,7 +367,7 @@ class RunTest262Tests(TestWithFailureCount):
     description = ["test262-tests running"]
     descriptionDone = ["test262-tests"]
     failedTestsFormatString = "%d Test262 test%s failed"
-    command = ["ruby", "./Tools/Scripts/run-jsc-stress-tests", WithProperties("--%(configuration)s"), "JSTests/test262.yaml"]
+    command = ["perl", "./Tools/Scripts/test262-runner", "--verbose", WithProperties("--%(configuration)s")]
 
     def start(self):
         appendCustomBuildFlags(self, self.getProperty('platform'), self.getProperty('fullPlatform'))
@@ -367,7 +375,7 @@ class RunTest262Tests(TestWithFailureCount):
 
     def countFailures(self, cmd):
         logText = cmd.logs['stdio'].getText()
-        matches = re.findall(r'^FAIL:', logText, flags=re.MULTILINE)
+        matches = re.findall(r'^\! NEW FAIL', logText, flags=re.MULTILINE)
         if matches:
             return len(matches)
         return 0
@@ -382,6 +390,7 @@ class RunWebKitTests(shell.Test):
                "--no-build",
                "--no-show-results",
                "--no-new-test-results",
+               "--clobber-old-results",
                "--builder-name", WithProperties("%(buildername)s"),
                "--build-number", WithProperties("%(buildnumber)s"),
                "--master-name", "webkit.org",
@@ -494,12 +503,12 @@ class RunDashboardTests(RunWebKitTests):
         return RunWebKitTests.start(self)
 
 
-class RunUnitTests(TestWithFailureCount):
+class RunAPITests(TestWithFailureCount):
     name = "run-api-tests"
-    description = ["unit tests running"]
-    descriptionDone = ["unit-tests"]
+    description = ["api tests running"]
+    descriptionDone = ["api-tests"]
     command = ["python", "./Tools/Scripts/run-api-tests", "--no-build", WithProperties("--%(configuration)s"), "--verbose"]
-    failedTestsFormatString = "%d unit test%s failed or timed out"
+    failedTestsFormatString = "%d api test%s failed or timed out"
 
     def start(self):
         appendCustomBuildFlags(self, self.getProperty('platform'), self.getProperty('fullPlatform'))
@@ -518,7 +527,7 @@ class RunPythonTests(TestWithFailureCount):
     name = "webkitpy-test"
     description = ["python-tests running"]
     descriptionDone = ["python-tests"]
-    command = ["python", "./Tools/Scripts/test-webkitpy", "--verbose"]
+    command = ["python", "./Tools/Scripts/test-webkitpy", "--verbose", WithProperties("--%(configuration)s")]
     failedTestsFormatString = "%d python test%s failed"
 
     def start(self):
@@ -590,7 +599,7 @@ class Run32bitJSCTests(TestWithFailureCount):
     description = ["32bit-jsc-tests running"]
     descriptionDone = ["32bit-jsc-tests"]
     jsonFileName = "jsc_32bit.json"
-    command = ["perl", "./Tools/Scripts/run-javascriptcore-tests", "--32-bit", "--no-build", "--no-fail-fast", "--json-output={0}".format(jsonFileName), WithProperties("--%(configuration)s")]
+    command = ["perl", "./Tools/Scripts/run-javascriptcore-tests", "--32-bit", "--no-build", "--no-fail-fast", "--no-jit", "--no-testair", "--no-testb3", "--no-testmasm", "--json-output={0}".format(jsonFileName), WithProperties("--%(configuration)s")]
     failedTestsFormatString = "%d regression%s found."
     logfiles = {"json": jsonFileName}
 
@@ -817,11 +826,9 @@ class RunBenchmarkTests(shell.Test):
     name = "benchmark-test"
     description = ["benchmark tests running"]
     descriptionDone = ["benchmark tests"]
-    # Buildbot default timeout without output for a step is 1200.
-    # The current maximum timeout for a benchmark plan is also 1200.
-    # So raise the buildbot timeout to avoid aborting this whole step when a test timeouts.
-    timeout = 1500
-    command = ["python", "./Tools/Scripts/run-benchmark", "--allplans"]
+    command = ["python", "./Tools/Scripts/browserperfdash-benchmark", "--allplans",
+               "--config-file", "../../browserperfdash-benchmark-config.txt",
+               "--browser-version", WithProperties("r%(got_revision)s")]
 
     def start(self):
         platform = self.getProperty("platform")

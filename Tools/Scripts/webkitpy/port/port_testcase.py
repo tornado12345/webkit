@@ -70,7 +70,7 @@ class TestWebKitPort(Port):
     def _symbols_string(self):
         return self.symbols_string
 
-    def _tests_for_other_platforms(self):
+    def _tests_for_other_platforms(self, **kwargs):
         return ["media", ]
 
     def _tests_for_disabled_features(self):
@@ -168,7 +168,7 @@ class PortTestCase(unittest.TestCase):
     def integration_test_check_sys_deps(self):
         port = self.make_port()
         # Only checking that no exception is raised.
-        port.check_sys_deps(True)
+        port.check_sys_deps()
 
     def integration_test_helper(self):
         port = self.make_port()
@@ -666,21 +666,26 @@ MOCK output of child process
             return True
 
         port._build_driver = build_driver_called
-        port.check_build(False)
+        port.check_build()
         self.assertTrue(self.build_called)
 
         port = self.make_port(options=MockOptions(root='/tmp', build=True))
         self.build_called = False
         port._build_driver = build_driver_called
-        port.check_build(False)
+        port.check_build()
         self.assertFalse(self.build_called, None)
 
         port = self.make_port(options=MockOptions(build=False))
         self.build_called = False
         port._build_driver = build_driver_called
-        port.check_build(False)
+        port.check_build()
         self.assertFalse(self.build_called, None)
 
     def test_additional_platform_directory(self):
         port = self.make_port(options=MockOptions(additional_platform_directory=['/tmp/foo']))
         self.assertEqual(port.baseline_search_path()[0], '/tmp/foo')
+
+    def test_max_child_processes(self):
+        port = self.make_port()
+        self.assertEqual(port.max_child_processes(True), 0)
+        self.assertEqual(port.max_child_processes(), float('inf'))

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -37,7 +37,7 @@
 #include "DFGVariableAccessDataDump.h"
 #include "JSCInlines.h"
 #include "MathCommon.h"
-#include "RegExpConstructor.h"
+#include "RegExpObject.h"
 #include "StringPrototype.h"
 #include <cstdlib>
 #include <wtf/text/StringBuilder.h>
@@ -78,7 +78,7 @@ private:
     void handleNode()
     {
         switch (m_node->op()) {
-        case BitOr:
+        case ArithBitOr:
             handleCommutativity();
 
             if (m_node->child1().useKind() != UntypedUse && m_node->child2()->isInt32Constant() && !m_node->child2()->asInt32()) {
@@ -87,8 +87,8 @@ private:
             }
             break;
             
-        case BitXor:
-        case BitAnd:
+        case ArithBitXor:
+        case ArithBitAnd:
             handleCommutativity();
             break;
             
@@ -121,6 +121,15 @@ private:
             }
             break;
             
+        case ValueMul:
+        case ValueBitOr:
+        case ValueBitAnd:
+        case ValueBitXor: {
+            if (m_node->binaryUseKind() == BigIntUse)
+                handleCommutativity();
+            break;
+        }
+
         case ArithMul: {
             handleCommutativity();
             Edge& child2 = m_node->child2();
@@ -204,7 +213,7 @@ private:
             if (m_node->isBinaryUseKind(DoubleRepUse)
                 && m_node->child2()->isNumberConstant()) {
 
-                if (std::optional<double> reciprocal = safeReciprocalForDivByConst(m_node->child2()->asNumber())) {
+                if (Optional<double> reciprocal = safeReciprocalForDivByConst(m_node->child2()->asNumber())) {
                     Node* reciprocalNode = m_insertionSet.insertConstant(m_nodeIndex, m_node->origin, jsDoubleNumber(*reciprocal), DoubleConstant);
                     m_node->setOp(ArithMul);
                     m_node->child2() = Edge(reciprocalNode, DoubleRepUse);
@@ -303,7 +312,7 @@ private:
             break;
         }
 
-        // FIXME: we should probably do this in constant folding but this currently relies on an OSR exit rule.
+        // FIXME: we should probably do this in constant folding but this currently relies on OSR exit history:
         // https://bugs.webkit.org/show_bug.cgi?id=154832
         case OverridesHasInstance: {
             if (!m_node->child2().node()->isCellConstant())
@@ -343,11 +352,11 @@ private:
                     if (value.isNumber())
                         return String::numberToStringECMAScript(value.asNumber());
                     if (value.isBoolean())
-                        return value.asBoolean() ? ASCIILiteral("true") : ASCIILiteral("false");
+                        return value.asBoolean() ? "true"_s : "false"_s;
                     if (value.isNull())
-                        return ASCIILiteral("null");
+                        return "null"_s;
                     if (value.isUndefined())
-                        return ASCIILiteral("undefined");
+                        return "undefined"_s;
                     return String();
                 };
 
@@ -363,7 +372,12 @@ private:
                 builder.append(rightString);
                 convertToLazyJSValue(m_node, LazyJSValue::newString(m_graph, builder.toString()));
                 m_changed = true;
+                break;
             }
+
+            if (m_node->binaryUseKind() == BigIntUse)
+                handleCommutativity();
+
             break;
         }
 
@@ -452,7 +466,7 @@ private:
 
         case GetGlobalObject: {
             if (JSObject* object = m_node->child1()->dynamicCastConstant<JSObject*>(vm())) {
-                m_graph.convertToConstant(m_node, object->globalObject());
+                m_graph.convertToConstant(m_node, object->globalObject(vm()));
                 m_changed = true;
                 break;
             }
@@ -508,7 +522,7 @@ private:
                         m_insertionSet.insertConstantForUse(
                             m_nodeIndex, origin, jsNumber(0), UntypedUse));
                     origin = origin.withInvalidExit();
-                    m_node->convertToRegExpMatchFastGlobal(m_graph.freeze(regExp));
+                    m_node->convertToRegExpMatchFastGlobalWithoutChecks(m_graph.freeze(regExp));
                     m_node->origin = origin;
                     m_changed = true;
                     break;
@@ -606,8 +620,7 @@ private:
                 }
                 m_graph.registerStructure(structure);
 
-                RegExpConstructor* constructor = globalObject->regExpConstructor();
-                FrozenValue* constructorFrozenValue = m_graph.freeze(constructor);
+                FrozenValue* globalObjectFrozenValue = m_graph.freeze(globalObject);
 
                 MatchResult result;
                 Vector<int> ovector;
@@ -722,7 +735,7 @@ private:
                 } else
                     m_graph.convertToConstant(m_node, jsBoolean(!!result));
 
-                // Whether it's Exec or Test, we need to tell the constructor and RegExpObject what's up.
+                // Whether it's Exec or Test, we need to tell the globalObject and RegExpObject what's up.
                 // Because SetRegExpObjectLastIndex may exit and it clobbers exit state, we do that
                 // first.
 
@@ -742,7 +755,7 @@ private:
                     unsigned firstChild = m_graph.m_varArgChildren.size();
                     m_graph.m_varArgChildren.append(
                         m_insertionSet.insertConstantForUse(
-                            m_nodeIndex, origin, constructorFrozenValue, KnownCellUse));
+                            m_nodeIndex, origin, globalObjectFrozenValue, KnownCellUse));
                     m_graph.m_varArgChildren.append(
                         m_insertionSet.insertConstantForUse(
                             m_nodeIndex, origin, regExpFrozenValue, KnownCellUse));
@@ -774,7 +787,7 @@ private:
                 NodeOrigin origin = m_node->origin;
                 m_insertionSet.insertNode(
                     m_nodeIndex, SpecNone, Check, origin, m_node->children.justChecks());
-                m_node->convertToRegExpExecNonGlobalOrSticky(m_graph.freeze(regExp));
+                m_node->convertToRegExpExecNonGlobalOrStickyWithoutChecks(m_graph.freeze(regExp));
                 m_changed = true;
                 return true;
             };
@@ -842,8 +855,11 @@ private:
                 unsigned replLen = replace.length();
                 if (lastIndex < result.start || replLen) {
                     builder.append(string, lastIndex, result.start - lastIndex);
-                    if (replLen)
-                        builder.append(substituteBackreferences(replace, string, ovector.data(), regExp));
+                    if (replLen) {
+                        StringBuilder replacement;
+                        substituteBackreferences(replacement, replace, string, ovector.data(), regExp);
+                        builder.append(replacement);
+                    }
                 }
 
                 lastIndex = result.end;
@@ -898,15 +914,22 @@ private:
         case TailCall: {
             ExecutableBase* executable = nullptr;
             Edge callee = m_graph.varArgChild(m_node, 0);
-            if (JSFunction* function = callee->dynamicCastConstant<JSFunction*>(vm()))
+            CallVariant callVariant;
+            if (JSFunction* function = callee->dynamicCastConstant<JSFunction*>(vm())) {
                 executable = function->executable();
-            else if (callee->isFunctionAllocation())
+                callVariant = CallVariant(function);
+            } else if (callee->isFunctionAllocation()) {
                 executable = callee->castOperand<FunctionExecutable*>();
+                callVariant = CallVariant(executable);
+            }
             
             if (!executable)
                 break;
             
             if (FunctionExecutable* functionExecutable = jsDynamicCast<FunctionExecutable*>(vm(), executable)) {
+                if (m_node->op() == Construct && functionExecutable->constructAbility() == ConstructAbility::CannotConstruct)
+                    break;
+
                 // We need to update m_parameterSlots before we get to the backend, but we don't
                 // want to do too much of this.
                 unsigned numAllocatedArgs =
@@ -918,7 +941,9 @@ private:
                         Graph::parameterSlotsForArgCount(numAllocatedArgs));
                 }
             }
-            
+
+            m_graph.m_plan.recordedStatuses().addCallLinkStatus(m_node->origin.semantic, CallLinkStatus(callVariant));
+
             m_node->convertToDirectCall(m_graph.freeze(executable));
             m_changed = true;
             break;

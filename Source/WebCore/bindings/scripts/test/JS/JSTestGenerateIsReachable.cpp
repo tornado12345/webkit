@@ -29,9 +29,11 @@
 #include "JSDOMWrapperCache.h"
 #include "ScriptExecutionContext.h"
 #include <JavaScriptCore/FunctionPrototype.h>
+#include <JavaScriptCore/HeapSnapshotBuilder.h>
 #include <JavaScriptCore/JSCInlines.h>
 #include <wtf/GetPtr.h>
 #include <wtf/PointerPreparations.h>
+#include <wtf/URL.h>
 
 
 namespace WebCore {
@@ -79,7 +81,7 @@ template<> JSValue JSTestGenerateIsReachableConstructor::prototypeForStructure(J
 template<> void JSTestGenerateIsReachableConstructor::initializeProperties(VM& vm, JSDOMGlobalObject& globalObject)
 {
     putDirect(vm, vm.propertyNames->prototype, JSTestGenerateIsReachable::prototype(vm, globalObject), JSC::PropertyAttribute::DontDelete | JSC::PropertyAttribute::ReadOnly | JSC::PropertyAttribute::DontEnum);
-    putDirect(vm, vm.propertyNames->name, jsNontrivialString(&vm, String(ASCIILiteral("TestGenerateIsReachable"))), JSC::PropertyAttribute::ReadOnly | JSC::PropertyAttribute::DontEnum);
+    putDirect(vm, vm.propertyNames->name, jsNontrivialString(&vm, String("TestGenerateIsReachable"_s)), JSC::PropertyAttribute::ReadOnly | JSC::PropertyAttribute::DontEnum);
     putDirect(vm, vm.propertyNames->length, jsNumber(0), JSC::PropertyAttribute::ReadOnly | JSC::PropertyAttribute::DontEnum);
 }
 
@@ -99,11 +101,15 @@ void JSTestGenerateIsReachablePrototype::finishCreation(VM& vm)
 {
     Base::finishCreation(vm);
     reifyStaticProperties(vm, JSTestGenerateIsReachable::info(), JSTestGenerateIsReachablePrototypeTableValues, *this);
+    bool hasDisabledRuntimeProperties = false;
     if (!jsCast<JSDOMGlobalObject*>(globalObject())->scriptExecutionContext()->isSecureContext()) {
+        hasDisabledRuntimeProperties = true;
         auto propertyName = Identifier::fromString(&vm, reinterpret_cast<const LChar*>("aSecretAttribute"), strlen("aSecretAttribute"));
         VM::DeletePropertyModeScope scope(vm, VM::DeletePropertyMode::IgnoreConfigurable);
         JSObject::deleteProperty(this, globalObject()->globalExec(), propertyName);
     }
+    if (hasDisabledRuntimeProperties && structure()->isDictionary())
+        flattenDictionaryObject(vm);
 }
 
 const ClassInfo JSTestGenerateIsReachable::s_info = { "TestGenerateIsReachable", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(JSTestGenerateIsReachable) };
@@ -183,10 +189,21 @@ EncodedJSValue jsTestGenerateIsReachableASecretAttribute(ExecState* state, Encod
     return IDLAttribute<JSTestGenerateIsReachable>::get<jsTestGenerateIsReachableASecretAttributeGetter, CastedThisErrorBehavior::Assert>(*state, thisValue, "aSecretAttribute");
 }
 
-bool JSTestGenerateIsReachableOwner::isReachableFromOpaqueRoots(JSC::Handle<JSC::Unknown> handle, void*, SlotVisitor& visitor)
+void JSTestGenerateIsReachable::heapSnapshot(JSCell* cell, HeapSnapshotBuilder& builder)
+{
+    auto* thisObject = jsCast<JSTestGenerateIsReachable*>(cell);
+    builder.setWrappedObjectForCell(cell, &thisObject->wrapped());
+    if (thisObject->scriptExecutionContext())
+        builder.setLabelForCell(cell, "url " + thisObject->scriptExecutionContext()->url().string());
+    Base::heapSnapshot(cell, builder);
+}
+
+bool JSTestGenerateIsReachableOwner::isReachableFromOpaqueRoots(JSC::Handle<JSC::Unknown> handle, void*, SlotVisitor& visitor, const char** reason)
 {
     auto* jsTestGenerateIsReachable = jsCast<JSTestGenerateIsReachable*>(handle.slot()->asCell());
     TestGenerateIsReachable* root = &jsTestGenerateIsReachable->wrapped();
+    if (UNLIKELY(reason))
+        *reason = "Reachable from TestGenerateIsReachable";
     return visitor.containsOpaqueRoot(root);
 }
 

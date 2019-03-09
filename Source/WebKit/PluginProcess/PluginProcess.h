@@ -27,7 +27,7 @@
 
 #if ENABLE(NETSCAPE_PLUGIN_API)
 
-#include "ChildProcess.h"
+#include "AuxiliaryProcess.h"
 #include <WebCore/CountedUserActivity.h>
 #include <wtf/Forward.h>
 #include <wtf/text/WTFString.h>
@@ -42,13 +42,14 @@ class NetscapePluginModule;
 class WebProcessConnection;
 struct PluginProcessCreationParameters;
         
-class PluginProcess : public ChildProcess
+class PluginProcess : public AuxiliaryProcess
 {
     WTF_MAKE_NONCOPYABLE(PluginProcess);
     friend NeverDestroyed<PluginProcess>;
 
 public:
     static PluginProcess& singleton();
+    static constexpr ProcessType processType = ProcessType::Plugin;
 
     void removeWebProcessConnection(WebProcessConnection*);
 
@@ -74,12 +75,17 @@ private:
     PluginProcess();
     ~PluginProcess();
 
-    // ChildProcess
-    void initializeProcess(const ChildProcessInitializationParameters&) override;
-    void initializeProcessName(const ChildProcessInitializationParameters&) override;
-    void initializeSandbox(const ChildProcessInitializationParameters&, SandboxInitializationParameters&) override;
+#if PLATFORM(MAC)
+    bool shouldOverrideQuarantine() final;
+#endif
+
+    // AuxiliaryProcess
+    void initializeProcess(const AuxiliaryProcessInitializationParameters&) override;
+    void initializeProcessName(const AuxiliaryProcessInitializationParameters&) override;
+    void initializeConnection(IPC::Connection*) override;
+    void initializeSandbox(const AuxiliaryProcessInitializationParameters&, SandboxInitializationParameters&) override;
     bool shouldTerminate() override;
-    void platformInitializeProcess(const ChildProcessInitializationParameters&);
+    void platformInitializeProcess(const AuxiliaryProcessInitializationParameters&);
 
 #if USE(APPKIT)
     void stopRunLoop() override;

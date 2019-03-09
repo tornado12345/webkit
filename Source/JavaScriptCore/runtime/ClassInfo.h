@@ -89,7 +89,7 @@ struct MethodTable {
     GetPropertyNamesFunctionPtr WTF_METHOD_TABLE_ENTRY(getStructurePropertyNames);
     GetPropertyNamesFunctionPtr WTF_METHOD_TABLE_ENTRY(getGenericPropertyNames);
 
-    using ClassNameFunctionPtr = String (*)(const JSObject*);
+    using ClassNameFunctionPtr = String (*)(const JSObject*, VM&);
     ClassNameFunctionPtr WTF_METHOD_TABLE_ENTRY(className);
 
     using ToStringNameFunctionPtr = String (*)(const JSObject*, ExecState*);
@@ -100,12 +100,6 @@ struct MethodTable {
 
     using DefineOwnPropertyFunctionPtr = bool (*)(JSObject*, ExecState*, PropertyName, const PropertyDescriptor&, bool);
     DefineOwnPropertyFunctionPtr WTF_METHOD_TABLE_ENTRY(defineOwnProperty);
-
-    using SlowDownAndWasteMemory = ArrayBuffer* (*)(JSArrayBufferView*);
-    SlowDownAndWasteMemory WTF_METHOD_TABLE_ENTRY(slowDownAndWasteMemory);
-
-    using GetTypedArrayImpl = RefPtr<ArrayBufferView> (*)(JSArrayBufferView*);
-    GetTypedArrayImpl WTF_METHOD_TABLE_ENTRY(getTypedArrayImpl);
 
     using PreventExtensionsFunctionPtr = bool (*)(JSObject*, ExecState*);
     PreventExtensionsFunctionPtr WTF_METHOD_TABLE_ENTRY(preventExtensions);
@@ -125,14 +119,11 @@ struct MethodTable {
     using HeapSnapshotFunctionPtr = void (*)(JSCell*, HeapSnapshotBuilder&);
     HeapSnapshotFunctionPtr WTF_METHOD_TABLE_ENTRY(heapSnapshot);
 
-    using EstimatedSizeFunctionPtr = size_t (*)(JSCell*);
+    using EstimatedSizeFunctionPtr = size_t (*)(JSCell*, VM&);
     EstimatedSizeFunctionPtr WTF_METHOD_TABLE_ENTRY(estimatedSize);
 
     using VisitOutputConstraintsPtr = void (*)(JSCell*, SlotVisitor&);
     VisitOutputConstraintsPtr WTF_METHOD_TABLE_ENTRY(visitOutputConstraints);
-
-    using ReifyPropertyNameIfNeededPtr = PropertyReificationResult (*)(JSCell*, ExecState*, PropertyName&);
-    ReifyPropertyNameIfNeededPtr WTF_METHOD_TABLE_ENTRY(reifyPropertyNameIfNeeded);
 };
 
 #define CREATE_MEMBER_CHECKER(member) \
@@ -177,8 +168,6 @@ struct MethodTable {
         &ClassName::toStringName, \
         &ClassName::customHasInstance, \
         &ClassName::defineOwnProperty, \
-        &ClassName::slowDownAndWasteMemory, \
-        &ClassName::getTypedArrayImpl, \
         &ClassName::preventExtensions, \
         &ClassName::isExtensible, \
         &ClassName::setPrototype, \
@@ -187,7 +176,6 @@ struct MethodTable {
         &ClassName::heapSnapshot, \
         &ClassName::estimatedSize, \
         &ClassName::visitOutputConstraints, \
-        &ClassName::reifyPropertyNameIfNeeded, \
     }, \
     ClassName::TypedArrayStorageType
 

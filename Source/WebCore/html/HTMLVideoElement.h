@@ -61,6 +61,10 @@ public:
     unsigned webkitDroppedFrameCount() const;
 #endif
 
+#if ENABLE(FULLSCREEN_API) && PLATFORM(IOS_FAMILY)
+    void webkitRequestFullscreen() override;
+#endif
+
     // Used by canvas to gain raw pixel access
     void paintCurrentFrameInContext(GraphicsContext&, const FloatRect&);
 

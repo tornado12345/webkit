@@ -35,9 +35,9 @@ namespace JSC {
 class WEBCORE_EXPORT RuntimeMethod : public InternalFunction {
 public:
     typedef InternalFunction Base;
-    static const unsigned StructureFlags = Base::StructureFlags | OverridesGetOwnPropertySlot | TypeOfShouldCallGetCallData;
+    static const unsigned StructureFlags = Base::StructureFlags | OverridesGetOwnPropertySlot | OverridesGetCallData;
 
-    template<typename CellType>
+    template<typename CellType, JSC::SubspaceAccess>
     static IsoSubspace* subspaceFor(VM& vm)
     {
         static_assert(sizeof(CellType) == sizeof(RuntimeMethod), "RuntimeMethod subclasses that add fields need to override subspaceFor<>()");

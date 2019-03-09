@@ -23,7 +23,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 #import "WebGeolocationCoreLocationProvider.h"
 
@@ -89,7 +89,7 @@ using namespace WebCore;
 
 - (void)requestGeolocationAuthorization
 {
-#if ENABLE(MINIMAL_SIMULATOR)
+#if PLATFORM(IOSMAC)
     [_positionListener geolocationAuthorizationDenied];
     return;
 #else
@@ -202,4 +202,4 @@ static bool isAuthorizationGranted(CLAuthorizationStatus authorizationStatus)
 
 @end
 
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)

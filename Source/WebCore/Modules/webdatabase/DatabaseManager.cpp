@@ -59,7 +59,7 @@ private:
 DatabaseManager::ProposedDatabase::ProposedDatabase(DatabaseManager& manager, SecurityOrigin& origin, const String& name, const String& displayName, unsigned long estimatedSize)
     : m_manager(manager)
     , m_origin(origin.isolatedCopy())
-    , m_details(name.isolatedCopy(), displayName.isolatedCopy(), estimatedSize, 0, 0, 0)
+    , m_details(name.isolatedCopy(), displayName.isolatedCopy(), estimatedSize, 0, WTF::nullopt, WTF::nullopt)
 {
     m_manager.addProposedDatabase(*this);
 }
@@ -77,6 +77,7 @@ DatabaseManager& DatabaseManager::singleton()
 
 void DatabaseManager::initialize(const String& databasePath)
 {
+    platformInitialize(databasePath);
     DatabaseTracker::initializeTracker(databasePath);
 }
 
@@ -270,5 +271,12 @@ void DatabaseManager::logErrorMessage(ScriptExecutionContext& context, const Str
 {
     context.addConsoleMessage(MessageSource::Storage, MessageLevel::Error, message);
 }
+
+#if !PLATFORM(COCOA)
+void DatabaseManager::platformInitialize(const String& databasePath)
+{
+    UNUSED_PARAM(databasePath);
+}
+#endif
 
 } // namespace WebCore

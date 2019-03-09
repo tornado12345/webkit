@@ -28,19 +28,19 @@
 
 #if PLATFORM(MAC)
 
+#import "Logging.h"
 #import "WebAutomationSessionMacros.h"
 #import "WebInspectorProxy.h"
 #import "WebPageProxy.h"
 #import "_WKAutomationSession.h"
-#import <HIToolbox/Events.h>
+#import <Carbon/Carbon.h>
 #import <WebCore/IntPoint.h>
 #import <WebCore/IntSize.h>
 #import <WebCore/PlatformMouseEvent.h>
 #import <objc/runtime.h>
 
-using namespace WebCore;
-
 namespace WebKit {
+using namespace WebCore;
 
 #pragma mark Commands for Platform: 'macOS'
 
@@ -75,6 +75,8 @@ void WebAutomationSession::sendSynthesizedEventsToPage(WebPageProxy& page, NSArr
     NSWindow *window = page.platformWindow();
 
     for (NSEvent *event in eventsToSend) {
+        LOG(Automation, "Sending event[%p] to window[%p]: %@", event, window, event);
+
         // Take focus back in case the Inspector became focused while the prior command or
         // NSEvent was delivered to the window.
         [window becomeKeyWindow];
@@ -118,22 +120,23 @@ bool WebAutomationSession::wasEventSynthesizedForAutomation(NSEvent *event)
 
 #pragma mark Platform-dependent Implementations
 
-void WebAutomationSession::platformSimulateMouseInteraction(WebPageProxy& page, MouseInteraction interaction, WebMouseEvent::Button button, const WebCore::IntPoint& locationInView, WebEvent::Modifiers keyModifiers)
+#if ENABLE(WEBDRIVER_MOUSE_INTERACTIONS)
+void WebAutomationSession::platformSimulateMouseInteraction(WebPageProxy& page, MouseInteraction interaction, WebMouseEvent::Button button, const WebCore::IntPoint& locationInView, OptionSet<WebEvent::Modifier> keyModifiers)
 {
     IntRect windowRect;
     page.rootViewToWindow(IntRect(locationInView, IntSize()), windowRect);
     IntPoint locationInWindow = windowRect.location();
 
     NSEventModifierFlags modifiers = 0;
-    if (keyModifiers & WebEvent::MetaKey)
+    if (keyModifiers.contains(WebEvent::Modifier::MetaKey))
         modifiers |= NSEventModifierFlagCommand;
-    if (keyModifiers & WebEvent::AltKey)
+    if (keyModifiers.contains(WebEvent::Modifier::AltKey))
         modifiers |= NSEventModifierFlagOption;
-    if (keyModifiers & WebEvent::ControlKey)
+    if (keyModifiers.contains(WebEvent::Modifier::ControlKey))
         modifiers |= NSEventModifierFlagControl;
-    if (keyModifiers & WebEvent::ShiftKey)
+    if (keyModifiers.contains(WebEvent::Modifier::ShiftKey))
         modifiers |= NSEventModifierFlagShift;
-    if (keyModifiers & WebEvent::CapsLockKey)
+    if (keyModifiers.contains(WebEvent::Modifier::CapsLockKey))
         modifiers |= NSEventModifierFlagCapsLock;
 
     NSTimeInterval timestamp = [NSDate timeIntervalSinceReferenceDate];
@@ -208,7 +211,9 @@ void WebAutomationSession::platformSimulateMouseInteraction(WebPageProxy& page, 
 
     sendSynthesizedEventsToPage(page, eventsToBeSent.get());
 }
+#endif // ENABLE(WEBDRIVER_MOUSE_INTERACTIONS)
 
+#if ENABLE(WEBDRIVER_KEYBOARD_INTERACTIONS)
 static bool virtualKeyHasStickyModifier(VirtualKey key)
 {
     // Returns whether the key's modifier flags should affect other events while pressed down.
@@ -223,6 +228,145 @@ static bool virtualKeyHasStickyModifier(VirtualKey key)
     default:
         return false;
     }
+}
+
+static int keyCodeForCharKey(CharKey key)
+{
+    switch (key) {
+    case 'q':
+    case 'Q':
+        return kVK_ANSI_Q;
+    case 'w':
+    case 'W':
+        return kVK_ANSI_W;
+    case 'e':
+    case 'E':
+        return kVK_ANSI_E;
+    case 'r':
+    case 'R':
+        return kVK_ANSI_R;
+    case 't':
+    case 'T':
+        return kVK_ANSI_T;
+    case 'y':
+    case 'Y':
+        return kVK_ANSI_Y;
+    case 'u':
+    case 'U':
+        return kVK_ANSI_U;
+    case 'i':
+    case 'I':
+        return kVK_ANSI_I;
+    case 'o':
+    case 'O':
+        return kVK_ANSI_O;
+    case 'p':
+    case 'P':
+        return kVK_ANSI_P;
+    case 'a':
+    case 'A':
+        return kVK_ANSI_A;
+    case 's':
+    case 'S':
+        return kVK_ANSI_S;
+    case 'd':
+    case 'D':
+        return kVK_ANSI_D;
+    case 'f':
+    case 'F':
+        return kVK_ANSI_F;
+    case 'g':
+    case 'G':
+        return kVK_ANSI_G;
+    case 'h':
+    case 'H':
+        return kVK_ANSI_H;
+    case 'j':
+    case 'J':
+        return kVK_ANSI_J;
+    case 'k':
+    case 'K':
+        return kVK_ANSI_K;
+    case 'l':
+    case 'L':
+        return kVK_ANSI_L;
+    case 'z':
+    case 'Z':
+        return kVK_ANSI_Z;
+    case 'x':
+    case 'X':
+        return kVK_ANSI_X;
+    case 'c':
+    case 'C':
+        return kVK_ANSI_C;
+    case 'v':
+    case 'V':
+        return kVK_ANSI_V;
+    case 'b':
+    case 'B':
+        return kVK_ANSI_B;
+    case 'n':
+    case 'N':
+        return kVK_ANSI_N;
+    case 'm':
+    case 'M':
+        return kVK_ANSI_M;
+    case '1':
+        return kVK_ANSI_1;
+    case '2':
+        return kVK_ANSI_2;
+    case '3':
+        return kVK_ANSI_3;
+    case '4':
+        return kVK_ANSI_4;
+    case '5':
+        return kVK_ANSI_5;
+    case '6':
+        return kVK_ANSI_6;
+    case '7':
+        return kVK_ANSI_7;
+    case '8':
+        return kVK_ANSI_8;
+    case '9':
+        return kVK_ANSI_9;
+    case '0':
+        return kVK_ANSI_0;
+    case '=':
+    case '+':
+        return kVK_ANSI_Equal;
+    case '-':
+    case '_':
+        return kVK_ANSI_Minus;
+    case '[':
+    case '{':
+        return kVK_ANSI_LeftBracket;
+    case ']':
+    case '}':
+        return kVK_ANSI_RightBracket;
+    case '\'':
+    case '"':
+        return kVK_ANSI_Quote;
+    case ';':
+    case ':':
+        return kVK_ANSI_Semicolon;
+    case '\\':
+    case '|':
+        return kVK_ANSI_Backslash;
+    case ',':
+    case '<':
+        return kVK_ANSI_Comma;
+    case '.':
+    case '>':
+        return kVK_ANSI_Period;
+    case '/':
+    case '?':
+        return kVK_ANSI_Slash;
+    case '`':
+    case '~':
+        return kVK_ANSI_Grave;
+    }
+
+    return 0;
 }
 
 static int keyCodeForVirtualKey(VirtualKey key)
@@ -372,8 +516,6 @@ static NSEventModifierFlags eventModifierFlagsForVirtualKey(VirtualKey key)
         return NSEventModifierFlagCommand;
 
     case VirtualKey::Help:
-        return NSEventModifierFlagHelp | NSEventModifierFlagFunction;
-
     case VirtualKey::PageUp:
     case VirtualKey::PageDown:
     case VirtualKey::End:
@@ -427,31 +569,31 @@ static NSEventModifierFlags eventModifierFlagsForVirtualKey(VirtualKey key)
     }
 }
 
-void WebAutomationSession::platformSimulateKeyboardInteraction(WebPageProxy& page, KeyboardInteraction interaction, std::optional<VirtualKey> virtualKey, std::optional<CharKey> charKey)
+void WebAutomationSession::platformSimulateKeyboardInteraction(WebPageProxy& page, KeyboardInteraction interaction, WTF::Variant<VirtualKey, CharKey>&& key)
 {
     // FIXME: this function and the Automation protocol enum should probably adopt key names
     // from W3C UIEvents standard. For more details: https://w3c.github.io/uievents-code/
 
-    ASSERT(virtualKey.has_value() || charKey.has_value());
-
     bool isStickyModifier = false;
     NSEventModifierFlags changedModifiers = 0;
-    int keyCode;
-    std::optional<unichar> charCode;
-    std::optional<unichar> charCodeIgnoringModifiers;
+    int keyCode = 0;
+    Optional<unichar> charCode;
+    Optional<unichar> charCodeIgnoringModifiers;
 
-    if (virtualKey.has_value()) {
-        isStickyModifier = virtualKeyHasStickyModifier(virtualKey.value());
-        changedModifiers = eventModifierFlagsForVirtualKey(virtualKey.value());
-        keyCode = keyCodeForVirtualKey(virtualKey.value());
-        charCode = charCodeForVirtualKey(virtualKey.value());
-        charCodeIgnoringModifiers = charCodeIgnoringModifiersForVirtualKey(virtualKey.value());
-    }
-
-    if (charKey.has_value()) {
-        charCode = (unichar)charKey.value();
-        charCodeIgnoringModifiers = (unichar)charKey.value();
-    }
+    WTF::switchOn(key,
+        [&] (VirtualKey virtualKey) {
+            isStickyModifier = virtualKeyHasStickyModifier(virtualKey);
+            changedModifiers = eventModifierFlagsForVirtualKey(virtualKey);
+            keyCode = keyCodeForVirtualKey(virtualKey);
+            charCode = charCodeForVirtualKey(virtualKey);
+            charCodeIgnoringModifiers = charCodeIgnoringModifiersForVirtualKey(virtualKey);
+        },
+        [&] (CharKey charKey) {
+            keyCode = keyCodeForCharKey(charKey);
+            charCode = (unichar)charKey;
+            charCodeIgnoringModifiers = (unichar)charKey;
+        }
+    );
 
     // FIXME: consider using AppKit SPI to normalize 'characters', i.e., changing * to Shift-8,
     // and passing that in to charactersIgnoringModifiers. We could hardcode this for ASCII if needed.
@@ -476,6 +618,12 @@ void WebAutomationSession::platformSimulateKeyboardInteraction(WebPageProxy& pag
     case KeyboardInteraction::KeyRelease: {
         NSEventType eventType = isStickyModifier ? NSEventTypeFlagsChanged : NSEventTypeKeyUp;
         m_currentModifiers &= ~changedModifiers;
+
+        // When using a physical keyboard, if command is held down, releasing a non-modifier key doesn't send a KeyUp event.
+        bool commandKeyHeldDown = m_currentModifiers & NSEventModifierFlagCommand;
+        if (characters && commandKeyHeldDown)
+            break;
+
         [eventsToBeSent addObject:[NSEvent keyEventWithType:eventType location:eventPosition modifierFlags:m_currentModifiers timestamp:timestamp windowNumber:windowNumber context:nil characters:characters charactersIgnoringModifiers:unmodifiedCharacters isARepeat:NO keyCode:keyCode]];
         break;
     }
@@ -573,6 +721,7 @@ void WebAutomationSession::platformSimulateKeySequence(WebPageProxy& page, const
 
     sendSynthesizedEventsToPage(page, eventsToBeSent.get());
 }
+#endif // ENABLE(WEBDRIVER_KEYBOARD_INTERACTIONS)
 
 } // namespace WebKit
 

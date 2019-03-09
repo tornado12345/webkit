@@ -46,6 +46,7 @@
 #include "RenderObject.h"
 #include "ResourceHandle.h"
 #include "Settings.h"
+#include "ShareData.h"
 #include "StorageNamespace.h"
 #include "WindowFeatures.h"
 #include <JavaScriptCore/VM.h>
@@ -54,6 +55,14 @@
 
 #if ENABLE(INPUT_TYPE_COLOR)
 #include "ColorChooser.h"
+#endif
+
+#if ENABLE(DATALIST_ELEMENT)
+#include "DataListSuggestionPicker.h"
+#endif
+
+#if PLATFORM(MAC) && ENABLE(GRAPHICS_CONTEXT_3D)
+#include "GraphicsContext3DManager.h"
 #endif
 
 namespace WebCore {
@@ -102,8 +111,6 @@ IntRect Chrome::rootViewToScreen(const IntRect& rect) const
     return m_client.rootViewToScreen(rect);
 }
     
-#if PLATFORM(IOS)
-
 IntPoint Chrome::accessibilityScreenToRootView(const IntPoint& point) const
 {
     return m_client.accessibilityScreenToRootView(point);
@@ -113,8 +120,6 @@ IntRect Chrome::rootViewToAccessibilityScreen(const IntRect& rect) const
 {
     return m_client.rootViewToAccessibilityScreen(rect);
 }
-
-#endif
 
 PlatformPageClient Chrome::platformPageClient() const
 {
@@ -324,7 +329,7 @@ void Chrome::setStatusbarText(Frame& frame, const String& status)
 void Chrome::mouseDidMoveOverElement(const HitTestResult& result, unsigned modifierFlags)
 {
     if (result.innerNode() && result.innerNode()->document().isDNSPrefetchEnabled())
-        m_page.mainFrame().loader().client().prefetchDNS(result.absoluteLinkURL().host());
+        m_page.mainFrame().loader().client().prefetchDNS(result.absoluteLinkURL().host().toString());
     m_client.mouseDidMoveOverElement(result, modifierFlags);
 
     InspectorInstrumentation::mouseDidMoveOverElement(m_page, result, modifierFlags);
@@ -348,7 +353,7 @@ void Chrome::setToolTip(const HitTestResult& result)
                         if (form->renderer())
                             toolTipDirection = form->renderer()->style().direction();
                         else
-                            toolTipDirection = LTR;
+                            toolTipDirection = TextDirection::LTR;
                     }
                 }
             }
@@ -359,7 +364,7 @@ void Chrome::setToolTip(const HitTestResult& result)
             // FIXME: Need to pass this URL through userVisibleString once that's in WebCore
             toolTip = result.absoluteLinkURL().string();
             // URL always display as LTR.
-            toolTipDirection = LTR;
+            toolTipDirection = TextDirection::LTR;
         }
     }
 
@@ -381,7 +386,7 @@ void Chrome::setToolTip(const HitTestResult& result)
                 // implementations don't use text direction information for
                 // ChromeClient::setToolTip. We'll work on tooltip text
                 // direction during bidi cleanup in form inputs.
-                toolTipDirection = LTR;
+                toolTipDirection = TextDirection::LTR;
             }
         }
     }
@@ -416,8 +421,21 @@ void Chrome::disableSuddenTermination()
 
 std::unique_ptr<ColorChooser> Chrome::createColorChooser(ColorChooserClient& client, const Color& initialColor)
 {
+#if PLATFORM(IOS_FAMILY)
+    return nullptr;
+#endif
     notifyPopupOpeningObservers();
     return m_client.createColorChooser(client, initialColor);
+}
+
+#endif
+
+#if ENABLE(DATALIST_ELEMENT)
+
+std::unique_ptr<DataListSuggestionPicker> Chrome::createDataListSuggestionPicker(DataListSuggestionsClient& client)
+{
+    notifyPopupOpeningObservers();
+    return m_client.createDataListSuggestionPicker(client);
 }
 
 #endif
@@ -426,6 +444,11 @@ void Chrome::runOpenPanel(Frame& frame, FileChooser& fileChooser)
 {
     notifyPopupOpeningObservers();
     m_client.runOpenPanel(frame, fileChooser);
+}
+
+void Chrome::showShareSheet(ShareDataWithParsedURL& shareData, CompletionHandler<void(bool)>&& callback)
+{
+    m_client.showShareSheet(shareData, WTFMove(callback));
 }
 
 void Chrome::loadIconForFiles(const Vector<String>& filenames, FileIconLoader& loader)
@@ -448,9 +471,14 @@ FloatSize Chrome::overrideScreenSize() const
     return m_client.overrideScreenSize();
 }
 
+void Chrome::dispatchDisabledAdaptationsDidChange(const OptionSet<DisabledAdaptations>& disabledAdaptations) const
+{
+    m_client.dispatchDisabledAdaptationsDidChange(disabledAdaptations);
+}
+
 void Chrome::dispatchViewportPropertiesDidChange(const ViewportArguments& arguments) const
 {
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
     if (m_isDispatchViewportDataDidChangeSuppressed)
         return;
 #endif
@@ -491,9 +519,11 @@ void Chrome::windowScreenDidChange(PlatformDisplayID displayID)
         if (frame->document())
             frame->document()->windowScreenDidChange(displayID);
     }
-}
 
-// --------
+#if PLATFORM(MAC) && ENABLE(GRAPHICS_CONTEXT_3D)
+    GraphicsContext3DManager::sharedManager().screenDidChange(displayID, this);
+#endif
+}
 
 #if ENABLE(DASHBOARD_SUPPORT)
 void ChromeClient::annotatedRegionsChanged()
@@ -541,7 +571,7 @@ bool Chrome::requiresFullscreenForVideoPlayback()
 
 void Chrome::didReceiveDocType(Frame& frame)
 {
-#if !PLATFORM(IOS)
+#if !PLATFORM(IOS_FAMILY)
     UNUSED_PARAM(frame);
 #else
     if (!frame.isMainFrame())

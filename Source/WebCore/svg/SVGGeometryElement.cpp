@@ -23,51 +23,83 @@
 #include "config.h"
 #include "SVGGeometryElement.h"
 
-#include "RenderSVGPath.h"
-#include "RenderSVGResource.h"
+#include "DOMPoint.h"
 #include "SVGDocumentExtensions.h"
-#include "SVGMPathElement.h"
-#include "SVGNames.h"
 #include "SVGPathUtilities.h"
 #include "SVGPoint.h"
 #include <wtf/IsoMallocInlines.h>
-#include <wtf/NeverDestroyed.h>
 
 namespace WebCore {
 
 WTF_MAKE_ISO_ALLOCATED_IMPL(SVGGeometryElement);
 
-// Animated property definitions
-DEFINE_ANIMATED_NUMBER(SVGGeometryElement, SVGNames::pathLengthAttr, PathLength, pathLength)
-
-BEGIN_REGISTER_ANIMATED_PROPERTIES(SVGGeometryElement)
-    REGISTER_LOCAL_ANIMATED_PROPERTY(pathLength)
-    REGISTER_PARENT_ANIMATED_PROPERTIES(SVGGraphicsElement)
-END_REGISTER_ANIMATED_PROPERTIES
-
 SVGGeometryElement::SVGGeometryElement(const QualifiedName& tagName, Document& document)
     : SVGGraphicsElement(tagName, document)
 {
-    registerAnimatedPropertiesForSVGGeometryElement();
+    registerAttributes();
 }
 
-bool SVGGeometryElement::isSupportedAttribute(const QualifiedName& attrName)
+float SVGGeometryElement::getTotalLength() const
 {
-    static const auto supportedAttributes = makeNeverDestroyed([] {
-        HashSet<QualifiedName> set;
-        SVGLangSpace::addSupportedAttributes(set);
-        SVGExternalResourcesRequired::addSupportedAttributes(set);
-        set.add({ SVGNames::pathLengthAttr.get() });
-        return set;
-    }());
-    return supportedAttributes.get().contains<SVGAttributeHashTranslator>(attrName);
+    document().updateLayoutIgnorePendingStylesheets();
+
+    auto* renderer = downcast<RenderSVGShape>(this->renderer());
+    if (!renderer)
+        return 0;
+
+    return renderer->getTotalLength();
+}
+
+Ref<SVGPoint> SVGGeometryElement::getPointAtLength(float distance) const
+{
+    FloatPoint point { };
+
+    document().updateLayoutIgnorePendingStylesheets();
+
+    auto* renderer = downcast<RenderSVGShape>(this->renderer());
+    if (renderer)
+        renderer->getPointAtLength(point, distance);
+
+    return SVGPoint::create(point);
+}
+
+bool SVGGeometryElement::isPointInFill(DOMPointInit&& pointInit)
+{
+    document().updateLayoutIgnorePendingStylesheets();
+
+    auto* renderer = downcast<RenderSVGShape>(this->renderer());
+    if (!renderer)
+        return false;
+
+    FloatPoint point {static_cast<float>(pointInit.x), static_cast<float>(pointInit.y)};
+    return renderer->isPointInFill(point);
+}
+
+bool SVGGeometryElement::isPointInStroke(DOMPointInit&& pointInit)
+{
+    document().updateLayoutIgnorePendingStylesheets();
+
+    auto* renderer = downcast<RenderSVGShape>(this->renderer());
+    if (!renderer)
+        return false;
+
+    FloatPoint point {static_cast<float>(pointInit.x), static_cast<float>(pointInit.y)};
+    return renderer->isPointInStroke(point);
+}
+
+void SVGGeometryElement::registerAttributes()
+{
+    auto& registry = attributeRegistry();
+    if (!registry.isEmpty())
+        return;
+    registry.registerAttribute<SVGNames::pathLengthAttr, &SVGGeometryElement::m_pathLength>();
 }
 
 void SVGGeometryElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
 {
     if (name == SVGNames::pathLengthAttr) {
-        setPathLengthBaseValue(value.toFloat());
-        if (pathLengthBaseValue() < 0)
+        m_pathLength.setValue(value.toFloat());
+        if (m_pathLength.value() < 0)
             document().accessSVGExtensions().reportError("A negative value for path attribute <pathLength> is not allowed");
         return;
     }
@@ -77,19 +109,14 @@ void SVGGeometryElement::parseAttribute(const QualifiedName& name, const AtomicS
 
 void SVGGeometryElement::svgAttributeChanged(const QualifiedName& attrName)
 {
-    if (!isSupportedAttribute(attrName)) {
-        SVGGraphicsElement::svgAttributeChanged(attrName);
+    if (attrName == SVGNames::pathLengthAttr) {
+        InstanceInvalidationGuard guard(*this);
+        if (auto* renderer = this->renderer())
+            RenderSVGResource::markForLayoutAndParentResourceInvalidation(*renderer);
         return;
     }
 
-    InstanceInvalidationGuard guard(*this);
-
-    ASSERT_NOT_REACHED();
-}
-
-RenderPtr<RenderElement> SVGGeometryElement::createElementRenderer(RenderStyle&& style, const RenderTreePosition&)
-{
-    return createRenderer<RenderSVGPath>(*this, WTFMove(style));
+    SVGGraphicsElement::svgAttributeChanged(attrName);
 }
 
 }

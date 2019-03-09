@@ -148,7 +148,7 @@ private:
                 }
 
                 case NewArrayBuffer: {
-                    if (m_graph.isWatchingHavingABadTimeWatchpoint(node) && !hasAnyArrayStorage(node->indexingType()))
+                    if (m_graph.isWatchingHavingABadTimeWatchpoint(node) && !hasAnyArrayStorage(node->indexingMode()))
                         m_candidates.add(node);
                     break;
                 }
@@ -252,7 +252,7 @@ private:
                 // If we're out-of-bounds then we proceed only if the prototype chain
                 // for the allocation is sane (i.e. doesn't have indexed properties).
                 JSGlobalObject* globalObject = m_graph.globalObjectFor(edge->origin.semantic);
-                Structure* objectPrototypeStructure = globalObject->objectPrototype()->structure();
+                Structure* objectPrototypeStructure = globalObject->objectPrototype()->structure(m_graph.m_vm);
                 if (objectPrototypeStructure->transitionWatchpointSetIsStillValid()
                     && globalObject->objectPrototypeIsSane()) {
                     m_graph.registerAndWatchStructureTransition(objectPrototypeStructure);
@@ -275,9 +275,9 @@ private:
                 // If we're out-of-bounds then we proceed only if the prototype chain
                 // for the allocation is sane (i.e. doesn't have indexed properties).
                 JSGlobalObject* globalObject = m_graph.globalObjectFor(edge->origin.semantic);
-                Structure* objectPrototypeStructure = globalObject->objectPrototype()->structure();
+                Structure* objectPrototypeStructure = globalObject->objectPrototype()->structure(m_graph.m_vm);
                 if (edge->op() == CreateRest) {
-                    Structure* arrayPrototypeStructure = globalObject->arrayPrototype()->structure();
+                    Structure* arrayPrototypeStructure = globalObject->arrayPrototype()->structure(m_graph.m_vm);
                     if (arrayPrototypeStructure->transitionWatchpointSetIsStillValid()
                         && objectPrototypeStructure->transitionWatchpointSetIsStillValid()
                         && globalObject->arrayPrototypeChainIsSane()) {
@@ -400,6 +400,12 @@ private:
                     // butterfly's child and check if it's a candidate.
                     break;
                     
+                case FilterGetByIdStatus:
+                case FilterPutByIdStatus:
+                case FilterCallLinkStatus:
+                case FilterInByIdStatus:
+                    break;
+
                 case CheckArray:
                     escapeBasedOnArrayMode(node->arrayMode(), node->child1(), node);
                     break;
@@ -429,9 +435,9 @@ private:
                         break;
                     case NewArrayBuffer: {
                         ASSERT(m_graph.isWatchingHavingABadTimeWatchpoint(target));
-                        IndexingType indexingType = target->indexingType();
-                        ASSERT(!hasAnyArrayStorage(indexingType));
-                        structure = globalObject->originalArrayStructureForIndexingType(indexingType);
+                        IndexingType indexingMode = target->indexingMode();
+                        ASSERT(!hasAnyArrayStorage(indexingMode));
+                        structure = globalObject->originalArrayStructureForIndexingType(indexingMode);
                         break;
                     }
                     default:
@@ -618,9 +624,12 @@ private:
     
     void transform()
     {
-        InsertionSet insertionSet(m_graph);
+        bool modifiedCFG = false;
         
+        InsertionSet insertionSet(m_graph);
+
         for (BasicBlock* block : m_graph.blocksInPreOrder()) {
+            Node* pseudoTerminal = nullptr;
             for (unsigned nodeIndex = 0; nodeIndex < block->size(); ++nodeIndex) {
                 Node* node = block->at(nodeIndex);
                 
@@ -761,14 +770,15 @@ private:
                                 arg += inlineCallFrame->stackOffset;
                             data = m_graph.m_stackAccessData.add(arg, FlushedJSValue);
                             
+                            Node* check = nullptr;
                             if (!inlineCallFrame || inlineCallFrame->isVarargs()) {
-                                insertionSet.insertNode(
+                                check = insertionSet.insertNode(
                                     nodeIndex, SpecNone, CheckInBounds, node->origin,
                                     m_graph.varArgChild(node, 1), Edge(getArrayLength(candidate), Int32Use));
                             }
                             
                             result = insertionSet.insertNode(
-                                nodeIndex, node->prediction(), GetStack, node->origin, OpInfo(data));
+                                nodeIndex, node->prediction(), GetStack, node->origin, OpInfo(data), Edge(check, UntypedUse));
                         }
                     }
                     
@@ -867,7 +877,7 @@ private:
                                 }
 
                                 if (candidate->op() == PhantomNewArrayBuffer)
-                                    return candidate->castOperand<JSFixedArray*>()->length();
+                                    return candidate->castOperand<JSImmutableButterfly*>()->length();
 
                                 ASSERT(candidate->op() == PhantomCreateRest);
                                 unsigned numberOfArgumentsToSkip = candidate->numberOfArgumentsToSkip();
@@ -904,7 +914,7 @@ private:
                                     }
 
                                     if (candidate->op() == PhantomNewArrayBuffer) {
-                                        auto* array = candidate->castOperand<JSFixedArray*>();
+                                        auto* array = candidate->castOperand<JSImmutableButterfly*>();
                                         for (unsigned index = 0; index < array->length(); ++index) {
                                             JSValue constant;
                                             if (candidate->indexingType() == ArrayWithDouble)
@@ -1121,7 +1131,7 @@ private:
 
                                 if (candidate->op() == PhantomNewArrayBuffer) {
                                     bool canExit = true;
-                                    auto* array = candidate->castOperand<JSFixedArray*>();
+                                    auto* array = candidate->castOperand<JSImmutableButterfly*>();
                                     for (unsigned index = 0; index < array->length(); ++index) {
                                         JSValue constant;
                                         if (candidate->indexingType() == ArrayWithDouble)
@@ -1182,7 +1192,11 @@ private:
                 }
                     
                 case CheckArray:
-                case GetButterfly: {
+                case GetButterfly:
+                case FilterGetByIdStatus:
+                case FilterPutByIdStatus:
+                case FilterCallLinkStatus:
+                case FilterInByIdStatus: {
                     if (!isEliminatedAllocation(node->child1().node()))
                         break;
                     node->remove(m_graph);
@@ -1200,11 +1214,32 @@ private:
                 default:
                     break;
                 }
-                if (node->isPseudoTerminal())
+
+                if (node->isPseudoTerminal()) {
+                    pseudoTerminal = node;
                     break;
+                }
             }
-            
+
             insertionSet.execute(block);
+
+            if (pseudoTerminal) {
+                for (unsigned i = 0; i < block->size(); ++i) {
+                    Node* node = block->at(i);
+                    if (node != pseudoTerminal)
+                        continue;
+                    block->resize(i + 1);
+                    block->append(m_graph.addNode(SpecNone, Unreachable, node->origin));
+                    modifiedCFG = true;
+                    break;
+                }
+            }
+        }
+
+        if (modifiedCFG) {
+            m_graph.invalidateCFG();
+            m_graph.resetReachability();
+            m_graph.killUnreachableBlocks();
         }
     }
     

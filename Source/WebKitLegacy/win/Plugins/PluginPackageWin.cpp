@@ -36,7 +36,6 @@
 #include <string.h>
 #include <wtf/StdLibExtras.h>
 #include <wtf/text/CString.h>
-#include <wtf/text/win/WCharStringExtras.h>
 
 namespace WebCore {
 
@@ -46,7 +45,7 @@ static String getVersionInfo(const LPVOID versionInfoData, const String& info)
     UINT bufferLength;
     String subInfo = "\\StringfileInfo\\040904E4\\" + info;
     bool retval = VerQueryValueW(versionInfoData,
-        stringToNullTerminatedWChar(subInfo).data(),
+        subInfo.wideCharacters().data(),
         &buffer, &bufferLength);
     if (!retval || bufferLength == 0)
         return String();
@@ -166,13 +165,13 @@ void PluginPackage::determineQuirks(const String& mimeType)
 bool PluginPackage::fetchInfo()
 {
     DWORD versionInfoSize, zeroHandle;
-    versionInfoSize = GetFileVersionInfoSizeW(stringToNullTerminatedWChar(m_path).data(), &zeroHandle);
+    versionInfoSize = GetFileVersionInfoSizeW(m_path.wideCharacters().data(), &zeroHandle);
     if (versionInfoSize == 0)
         return false;
 
     Vector<char> versionInfoData(versionInfoSize);
 
-    if (!GetFileVersionInfoW(stringToNullTerminatedWChar(m_path).data(), 0, versionInfoSize, versionInfoData.data()))
+    if (!GetFileVersionInfoW(m_path.wideCharacters().data(), 0, versionInfoSize, versionInfoData.data()))
         return false;
 
     m_name = getVersionInfo(versionInfoData.data(), "ProductName");
@@ -190,20 +189,16 @@ bool PluginPackage::fetchInfo()
     if (isPluginBlacklisted())
         return false;
 
-    Vector<String> types;
-    getVersionInfo(versionInfoData.data(), "MIMEType").split('|', types);
-    Vector<String> extensionLists;
-    getVersionInfo(versionInfoData.data(), "FileExtents").split('|', extensionLists);
-    Vector<String> descriptions;
-    getVersionInfo(versionInfoData.data(), "FileOpenName").split('|', descriptions);
+    Vector<String> types = getVersionInfo(versionInfoData.data(), "MIMEType").split('|');
+    Vector<String> extensionLists = getVersionInfo(versionInfoData.data(), "FileExtents").split('|');
+    Vector<String> descriptions = getVersionInfo(versionInfoData.data(), "FileOpenName").split('|');
 
     for (unsigned i = 0; i < types.size(); i++) {
         String type = types[i].convertToASCIILowercase();
         String description = i < descriptions.size() ? descriptions[i] : "";
         String extensionList = i < extensionLists.size() ? extensionLists[i] : "";
 
-        Vector<String> extensionsVector;
-        extensionList.split(',', extensionsVector);
+        Vector<String> extensionsVector = extensionList.split(',');
 
         // Get rid of the extension list that may be at the end of the description string.
         int pos = description.find("(*");
@@ -242,11 +237,11 @@ bool PluginPackage::load()
 
         String path = m_path.substring(0, m_path.reverseFind('\\'));
 
-        if (!::SetCurrentDirectoryW(stringToNullTerminatedWChar(path).data()))
+        if (!::SetCurrentDirectoryW(path.wideCharacters().data()))
             return false;
 
         // Load the library
-        m_module = ::LoadLibraryExW(stringToNullTerminatedWChar(m_path).data(), 0, LOAD_WITH_ALTERED_SEARCH_PATH);
+        m_module = ::LoadLibraryExW(m_path.wideCharacters().data(), 0, LOAD_WITH_ALTERED_SEARCH_PATH);
 
         if (!::SetCurrentDirectoryW(currentPath)) {
             if (m_module)

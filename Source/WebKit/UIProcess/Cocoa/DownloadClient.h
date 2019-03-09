@@ -27,10 +27,9 @@
 
 #import "WKFoundation.h"
 
-#if WK_API_ENABLED
-
 #import "APIDownloadClient.h"
-#import "WeakObjCPtr.h"
+#import "ProcessThrottler.h"
+#import <wtf/WeakObjCPtr.h>
 
 @protocol _WKDownloadDelegate;
 
@@ -42,6 +41,7 @@ class ResourceResponse;
 namespace WebKit {
 
 class DownloadClient final : public API::DownloadClient {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     explicit DownloadClient(id <_WKDownloadDelegate>);
     
@@ -59,7 +59,16 @@ private:
     void didCreateDestination(WebProcessPool&, DownloadProxy&, const String&) final;
     void processDidCrash(WebProcessPool&, DownloadProxy&) final;
 
+#if USE(SYSTEM_PREVIEW)
+    void takeActivityToken(DownloadProxy&);
+    void releaseActivityTokenIfNecessary(DownloadProxy&);
+#endif
+
     WeakObjCPtr<id <_WKDownloadDelegate>> m_delegate;
+
+#if PLATFORM(IOS_FAMILY) && USE(SYSTEM_PREVIEW)
+    ProcessThrottler::BackgroundActivityToken m_activityToken { nullptr };
+#endif
 
     struct {
         bool downloadDidStart : 1;            
@@ -79,5 +88,3 @@ private:
 };
 
 } // namespace WebKit
-
-#endif

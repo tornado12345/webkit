@@ -68,7 +68,7 @@
 #include <wtf/BlockObjCExceptions.h>
 #include <wtf/MainThread.h>
 #include <wtf/NeverDestroyed.h>
-#include <wtf/ObjcRuntimeExtras.h>
+#include <wtf/ObjCRuntimeExtras.h>
 #include <wtf/ProcessPrivilege.h>
 
 #if ENABLE(MAC_GESTURE_EVENTS)
@@ -453,10 +453,10 @@ static void selfRetainingNSScrollViewScrollWheel(NSScrollView *self, SEL selecto
     bool shouldRetainSelf = isMainThread() && nsScrollViewScrollWheelShouldRetainSelf();
 
     if (shouldRetainSelf)
-        [self retain];
+        CFRetain((__bridge CFTypeRef)self);
     wtfCallIMP<void>(originalNSScrollViewScrollWheel, self, selector, event);
     if (shouldRetainSelf)
-        [self release];
+        CFRelease((__bridge CFTypeRef)self);
 }
 
 bool EventHandler::widgetDidHandleWheelEvent(const PlatformWheelEvent& wheelEvent, Widget& widget)
@@ -612,10 +612,9 @@ void EventHandler::sendFakeEventsAfterWidgetTracking(NSEvent *initiatingEvent)
         // no up-to-date cache of them anywhere.
         fakeEvent = [NSEvent mouseEventWithType:NSEventTypeMouseMoved
                                        location:[[view->platformWidget() window]
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        ALLOW_DEPRECATED_DECLARATIONS_BEGIN
                                   convertScreenToBase:[NSEvent mouseLocation]]
-#pragma clang diagnostic pop
+        ALLOW_DEPRECATED_DECLARATIONS_END
                                   modifierFlags:[initiatingEvent modifierFlags]
                                       timestamp:[initiatingEvent timestamp]
                                    windowNumber:[initiatingEvent windowNumber]
@@ -770,9 +769,9 @@ OptionSet<PlatformEvent::Modifier> EventHandler::accessKeyModifiers()
     // So, we use Control in this case, even though it conflicts with Emacs-style key bindings.
     // See <https://bugs.webkit.org/show_bug.cgi?id=21107> for more detail.
     if (AXObjectCache::accessibilityEnhancedUserInterfaceEnabled())
-        return PlatformEvent::Modifier::CtrlKey;
+        return PlatformEvent::Modifier::ControlKey;
 
-    return { PlatformEvent::Modifier::CtrlKey, PlatformEvent::Modifier::AltKey };
+    return { PlatformEvent::Modifier::ControlKey, PlatformEvent::Modifier::AltKey };
 }
 
 static ScrollableArea* scrollableAreaForBox(RenderBox& box)
@@ -788,10 +787,10 @@ static ContainerNode* findEnclosingScrollableContainer(ContainerNode* node, floa
     // Find the first node with a valid scrollable area starting with the current
     // node and traversing its parents (or shadow hosts).
     for (ContainerNode* candidate = node; candidate; candidate = candidate->parentOrShadowHostNode()) {
-        if (is<HTMLIFrameElement>(candidate))
+        if (is<HTMLIFrameElement>(*candidate))
             continue;
 
-        if (is<HTMLHtmlElement>(candidate) || is<HTMLDocument>(candidate))
+        if (is<HTMLHtmlElement>(*candidate) || is<HTMLDocument>(*candidate))
             return nullptr;
 
         RenderBox* box = candidate->renderBox();
@@ -821,7 +820,7 @@ static bool scrolledToEdgeInDominantDirection(const ContainerNode& container, co
     const RenderStyle& style = container.renderer()->style();
 
     if (!deltaIsPredominantlyVertical(deltaX, deltaY) && deltaX) {
-        if (style.overflowX() == OHIDDEN)
+        if (style.overflowX() == Overflow::Hidden)
             return true;
 
         if (deltaX < 0)
@@ -830,7 +829,7 @@ static bool scrolledToEdgeInDominantDirection(const ContainerNode& container, co
         return area.scrolledToLeft();
     }
 
-    if (style.overflowY() == OHIDDEN)
+    if (style.overflowY() == Overflow::Hidden)
         return true;
 
     if (deltaY < 0)
@@ -845,7 +844,7 @@ static WeakPtr<ScrollableArea> scrollableAreaForEventTarget(Element* eventTarget
     if (!widget || !widget->isScrollView())
         return { };
 
-    return static_cast<ScrollableArea*>(static_cast<ScrollView*>(widget))->createWeakPtr();
+    return makeWeakPtr(static_cast<ScrollableArea&>(static_cast<ScrollView&>(*widget)));
 }
     
 static bool eventTargetIsPlatformWidget(Element* eventTarget)
@@ -904,7 +903,7 @@ static WeakPtr<ScrollableArea> scrollableAreaForContainerNode(ContainerNode& con
     if (!scrollableAreaPtr)
         return { };
     
-    return scrollableAreaPtr->createWeakPtr();
+    return makeWeakPtr(*scrollableAreaPtr);
 }
 
 static bool latchedToFrameOrBody(ContainerNode& container)
@@ -956,7 +955,7 @@ void EventHandler::platformPrepareForWheelEvents(const PlatformWheelEvent& wheel
                 scrollableArea = scrollableAreaForContainerNode(*scrollableContainer);
             else {
                 scrollableContainer = view->frame().document()->bodyOrFrameset();
-                scrollableArea = static_cast<ScrollableArea*>(view)->createWeakPtr();
+                scrollableArea = makeWeakPtr(static_cast<ScrollableArea&>(*view));
             }
         }
     }
@@ -1113,10 +1112,12 @@ VisibleSelection EventHandler::selectClosestWordFromHitTestResultBasedOnLookup(c
     if (!m_frame.editor().behavior().shouldSelectBasedOnDictionaryLookup())
         return VisibleSelection();
 
-    if (auto range = DictionaryLookup::rangeAtHitTestResult(result, nullptr))
-        return VisibleSelection(*range);
+    RefPtr<Range> range;
+    std::tie(range, std::ignore) = DictionaryLookup::rangeAtHitTestResult(result);
+    if (!range)
+        return VisibleSelection();
 
-    return VisibleSelection();
+    return VisibleSelection(*range);
 }
 
 static IntSize autoscrollAdjustmentFactorForScreenBoundaries(const IntPoint& screenPoint, const FloatRect& screenRect)

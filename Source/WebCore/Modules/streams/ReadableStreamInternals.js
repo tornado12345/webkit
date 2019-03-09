@@ -27,21 +27,6 @@
 // @conditional=ENABLE(STREAMS_API)
 // @internal
 
-function privateInitializeReadableStreamDefaultReader(stream)
-{
-    "use strict";
-
-    if (!@isReadableStream(stream))
-       @throwTypeError("ReadableStreamDefaultReader needs a ReadableStream");
-    if (@isReadableStreamLocked(stream))
-       @throwTypeError("ReadableStream is locked");
-
-    @readableStreamReaderGenericInitialize(this, stream);
-    @putByIdDirectPrivate(this, "readRequests", []);
-
-    return this;
-}
-
 function readableStreamReaderGenericInitialize(reader, stream)
 {
     "use strict";
@@ -85,8 +70,7 @@ function privateInitializeReadableStreamDefaultController(stream, underlyingSour
         @assert(!@getByIdDirectPrivate(controller, "pullAgain"));
         @readableStreamDefaultControllerCallPullIfNeeded(controller);
     }, (error) => {
-        if (@getByIdDirectPrivate(stream, "state") === @streamReadable)
-            @readableStreamDefaultControllerError(controller, error);
+        @readableStreamDefaultControllerError(controller, error);
     });
 
     @putByIdDirectPrivate(this, "cancel", @readableStreamDefaultControllerCancel);
@@ -101,7 +85,8 @@ function readableStreamDefaultControllerError(controller, error)
     "use strict";
 
     const stream = @getByIdDirectPrivate(controller, "controlledReadableStream");
-    @assert(@getByIdDirectPrivate(stream, "state") === @streamReadable);
+    if (@getByIdDirectPrivate(stream, "state") !== @streamReadable)
+        return;
     @putByIdDirectPrivate(controller, "queue", @newQueue());
     @readableStreamError(stream, error);
 }
@@ -341,8 +326,7 @@ function readableStreamDefaultControllerCallPullIfNeeded(controller)
             @readableStreamDefaultControllerCallPullIfNeeded(controller);
         }
     }, function(error) {
-        if (@getByIdDirectPrivate(stream, "state") === @streamReadable)
-            @readableStreamDefaultControllerError(controller, error);
+        @readableStreamDefaultControllerError(controller, error);
     });
 }
 
@@ -477,8 +461,7 @@ function readableStreamDefaultControllerEnqueue(controller, chunk)
         @enqueueValueWithSize(@getByIdDirectPrivate(controller, "queue"), chunk, chunkSize);
     }
     catch(error) {
-        if (@getByIdDirectPrivate(stream, "state") === @streamReadable)
-            @readableStreamDefaultControllerError(controller, error);
+        @readableStreamDefaultControllerError(controller, error);
         throw error;
     }
     @readableStreamDefaultControllerCallPullIfNeeded(controller);
@@ -531,9 +514,9 @@ function readableStreamReaderGenericRelease(reader)
     @assert(@getByIdDirectPrivate(@getByIdDirectPrivate(reader, "ownerReadableStream"), "reader") === reader);
 
     if (@getByIdDirectPrivate(@getByIdDirectPrivate(reader, "ownerReadableStream"), "state") === @streamReadable)
-        @getByIdDirectPrivate(reader, "closedPromiseCapability").@reject.@call(@undefined, new @TypeError("releasing lock of reader whose stream is still in readable state"));
+        @getByIdDirectPrivate(reader, "closedPromiseCapability").@reject.@call(@undefined, @makeTypeError("releasing lock of reader whose stream is still in readable state"));
     else
-        @putByIdDirectPrivate(reader, "closedPromiseCapability", { @promise: @newHandledRejectedPromise(new @TypeError("reader released lock")) });
+        @putByIdDirectPrivate(reader, "closedPromiseCapability", { @promise: @newHandledRejectedPromise(@makeTypeError("reader released lock")) });
 
     @putByIdDirectPrivate(@getByIdDirectPrivate(reader, "closedPromiseCapability").@promise, "promiseIsHandled", true);
     @putByIdDirectPrivate(@getByIdDirectPrivate(reader, "ownerReadableStream"), "reader", @undefined);

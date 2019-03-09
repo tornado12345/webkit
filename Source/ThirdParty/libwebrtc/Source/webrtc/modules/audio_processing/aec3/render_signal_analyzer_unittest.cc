@@ -46,7 +46,7 @@ void ProduceSinusoid(int sample_rate_hz,
 #if RTC_DCHECK_IS_ON && GTEST_HAS_DEATH_TEST && !defined(WEBRTC_ANDROID)
 // Verifies that the check for non-null output parameter works.
 TEST(RenderSignalAnalyzer, NullMaskOutput) {
-  RenderSignalAnalyzer analyzer;
+  RenderSignalAnalyzer analyzer(EchoCanceller3Config{});
   EXPECT_DEATH(analyzer.MaskRegionsAroundNarrowBands(nullptr), "");
 }
 
@@ -54,12 +54,12 @@ TEST(RenderSignalAnalyzer, NullMaskOutput) {
 
 // Verify that no narrow bands are detected in a Gaussian noise signal.
 TEST(RenderSignalAnalyzer, NoFalseDetectionOfNarrowBands) {
-  RenderSignalAnalyzer analyzer;
+  RenderSignalAnalyzer analyzer(EchoCanceller3Config{});
   Random random_generator(42U);
   std::vector<std::vector<float>> x(3, std::vector<float>(kBlockSize, 0.f));
   std::array<float, kBlockSize> x_old;
   std::unique_ptr<RenderDelayBuffer> render_delay_buffer(
-      RenderDelayBuffer::Create(EchoCanceller3Config(), 3));
+      RenderDelayBuffer::Create2(EchoCanceller3Config(), 3));
   std::array<float, kFftLengthBy2Plus1> mask;
   x_old.fill(0.f);
 
@@ -73,7 +73,7 @@ TEST(RenderSignalAnalyzer, NoFalseDetectionOfNarrowBands) {
     render_delay_buffer->PrepareCaptureProcessing();
 
     analyzer.Update(*render_delay_buffer->GetRenderBuffer(),
-                    rtc::Optional<size_t>(0));
+                    absl::optional<size_t>(0));
   }
 
   mask.fill(1.f);
@@ -85,7 +85,7 @@ TEST(RenderSignalAnalyzer, NoFalseDetectionOfNarrowBands) {
 
 // Verify that a sinusiod signal is detected as narrow bands.
 TEST(RenderSignalAnalyzer, NarrowBandDetection) {
-  RenderSignalAnalyzer analyzer;
+  RenderSignalAnalyzer analyzer(EchoCanceller3Config{});
   Random random_generator(42U);
   std::vector<std::vector<float>> x(3, std::vector<float>(kBlockSize, 0.f));
   std::array<float, kBlockSize> x_old;
@@ -93,7 +93,7 @@ TEST(RenderSignalAnalyzer, NarrowBandDetection) {
   EchoCanceller3Config config;
   config.delay.min_echo_path_delay_blocks = 0;
   std::unique_ptr<RenderDelayBuffer> render_delay_buffer(
-      RenderDelayBuffer::Create(config, 3));
+      RenderDelayBuffer::Create2(config, 3));
 
   std::array<float, kFftLengthBy2Plus1> mask;
   x_old.fill(0.f);
@@ -112,7 +112,7 @@ TEST(RenderSignalAnalyzer, NarrowBandDetection) {
       render_delay_buffer->PrepareCaptureProcessing();
 
       analyzer.Update(*render_delay_buffer->GetRenderBuffer(),
-                      known_delay ? rtc::Optional<size_t>(0) : rtc::nullopt);
+                      known_delay ? absl::optional<size_t>(0) : absl::nullopt);
     }
   };
 

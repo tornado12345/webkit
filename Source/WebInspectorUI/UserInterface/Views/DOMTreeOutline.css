@@ -36,7 +36,7 @@
 
  /* Needed to make the negative z-index on .selection-area works. Otherwise the background-color from .syntax-highlighted hides the selection. */
     background-color: transparent !important;
-    color: black;
+    color: var(--text-color);
 
     --item-parent-margin-start: -15px;
 
@@ -53,10 +53,6 @@
     --sublist-border-width-start: 9px;
 }
 
-.tree-outline.dom li.hovered:not(.selected) .selection-area {
-    background-color: hsla(209, 100%, 49%, 0.1);
-}
-
 .tree-outline.dom li .selection-area {
     position: absolute;
     left: 0;
@@ -66,26 +62,30 @@
 }
 
 .tree-outline.dom li.selected .selection-area {
-    background-color: hsl(0, 0%, 83%);
+    background-color: var(--selected-background-color-unfocused);
 }
 
 .tree-outline.dom li.elements-drag-over .selection-area {
     margin-top: -2px;
-    border-top: 2px solid hsl(209, 100%, 49%);
+    border-top: 2px solid var(--selected-background-color);
 }
 
-.tree-outline.dom:focus li.selected .selection-area {
-    background-color: hsl(209, 100%, 49%);
+.tree-outline.dom:focus li:matches(.selected, .hovered) .selection-area {
+    background-color: var(--selected-background-color);
 }
 
-.tree-outline.dom li.selected > span::after {
+.tree-outline.dom li.hovered:not(.selected) .selection-area {
+    opacity: 0.3;
+}
+
+.tree-outline.dom li.last-selected > span::after {
     content: " = $0";
     color: var(--console-secondary-text-color);
     position: absolute;
     white-space: pre;
 }
 
-.tree-outline.dom:focus li.selected > span::after {
+.tree-outline.dom:focus li.last-selected > span::after {
     color: var(--selected-secondary-text-color);
 }
 
@@ -127,7 +127,7 @@ body[dir=rtl] .tree-outline.dom li:matches(.hovered, .selected) + ol.children.ex
 }
 
 .tree-outline.dom li.selected + ol.children.expanded {
-    border-color: hsl(0, 0%, 83%);
+    border-color: hsl(0, 0%, 65%, 0.5);
 }
 
 .tree-outline.dom li {
@@ -155,7 +155,7 @@ body[dir=rtl] .tree-outline.dom li:matches(.hovered, .selected) + ol.children.ex
     width: 5px;
     height: 5px;
     content: "";
-    background-color: var(--selected-background-color);
+    background-color: var(--glyph-color-active);
     border-radius: 50%;
 }
 
@@ -305,4 +305,31 @@ body[dir=rtl] .tree-outline.dom li.parent.shadow::after {
 
 .highlight .selection-area {
     animation: "dom-tree-outline-highlight-fadeout" 2s;
+}
+
+.tree-outline.dom li .highlight {
+    background-color: hsla(53, 83%, 53%, 0.2);
+    border-bottom: 1px solid hsl(47, 82%, 60%);
+}
+
+@media (prefers-color-scheme: dark) {
+    .tree-outline.dom .shadow {
+        color: var(--text-color);
+    }
+
+    /* FIXME: extract this as a variable. It's slightly different from var(background-color-secondary),
+    but close enough for now. It needs to use partial translucency so that the selection area shines through. */
+    .tree-outline.dom li.parent.shadow + ol.children.expanded,
+    .tree-outline.dom li.parent.shadow::after {
+        background-color: hsla(0, 0%, 90%, 0.1);
+    }
+
+    .showing-find-banner .tree-outline.dom .search-highlight {
+        /* FIXME: This should use a variable. */
+        background-color: hsla(53, 83%, 53%, 0.8);
+    }
+
+    .tree-outline.dom .html-pseudo-element {
+        color: hsl(0, 80%, 65%);
+    }
 }

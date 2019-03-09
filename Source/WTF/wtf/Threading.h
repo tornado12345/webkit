@@ -28,8 +28,7 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef Threading_h
-#define Threading_h
+#pragma once
 
 #include <mutex>
 #include <stdint.h>
@@ -37,6 +36,7 @@
 #include <wtf/Expected.h>
 #include <wtf/FastTLS.h>
 #include <wtf/Function.h>
+#include <wtf/HashSet.h>
 #include <wtf/PlatformRegisters.h>
 #include <wtf/Ref.h>
 #include <wtf/RefPtr.h>
@@ -46,6 +46,7 @@
 #include <wtf/ThreadSpecific.h>
 #include <wtf/Vector.h>
 #include <wtf/WordLock.h>
+#include <wtf/text/AtomicStringTable.h>
 
 #if USE(PTHREADS) && !OS(DARWIN)
 #include <signal.h>
@@ -54,7 +55,6 @@
 namespace WTF {
 
 class AbstractLocker;
-class AtomicStringTable;
 class ThreadMessageData;
 
 enum class ThreadGroupAddResult;
@@ -64,6 +64,13 @@ class PrintStream;
 
 // This function can be called from any threads.
 WTF_EXPORT_PRIVATE void initializeThreading();
+
+#if USE(PTHREADS)
+
+// We use SIGUSR1 to suspend and resume machine threads in JavaScriptCore.
+constexpr const int SigThreadSuspendResume = SIGUSR1;
+
+#endif
 
 // FIXME: The following functions remain because they are used from WebKit Windows support library,
 // WebKitQuartzCoreAdditions.dll. When updating the support library, we should use new API instead
@@ -77,7 +84,6 @@ WTF_EXPORT_PRIVATE int waitForThreadCompletion(ThreadIdentifier);
 class Thread : public ThreadSafeRefCounted<Thread> {
 public:
     friend class ThreadGroup;
-    friend class AtomicStringTable;
     friend WTF_EXPORT_PRIVATE void initializeThreading();
 #if OS(WINDOWS)
     friend WTF_EXPORT_PRIVATE int waitForThreadCompletion(ThreadIdentifier);
@@ -91,6 +97,10 @@ public:
 
     // Returns Thread object.
     static Thread& current();
+
+    // Set of all WTF::Thread created threads.
+    WTF_EXPORT_PRIVATE static HashSet<Thread*>& allThreads(const LockHolder&);
+    WTF_EXPORT_PRIVATE static Lock& allThreadsMutex();
 
 #if OS(WINDOWS)
     // Returns ThreadIdentifier directly. It is useful if the user only cares about identity
@@ -290,7 +300,7 @@ protected:
 #endif
 
     AtomicStringTable* m_currentAtomicStringTable { nullptr };
-    AtomicStringTable* m_defaultAtomicStringTable { nullptr };
+    AtomicStringTable m_defaultAtomicStringTable;
 
 #if ENABLE(STACK_STATS)
     StackStats::PerThreadStats m_stackStats;
@@ -341,5 +351,3 @@ using WTF::ThreadIdentifier;
 using WTF::createThread;
 using WTF::waitForThreadCompletion;
 #endif
-
-#endif // Threading_h

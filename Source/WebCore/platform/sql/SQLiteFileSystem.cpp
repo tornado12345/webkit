@@ -31,12 +31,12 @@
 #include "config.h"
 #include "SQLiteFileSystem.h"
 
-#include "FileSystem.h"
 #include "SQLiteDatabase.h"
 #include "SQLiteStatement.h"
 #include <sqlite3.h>
+#include <wtf/FileSystem.h>
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 #include <pal/spi/ios/SQLite3SPI.h>
 #endif
 
@@ -44,11 +44,6 @@ namespace WebCore {
 
 SQLiteFileSystem::SQLiteFileSystem()
 {
-}
-
-int SQLiteFileSystem::openDatabase(const String& filename, sqlite3** database, bool)
-{
-    return sqlite3_open_v2(FileSystem::fileSystemRepresentation(filename).data(), database, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_AUTOPROXY, nullptr);
 }
 
 String SQLiteFileSystem::appendDatabaseFileNameToPath(const String& path, const String& fileName)
@@ -83,8 +78,8 @@ bool SQLiteFileSystem::deleteEmptyDatabaseDirectory(const String& path)
 
 bool SQLiteFileSystem::deleteDatabaseFile(const String& fileName)
 {
-    String walFileName = makeString(fileName, ASCIILiteral("-wal"));
-    String shmFileName = makeString(fileName, ASCIILiteral("-shm"));
+    String walFileName = makeString(fileName, "-wal"_s);
+    String shmFileName = makeString(fileName, "-shm"_s);
 
     // Try to delete all three files whether or not they are there.
     FileSystem::deleteFile(fileName);
@@ -95,7 +90,7 @@ bool SQLiteFileSystem::deleteDatabaseFile(const String& fileName)
     return !FileSystem::fileExists(fileName) && !FileSystem::fileExists(walFileName) && !FileSystem::fileExists(shmFileName);
 }
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 bool SQLiteFileSystem::truncateDatabaseFile(sqlite3* database)
 {
     return sqlite3_file_control(database, 0, SQLITE_TRUNCATE_DATABASE, 0) == SQLITE_OK;
@@ -108,16 +103,14 @@ long long SQLiteFileSystem::getDatabaseFileSize(const String& fileName)
     return FileSystem::getFileSize(fileName, size) ? size : 0;
 }
 
-double SQLiteFileSystem::databaseCreationTime(const String& fileName)
+Optional<WallTime> SQLiteFileSystem::databaseCreationTime(const String& fileName)
 {
-    time_t time;
-    return FileSystem::getFileCreationTime(fileName, time) ? time : 0;
+    return FileSystem::getFileCreationTime(fileName);
 }
 
-double SQLiteFileSystem::databaseModificationTime(const String& fileName)
+Optional<WallTime> SQLiteFileSystem::databaseModificationTime(const String& fileName)
 {
-    time_t time;
-    return FileSystem::getFileModificationTime(fileName, time) ? time : 0;
+    return FileSystem::getFileModificationTime(fileName);
 }
 
 } // namespace WebCore

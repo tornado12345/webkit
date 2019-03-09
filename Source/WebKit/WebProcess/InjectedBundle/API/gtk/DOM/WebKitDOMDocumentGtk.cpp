@@ -55,7 +55,7 @@
 #include <WebCore/CSSImportRule.h>
 #include <WebCore/DOMException.h>
 #include <WebCore/Document.h>
-#include <WebCore/JSMainThreadExecState.h>
+#include <WebCore/JSExecState.h>
 #include <wtf/GetPtr.h>
 #include <wtf/RefPtr.h>
 
@@ -181,7 +181,7 @@ static void webkit_dom_document_set_property(GObject* object, guint propertyId, 
         webkit_dom_document_set_charset(self, g_value_get_string(value));
         break;
     case DOM_DOCUMENT_PROP_SELECTED_STYLESHEET_SET:
-        webkit_dom_document_set_selected_stylesheet_set(self, g_value_get_string(value));
+        g_warning("%s: The selected-stylesheet-set property has been removed and no longer works.", __func__);
         break;
     default:
         G_OBJECT_WARN_INVALID_PROPERTY_ID(object, propertyId, pspec);
@@ -291,10 +291,10 @@ static void webkit_dom_document_get_property(GObject* object, guint propertyId, 
         g_value_take_string(value, webkit_dom_document_get_character_set(self));
         break;
     case DOM_DOCUMENT_PROP_PREFERRED_STYLESHEET_SET:
-        g_value_take_string(value, webkit_dom_document_get_preferred_stylesheet_set(self));
+        g_warning("%s: The preferred-stylesheet-set property has been removed and no longer works.", __func__);
         break;
     case DOM_DOCUMENT_PROP_SELECTED_STYLESHEET_SET:
-        g_value_take_string(value, webkit_dom_document_get_selected_stylesheet_set(self));
+        g_warning("%s: The selected-stylesheet-set property has been removed and no longer works.", __func__);
         break;
     case DOM_DOCUMENT_PROP_ACTIVE_ELEMENT:
         g_value_set_object(value, webkit_dom_document_get_active_element(self));
@@ -1119,16 +1119,9 @@ WebKitDOMTreeWalker* webkit_dom_document_create_tree_walker(WebKitDOMDocument* s
     return WebKit::kit(gobjectResult.get());
 }
 
-WebKitDOMCSSStyleDeclaration* webkit_dom_document_get_override_style(WebKitDOMDocument* self, WebKitDOMElement* element, const gchar* pseudoElement)
+WebKitDOMCSSStyleDeclaration* webkit_dom_document_get_override_style(WebKitDOMDocument*, WebKitDOMElement*, const gchar*)
 {
-    WebCore::JSMainThreadNullState state;
-    g_return_val_if_fail(WEBKIT_DOM_IS_DOCUMENT(self), 0);
-    g_return_val_if_fail(WEBKIT_DOM_IS_ELEMENT(element), 0);
-    WebCore::Document* item = WebKit::core(self);
-    WebCore::Element* convertedElement = WebKit::core(element);
-    WTF::String convertedPseudoElement = WTF::String::fromUTF8(pseudoElement);
-    RefPtr<WebCore::CSSStyleDeclaration> gobjectResult = WTF::getPtr(item->getOverrideStyle(convertedElement, convertedPseudoElement));
-    return WebKit::kit(gobjectResult.get());
+    return nullptr;
 }
 
 WebKitDOMXPathExpression* webkit_dom_document_create_expression(WebKitDOMDocument* self, const gchar* expression, WebKitDOMXPathNSResolver* resolver, GError** error)
@@ -1767,11 +1760,11 @@ gchar* webkit_dom_document_get_ready_state(WebKitDOMDocument* self)
     auto readyState = WebKit::core(self)->readyState();
     switch (readyState) {
     case WebCore::Document::Loading:
-        return convertToUTF8String(ASCIILiteral("loading"));
+        return convertToUTF8String("loading"_s);
     case WebCore::Document::Interactive:
-        return convertToUTF8String(ASCIILiteral("interactive"));
+        return convertToUTF8String("interactive"_s);
     case WebCore::Document::Complete:
-        return convertToUTF8String(ASCIILiteral("complete"));
+        return convertToUTF8String("complete"_s);
     }
     return 0;
 }
@@ -1787,30 +1780,19 @@ gchar* webkit_dom_document_get_character_set(WebKitDOMDocument* self)
 
 gchar* webkit_dom_document_get_preferred_stylesheet_set(WebKitDOMDocument* self)
 {
-    WebCore::JSMainThreadNullState state;
-    g_return_val_if_fail(WEBKIT_DOM_IS_DOCUMENT(self), 0);
-    WebCore::Document* item = WebKit::core(self);
-    gchar* result = convertToUTF8String(item->preferredStylesheetSet());
-    return result;
+    g_warning("%s: this function has been removed and does nothing", __func__);
+    return nullptr;
 }
 
 gchar* webkit_dom_document_get_selected_stylesheet_set(WebKitDOMDocument* self)
 {
-    WebCore::JSMainThreadNullState state;
-    g_return_val_if_fail(WEBKIT_DOM_IS_DOCUMENT(self), 0);
-    WebCore::Document* item = WebKit::core(self);
-    gchar* result = convertToUTF8String(item->selectedStylesheetSet());
-    return result;
+    g_warning("%s: this function has been removed and does nothing", __func__);
+    return nullptr;
 }
 
 void webkit_dom_document_set_selected_stylesheet_set(WebKitDOMDocument* self, const gchar* value)
 {
-    WebCore::JSMainThreadNullState state;
-    g_return_if_fail(WEBKIT_DOM_IS_DOCUMENT(self));
-    g_return_if_fail(value);
-    WebCore::Document* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setSelectedStylesheetSet(convertedValue);
+    g_warning("%s: this function has been removed and does nothing", __func__);
 }
 
 WebKitDOMElement* webkit_dom_document_get_active_element(WebKitDOMDocument* self)
@@ -1940,7 +1922,7 @@ WebKitDOMElement* webkit_dom_document_get_scrolling_element(WebKitDOMDocument* s
     WebCore::JSMainThreadNullState state;
     g_return_val_if_fail(WEBKIT_DOM_IS_DOCUMENT(self), 0);
     WebCore::Document* item = WebKit::core(self);
-    RefPtr<WebCore::Element> gobjectResult = WTF::getPtr(item->scrollingElement());
+    RefPtr<WebCore::Element> gobjectResult = WTF::getPtr(item->scrollingElementForAPI());
     return WebKit::kit(gobjectResult.get());
 }
 

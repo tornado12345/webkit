@@ -37,8 +37,7 @@
 #import <WebKit/_WKUserContentWorld.h>
 #import <WebKit/_WKUserStyleSheet.h>
 #import <wtf/RetainPtr.h>
-
-#if WK_API_ENABLED
+#import <wtf/Vector.h>
 
 static bool isDoneWithNavigation;
 
@@ -55,7 +54,7 @@ static bool isDoneWithNavigation;
 @end
 
 static bool receivedScriptMessage;
-static RetainPtr<WKScriptMessage> lastScriptMessage;
+static Vector<RetainPtr<WKScriptMessage>> scriptMessages;
 
 @interface ScriptMessageHandler : NSObject <WKScriptMessageHandler>
 @end
@@ -65,7 +64,7 @@ static RetainPtr<WKScriptMessage> lastScriptMessage;
 - (void)userContentController:(WKUserContentController *)userContentController didReceiveScriptMessage:(WKScriptMessage *)message
 {
     receivedScriptMessage = true;
-    lastScriptMessage = message;
+    scriptMessages.append(message);
 }
 
 @end
@@ -88,7 +87,7 @@ TEST(WKUserContentController, ScriptMessageHandlerBasicPost)
     TestWebKitAPI::Util::run(&receivedScriptMessage);
     receivedScriptMessage = false;
 
-    EXPECT_WK_STREQ(@"Hello", (NSString *)[lastScriptMessage body]);
+    EXPECT_WK_STREQ(@"Hello", (NSString *)[scriptMessages[0] body]);
 }
 
 TEST(WKUserContentController, ScriptMessageHandlerBasicPostIsolatedWorld)
@@ -115,7 +114,7 @@ TEST(WKUserContentController, ScriptMessageHandlerBasicPostIsolatedWorld)
     TestWebKitAPI::Util::run(&receivedScriptMessage);
     receivedScriptMessage = false;
 
-    EXPECT_WK_STREQ(@"Hello", (NSString *)[lastScriptMessage body]);
+    EXPECT_WK_STREQ(@"Hello", (NSString *)[scriptMessages[0] body]);
 
     if (!isDoneWithNavigation)
         TestWebKitAPI::Util::run(&isDoneWithNavigation);
@@ -166,7 +165,7 @@ TEST(WKUserContentController, ScriptMessageHandlerBasicRemove)
     TestWebKitAPI::Util::run(&receivedScriptMessage);
     receivedScriptMessage = false;
 
-    EXPECT_WK_STREQ(@"PASS", (NSString *)[lastScriptMessage body]);
+    EXPECT_WK_STREQ(@"PASS", (NSString *)[scriptMessages[0] body]);
 
     [userContentController removeScriptMessageHandlerForName:@"handlerToRemove"];
 
@@ -181,7 +180,7 @@ TEST(WKUserContentController, ScriptMessageHandlerBasicRemove)
     TestWebKitAPI::Util::run(&receivedScriptMessage);
     receivedScriptMessage = false;
 
-    EXPECT_WK_STREQ(@"PASS", (NSString *)[lastScriptMessage body]);
+    EXPECT_WK_STREQ(@"PASS", (NSString *)[scriptMessages[0] body]);
 }
 
 TEST(WKUserContentController, ScriptMessageHandlerCallRemovedHandler)
@@ -214,7 +213,7 @@ TEST(WKUserContentController, ScriptMessageHandlerCallRemovedHandler)
     TestWebKitAPI::Util::run(&receivedScriptMessage);
     receivedScriptMessage = false;
 
-    EXPECT_WK_STREQ(@"PASS", (NSString *)[lastScriptMessage body]);
+    EXPECT_WK_STREQ(@"PASS", (NSString *)[scriptMessages[0] body]);
 }
 
 static RetainPtr<WKWebView> webViewForScriptMessageHandlerMultipleHandlerRemovalTest(WKWebViewConfiguration *configuration)
@@ -236,7 +235,6 @@ TEST(WKUserContentController, ScriptMessageHandlerMultipleHandlerRemoval)
 {
     RetainPtr<WKWebViewConfiguration> configuration = adoptNS([[WKWebViewConfiguration alloc] init]);
     RetainPtr<_WKProcessPoolConfiguration> processPoolConfiguration = adoptNS([[_WKProcessPoolConfiguration alloc] init]);
-    [processPoolConfiguration setMaximumProcessCount:1];
     [configuration setProcessPool:[[[WKProcessPool alloc] _initWithConfiguration:processPoolConfiguration.get()] autorelease]];
 
     RetainPtr<WKWebView> webView = webViewForScriptMessageHandlerMultipleHandlerRemovalTest(configuration.get());
@@ -255,10 +253,10 @@ TEST(WKUserContentController, ScriptMessageHandlerMultipleHandlerRemoval)
     TestWebKitAPI::Util::run(&receivedScriptMessage);
     receivedScriptMessage = false;
 
-    EXPECT_WK_STREQ(@"PASS", (NSString *)[lastScriptMessage body]);
+    EXPECT_WK_STREQ(@"PASS", (NSString *)[scriptMessages[0] body]);
 }
 
-#if !PLATFORM(IOS) // FIXME: hangs in the iOS simulator
+#if !PLATFORM(IOS_FAMILY) // FIXME: hangs in the iOS simulator
 TEST(WKUserContentController, ScriptMessageHandlerWithNavigation)
 {
     RetainPtr<ScriptMessageHandler> handler = adoptNS([[ScriptMessageHandler alloc] init]);
@@ -275,10 +273,9 @@ TEST(WKUserContentController, ScriptMessageHandlerWithNavigation)
 
     TestWebKitAPI::Util::run(&receivedScriptMessage);
 
-    EXPECT_WK_STREQ(@"First Message", (NSString *)[lastScriptMessage body]);
+    EXPECT_WK_STREQ(@"First Message", (NSString *)[scriptMessages[0] body]);
     
     receivedScriptMessage = false;
-    lastScriptMessage = nullptr;
 
     [webView loadRequest:request];
     [webView _test_waitForDidFinishNavigation];
@@ -287,7 +284,7 @@ TEST(WKUserContentController, ScriptMessageHandlerWithNavigation)
 
     TestWebKitAPI::Util::run(&receivedScriptMessage);
 
-    EXPECT_WK_STREQ(@"Second Message", (NSString *)[lastScriptMessage body]);    
+    EXPECT_WK_STREQ(@"Second Message", (NSString *)[scriptMessages[1] body]);
 }
 #endif
 
@@ -311,7 +308,7 @@ TEST(WKUserContentController, ScriptMessageHandlerReplaceWithSameName)
     TestWebKitAPI::Util::run(&receivedScriptMessage);
     receivedScriptMessage = false;
 
-    EXPECT_WK_STREQ(@"PASS1", (NSString *)[lastScriptMessage body]);
+    EXPECT_WK_STREQ(@"PASS1", (NSString *)[scriptMessages[0] body]);
 
     [userContentController removeScriptMessageHandlerForName:@"handlerToReplace"];
     [userContentController addScriptMessageHandler:handler.get() name:@"handlerToReplace"];
@@ -322,7 +319,7 @@ TEST(WKUserContentController, ScriptMessageHandlerReplaceWithSameName)
     TestWebKitAPI::Util::run(&receivedScriptMessage);
     receivedScriptMessage = false;
 
-    EXPECT_WK_STREQ(@"PASS2", (NSString *)[lastScriptMessage body]);
+    EXPECT_WK_STREQ(@"PASS2", (NSString *)[scriptMessages[1] body]);
 }
 
 static NSString *styleSheetSource = @"body { background-color: green !important; }";
@@ -592,4 +589,48 @@ TEST(WKUserContentController, UserScriptRemoveAllByNormalWorld)
     EXPECT_EQ(userScriptAssociatedWithWorld2.get(), [userContentController userScripts][1]);
 }
 
-#endif
+static void waitForMessages(size_t expectedCount)
+{
+    while (scriptMessages.size() < expectedCount) {
+        TestWebKitAPI::Util::run(&receivedScriptMessage);
+        receivedScriptMessage = false;
+    }
+}
+
+static void compareMessages(Vector<const char*>&& expectedMessages)
+{
+    EXPECT_EQ(expectedMessages.size(), scriptMessages.size());
+    for (size_t i = 0; i < expectedMessages.size(); ++i)
+        EXPECT_STREQ([[scriptMessages[i] body] UTF8String], expectedMessages[i]);
+}
+
+TEST(WKUserContentController, InjectUserScriptImmediately)
+{
+    auto handler = adoptNS([[ScriptMessageHandler alloc] init]);
+    auto startAllFrames = adoptNS([[WKUserScript alloc] initWithSource:@"window.webkit.messageHandlers.testHandler.postMessage('start all')" injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:NO]);
+    auto endMainFrameOnly = adoptNS([[WKUserScript alloc] initWithSource:@"window.webkit.messageHandlers.testHandler.postMessage('end main')" injectionTime:WKUserScriptInjectionTimeAtDocumentEnd forMainFrameOnly:YES]);
+
+    auto configuration = adoptNS([[WKWebViewConfiguration alloc] init]);
+    [[configuration userContentController] addScriptMessageHandler:handler.get() name:@"testHandler"];
+
+    auto webView = adoptNS([[WKWebView alloc] initWithFrame:NSMakeRect(0, 0, 800, 600) configuration:configuration.get()]);
+
+    auto delegate = adoptNS([[SimpleNavigationDelegate alloc] init]);
+    [webView setNavigationDelegate:delegate.get()];
+
+    NSURLRequest *request = [NSURLRequest requestWithURL:[[NSBundle mainBundle] URLForResource:@"simple-iframe" withExtension:@"html" subdirectory:@"TestWebKitAPI.resources"]];
+
+    isDoneWithNavigation = false;
+    [webView loadRequest:request];
+    TestWebKitAPI::Util::run(&isDoneWithNavigation);
+
+    receivedScriptMessage = false;
+    [[configuration userContentController] _addUserScriptImmediately:startAllFrames.get()];
+    // simple-iframe.html has a main frame and one iframe.
+    waitForMessages(2);
+    [[configuration userContentController] _addUserScriptImmediately:endMainFrameOnly.get()];
+    waitForMessages(3);
+    [webView reload];
+    waitForMessages(6);
+    compareMessages({"start all", "start all", "end main", "start all", "end main", "start all"});
+}

@@ -43,7 +43,7 @@ public:
 
     void didReceiveAuthenticationChallenge(uint64_t pageID, uint64_t frameID, Ref<AuthenticationChallengeProxy>&&);
 
-    void start(const WebPreferencesStore&, std::optional<PAL::SessionID> initialSessionID);
+    void start(const WebPreferencesStore&, Optional<PAL::SessionID> initialSessionID);
     void setUserAgent(const String&);
     void updatePreferencesStore(const WebPreferencesStore&);
 
@@ -51,8 +51,11 @@ public:
     uint64_t pageID() const { return m_serviceWorkerPageID; }
 
 private:
-    // ChildProcessProxy
+    // AuxiliaryProcessProxy
     void getLaunchOptions(ProcessLauncher::LaunchOptions&) final;
+
+    // ProcessLauncher::Client
+    void didFinishLaunching(ProcessLauncher*, IPC::Connection::Identifier) final;
 
     bool isServiceWorkerProcess() const final { return true; }
 

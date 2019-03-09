@@ -26,12 +26,13 @@
 #import "config.h"
 #import "EventHandler.h"
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 #import "AXObjectCache.h"
 #import "AutoscrollController.h"
 #import "Chrome.h"
 #import "ChromeClient.h"
+#import "ContentChangeObserver.h"
 #import "DataTransfer.h"
 #import "DragState.h"
 #import "FocusController.h"
@@ -366,48 +367,48 @@ bool EventHandler::passSubframeEventToSubframe(MouseEventWithHitTestResults& eve
 
     WebEventType currentEventType = currentEvent().type;
     switch (currentEventType) {
-        case WebEventMouseMoved: {
-            // Since we're passing in currentNSEvent() here, we can call
-            // handleMouseMoveEvent() directly, since the save/restore of
-            // currentNSEvent() that mouseMoved() does would have no effect.
-            ASSERT(!m_sendingEventToSubview);
-            m_sendingEventToSubview = true;
-            subframe->eventHandler().handleMouseMoveEvent(currentPlatformMouseEvent(), hoveredNode);
-            m_sendingEventToSubview = false;
-            return true;
-        }
-        case WebEventMouseDown: {
-            Node* node = event.targetNode();
-            if (!node)
-                return false;
-            auto* renderer = node->renderer();
-            if (!is<RenderWidget>(renderer))
-                return false;
-            Widget* widget = downcast<RenderWidget>(*renderer).widget();
-            if (!widget || !widget->isFrameView())
-                return false;
-            if (!passWidgetMouseDownEventToWidget(downcast<RenderWidget>(renderer)))
-                return false;
-            m_mouseDownWasInSubframe = true;
-            return true;
-        }
-        case WebEventMouseUp: {
-            if (!m_mouseDownWasInSubframe)
-                return false;
-            ASSERT(!m_sendingEventToSubview);
-            m_sendingEventToSubview = true;
-            subframe->eventHandler().handleMouseReleaseEvent(currentPlatformMouseEvent());
-            m_sendingEventToSubview = false;
-            return true;
-        }
-        case WebEventKeyDown:
-        case WebEventKeyUp:
-        case WebEventScrollWheel:
-        case WebEventTouchBegin:
-        case WebEventTouchCancel:
-        case WebEventTouchChange:
-        case WebEventTouchEnd:
+    case WebEventMouseMoved: {
+        // Since we're passing in currentNSEvent() here, we can call
+        // handleMouseMoveEvent() directly, since the save/restore of
+        // currentNSEvent() that mouseMoved() does would have no effect.
+        ASSERT(!m_sendingEventToSubview);
+        m_sendingEventToSubview = true;
+        subframe->eventHandler().handleMouseMoveEvent(currentPlatformMouseEvent(), hoveredNode);
+        m_sendingEventToSubview = false;
+        return true;
+    }
+    case WebEventMouseDown: {
+        auto* node = event.targetNode();
+        if (!node)
             return false;
+        auto* renderer = node->renderer();
+        if (!is<RenderWidget>(renderer))
+            return false;
+        auto* widget = downcast<RenderWidget>(*renderer).widget();
+        if (!widget || !widget->isFrameView())
+            return false;
+        if (!passWidgetMouseDownEventToWidget(downcast<RenderWidget>(renderer)))
+            return false;
+        m_mouseDownWasInSubframe = true;
+        return true;
+    }
+    case WebEventMouseUp: {
+        if (!m_mouseDownWasInSubframe)
+            return false;
+        ASSERT(!m_sendingEventToSubview);
+        m_sendingEventToSubview = true;
+        subframe->eventHandler().handleMouseReleaseEvent(currentPlatformMouseEvent());
+        m_sendingEventToSubview = false;
+        return true;
+    }
+    case WebEventKeyDown:
+    case WebEventKeyUp:
+    case WebEventScrollWheel:
+    case WebEventTouchBegin:
+    case WebEventTouchCancel:
+    case WebEventTouchChange:
+    case WebEventTouchEnd:
+        return false;
     }
     END_BLOCK_OBJC_EXCEPTIONS;
 
@@ -490,16 +491,16 @@ void EventHandler::mouseMoved(WebEvent *event)
         return;
 
     BEGIN_BLOCK_OBJC_EXCEPTIONS;
-
-    m_frame.document()->updateStyleIfNeeded();
-
-    WKBeginObservingContentChanges(true);
+    auto& document = *m_frame.document();
+    // Ensure we start mouse move event dispatching on a clear tree.
+    document.updateStyleIfNeeded();
     CurrentEventScope scope(event);
-    event.wasHandled = mouseMoved(currentPlatformMouseEvent());
-    
-    // FIXME: Why is this here?
-    m_frame.document()->updateStyleIfNeeded();
-    WKStopObservingContentChanges();
+    {
+        ContentChangeObserver::MouseMovedScope observingScope(document);
+        event.wasHandled = mouseMoved(currentPlatformMouseEvent());
+        // Run style recalc to be able to capture content changes as the result of the mouse move event.
+        document.updateStyleIfNeeded();
+    }
 
     END_BLOCK_OBJC_EXCEPTIONS;
 }
@@ -552,9 +553,9 @@ OptionSet<PlatformEvent::Modifier> EventHandler::accessKeyModifiers()
     // So, we use Control in this case, even though it conflicts with Emacs-style key bindings.
     // See <https://bugs.webkit.org/show_bug.cgi?id=21107> for more detail.
     if (AXObjectCache::accessibilityEnhancedUserInterfaceEnabled())
-        return PlatformEvent::Modifier::CtrlKey;
+        return PlatformEvent::Modifier::ControlKey;
 
-    return { PlatformEvent::Modifier::CtrlKey, PlatformEvent::Modifier::AltKey };
+    return { PlatformEvent::Modifier::ControlKey, PlatformEvent::Modifier::AltKey };
 }
 
 PlatformMouseEvent EventHandler::currentPlatformMouseEvent() const
@@ -578,7 +579,7 @@ void EventHandler::cancelSelectionAutoscroll()
     m_autoscrollController->stopAutoscrollTimer();
 }
 
-static IntSize autoscrollAdjustmentFactorForScreenBoundaries(const IntPoint& screenPoint, const FloatRect& screenRect)
+static IntSize autoscrollAdjustmentFactorForScreenBoundaries(const IntPoint& contentPosition, const FloatRect& unobscuredContentRect, float zoomFactor)
 {
     // If the window is at the edge of the screen, and the touch position is also at that edge of the screen,
     // we need to adjust the autoscroll amount in order for the user to be able to autoscroll in that direction.
@@ -590,33 +591,35 @@ static IntSize autoscrollAdjustmentFactorForScreenBoundaries(const IntPoint& scr
     
 #define EDGE_DISTANCE_THRESHOLD 100
 
-    float screenLeftEdge = screenRect.x();
-    float insetScreenLeftEdge = screenLeftEdge + EDGE_DISTANCE_THRESHOLD;
-    float screenRightEdge = screenRect.maxX();
-    float insetScreenRightEdge = screenRightEdge - EDGE_DISTANCE_THRESHOLD;
-    if (screenPoint.x() >= screenLeftEdge && screenPoint.x() < insetScreenLeftEdge) {
-        float distanceFromEdge = screenPoint.x() - screenLeftEdge - EDGE_DISTANCE_THRESHOLD;
+    CGSize edgeDistanceThreshold = CGSizeMake(EDGE_DISTANCE_THRESHOLD / zoomFactor, EDGE_DISTANCE_THRESHOLD / zoomFactor);
+    
+    float screenLeftEdge = unobscuredContentRect.x();
+    float insetScreenLeftEdge = screenLeftEdge + edgeDistanceThreshold.width;
+    float screenRightEdge = unobscuredContentRect.maxX();
+    float insetScreenRightEdge = screenRightEdge - edgeDistanceThreshold.width;
+    if (contentPosition.x() >= screenLeftEdge && contentPosition.x() < insetScreenLeftEdge) {
+        float distanceFromEdge = contentPosition.x() - screenLeftEdge - edgeDistanceThreshold.width;
         if (distanceFromEdge < 0)
-            adjustmentFactor.setWidth(-EDGE_DISTANCE_THRESHOLD);
-    } else if (screenPoint.x() >= insetScreenRightEdge && screenPoint.x() < screenRightEdge) {
-        float distanceFromEdge = EDGE_DISTANCE_THRESHOLD - (screenRightEdge - screenPoint.x());
+            adjustmentFactor.setWidth(-edgeDistanceThreshold.width);
+    } else if (contentPosition.x() >= insetScreenRightEdge && contentPosition.x() < screenRightEdge) {
+        float distanceFromEdge = edgeDistanceThreshold.width - (screenRightEdge - contentPosition.x());
         if (distanceFromEdge > 0)
-            adjustmentFactor.setWidth(EDGE_DISTANCE_THRESHOLD);
+            adjustmentFactor.setWidth(edgeDistanceThreshold.width);
     }
     
-    float screenTopEdge = screenRect.y();
-    float insetScreenTopEdge = screenTopEdge + EDGE_DISTANCE_THRESHOLD;
-    float screenBottomEdge = screenRect.maxY();
-    float insetScreenBottomEdge = screenBottomEdge - EDGE_DISTANCE_THRESHOLD;
+    float screenTopEdge = unobscuredContentRect.y();
+    float insetScreenTopEdge = screenTopEdge + edgeDistanceThreshold.height;
+    float screenBottomEdge = unobscuredContentRect.maxY();
+    float insetScreenBottomEdge = screenBottomEdge - edgeDistanceThreshold.height;
     
-    if (screenPoint.y() >= screenTopEdge && screenPoint.y() < insetScreenTopEdge) {
-        float distanceFromEdge = screenPoint.y() - screenTopEdge - EDGE_DISTANCE_THRESHOLD;
+    if (contentPosition.y() >= screenTopEdge && contentPosition.y() < insetScreenTopEdge) {
+        float distanceFromEdge = contentPosition.y() - screenTopEdge - edgeDistanceThreshold.height;
         if (distanceFromEdge < 0)
-            adjustmentFactor.setHeight(-EDGE_DISTANCE_THRESHOLD);
-    } else if (screenPoint.y() >= insetScreenBottomEdge && screenPoint.y() < screenBottomEdge) {
-        float distanceFromEdge = EDGE_DISTANCE_THRESHOLD - (screenBottomEdge - screenPoint.y());
+            adjustmentFactor.setHeight(-edgeDistanceThreshold.height);
+    } else if (contentPosition.y() >= insetScreenBottomEdge && contentPosition.y() < screenBottomEdge) {
+        float distanceFromEdge = edgeDistanceThreshold.height - (screenBottomEdge - contentPosition.y());
         if (distanceFromEdge > 0)
-            adjustmentFactor.setHeight(EDGE_DISTANCE_THRESHOLD);
+            adjustmentFactor.setHeight(edgeDistanceThreshold.height);
     }
     
     return adjustmentFactor;
@@ -630,7 +633,7 @@ IntPoint EventHandler::targetPositionInWindowForSelectionAutoscroll() const
     
     // Manually need to convert viewToContents, as it will be skipped because delegatedScrolling is on iOS
     IntPoint contentPosition = protectedFrame->view()->viewToContents(protectedFrame->view()->convertFromContainingWindow(m_targetAutoscrollPositionInWindow));
-    IntSize adjustPosition = autoscrollAdjustmentFactorForScreenBoundaries(contentPosition, unobscuredContentRect);
+    IntSize adjustPosition = autoscrollAdjustmentFactorForScreenBoundaries(contentPosition, unobscuredContentRect, protectedFrame->page()->pageScaleFactor());
     return contentPosition + adjustPosition;
 }
     
@@ -646,7 +649,7 @@ bool EventHandler::eventLoopHandleMouseDragged(const MouseEventWithHitTestResult
     return false;
 }
 
-bool EventHandler::tryToBeginDataInteractionAtPoint(const IntPoint& clientPosition, const IntPoint&)
+bool EventHandler::tryToBeginDragAtPoint(const IntPoint& clientPosition, const IntPoint&)
 {
     Ref<Frame> protectedFrame(m_frame);
 
@@ -669,24 +672,21 @@ bool EventHandler::tryToBeginDataInteractionAtPoint(const IntPoint& clientPositi
     auto hitTestedMouseEvent = document->prepareMouseEvent(request, documentPoint, syntheticMouseMoveEvent);
 
     RefPtr<Frame> subframe = subframeForHitTestResult(hitTestedMouseEvent);
-    if (subframe && subframe->eventHandler().tryToBeginDataInteractionAtPoint(adjustedClientPosition, adjustedGlobalPosition))
+    if (subframe && subframe->eventHandler().tryToBeginDragAtPoint(adjustedClientPosition, adjustedGlobalPosition))
         return true;
 
-    // FIXME: This needs to be refactored, along with handleMousePressEvent and handleMouseMoveEvent, so that state associated only with dragging
-    // lives solely in the DragController, and so that we don't need to pretend that a mouse press and mouse move have already occurred here.
-    m_mouseDownMayStartDrag = eventMayStartDrag(syntheticMousePressEvent);
-    if (!m_mouseDownMayStartDrag)
+    if (!eventMayStartDrag(syntheticMousePressEvent))
         return false;
 
-    SetForScope<bool> mousePressed(m_mousePressed, true);
-    dragState().source = nullptr;
-    m_mouseDownPos = protectedFrame->view()->windowToContents(syntheticMouseMoveEvent.position());
-
-    return handleMouseDraggedEvent(hitTestedMouseEvent, DontCheckDragHysteresis);
+    handleMousePressEvent(syntheticMousePressEvent);
+    bool handledDrag = m_mouseDownMayStartDrag && handleMouseDraggedEvent(hitTestedMouseEvent, DontCheckDragHysteresis);
+    // Reset this bit to prevent autoscrolling from updating the selection with the last mouse location.
+    m_mouseDownMayStartSelect = false;
+    return handledDrag;
 }
 
 #endif
 
 }
 
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)

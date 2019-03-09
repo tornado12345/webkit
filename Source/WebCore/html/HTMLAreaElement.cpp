@@ -69,7 +69,7 @@ void HTMLAreaElement::parseAttribute(const QualifiedName& name, const AtomicStri
     } else if (name == coordsAttr) {
         m_coords = parseHTMLListOfOfFloatingPointNumberValues(value.string());
         invalidateCachedRegion();
-    } else if (name == altAttr || name == accesskeyAttr) {
+    } else if (name == altAttr) {
         // Do nothing.
     } else
         HTMLAnchorElement::parseAttribute(name, value);
@@ -210,7 +210,7 @@ bool HTMLAreaElement::isMouseFocusable() const
 bool HTMLAreaElement::isFocusable() const
 {
     RefPtr<HTMLImageElement> image = imageElement();
-    if (!image || !image->renderer() || image->renderer()->style().visibility() != VISIBLE)
+    if (!image || !image->renderer() || image->renderer()->style().visibility() != Visibility::Visible)
         return false;
 
     return supportsFocus() && Element::tabIndex() >= 0;

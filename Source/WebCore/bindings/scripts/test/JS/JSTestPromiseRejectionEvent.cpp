@@ -33,9 +33,12 @@
 #include "JSDOMExceptionHandling.h"
 #include "JSDOMGlobalObject.h"
 #include "JSDOMWrapperCache.h"
+#include "ScriptExecutionContext.h"
+#include <JavaScriptCore/HeapSnapshotBuilder.h>
 #include <JavaScriptCore/JSCInlines.h>
 #include <wtf/GetPtr.h>
 #include <wtf/PointerPreparations.h>
+#include <wtf/URL.h>
 
 
 namespace WebCore {
@@ -177,7 +180,7 @@ template<> JSValue JSTestPromiseRejectionEventConstructor::prototypeForStructure
 template<> void JSTestPromiseRejectionEventConstructor::initializeProperties(VM& vm, JSDOMGlobalObject& globalObject)
 {
     putDirect(vm, vm.propertyNames->prototype, JSTestPromiseRejectionEvent::prototype(vm, globalObject), JSC::PropertyAttribute::DontDelete | JSC::PropertyAttribute::ReadOnly | JSC::PropertyAttribute::DontEnum);
-    putDirect(vm, vm.propertyNames->name, jsNontrivialString(&vm, String(ASCIILiteral("TestPromiseRejectionEvent"))), JSC::PropertyAttribute::ReadOnly | JSC::PropertyAttribute::DontEnum);
+    putDirect(vm, vm.propertyNames->name, jsNontrivialString(&vm, String("TestPromiseRejectionEvent"_s)), JSC::PropertyAttribute::ReadOnly | JSC::PropertyAttribute::DontEnum);
     putDirect(vm, vm.propertyNames->length, jsNumber(2), JSC::PropertyAttribute::ReadOnly | JSC::PropertyAttribute::DontEnum);
 }
 
@@ -283,6 +286,15 @@ static inline JSValue jsTestPromiseRejectionEventReasonGetter(ExecState& state, 
 EncodedJSValue jsTestPromiseRejectionEventReason(ExecState* state, EncodedJSValue thisValue, PropertyName)
 {
     return IDLAttribute<JSTestPromiseRejectionEvent>::get<jsTestPromiseRejectionEventReasonGetter, CastedThisErrorBehavior::Assert>(*state, thisValue, "reason");
+}
+
+void JSTestPromiseRejectionEvent::heapSnapshot(JSCell* cell, HeapSnapshotBuilder& builder)
+{
+    auto* thisObject = jsCast<JSTestPromiseRejectionEvent*>(cell);
+    builder.setWrappedObjectForCell(cell, &thisObject->wrapped());
+    if (thisObject->scriptExecutionContext())
+        builder.setLabelForCell(cell, "url " + thisObject->scriptExecutionContext()->url().string());
+    Base::heapSnapshot(cell, builder);
 }
 
 #if ENABLE(BINDING_INTEGRITY)

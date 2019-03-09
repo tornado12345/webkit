@@ -33,6 +33,7 @@
 #include "CSSPropertyParserHelpers.h"
 #include "MediaFeatureNames.h"
 #include "MediaQueryParserContext.h"
+#include "RuntimeEnabledFeatures.h"
 #include <wtf/text/TextStream.h>
 #include <wtf/text/StringBuilder.h>
 
@@ -53,8 +54,11 @@ static inline bool featureWithValidIdent(const AtomicString& mediaFeature, const
 #if ENABLE(APPLICATION_MANIFEST)
     || mediaFeature == MediaFeatureNames::displayMode
 #endif
+#if ENABLE(DARK_MODE_CSS)
+    || (mediaFeature == MediaFeatureNames::prefersColorScheme && RuntimeEnabledFeatures::sharedFeatures().darkModeCSSEnabled())
+#endif
     || mediaFeature == MediaFeatureNames::prefersReducedMotion
-    || (mediaFeature == MediaFeatureNames::defaultAppearance && context.useSystemAppearance);
+    || (mediaFeature == MediaFeatureNames::prefersDarkInterface && (context.useSystemAppearance || isUASheetBehavior(context.mode)));
 }
 
 static inline bool featureWithValidDensity(const String& mediaFeature, const CSSPrimitiveValue& value)
@@ -162,7 +166,10 @@ static inline bool isFeatureValidWithoutValue(const AtomicString& mediaFeature, 
         || mediaFeature == MediaFeatureNames::invertedColors
         || mediaFeature == MediaFeatureNames::pointer
         || mediaFeature == MediaFeatureNames::prefersReducedMotion
-        || (mediaFeature == MediaFeatureNames::defaultAppearance && context.useSystemAppearance)
+        || (mediaFeature == MediaFeatureNames::prefersDarkInterface && (context.useSystemAppearance || isUASheetBehavior(context.mode)))
+#if ENABLE(DARK_MODE_CSS)
+        || (mediaFeature == MediaFeatureNames::prefersColorScheme && RuntimeEnabledFeatures::sharedFeatures().darkModeCSSEnabled())
+#endif
         || mediaFeature == MediaFeatureNames::devicePixelRatio
         || mediaFeature == MediaFeatureNames::resolution
 #if ENABLE(APPLICATION_MANIFEST)

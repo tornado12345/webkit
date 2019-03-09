@@ -25,14 +25,14 @@
 
 #include "config.h"
 
-#if WK_API_ENABLED && PLATFORM(COCOA)
+#if PLATFORM(COCOA)
 
 #import "PlatformUtilities.h"
 #import "TestWKWebView.h"
 #import <wtf/RetainPtr.h>
 #import <wtf/text/WTFString.h>
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 #include <MobileCoreServices/MobileCoreServices.h>
 #endif
 
@@ -49,13 +49,35 @@ void writeImageDataToPasteboard(NSString *type, NSData *data)
 }
 #endif
 
+@interface TestWKWebView (PasteImage)
+- (void)waitForMessage:(NSString *)message afterEvaluatingScript:(NSString *)script;
+@end
+
+@implementation TestWKWebView (PasteImage)
+
+- (void)waitForMessage:(NSString *)message afterEvaluatingScript:(NSString *)script
+{
+    __block bool evaluatedScript = false;
+    __block bool receivedMessage = false;
+    [self performAfterReceivingMessage:message action:^{
+        receivedMessage = true;
+    }];
+    [self evaluateJavaScript:script completionHandler:^(id, NSError *) {
+        evaluatedScript = true;
+    }];
+    TestWebKitAPI::Util::run(&evaluatedScript);
+    TestWebKitAPI::Util::run(&receivedMessage);
+}
+
+@end
+
 TEST(PasteImage, PasteGIFImage)
 {
     auto webView = adoptNS([[TestWKWebView alloc] initWithFrame:NSMakeRect(0, 0, 400, 400)]);
     [webView synchronouslyLoadTestPageNamed:@"paste-image"];
 
     auto *data = [NSData dataWithContentsOfFile:[[NSBundle mainBundle] pathForResource:@"sunset-in-cupertino-400px" ofType:@"gif" inDirectory:@"TestWebKitAPI.resources"]];
-    writeImageDataToPasteboard((NSString *)kUTTypeGIF, data);
+    writeImageDataToPasteboard((__bridge NSString *)kUTTypeGIF, data);
     [webView paste:nil];
 
     EXPECT_WK_STREQ("false", [webView stringByEvaluatingJavaScript:@"dataTransfer.types.includes('image/gif').toString()"]);
@@ -66,7 +88,7 @@ TEST(PasteImage, PasteGIFImage)
     EXPECT_WK_STREQ("image.gif", [webView stringByEvaluatingJavaScript:@"gifItem.file.name"]);
     EXPECT_WK_STREQ("true", [webView stringByEvaluatingJavaScript:@"dataTransfer.files.includes(gifItem.file).toString()"]);
 
-    [webView stringByEvaluatingJavaScript:@"insertFileAsImage(gifItem.file)"];
+    [webView waitForMessage:@"loaded" afterEvaluatingScript:@"insertFileAsImage(gifItem.file)"];
     EXPECT_WK_STREQ("blob:", [webView stringByEvaluatingJavaScript:@"url = new URL(imageElement.src); url.protocol"]);
     EXPECT_WK_STREQ("400", [webView stringByEvaluatingJavaScript:@"imageElement.width"]);
 }
@@ -77,7 +99,7 @@ TEST(PasteImage, PasteJPEGImage)
     [webView synchronouslyLoadTestPageNamed:@"paste-image"];
 
     auto *data = [NSData dataWithContentsOfFile:[[NSBundle mainBundle] pathForResource:@"sunset-in-cupertino-600px" ofType:@"jpg" inDirectory:@"TestWebKitAPI.resources"]];
-    writeImageDataToPasteboard((NSString *)kUTTypeJPEG, data);
+    writeImageDataToPasteboard((__bridge NSString *)kUTTypeJPEG, data);
     [webView paste:nil];
 
     EXPECT_WK_STREQ("false", [webView stringByEvaluatingJavaScript:@"dataTransfer.types.includes('image/gif').toString()"]);
@@ -88,7 +110,7 @@ TEST(PasteImage, PasteJPEGImage)
     EXPECT_WK_STREQ("image.jpeg", [webView stringByEvaluatingJavaScript:@"jpegItem.file.name"]);
     EXPECT_WK_STREQ("true", [webView stringByEvaluatingJavaScript:@"dataTransfer.files.includes(jpegItem.file).toString()"]);
 
-    [webView stringByEvaluatingJavaScript:@"insertFileAsImage(jpegItem.file)"];
+    [webView waitForMessage:@"loaded" afterEvaluatingScript:@"insertFileAsImage(jpegItem.file)"];
     EXPECT_WK_STREQ("blob:", [webView stringByEvaluatingJavaScript:@"url = new URL(imageElement.src); url.protocol"]);
     EXPECT_WK_STREQ("600", [webView stringByEvaluatingJavaScript:@"imageElement.width"]);
 }
@@ -99,7 +121,7 @@ TEST(PasteImage, PastePNGImage)
     [webView synchronouslyLoadTestPageNamed:@"paste-image"];
 
     auto *data = [NSData dataWithContentsOfFile:[[NSBundle mainBundle] pathForResource:@"sunset-in-cupertino-200px" ofType:@"png" inDirectory:@"TestWebKitAPI.resources"]];
-    writeImageDataToPasteboard((NSString *)kUTTypePNG, data);
+    writeImageDataToPasteboard((__bridge NSString *)kUTTypePNG, data);
     [webView paste:nil];
 
     EXPECT_WK_STREQ("false", [webView stringByEvaluatingJavaScript:@"dataTransfer.types.includes('image/gif').toString()"]);
@@ -110,7 +132,7 @@ TEST(PasteImage, PastePNGImage)
     EXPECT_WK_STREQ("image.png", [webView stringByEvaluatingJavaScript:@"pngItem.file.name"]);
     EXPECT_WK_STREQ("true", [webView stringByEvaluatingJavaScript:@"dataTransfer.files.includes(pngItem.file).toString()"]);
 
-    [webView stringByEvaluatingJavaScript:@"insertFileAsImage(pngItem.file)"];
+    [webView waitForMessage:@"loaded" afterEvaluatingScript:@"insertFileAsImage(pngItem.file)"];
     EXPECT_WK_STREQ("blob:", [webView stringByEvaluatingJavaScript:@"url = new URL(imageElement.src); url.protocol"]);
     EXPECT_WK_STREQ("200", [webView stringByEvaluatingJavaScript:@"imageElement.width"]);
 }
@@ -138,8 +160,7 @@ TEST(PasteImage, PasteGIFFile)
     EXPECT_WK_STREQ("sunset-in-cupertino-400px.gif", [webView stringByEvaluatingJavaScript:@"file.name"]);
     EXPECT_WK_STREQ("", [webView stringByEvaluatingJavaScript:@"editor.textContent"]);
 
-    [webView stringByEvaluatingJavaScript:@"insertFileAsImage(file)"];
-    [webView waitForMessage:@"loaded"];
+    [webView waitForMessage:@"loaded" afterEvaluatingScript:@"insertFileAsImage(file)"];
     EXPECT_WK_STREQ("blob:", [webView stringByEvaluatingJavaScript:@"url = new URL(imageElement.src); url.protocol"]);
     EXPECT_WK_STREQ("400", [webView stringByEvaluatingJavaScript:@"imageElement.width"]);
 }
@@ -160,8 +181,7 @@ TEST(PasteImage, PasteJPEGFile)
     EXPECT_WK_STREQ("sunset-in-cupertino-600px.jpg", [webView stringByEvaluatingJavaScript:@"file.name"]);
     EXPECT_WK_STREQ("", [webView stringByEvaluatingJavaScript:@"editor.textContent"]);
 
-    [webView stringByEvaluatingJavaScript:@"insertFileAsImage(file)"];
-    [webView waitForMessage:@"loaded"];
+    [webView waitForMessage:@"loaded" afterEvaluatingScript:@"insertFileAsImage(file)"];
     EXPECT_WK_STREQ("blob:", [webView stringByEvaluatingJavaScript:@"url = new URL(imageElement.src); url.protocol"]);
     EXPECT_WK_STREQ("600", [webView stringByEvaluatingJavaScript:@"imageElement.width"]);
 }
@@ -182,8 +202,7 @@ TEST(PasteImage, PastePNGFile)
     EXPECT_WK_STREQ("sunset-in-cupertino-200px.png", [webView stringByEvaluatingJavaScript:@"file.name"]);
     EXPECT_WK_STREQ("", [webView stringByEvaluatingJavaScript:@"editor.textContent"]);
 
-    [webView stringByEvaluatingJavaScript:@"insertFileAsImage(file)"];
-    [webView waitForMessage:@"loaded"];
+    [webView waitForMessage:@"loaded" afterEvaluatingScript:@"insertFileAsImage(file)"];
     EXPECT_WK_STREQ("blob:", [webView stringByEvaluatingJavaScript:@"url = new URL(imageElement.src); url.protocol"]);
     EXPECT_WK_STREQ("200", [webView stringByEvaluatingJavaScript:@"imageElement.width"]);
 }
@@ -204,8 +223,7 @@ TEST(PasteImage, PasteTIFFFile)
     EXPECT_WK_STREQ("sunset-in-cupertino-100px.tiff", [webView stringByEvaluatingJavaScript:@"file.name"]);
     EXPECT_WK_STREQ("", [webView stringByEvaluatingJavaScript:@"editor.textContent"]);
 
-    [webView stringByEvaluatingJavaScript:@"insertFileAsImage(file)"];
-    [webView waitForMessage:@"loaded"];
+    [webView waitForMessage:@"loaded" afterEvaluatingScript:@"insertFileAsImage(file)"];
     EXPECT_WK_STREQ("blob:", [webView stringByEvaluatingJavaScript:@"url = new URL(imageElement.src); url.protocol"]);
     EXPECT_WK_STREQ("100", [webView stringByEvaluatingJavaScript:@"imageElement.width"]);
 }
@@ -226,7 +244,7 @@ TEST(PasteImage, PasteLegacyTIFFImage)
     EXPECT_WK_STREQ("image/png", [webView stringByEvaluatingJavaScript:@"file = dataTransfer.files[0]; file.type"]);
     EXPECT_WK_STREQ("image.png", [webView stringByEvaluatingJavaScript:@"file.name"]);
 
-    [webView stringByEvaluatingJavaScript:@"insertFileAsImage(file)"];
+    [webView waitForMessage:@"loaded" afterEvaluatingScript:@"insertFileAsImage(file)"];
     EXPECT_WK_STREQ("blob:", [webView stringByEvaluatingJavaScript:@"url = new URL(imageElement.src); url.protocol"]);
     EXPECT_WK_STREQ("100", [webView stringByEvaluatingJavaScript:@"imageElement.width"]);
 }
@@ -237,7 +255,7 @@ TEST(PasteImage, PasteTIFFImage)
     [webView synchronouslyLoadTestPageNamed:@"paste-image"];
 
     auto *data = [NSData dataWithContentsOfFile:[[NSBundle mainBundle] pathForResource:@"sunset-in-cupertino-100px" ofType:@"tiff" inDirectory:@"TestWebKitAPI.resources"]];
-    writeImageDataToPasteboard((NSString *)kUTTypeTIFF, data);
+    writeImageDataToPasteboard((__bridge NSString *)kUTTypeTIFF, data);
     [webView paste:nil];
 
     EXPECT_WK_STREQ("false", [webView stringByEvaluatingJavaScript:@"dataTransfer.types.includes('image/gif').toString()"]);
@@ -248,12 +266,10 @@ TEST(PasteImage, PasteTIFFImage)
     EXPECT_WK_STREQ("image.png", [webView stringByEvaluatingJavaScript:@"pngItem.file.name"]);
     EXPECT_WK_STREQ("true", [webView stringByEvaluatingJavaScript:@"dataTransfer.files.includes(pngItem.file).toString()"]);
 
-    [webView stringByEvaluatingJavaScript:@"insertFileAsImage(pngItem.file)"];
+    [webView waitForMessage:@"loaded" afterEvaluatingScript:@"insertFileAsImage(pngItem.file)"];
     EXPECT_WK_STREQ("blob:", [webView stringByEvaluatingJavaScript:@"url = new URL(imageElement.src); url.protocol"]);
     EXPECT_WK_STREQ("100", [webView stringByEvaluatingJavaScript:@"imageElement.width"]);
 }
 #endif
 
-#endif // WK_API_ENABLED && PLATFORM(MAC)
-
-
+#endif // PLATFORM(MAC)

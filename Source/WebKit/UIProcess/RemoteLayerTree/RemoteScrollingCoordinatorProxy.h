@@ -51,25 +51,25 @@ public:
     explicit RemoteScrollingCoordinatorProxy(WebPageProxy&);
     virtual ~RemoteScrollingCoordinatorProxy();
 
-    bool visualViewportEnabled() const { return m_scrollingTree && m_scrollingTree->visualViewportEnabled(); }
-
     // Inform the web process that the scroll position changed (called from the scrolling tree)
-    void scrollingTreeNodeDidScroll(WebCore::ScrollingNodeID, const WebCore::FloatPoint& newScrollPosition, const std::optional<WebCore::FloatPoint>& layoutViewportOrigin, WebCore::ScrollingLayerPositionAction);
+    void scrollingTreeNodeDidScroll(WebCore::ScrollingNodeID, const WebCore::FloatPoint& newScrollPosition, const Optional<WebCore::FloatPoint>& layoutViewportOrigin, WebCore::ScrollingLayerPositionAction);
     void scrollingTreeNodeRequestsScroll(WebCore::ScrollingNodeID, const WebCore::FloatPoint& scrollPosition, bool representsProgrammaticScroll);
 
     WebCore::TrackingType eventTrackingTypeForPoint(const AtomicString& eventName, WebCore::IntPoint) const;
 
     // Called externally when native views move around.
-    void viewportChangedViaDelegatedScrolling(WebCore::ScrollingNodeID, const WebCore::FloatRect& fixedPositionRect, double scale);
+    void viewportChangedViaDelegatedScrolling(const WebCore::FloatPoint& scrollPosition, const WebCore::FloatRect& layoutViewport, double scale);
 
     void currentSnapPointIndicesDidChange(WebCore::ScrollingNodeID, unsigned horizontal, unsigned vertical);
 
     // FIXME: expose the tree and pass this to that?
     bool handleWheelEvent(const WebCore::PlatformWheelEvent&);
-    
+    void handleMouseEvent(const WebCore::PlatformMouseEvent&);
+
     WebCore::ScrollingNodeID rootScrollingNodeID() const;
 
     const RemoteLayerTreeHost* layerTreeHost() const;
+    WebPageProxy& webPageProxy() const { return m_webPageProxy; }
 
     struct RequestedScrollInfo {
         bool requestsScrollPositionUpdate { };
@@ -82,8 +82,8 @@ public:
     bool propagatesMainFrameScrolls() const { return m_propagatesMainFrameScrolls; }
     bool hasFixedOrSticky() const { return m_scrollingTree->hasFixedOrSticky(); }
 
-#if PLATFORM(IOS)
-    WebCore::FloatRect customFixedPositionRect() const;
+#if PLATFORM(IOS_FAMILY)
+    WebCore::FloatRect currentLayoutViewport() const;
     void scrollingTreeNodeWillStartPanGesture();
     void scrollingTreeNodeWillStartScroll();
     void scrollingTreeNodeDidEndScroll();
@@ -97,6 +97,13 @@ public:
 
     String scrollingTreeAsText() const;
 
+#if ENABLE(POINTER_EVENTS)
+    Optional<WebCore::TouchActionData> touchActionDataAtPoint(const WebCore::IntPoint) const;
+    Optional<WebCore::TouchActionData> touchActionDataForScrollNodeID(WebCore::ScrollingNodeID) const;
+    void setTouchDataForTouchIdentifier(WebCore::TouchActionData, unsigned);
+    void clearTouchDataForTouchIdentifier(unsigned);
+#endif
+
 private:
     void connectStateNodeLayers(WebCore::ScrollingStateTree&, const RemoteLayerTreeHost&);
 #if ENABLE(CSS_SCROLL_SNAP)
@@ -106,6 +113,9 @@ private:
 
     WebPageProxy& m_webPageProxy;
     RefPtr<RemoteScrollingTree> m_scrollingTree;
+#if ENABLE(POINTER_EVENTS)
+    HashMap<unsigned, WebCore::TouchActionData> m_touchActionDataByTouchIdentifier;
+#endif
     RequestedScrollInfo* m_requestedScrollInfo;
 #if ENABLE(CSS_SCROLL_SNAP)
     unsigned m_currentHorizontalSnapPointIndex { 0 };

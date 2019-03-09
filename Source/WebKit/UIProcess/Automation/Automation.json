@@ -32,14 +32,22 @@
             "description": "The coordinate system in which rects, points, and sizes are to be interpreted.",
             "enum": [
                 "Page",
-                "LayoutViewport",
-                "VisualViewport"
+                "LayoutViewport"
             ]
         },
         {
             "id": "BrowsingContextHandle",
             "type": "string",
             "description": "An opaque identifier for a browsing context."
+        },
+        {
+            "id": "BrowsingContextPresentation",
+            "type": "string",
+            "description": "How a browsing context is presented by the user agent. A browsing context is considered a tab if it shares an OS-level window with another browsing context.",
+            "enum": [
+                "Window",
+                "Tab"
+            ]
         },
         {
             "id": "FrameHandle",
@@ -274,14 +282,26 @@
             ]
         },
         {
+            "id": "MouseMoveOrigin",
+            "type": "string",
+            "description": "Enumerates different origin types that can be used in mouse move interactions.",
+            "enum": [
+                "Viewport",
+                "Pointer",
+                "Element"
+            ]
+        },
+        {
             "id": "InputSourceState",
             "type": "object",
             "description": "A new state for a specific input source. All state-related fields are optional and must be applicable to the InputSource referenced by 'sourceId'. If no state-related fields are specified, the state is assumed to remain the same as in the previous step (i.e., 'sustained').",
             "properties": [
                 { "name": "sourceId", "type": "string", "description": "The input source whose state is described by this object." },
                 { "name": "pressedCharKey", "type": "string", "optional": true, "description": "For 'keyboard' input sources, specifies a character key that has 'pressed' state. Unmentioned character keys are assumed to have a 'released' state." },
-                { "name": "pressedVirtualKey", "$ref": "VirtualKey", "optional": true, "description": "For 'keyboard' input sources, specifies a virtual key that has a 'pressed' state. Unmentioned virtual keys are assumed to have a 'released' state." },
-                { "name": "pressedButton", "$ref": "MouseButton", "optional": true, "description": "For 'mouse' input sources, specifies which mouse button has a 'pressed' state. Unmentioned mouse buttons are assumed to have a 'released' state." },
+                { "name": "pressedVirtualKeys", "type": "array", "items": { "$ref": "VirtualKey" }, "optional": true, "description": "For 'keyboard' input sources, specifies virtual keys that have a 'pressed' state. Unmentioned virtual keys are assumed to have a 'released' state." },
+                { "name": "pressedButton", "$ref": "MouseButton", "optional": true, "description": "For 'mouse' input sources, specifies which mouse button has a 'pressed' state. Unmentioned mouse buttons are assumed to have a 'released' state. For 'touch' input sources, passing MouseButton::Left denotes a touch-down state." },
+                { "name": "origin", "$ref": "MouseMoveOrigin", "optional": true, "description": "For 'mouse' input sources, specifies the origin type of a mouse move transition. Defaults to 'Viewport' if omitted."},
+                { "name": "nodeHandle", "$ref": "NodeHandle", "optional": true, "description": "The handle of the element to use as origin when origin type is 'Element'."},
                 { "name": "location", "$ref": "Point", "optional": true, "description": "For 'mouse' or 'touch' input sources, specifies a location in view coordinates to which the input source should transition. Transitioning to this state may interpolate intemediate input source states to better simulate real user movements and gestures." },
                 { "name": "duration", "type": "integer", "optional": true, "description": "The minimum number of milliseconds that must elapse while the relevant input source transitions to this state." }
             ]
@@ -311,10 +331,11 @@
             "name": "createBrowsingContext",
             "description": "Opens a new browsing context in the automation session and makes it the active browsing context for user interaction. This command creates a browsing context in a new window rather than adding a tab to an existing window.",
             "parameters": [
-                { "name": "preferNewTab", "type": "boolean", "optional": true, "description": "Create the new browsing context as a tab in an existing Automation window, if possible."}
+                { "name": "presentationHint", "$ref": "BrowsingContextPresentation", "optional": true, "description": "A hint for the desired presentation of new browsing context (new tab or new window)."}
             ],
             "returns": [
-                { "name": "handle", "$ref": "BrowsingContextHandle", "description": "An opaque handle for the newly created browsing context." }
+                { "name": "handle", "$ref": "BrowsingContextHandle", "description": "An opaque handle for the newly created browsing context." },
+                { "name": "presentation", "$ref": "BrowsingContextPresentation", "description": "How the browser presented the new browsing context (new tab or new window)." }
             ],
             "async": true
         },
@@ -341,6 +362,14 @@
                 { "name": "handle", "$ref": "BrowsingContextHandle", "description": "The handle for the browsing context to be resized." },
                 { "name": "origin", "$ref": "Point", "optional": true, "description": "The new origin for the browsing context's window. The position is interpreted in screen coordinate space, relative to the upper left corner of the screen." },
                 { "name": "size", "$ref": "Size", "optional": true, "description": "The new size for the browsing context's window. The size is interpreted in screen pixels." }
+            ],
+            "async": true
+        },
+        {
+            "name": "maximizeWindowOfBrowsingContext",
+            "description": "Causes the window of the specified browsing context to be maximized. This command implicitly exits fullscreen mode.",
+            "parameters": [
+                { "name": "handle", "$ref": "BrowsingContextHandle", "description": "The handle for the browsing context whose window should be maximized." }
             ],
             "async": true
         },
@@ -459,6 +488,7 @@
             "description": "Perform multiple simulated interactions over time using a list of input sources and a list of steps, where each step specifies a state for each input source at the time that step is performed.",
             "parameters": [
                 { "name": "handle", "$ref": "BrowsingContextHandle", "description": "The browsing context to be interacted with." },
+                { "name": "frameHandle", "$ref": "FrameHandle", "optional": true, "description": "The handle for the frame in which to search for the elements in case of an 'Element' type MouseMoveOrigin. The main frame is used if this parameter empty string or excluded." },
                 { "name": "inputSources", "type": "array", "items": { "$ref": "InputSource" }, "description": "All input sources that are used to perform this interaction sequence." },
                 { "name": "steps", "type": "array", "items": { "$ref": "InteractionStep" }, "description": "A list of steps that are executed in order." }
             ],
@@ -468,7 +498,8 @@
             "name": "cancelInteractionSequence",
             "description": "Cancel an active interaction sequence that is currently in progress.",
             "parameters": [
-                { "name": "handle", "$ref": "BrowsingContextHandle", "description": "The browsing context to be interacted with." }
+                { "name": "handle", "$ref": "BrowsingContextHandle", "description": "The browsing context to be interacted with." },
+                { "name": "frameHandle", "$ref": "FrameHandle", "optional": true, "description": "The handle for the frame passed to performInteractionSequence. The main frame is used if this parameter empty string or excluded." }
             ],
             "async": true
         },

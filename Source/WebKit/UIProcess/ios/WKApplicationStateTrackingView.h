@@ -23,7 +23,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 #import <UIKit/UIKit.h>
 
@@ -32,10 +32,10 @@
 @interface WKApplicationStateTrackingView : UIView
 
 - (instancetype)initWithFrame:(CGRect)frame webView:(WKWebView *)webView;
-- (void)_applicationDidCreateWindowContext;
 - (void)_applicationWillEnterForeground;
 @property (nonatomic, readonly) BOOL isBackground;
+@property (nonatomic, readonly) UIView *_contentView;
 
 @end
 
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)

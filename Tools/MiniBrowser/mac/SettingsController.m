@@ -29,10 +29,8 @@
 #import "AppKitCompatibilityDeclarations.h"
 #import "BrowserWindowController.h"
 #import <WebKit/WKPreferencesPrivate.h>
-
-#if WK_API_ENABLED
 #import <WebKit/_WKExperimentalFeature.h>
-#endif
+#import <WebKit/_WKInternalDebugFeature.h>
 
 static NSString * const defaultURL = @"http://www.webkit.org/";
 static NSString * const DefaultURLPreferenceKey = @"DefaultURL";
@@ -61,24 +59,24 @@ static NSString * const UseTransparentWindowsPreferenceKey = @"UseTransparentWin
 static NSString * const UsePaginatedModePreferenceKey = @"UsePaginatedMode";
 static NSString * const EnableSubPixelCSSOMMetricsPreferenceKey = @"EnableSubPixelCSSOMMetrics";
 
-static NSString * const VisualViewportEnabledPreferenceKey = @"VisualViewportEnabled";
 static NSString * const LargeImageAsyncDecodingEnabledPreferenceKey = @"LargeImageAsyncDecodingEnabled";
 static NSString * const AnimatedImageAsyncDecodingEnabledPreferenceKey = @"AnimatedImageAsyncDecodingEnabled";
+static NSString * const AppleColorFilterEnabledPreferenceKey = @"AppleColorFilterEnabled";
+static NSString * const PunchOutWhiteBackgroundsInDarkModePreferenceKey = @"PunchOutWhiteBackgroundsInDarkMode";
+static NSString * const UseSystemAppearancePreferenceKey = @"UseSystemAppearance";
 
 // This default name intentionally overlaps with the key that WebKit2 checks when creating a view.
 static NSString * const UseRemoteLayerTreeDrawingAreaPreferenceKey = @"WebKit2UseRemoteLayerTreeDrawingArea";
 
 static NSString * const PerWindowWebProcessesDisabledKey = @"PerWindowWebProcessesDisabled";
 static NSString * const NetworkCacheSpeculativeRevalidationDisabledKey = @"NetworkCacheSpeculativeRevalidationDisabled";
-static NSString * const ProcessSwapOnNavigationKey = @"ProcessSwapOnNavigation";
 static NSString * const ProcessSwapOnWindowOpenWithOpenerKey = @"ProcessSwapOnWindowOpenWithOpener";
 
 typedef NS_ENUM(NSInteger, DebugOverylayMenuItemTag) {
     NonFastScrollableRegionOverlayTag = 100,
     WheelEventHandlerRegionOverlayTag,
-#if WK_API_ENABLED
     ExperimentalFeatureTag,
-#endif
+    InternalDebugFeatureTag,
 };
 
 @implementation SettingsController
@@ -109,7 +107,6 @@ typedef NS_ENUM(NSInteger, DebugOverylayMenuItemTag) {
 #if __MAC_OS_X_VERSION_MIN_REQUIRED >= 101300
         SubpixelAntialiasedLayerTextEnabledPreferenceKey,
 #endif
-        VisualViewportEnabledPreferenceKey,
         LargeImageAsyncDecodingEnabledPreferenceKey,
         AnimatedImageAsyncDecodingEnabledPreferenceKey,
     ];
@@ -166,11 +163,12 @@ typedef NS_ENUM(NSInteger, DebugOverylayMenuItemTag) {
     [self _addItemWithTitle:@"Enable Accelerated Drawing" action:@selector(toggleAcceleratedDrawingEnabled:) indented:NO];
     [self _addItemWithTitle:@"Enable Display List Drawing" action:@selector(toggleDisplayListDrawingEnabled:) indented:NO];
     [self _addItemWithTitle:@"Enable Subpixel-antialiased Layer Text" action:@selector(toggleSubpixelAntialiasedLayerTextEnabled:) indented:NO];
-    [self _addItemWithTitle:@"Enable Visual Viewport" action:@selector(toggleVisualViewportEnabled:) indented:NO];
     [self _addItemWithTitle:@"Enable Resource Load Statistics" action:@selector(toggleResourceLoadStatisticsEnabled:) indented:NO];
     [self _addItemWithTitle:@"Enable Large Image Async Decoding" action:@selector(toggleLargeImageAsyncDecodingEnabled:) indented:NO];
     [self _addItemWithTitle:@"Enable Animated Image Async Decoding" action:@selector(toggleAnimatedImageAsyncDecodingEnabled:) indented:NO];
-
+    [self _addItemWithTitle:@"Enable color-filter" action:@selector(toggleAppleColorFilterEnabled:) indented:NO];
+    [self _addItemWithTitle:@"Punch Out White Backgrounds in Dark Mode" action:@selector(togglePunchOutWhiteBackgroundsInDarkMode:) indented:NO];
+    [self _addItemWithTitle:@"Use System Appearance" action:@selector(toggleUseSystemAppearance:) indented:NO];
     [self _addHeaderWithTitle:@"WebKit2-only Settings"];
 
     [self _addItemWithTitle:@"Reserve Space For Banners" action:@selector(toggleReserveSpaceForBanners:) indented:YES];
@@ -181,7 +179,6 @@ typedef NS_ENUM(NSInteger, DebugOverylayMenuItemTag) {
     [self _addItemWithTitle:@"Load All Site Icons Per-Page" action:@selector(toggleLoadsAllSiteIcons:) indented:YES];
     [self _addItemWithTitle:@"Use GameController.framework on macOS (Restart required)" action:@selector(toggleUsesGameControllerFramework:) indented:YES];
     [self _addItemWithTitle:@"Disable network cache speculative revalidation" action:@selector(toggleNetworkCacheSpeculativeRevalidationDisabled:) indented:YES];
-    [self _addItemWithTitle:@"Enable Process Swap on Navigation" action:@selector(toggleProcessSwapOnNavigation:) indented:YES];
     [self _addItemWithTitle:@"Enable Process Swap on window.open() with an opener" action:@selector(toggleProcessSwapOnWindowOpenWithOpener:) indented:YES];
 
     NSMenuItem *debugOverlaysSubmenuItem = [[NSMenuItem alloc] initWithTitle:@"Debug Overlays" action:nil keyEquivalent:@""];
@@ -202,14 +199,13 @@ typedef NS_ENUM(NSInteger, DebugOverylayMenuItemTag) {
     [_menu addItem:debugOverlaysSubmenuItem];
     [debugOverlaysSubmenuItem release];
 
-#if WK_API_ENABLED
     NSMenuItem *experimentalFeaturesSubmenuItem = [[NSMenuItem alloc] initWithTitle:@"Experimental Features" action:nil keyEquivalent:@""];
     NSMenu *experimentalFeaturesMenu = [[NSMenu alloc] initWithTitle:@"Experimental Features"];
     [experimentalFeaturesSubmenuItem setSubmenu:experimentalFeaturesMenu];
 
-    NSArray<_WKExperimentalFeature *> *features = [WKPreferences _experimentalFeatures];
+    NSArray<_WKExperimentalFeature *> *experimentalFeatures = [WKPreferences _experimentalFeatures];
 
-    for (_WKExperimentalFeature *feature in features) {
+    for (_WKExperimentalFeature *feature in experimentalFeatures) {
         NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:feature.name action:@selector(toggleExperimentalFeature:) keyEquivalent:@""];
         item.toolTip = feature.details;
         item.representedObject = feature;
@@ -222,7 +218,26 @@ typedef NS_ENUM(NSInteger, DebugOverylayMenuItemTag) {
     [_menu addItem:experimentalFeaturesSubmenuItem];
     [experimentalFeaturesSubmenuItem release];
     [experimentalFeaturesMenu release];
-#endif // WK_API_ENABLED
+
+    NSMenuItem *internalDebugFeaturesSubmenuItem = [[NSMenuItem alloc] initWithTitle:@"Internal Features" action:nil keyEquivalent:@""];
+    NSMenu *internalDebugFeaturesMenu = [[NSMenu alloc] initWithTitle:@"Internal Features"];
+    [internalDebugFeaturesSubmenuItem setSubmenu:internalDebugFeaturesMenu];
+
+    NSArray<_WKInternalDebugFeature *> *internalDebugFeatures = [WKPreferences _internalDebugFeatures];
+
+    for (_WKInternalDebugFeature *feature in internalDebugFeatures) {
+        NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:feature.name action:@selector(toggleInternalDebugFeature:) keyEquivalent:@""];
+        item.toolTip = feature.details;
+        item.representedObject = feature;
+
+        [item setTag:InternalDebugFeatureTag];
+        [item setTarget:self];
+        [internalDebugFeaturesMenu addItem:[item autorelease]];
+    }
+
+    [_menu addItem:internalDebugFeaturesSubmenuItem];
+    [internalDebugFeaturesSubmenuItem release];
+    [internalDebugFeaturesMenu release];
 
     [self _addHeaderWithTitle:@"WebKit1-only Settings"];
     [self _addItemWithTitle:@"Enable Subpixel CSSOM Metrics" action:@selector(toggleEnableSubPixelCSSOMMetrics:) indented:YES];
@@ -260,8 +275,12 @@ typedef NS_ENUM(NSInteger, DebugOverylayMenuItemTag) {
         [menuItem setState:[self largeImageAsyncDecodingEnabled] ? NSControlStateValueOn : NSControlStateValueOff];
     else if (action == @selector(toggleAnimatedImageAsyncDecodingEnabled:))
         [menuItem setState:[self animatedImageAsyncDecodingEnabled] ? NSControlStateValueOn : NSControlStateValueOff];
-    else if (action == @selector(toggleVisualViewportEnabled:))
-        [menuItem setState:[self visualViewportEnabled] ? NSControlStateValueOn : NSControlStateValueOff];
+    else if (action == @selector(toggleAppleColorFilterEnabled:))
+        [menuItem setState:[self appleColorFilterEnabled] ? NSControlStateValueOn : NSControlStateValueOff];
+    else if (action == @selector(togglePunchOutWhiteBackgroundsInDarkMode:))
+        [menuItem setState:[self punchOutWhiteBackgroundsInDarkMode] ? NSControlStateValueOn : NSControlStateValueOff];
+    else if (action == @selector(toggleUseSystemAppearance:))
+        [menuItem setState:[self useSystemAppearance] ? NSControlStateValueOn : NSControlStateValueOff];
     else if (action == @selector(toggleReserveSpaceForBanners:))
         [menuItem setState:[self isSpaceReservedForBanners] ? NSControlStateValueOn : NSControlStateValueOff];
     else if (action == @selector(toggleShowTiledScrollingIndicator:))
@@ -274,8 +293,6 @@ typedef NS_ENUM(NSInteger, DebugOverylayMenuItemTag) {
         [menuItem setState:[self usesGameControllerFramework] ? NSControlStateValueOn : NSControlStateValueOff];
     else if (action == @selector(toggleNetworkCacheSpeculativeRevalidationDisabled:))
         [menuItem setState:[self networkCacheSpeculativeRevalidationDisabled] ? NSControlStateValueOn : NSControlStateValueOff];
-    else if (action == @selector(toggleProcessSwapOnNavigation:))
-        [menuItem setState:[self processSwapOnNavigationEnabled] ? NSControlStateValueOn : NSControlStateValueOff];
     else if (action == @selector(toggleProcessSwapOnWindowOpenWithOpener:))
         [menuItem setState:[self processSwapOnWindowOpenWithOpenerEnabled] ? NSControlStateValueOn : NSControlStateValueOff];
     else if (action == @selector(toggleUseUISideCompositing:))
@@ -287,12 +304,14 @@ typedef NS_ENUM(NSInteger, DebugOverylayMenuItemTag) {
     else if (action == @selector(toggleDebugOverlay:))
         [menuItem setState:[self debugOverlayVisible:menuItem] ? NSControlStateValueOn : NSControlStateValueOff];
 
-#if WK_API_ENABLED
     if (menuItem.tag == ExperimentalFeatureTag) {
         _WKExperimentalFeature *feature = menuItem.representedObject;
-        [menuItem setState:[defaultPreferences() _isEnabledForFeature:feature] ? NSControlStateValueOn : NSControlStateValueOff];
+        [menuItem setState:[defaultPreferences() _isEnabledForExperimentalFeature:feature] ? NSControlStateValueOn : NSControlStateValueOff];
     }
-#endif
+    if (menuItem.tag == InternalDebugFeatureTag) {
+        _WKInternalDebugFeature *feature = menuItem.representedObject;
+        [menuItem setState:[defaultPreferences() _isEnabledForInternalDebugFeature:feature] ? NSControlStateValueOn : NSControlStateValueOff];
+    }
 
     return YES;
 }
@@ -493,16 +512,6 @@ typedef NS_ENUM(NSInteger, DebugOverylayMenuItemTag) {
     [self _toggleBooleanDefault:NetworkCacheSpeculativeRevalidationDisabledKey];
 }
 
-- (BOOL)processSwapOnNavigationEnabled
-{
-    return [[NSUserDefaults standardUserDefaults] boolForKey:ProcessSwapOnNavigationKey];
-}
-
-- (void)toggleProcessSwapOnNavigation:(id)sender
-{
-    [self _toggleBooleanDefault:ProcessSwapOnNavigationKey];
-}
-
 - (BOOL)processSwapOnWindowOpenWithOpenerEnabled
 {
     return [[NSUserDefaults standardUserDefaults] boolForKey:ProcessSwapOnWindowOpenWithOpenerKey];
@@ -533,16 +542,6 @@ typedef NS_ENUM(NSInteger, DebugOverylayMenuItemTag) {
     [self _toggleBooleanDefault:ResourceLoadStatisticsEnabledPreferenceKey];
 }
 
-- (BOOL)visualViewportEnabled
-{
-    return [[NSUserDefaults standardUserDefaults] boolForKey:VisualViewportEnabledPreferenceKey];
-}
-
-- (void)toggleVisualViewportEnabled:(id)sender
-{
-    [self _toggleBooleanDefault:VisualViewportEnabledPreferenceKey];
-}
-
 - (BOOL)resourceLoadStatisticsEnabled
 {
     return [[NSUserDefaults standardUserDefaults] boolForKey:ResourceLoadStatisticsEnabledPreferenceKey];
@@ -566,6 +565,36 @@ typedef NS_ENUM(NSInteger, DebugOverylayMenuItemTag) {
 - (BOOL)animatedImageAsyncDecodingEnabled
 {
     return [[NSUserDefaults standardUserDefaults] boolForKey:AnimatedImageAsyncDecodingEnabledPreferenceKey];
+}
+
+- (void)toggleAppleColorFilterEnabled:(id)sender
+{
+    [self _toggleBooleanDefault:AppleColorFilterEnabledPreferenceKey];
+}
+
+- (BOOL)appleColorFilterEnabled
+{
+    return [[NSUserDefaults standardUserDefaults] boolForKey:AppleColorFilterEnabledPreferenceKey];
+}
+
+- (void)togglePunchOutWhiteBackgroundsInDarkMode:(id)sender
+{
+    [self _toggleBooleanDefault:PunchOutWhiteBackgroundsInDarkModePreferenceKey];
+}
+
+- (BOOL)punchOutWhiteBackgroundsInDarkMode
+{
+    return [[NSUserDefaults standardUserDefaults] boolForKey:PunchOutWhiteBackgroundsInDarkModePreferenceKey];
+}
+
+- (void)toggleUseSystemAppearance:(id)sender
+{
+    [self _toggleBooleanDefault:UseSystemAppearancePreferenceKey];
+}
+
+- (BOOL)useSystemAppearance
+{
+    return [[NSUserDefaults standardUserDefaults] boolForKey:UseSystemAppearancePreferenceKey];
 }
 
 - (void)toggleEnableSubPixelCSSOMMetrics:(id)sender
@@ -607,18 +636,27 @@ typedef NS_ENUM(NSInteger, DebugOverylayMenuItemTag) {
         [self _toggleBooleanDefault:preferenceKey];
 }
 
-#if WK_API_ENABLED
 - (void)toggleExperimentalFeature:(id)sender
 {
     _WKExperimentalFeature *feature = ((NSMenuItem *)sender).representedObject;
     WKPreferences *preferences = defaultPreferences();
 
-    BOOL currentlyEnabled = [preferences _isEnabledForFeature:feature];
-    [preferences _setEnabled:!currentlyEnabled forFeature:feature];
+    BOOL currentlyEnabled = [preferences _isEnabledForExperimentalFeature:feature];
+    [preferences _setEnabled:!currentlyEnabled forExperimentalFeature:feature];
 
     [[NSUserDefaults standardUserDefaults] setBool:!currentlyEnabled forKey:feature.key];
 }
-#endif
+
+- (void)toggleInternalDebugFeature:(id)sender
+{
+    _WKInternalDebugFeature *feature = ((NSMenuItem *)sender).representedObject;
+    WKPreferences *preferences = defaultPreferences();
+
+    BOOL currentlyEnabled = [preferences _isEnabledForInternalDebugFeature:feature];
+    [preferences _setEnabled:!currentlyEnabled forInternalDebugFeature:feature];
+
+    [[NSUserDefaults standardUserDefaults] setBool:!currentlyEnabled forKey:feature.key];
+}
 
 - (BOOL)debugOverlayVisible:(NSMenuItem *)menuItem
 {

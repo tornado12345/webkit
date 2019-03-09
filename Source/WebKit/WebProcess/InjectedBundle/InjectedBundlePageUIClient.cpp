@@ -35,9 +35,8 @@
 #include "WebPage.h"
 #include <wtf/text/WTFString.h>
 
-using namespace WebCore;
-
 namespace WebKit {
+using namespace WebCore;
 
 InjectedBundlePageUIClient::InjectedBundlePageUIClient(const WKBundlePageUIClientBase* client)
 {
@@ -74,15 +73,15 @@ void InjectedBundlePageUIClient::willRunJavaScriptPrompt(WebPage* page, const St
         m_client.willRunJavaScriptPrompt(toAPI(page), toAPI(message.impl()), toAPI(defaultValue.impl()), toAPI(frame), m_client.base.clientInfo);
 }
 
-void InjectedBundlePageUIClient::mouseDidMoveOverElement(WebPage* page, const HitTestResult& coreHitTestResult, WebEvent::Modifiers modifiers, RefPtr<API::Object>& userData)
+void InjectedBundlePageUIClient::mouseDidMoveOverElement(WebPage* page, const HitTestResult& coreHitTestResult, OptionSet<WebEvent::Modifier> modifiers, RefPtr<API::Object>& userData)
 {
     if (!m_client.mouseDidMoveOverElement)
         return;
 
-    RefPtr<InjectedBundleHitTestResult> hitTestResult = InjectedBundleHitTestResult::create(coreHitTestResult);
+    auto hitTestResult = InjectedBundleHitTestResult::create(coreHitTestResult);
 
     WKTypeRef userDataToPass = 0;
-    m_client.mouseDidMoveOverElement(toAPI(page), toAPI(hitTestResult.get()), toAPI(modifiers), &userDataToPass, m_client.base.clientInfo);
+    m_client.mouseDidMoveOverElement(toAPI(page), toAPI(hitTestResult.ptr()), toAPI(modifiers), &userDataToPass, m_client.base.clientInfo);
     userData = adoptRef(toImpl(userDataToPass));
 }
 

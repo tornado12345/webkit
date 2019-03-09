@@ -23,15 +23,17 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+// FIXME: This is a .cpp but has ObjC in it?
+
 #include "config.h"
 #include "ArgumentCodersCF.h"
 
 #include "DataReference.h"
 #include "Decoder.h"
 #include "Encoder.h"
-#include <WebCore/CFURLExtras.h>
 #include <wtf/ProcessPrivilege.h>
 #include <wtf/Vector.h>
+#include <wtf/cf/CFURLExtras.h>
 #include <wtf/spi/cocoa/SecuritySPI.h>
 
 #if USE(FOUNDATION)
@@ -44,7 +46,7 @@
 
 extern "C" SecIdentityRef SecIdentityCreate(CFAllocatorRef allocator, SecCertificateRef certificate, SecKeyRef privateKey);
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 #if USE(APPLE_INTERNAL_SDK)
 #include <Security/SecKeyPriv.h>
 #endif
@@ -61,9 +63,8 @@ extern "C" SecAccessControlRef SecAccessControlCreateFromData(CFAllocatorRef all
 extern "C" CFDataRef SecAccessControlCopyData(SecAccessControlRef access_control);
 #endif
 
-using namespace WebCore;
-
 namespace IPC {
+using namespace WebCore;
 
 CFTypeRef tokenNullTypeRef()
 {
@@ -513,17 +514,9 @@ static size_t sizeForNumberType(CFNumberType numberType)
     case kCFNumberCFIndexType:
         return sizeof(CFIndex);
     case kCFNumberNSIntegerType:
-#ifdef __LP64__
         return sizeof(long);
-#else
-        return sizeof(int);
-#endif
     case kCFNumberCGFloatType:
-#ifdef __LP64__
         return sizeof(double);
-#else
-        return sizeof(float);
-#endif
     }
 
     return 0;
@@ -597,8 +590,8 @@ void encode(Encoder& encoder, CFURLRef url)
     if (baseURL)
         encode(encoder, baseURL);
 
-    URLCharBuffer urlBytes;
-    getURLBytes(url, urlBytes);
+    WTF::URLCharBuffer urlBytes;
+    WTF::getURLBytes(url, urlBytes);
     IPC::DataReference dataReference(reinterpret_cast<const uint8_t*>(urlBytes.data()), urlBytes.size());
     encoder << dataReference;
 }
@@ -624,12 +617,12 @@ bool decode(Decoder& decoder, RetainPtr<CFURLRef>& result)
     if (urlBytes.isEmpty()) {
         // CFURL can't hold an empty URL, unlike NSURL.
         // FIXME: This discards base URL, which seems incorrect.
-        result = reinterpret_cast<CFURLRef>([NSURL URLWithString:@""]);
+        result = (__bridge CFURLRef)[NSURL URLWithString:@""];
         return true;
     }
 #endif
 
-    result = createCFURLFromBuffer(reinterpret_cast<const char*>(urlBytes.data()), urlBytes.size(), baseURL.get());
+    result = WTF::createCFURLFromBuffer(reinterpret_cast<const char*>(urlBytes.data()), urlBytes.size(), baseURL.get());
     return result;
 }
 
@@ -649,7 +642,7 @@ bool decode(Decoder& decoder, RetainPtr<SecCertificateRef>& result)
     return true;
 }
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 static bool secKeyRefDecodingAllowed;
 
 void setAllowsDecodingSecKeyRef(bool allowsDecodingSecKeyRef)
@@ -686,7 +679,7 @@ void encode(Encoder& encoder, SecIdentityRef identity)
     SecIdentityCopyPrivateKey(identity, &key);
 
     CFDataRef keyData = nullptr;
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
     keyData = copyPersistentRef(key);
 #endif
 #if PLATFORM(MAC)
@@ -724,7 +717,7 @@ bool decode(Decoder& decoder, RetainPtr<SecIdentityRef>& result)
         return false;
 
     SecKeyRef key = nullptr;
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
     if (secKeyRefDecodingAllowed)
         SecKeyFindWithPersistentRef(keyData.get(), &key);
 #endif
@@ -771,7 +764,6 @@ bool decode(Decoder& decoder, RetainPtr<SecKeychainItemRef>& result)
 #if HAVE(SEC_ACCESS_CONTROL)
 void encode(Encoder& encoder, SecAccessControlRef accessControl)
 {
-    RELEASE_ASSERT(hasProcessPrivilege(ProcessPrivilege::CanAccessCredentials));
     RetainPtr<CFDataRef> data = adoptCF(SecAccessControlCopyData(accessControl));
     if (data)
         encode(encoder, data.get());
@@ -779,7 +771,6 @@ void encode(Encoder& encoder, SecAccessControlRef accessControl)
 
 bool decode(Decoder& decoder, RetainPtr<SecAccessControlRef>& result)
 {
-    RELEASE_ASSERT(hasProcessPrivilege(ProcessPrivilege::CanAccessCredentials));
     RetainPtr<CFDataRef> data;
     if (!decode(decoder, data))
         return false;

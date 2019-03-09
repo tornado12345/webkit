@@ -30,12 +30,13 @@
 
 #include "FormData.h"
 #include "HTTPHeaderMap.h"
-#include "URL.h"
+#include "IntRect.h"
+#include <wtf/URL.h>
 #include "ResourceLoadPriority.h"
 
 namespace WebCore {
 
-enum ResourceRequestCachePolicy {
+enum class ResourceRequestCachePolicy : uint8_t {
     UseProtocolCachePolicy, // normal load, equivalent to fetch "default" cache mode.
     ReloadIgnoringCacheData, // reload, equivalent to fetch "reload"cache mode.
     ReturnCacheDataElseLoad, // back/forward or encoding change - allow stale data, equivalent to fetch "force-cache" cache mode.
@@ -44,7 +45,7 @@ enum ResourceRequestCachePolicy {
     RefreshAnyCacheData, // Serve cache data only if revalidated, equivalent to fetch "no-cache" mode.
 };
 
-enum HTTPBodyUpdatePolicy {
+enum HTTPBodyUpdatePolicy : uint8_t {
     DoNotUpdateHTTPBody,
     UpdateHTTPBody
 };
@@ -56,7 +57,7 @@ class ResourceResponse;
 class ResourceRequestBase {
     WTF_MAKE_FAST_ALLOCATED;
 public:
-    ResourceRequest isolatedCopy() const;
+    WEBCORE_EXPORT ResourceRequest isolatedCopy() const;
     WEBCORE_EXPORT void setAsIsolatedCopy(const ResourceRequest&);
 
     WEBCORE_EXPORT bool isNull() const;
@@ -82,7 +83,7 @@ public:
     // and <https://tools.ietf.org/html/draft-ietf-httpbis-cookie-same-site-00#section-5.2>.
     // FIXME: For some reason the main resource request may be updated more than once. We start off as Unspecified
     // to detect if we need to compute the same-site and top-site state or not. See FIXME in DocumentLoader::startLoadingMainResource().
-    enum class SameSiteDisposition { Unspecified, SameSite, CrossSite };
+    enum class SameSiteDisposition : uint8_t { Unspecified, SameSite, CrossSite };
     bool isSameSiteUnspecified() const { return m_sameSiteDisposition == SameSiteDisposition::Unspecified; }
     WEBCORE_EXPORT bool isSameSite() const; // Whether this request's registrable domain matches the request's initiator's "site for cookies".
     WEBCORE_EXPORT void setIsSameSite(bool);
@@ -163,13 +164,25 @@ public:
     bool hiddenFromInspector() const { return m_hiddenFromInspector; }
     void setHiddenFromInspector(bool hiddenFromInspector) { m_hiddenFromInspector = hiddenFromInspector; }
 
-    enum class Requester { Unspecified, Main, XHR, Fetch, Media };
+    enum class Requester : uint8_t { Unspecified, Main, XHR, Fetch, Media, ImportScripts };
     Requester requester() const { return m_requester; }
     void setRequester(Requester requester) { m_requester = requester; }
 
     // Who initiated the request so the Inspector can associate it with a context. E.g. a Web Worker.
     String initiatorIdentifier() const { return m_initiatorIdentifier; }
     void setInitiatorIdentifier(const String& identifier) { m_initiatorIdentifier = identifier; }
+
+    // Additional information for the Inspector to be able to identify the node that initiated this request.
+    const Optional<int>& inspectorInitiatorNodeIdentifier() const { return m_inspectorInitiatorNodeIdentifier; }
+    void setInspectorInitiatorNodeIdentifier(int inspectorInitiatorNodeIdentifier) { m_inspectorInitiatorNodeIdentifier = inspectorInitiatorNodeIdentifier; }
+
+#if USE(SYSTEM_PREVIEW)
+    WEBCORE_EXPORT bool isSystemPreview() const;
+    WEBCORE_EXPORT void setSystemPreview(bool);
+
+    WEBCORE_EXPORT const IntRect& systemPreviewRect() const;
+    WEBCORE_EXPORT void setSystemPreviewRect(const IntRect&);
+#endif
 
 #if !PLATFORM(COCOA)
     bool encodingRequiresPlatformData() const { return true; }
@@ -193,7 +206,7 @@ protected:
     ResourceRequestBase(const URL& url, ResourceRequestCachePolicy policy)
         : m_url(url)
         , m_timeoutInterval(s_defaultTimeoutInterval)
-        , m_httpMethod(ASCIILiteral("GET"))
+        , m_httpMethod("GET"_s)
         , m_cachePolicy(policy)
         , m_allowCookies(true)
         , m_resourceRequestUpdated(true)
@@ -201,8 +214,8 @@ protected:
     {
     }
 
-    void updatePlatformRequest(HTTPBodyUpdatePolicy = DoNotUpdateHTTPBody) const;
-    void updateResourceRequest(HTTPBodyUpdatePolicy = DoNotUpdateHTTPBody) const;
+    void updatePlatformRequest(HTTPBodyUpdatePolicy = HTTPBodyUpdatePolicy::DoNotUpdateHTTPBody) const;
+    void updateResourceRequest(HTTPBodyUpdatePolicy = HTTPBodyUpdatePolicy::DoNotUpdateHTTPBody) const;
 
     template<class Encoder> void encodeBase(Encoder&) const;
     template<class Decoder> bool decodeBase(Decoder&);
@@ -214,22 +227,27 @@ protected:
     double m_timeoutInterval; // 0 is a magic value for platform default on platforms that have one.
     URL m_firstPartyForCookies;
     String m_httpMethod;
+    String m_initiatorIdentifier;
+    String m_cachePartition { emptyString() };
     HTTPHeaderMap m_httpHeaderFields;
     Vector<String> m_responseContentDispositionEncodingFallbackArray;
     RefPtr<FormData> m_httpBody;
-    ResourceRequestCachePolicy m_cachePolicy { UseProtocolCachePolicy };
+    ResourceRequestCachePolicy m_cachePolicy { ResourceRequestCachePolicy::UseProtocolCachePolicy };
+    SameSiteDisposition m_sameSiteDisposition { SameSiteDisposition::Unspecified };
+    ResourceLoadPriority m_priority { ResourceLoadPriority::Low };
+    Requester m_requester { Requester::Unspecified };
+    Optional<int> m_inspectorInitiatorNodeIdentifier;
     bool m_allowCookies { false };
     mutable bool m_resourceRequestUpdated { false };
     mutable bool m_platformRequestUpdated { false };
     mutable bool m_resourceRequestBodyUpdated { false };
     mutable bool m_platformRequestBodyUpdated { false };
     bool m_hiddenFromInspector { false };
-    SameSiteDisposition m_sameSiteDisposition { SameSiteDisposition::Unspecified };
     bool m_isTopSite { false };
-    ResourceLoadPriority m_priority { ResourceLoadPriority::Low };
-    Requester m_requester { Requester::Unspecified };
-    String m_initiatorIdentifier;
-    String m_cachePartition { emptyString() };
+#if USE(SYSTEM_PREVIEW)
+    bool m_isSystemPreview { false };
+    IntRect m_systemPreviewRect;
+#endif
 
 private:
     const ResourceRequest& asResourceRequest() const;
@@ -240,20 +258,28 @@ private:
 bool equalIgnoringHeaderFields(const ResourceRequestBase&, const ResourceRequestBase&);
 
 // FIXME: Find a better place for these functions.
+inline String toRegistrableDomain(const URL& a)
+{
+    auto host = a.host().toString();
+    auto registrableDomain = ResourceRequestBase::partitionName(host);
+    // Fall back to the host if we cannot determine the registrable domain.
+    return registrableDomain.isEmpty() ? host : registrableDomain;
+}
+
 inline bool registrableDomainsAreEqual(const URL& a, const URL& b)
 {
-    return ResourceRequestBase::partitionName(a.host()) == ResourceRequestBase::partitionName(b.host());
+    return toRegistrableDomain(a) == toRegistrableDomain(b);
 }
 inline bool registrableDomainsAreEqual(const URL& a, const String& registrableDomain)
 {
-    return ResourceRequestBase::partitionName(a.host()) == registrableDomain;
+    return toRegistrableDomain(a) == registrableDomain;
 }
 
 inline bool operator==(const ResourceRequest& a, const ResourceRequest& b) { return ResourceRequestBase::equal(a, b); }
 inline bool operator!=(ResourceRequest& a, const ResourceRequest& b) { return !(a == b); }
 
 WEBCORE_EXPORT unsigned initializeMaximumHTTPConnectionCountPerHost();
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 WEBCORE_EXPORT void initializeHTTPConnectionSettingsOnStartup();
 #endif
 
@@ -286,7 +312,7 @@ ALWAYS_INLINE bool ResourceRequestBase::decodeBase(Decoder& decoder)
     String firstPartyForCookies;
     if (!decoder.decode(firstPartyForCookies))
         return false;
-    m_firstPartyForCookies = URL(ParsedURLString, firstPartyForCookies);
+    m_firstPartyForCookies = URL({ }, firstPartyForCookies);
 
     if (!decoder.decode(m_httpMethod))
         return false;

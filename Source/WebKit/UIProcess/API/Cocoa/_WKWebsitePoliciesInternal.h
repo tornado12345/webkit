@@ -25,18 +25,14 @@
 
 #import "_WKWebsitePolicies.h"
 
-#if WK_API_ENABLED
-
 #import "APIWebsitePolicies.h"
 #import "WKObject.h"
 
-namespace API {
+namespace WebKit {
 
-inline _WKWebsitePolicies *wrapper(WebsitePolicies& websitePolicies)
-{
-    ASSERT([websitePolicies.wrapper() isKindOfClass:[_WKWebsitePolicies class]]);
-    return (_WKWebsitePolicies *)websitePolicies.wrapper();
-}
+template<> struct WrapperTraits<API::WebsitePolicies> {
+    using WrapperClass = _WKWebsitePolicies;
+};
 
 }
 
@@ -45,5 +41,3 @@ inline _WKWebsitePolicies *wrapper(WebsitePolicies& websitePolicies)
     API::ObjectStorage<API::WebsitePolicies> _websitePolicies;
 }
 @end
-
-#endif

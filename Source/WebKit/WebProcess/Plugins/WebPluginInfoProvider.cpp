@@ -36,6 +36,7 @@
 #include <WebCore/FrameLoader.h>
 #include <WebCore/Page.h>
 #include <WebCore/SchemeRegistry.h>
+#include <WebCore/Settings.h>
 #include <WebCore/SubframeLoader.h>
 #include <wtf/text/StringHash.h>
 
@@ -43,9 +44,8 @@
 #include <WebCore/StringUtilities.h>
 #endif
 
-using namespace WebCore;
-
 namespace WebKit {
+using namespace WebCore;
 
 WebPluginInfoProvider& WebPluginInfoProvider::singleton()
 {
@@ -80,11 +80,14 @@ void WebPluginInfoProvider::setPluginLoadClientPolicy(WebCore::PluginLoadClientP
     versionsToPolicies.set(versionStringToSet, clientPolicy);
     policiesByIdentifier.set(bundleIdentifierToSet, versionsToPolicies);
     m_hostsToPluginIdentifierData.set(hostToSet, policiesByIdentifier);
+
+    clearPagesPluginData();
 }
 
 void WebPluginInfoProvider::clearPluginClientPolicies()
 {
     m_hostsToPluginIdentifierData.clear();
+    clearPagesPluginData();
 }
 #endif
 
@@ -97,29 +100,29 @@ void WebPluginInfoProvider::refreshPlugins()
 #endif
 }
 
-Vector<PluginInfo> WebPluginInfoProvider::pluginInfo(Page& page, std::optional<Vector<SupportedPluginName>>& supportedPluginNames)
+Vector<PluginInfo> WebPluginInfoProvider::pluginInfo(Page& page, Optional<Vector<SupportedPluginIdentifier>>& supportedPluginIdentifiers)
 {
 #if ENABLE(NETSCAPE_PLUGIN_API)
     populatePluginCache(page);
 
-    if (m_cachedSupportedPluginNames)
-        supportedPluginNames = *m_cachedSupportedPluginNames;
+    if (m_cachedSupportedPluginIdentifiers)
+        supportedPluginIdentifiers = *m_cachedSupportedPluginIdentifiers;
 
     return page.mainFrame().loader().subframeLoader().allowPlugins() ? m_cachedPlugins : m_cachedApplicationPlugins;
 #else
     UNUSED_PARAM(page);
-    UNUSED_PARAM(supportedPluginNames);
+    UNUSED_PARAM(supportedPluginIdentifiers);
     return { };
 #endif // ENABLE(NETSCAPE_PLUGIN_API)
 }
 
-Vector<WebCore::PluginInfo> WebPluginInfoProvider::webVisiblePluginInfo(Page& page, const WebCore::URL& url)
+Vector<WebCore::PluginInfo> WebPluginInfoProvider::webVisiblePluginInfo(Page& page, const URL& url)
 {
-    std::optional<Vector<WebCore::SupportedPluginName>> supportedPluginNames;
-    auto plugins = pluginInfo(page, supportedPluginNames);
+    Optional<Vector<WebCore::SupportedPluginIdentifier>> supportedPluginIdentifiers;
+    auto plugins = pluginInfo(page, supportedPluginIdentifiers);
 
     plugins.removeAllMatching([&] (auto& plugin) {
-        return supportedPluginNames && !isSupportedPlugin(*supportedPluginNames, url, plugin.name);
+        return supportedPluginIdentifiers && !isSupportedPlugin(*supportedPluginIdentifiers, url, plugin.bundleIdentifier);
     });
 
 #if PLATFORM(MAC)
@@ -144,19 +147,25 @@ Vector<WebCore::PluginInfo> WebPluginInfoProvider::webVisiblePluginInfo(Page& pa
 void WebPluginInfoProvider::populatePluginCache(const WebCore::Page& page)
 {
     if (!m_pluginCacheIsPopulated) {
-        HangDetectionDisabler hangDetectionDisabler;
-
-        if (!WebProcess::singleton().parentProcessConnection()->sendSync(Messages::WebProcessProxy::GetPlugins(m_shouldRefreshPlugins),
-            Messages::WebProcessProxy::GetPlugins::Reply(m_cachedPlugins, m_cachedApplicationPlugins, m_cachedSupportedPluginNames), 0,
-            Seconds::infinity(), IPC::SendSyncOption::DoNotProcessIncomingMessagesWhenWaitingForSyncReply))
-            return;
+#if PLATFORM(COCOA)
+        // Application plugins are not affected by enablePlugins setting, so we always need to scan plugins to get them.
+        bool shouldScanPlugins = true;
+#else
+        bool shouldScanPlugins = page.mainFrame().loader().subframeLoader().allowPlugins();
+#endif
+        if (shouldScanPlugins) {
+            HangDetectionDisabler hangDetectionDisabler;
+            if (!WebProcess::singleton().parentProcessConnection()->sendSync(Messages::WebProcessProxy::GetPlugins(m_shouldRefreshPlugins),
+                Messages::WebProcessProxy::GetPlugins::Reply(m_cachedPlugins, m_cachedApplicationPlugins, m_cachedSupportedPluginIdentifiers), 0))
+                return;
+        }
 
         m_shouldRefreshPlugins = false;
         m_pluginCacheIsPopulated = true;
     }
 
 #if PLATFORM(MAC)
-    String pageHost = page.mainFrame().loader().documentLoader()->responseURL().host();
+    String pageHost = page.mainFrame().loader().documentLoader()->responseURL().host().toString();
     if (pageHost.isNull())
         return;
     for (auto& info : m_cachedPlugins) {
@@ -170,7 +179,7 @@ void WebPluginInfoProvider::populatePluginCache(const WebCore::Page& page)
 #endif
 
 #if PLATFORM(MAC)
-std::optional<WebCore::PluginLoadClientPolicy> WebPluginInfoProvider::pluginLoadClientPolicyForHost(const String& host, const WebCore::PluginInfo& info) const
+Optional<WebCore::PluginLoadClientPolicy> WebPluginInfoProvider::pluginLoadClientPolicyForHost(const String& host, const WebCore::PluginInfo& info) const
 {
     String hostToLookUp = host;
     String identifier = info.bundleIdentifier;
@@ -187,7 +196,7 @@ std::optional<WebCore::PluginLoadClientPolicy> WebPluginInfoProvider::pluginLoad
         }
     }
     if (policiesByIdentifierIterator == m_hostsToPluginIdentifierData.end())
-        return std::nullopt;
+        return WTF::nullopt;
 
     auto& policiesByIdentifier = policiesByIdentifierIterator->value;
 
@@ -201,7 +210,7 @@ std::optional<WebCore::PluginLoadClientPolicy> WebPluginInfoProvider::pluginLoad
     }
 
     if (identifierPolicyIterator == policiesByIdentifier.end())
-        return std::nullopt;
+        return WTF::nullopt;
 
     auto& versionsToPolicies = identifierPolicyIterator->value;
 
@@ -215,7 +224,7 @@ std::optional<WebCore::PluginLoadClientPolicy> WebPluginInfoProvider::pluginLoad
     }
 
     if (policyIterator == versionsToPolicies.end())
-        return std::nullopt;
+        return WTF::nullopt;
 
     return policyIterator->value;
 }

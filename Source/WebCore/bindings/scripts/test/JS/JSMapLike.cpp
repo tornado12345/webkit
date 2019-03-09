@@ -30,11 +30,14 @@
 #include "JSDOMMapLike.h"
 #include "JSDOMOperation.h"
 #include "JSDOMWrapperCache.h"
+#include "ScriptExecutionContext.h"
 #include <JavaScriptCore/BuiltinNames.h>
 #include <JavaScriptCore/FunctionPrototype.h>
+#include <JavaScriptCore/HeapSnapshotBuilder.h>
 #include <JavaScriptCore/JSCInlines.h>
 #include <wtf/GetPtr.h>
 #include <wtf/PointerPreparations.h>
+#include <wtf/URL.h>
 
 
 namespace WebCore {
@@ -94,7 +97,7 @@ template<> JSValue JSMapLikeConstructor::prototypeForStructure(JSC::VM& vm, cons
 template<> void JSMapLikeConstructor::initializeProperties(VM& vm, JSDOMGlobalObject& globalObject)
 {
     putDirect(vm, vm.propertyNames->prototype, JSMapLike::prototype(vm, globalObject), JSC::PropertyAttribute::DontDelete | JSC::PropertyAttribute::ReadOnly | JSC::PropertyAttribute::DontEnum);
-    putDirect(vm, vm.propertyNames->name, jsNontrivialString(&vm, String(ASCIILiteral("MapLike"))), JSC::PropertyAttribute::ReadOnly | JSC::PropertyAttribute::DontEnum);
+    putDirect(vm, vm.propertyNames->name, jsNontrivialString(&vm, String("MapLike"_s)), JSC::PropertyAttribute::ReadOnly | JSC::PropertyAttribute::DontEnum);
     putDirect(vm, vm.propertyNames->length, jsNumber(0), JSC::PropertyAttribute::ReadOnly | JSC::PropertyAttribute::DontEnum);
 }
 
@@ -337,10 +340,20 @@ EncodedJSValue JSC_HOST_CALL jsMapLikePrototypeFunctionDelete(ExecState* state)
     return IDLOperation<JSMapLike>::call<jsMapLikePrototypeFunctionDeleteBody>(*state, "delete");
 }
 
-bool JSMapLikeOwner::isReachableFromOpaqueRoots(JSC::Handle<JSC::Unknown> handle, void*, SlotVisitor& visitor)
+void JSMapLike::heapSnapshot(JSCell* cell, HeapSnapshotBuilder& builder)
+{
+    auto* thisObject = jsCast<JSMapLike*>(cell);
+    builder.setWrappedObjectForCell(cell, &thisObject->wrapped());
+    if (thisObject->scriptExecutionContext())
+        builder.setLabelForCell(cell, "url " + thisObject->scriptExecutionContext()->url().string());
+    Base::heapSnapshot(cell, builder);
+}
+
+bool JSMapLikeOwner::isReachableFromOpaqueRoots(JSC::Handle<JSC::Unknown> handle, void*, SlotVisitor& visitor, const char** reason)
 {
     UNUSED_PARAM(handle);
     UNUSED_PARAM(visitor);
+    UNUSED_PARAM(reason);
     return false;
 }
 

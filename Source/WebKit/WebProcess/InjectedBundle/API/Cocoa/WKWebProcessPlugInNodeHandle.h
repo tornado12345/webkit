@@ -25,8 +25,6 @@
 
 #import <WebKit/WKFoundation.h>
 
-#if WK_API_ENABLED
-
 #import <Foundation/Foundation.h>
 #import <JavaScriptCore/JavaScriptCore.h>
 #import <WebKit/WKImage.h>
@@ -57,9 +55,8 @@ WK_CLASS_AVAILABLE(macosx(10.10), ios(8.0))
 @property (nonatomic, readonly) BOOL HTMLTextAreaElementIsUserEdited;
 @property (nonatomic, readonly) WKWebProcessPlugInNodeHandle *HTMLTableCellElementCellAbove;
 @property (nonatomic, readonly) WKWebProcessPlugInFrame *frame;
+@property (nonatomic, readonly) BOOL isSelectElement WK_API_AVAILABLE(macosx(WK_MAC_TBA), ios(WK_IOS_TBA));
 
 - (BOOL)isTextField;
 
 @end
-
-#endif // WK_API_ENABLED

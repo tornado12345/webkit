@@ -2,11 +2,13 @@ file(MAKE_DIRECTORY ${FORWARDING_HEADERS_DIR}/JavaScriptCore/glib)
 file(MAKE_DIRECTORY ${DERIVED_SOURCES_JAVASCRIPCORE_GLIB_API_DIR})
 
 list(APPEND JavaScriptCore_SOURCES
+    API/glib/JSAPIWrapperGlobalObject.cpp
     API/glib/JSAPIWrapperObjectGLib.cpp
     API/glib/JSCCallbackFunction.cpp
     API/glib/JSCClass.cpp
     API/glib/JSCContext.cpp
     API/glib/JSCException.cpp
+    API/glib/JSCOptions.cpp
     API/glib/JSCValue.cpp
     API/glib/JSCVersion.cpp
     API/glib/JSCVirtualMachine.cpp
@@ -27,6 +29,7 @@ set(JavaScriptCore_INSTALLED_HEADERS
     ${JAVASCRIPTCORE_DIR}/API/glib/JSCContext.h
     ${JAVASCRIPTCORE_DIR}/API/glib/JSCDefines.h
     ${JAVASCRIPTCORE_DIR}/API/glib/JSCException.h
+    ${JAVASCRIPTCORE_DIR}/API/glib/JSCOptions.h
     ${JAVASCRIPTCORE_DIR}/API/glib/JSCValue.h
     ${JAVASCRIPTCORE_DIR}/API/glib/JSCVirtualMachine.h
     ${JAVASCRIPTCORE_DIR}/API/glib/JSCWeakValue.h

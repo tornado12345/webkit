@@ -24,8 +24,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef WTF_WeakPtr_h
-#define WTF_WeakPtr_h
+#pragma once
 
 #include <wtf/Noncopyable.h>
 #include <wtf/Ref.h>
@@ -43,6 +42,8 @@ class WeakReference : public ThreadSafeRefCounted<WeakReference<T>> {
     WTF_MAKE_NONCOPYABLE(WeakReference<T>);
     WTF_MAKE_FAST_ALLOCATED;
 public:
+    ~WeakReference() { } // So that we can use a template specialization for testing purposes to detect leaks.
+
     T* get() const { return m_ptr; }
 
     void clear() { m_ptr = nullptr; }
@@ -84,12 +85,14 @@ public:
     void clear() { m_ref = nullptr; }
 
 private:
+    template<typename U> friend class WeakHashSet;
     template<typename U> friend class WeakPtr;
     template<typename U> friend WeakPtr<U> makeWeakPtr(U&);
 
     RefPtr<WeakReference<T>> m_ref;
 };
 
+// Note: you probably want to inherit from CanMakeWeakPtr rather than use this directly.
 template<typename T>
 class WeakPtrFactory {
     WTF_MAKE_NONCOPYABLE(WeakPtrFactory<T>);
@@ -110,6 +113,13 @@ public:
         return { makeRef(*m_ref) };
     }
 
+    WeakPtr<const T> createWeakPtr(const T& ptr) const
+    {
+        if (!m_ref)
+            m_ref = WeakReference<T>::create(const_cast<T*>(&ptr));
+        return { makeRef(reinterpret_cast<WeakReference<const T>&>(*m_ref)) };
+    }
+
     void revokeAll()
     {
         if (!m_ref)
@@ -120,7 +130,18 @@ public:
     }
 
 private:
+    template<typename U> friend class WeakHashSet;
+
     mutable RefPtr<WeakReference<T>> m_ref;
+};
+
+template<typename T> class CanMakeWeakPtr {
+public:
+    const WeakPtrFactory<T>& weakPtrFactory() const { return m_weakFactory; }
+    WeakPtrFactory<T>& weakPtrFactory() { return m_weakFactory; }
+
+private:
+    WeakPtrFactory<T> m_weakFactory;
 };
 
 template<typename T, typename U> inline WeakReference<T>* weak_reference_upcast(WeakReference<U>* weakReference)
@@ -201,9 +222,8 @@ template<typename T, typename U> inline bool operator!=(T* a, const WeakPtr<U>& 
 
 } // namespace WTF
 
+using WTF::CanMakeWeakPtr;
 using WTF::WeakPtr;
 using WTF::WeakPtrFactory;
 using WTF::WeakReference;
 using WTF::makeWeakPtr;
-
-#endif

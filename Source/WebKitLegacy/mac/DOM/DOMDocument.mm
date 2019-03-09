@@ -68,7 +68,7 @@
 #import <WebCore/HTMLElement.h>
 #import <WebCore/HTMLHeadElement.h>
 #import <WebCore/HTMLScriptElement.h>
-#import <WebCore/JSMainThreadExecState.h>
+#import <WebCore/JSExecState.h>
 #import <WebCore/NameNodeList.h>
 #import <WebCore/NativeNodeFilter.h>
 #import <WebCore/Node.h>
@@ -82,12 +82,12 @@
 #import <WebCore/Text.h>
 #import <WebCore/ThreadCheck.h>
 #import <WebCore/TreeWalker.h>
-#import <WebCore/URL.h>
 #import <WebCore/WebScriptObjectPrivate.h>
 #import <WebCore/XPathExpression.h>
 #import <WebCore/XPathNSResolver.h>
 #import <WebCore/XPathResult.h>
 #import <wtf/GetPtr.h>
+#import <wtf/URL.h>
 
 #define IMPL static_cast<WebCore::Document*>(reinterpret_cast<WebCore::Node*>(_internal))
 
@@ -326,20 +326,16 @@
 
 - (NSString *)preferredStylesheetSet
 {
-    WebCore::JSMainThreadNullState state;
-    return IMPL->preferredStylesheetSet();
+    return nil;
 }
 
 - (NSString *)selectedStylesheetSet
 {
-    WebCore::JSMainThreadNullState state;
-    return IMPL->selectedStylesheetSet();
+    return nil;
 }
 
 - (void)setSelectedStylesheetSet:(NSString *)newSelectedStylesheetSet
 {
-    WebCore::JSMainThreadNullState state;
-    IMPL->setSelectedStylesheetSet(newSelectedStylesheetSet);
 }
 
 - (DOMElement *)activeElement
@@ -422,7 +418,7 @@
 - (DOMElement *)scrollingElement
 {
     WebCore::JSMainThreadNullState state;
-    return kit(WTF::getPtr(IMPL->scrollingElement()));
+    return kit(WTF::getPtr(IMPL->scrollingElementForAPI()));
 }
 
 - (DOMHTMLCollection *)children
@@ -578,8 +574,7 @@
 
 - (DOMCSSStyleDeclaration *)getOverrideStyle:(DOMElement *)element pseudoElement:(NSString *)pseudoElement
 {
-    WebCore::JSMainThreadNullState state;
-    return kit(WTF::getPtr(IMPL->getOverrideStyle(core(element), pseudoElement)));
+    return nil;
 }
 
 static RefPtr<WebCore::XPathNSResolver> wrap(id <DOMXPathNSResolver> resolver)
@@ -791,7 +786,7 @@ static RefPtr<WebCore::XPathNSResolver> wrap(id <DOMXPathNSResolver> resolver)
 
 - (DOMCSSStyleDeclaration *)getOverrideStyle:(DOMElement *)element :(NSString *)pseudoElement
 {
-    return [self getOverrideStyle:element pseudoElement:pseudoElement];
+    return nil;
 }
 
 - (DOMXPathExpression *)createExpression:(NSString *)expression :(id <DOMXPathNSResolver>)resolver

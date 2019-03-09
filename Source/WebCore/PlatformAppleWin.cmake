@@ -47,13 +47,14 @@ list(APPEND WebCore_SOURCES
     platform/graphics/win/FontCustomPlatformData.cpp
 
     platform/network/cf/AuthenticationCF.cpp
-    platform/network/cf/CookieJarCFNet.cpp
+    platform/network/cf/CertificateInfoCFNet.cpp
     platform/network/cf/CookieStorageCFNet.cpp
     platform/network/cf/CredentialStorageCFNet.cpp
     platform/network/cf/DNSResolveQueueCFNet.cpp
     platform/network/cf/FormDataStreamCFNet.cpp
     platform/network/cf/LoaderRunLoopCF.cpp
     platform/network/cf/NetworkStorageSessionCFNet.cpp
+    platform/network/cf/NetworkStorageSessionCFNetWin.cpp
     platform/network/cf/ProtectionSpaceCFNet.cpp
     platform/network/cf/ProxyServerCFNet.cpp
     platform/network/cf/ResourceErrorCF.cpp
@@ -64,6 +65,8 @@ list(APPEND WebCore_SOURCES
     platform/network/cf/ResourceResponseCFNet.cpp
     platform/network/cf/SocketStreamHandleImplCFNet.cpp
     platform/network/cf/SynchronousLoaderClientCFNet.cpp
+
+    platform/text/LocaleNone.cpp
 )
 
 if (${USE_DIRECT2D})
@@ -93,7 +96,6 @@ else ()
         page/win/FrameCGWin.cpp
 
         platform/graphics/ca/GraphicsLayerCA.cpp
-        platform/graphics/ca/LayerFlushScheduler.cpp
         platform/graphics/ca/LayerPool.cpp
         platform/graphics/ca/PlatformCALayer.cpp
         platform/graphics/ca/TileController.cpp
@@ -120,6 +122,7 @@ else ()
         platform/graphics/cg/IOSurfacePool.cpp
         platform/graphics/cg/ImageBufferCG.cpp
         platform/graphics/cg/ImageBufferDataCG.cpp
+        platform/graphics/cg/ImageBufferUtilitiesCG.cpp
         platform/graphics/cg/ImageDecoderCG.cpp
         platform/graphics/cg/ImageSourceCGWin.cpp
         platform/graphics/cg/IntPointCG.cpp

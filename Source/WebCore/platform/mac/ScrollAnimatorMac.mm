@@ -286,7 +286,7 @@ enum FeatureToAnimate {
     ExpansionTransition
 };
 
-#if __MAC_OS_X_VERSION_MIN_REQUIRED < 101400
+#if !ENABLE(WEBPROCESS_WINDOWSERVER_BLOCKING)
 @interface WebScrollbarPartAnimation : NSAnimation
 #else
 @interface WebScrollbarPartAnimation : NSObject
@@ -297,7 +297,7 @@ enum FeatureToAnimate {
     FeatureToAnimate _featureToAnimate;
     CGFloat _startValue;
     CGFloat _endValue;
-#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 101400
+#if ENABLE(WEBPROCESS_WINDOWSERVER_BLOCKING)
     NSTimeInterval _duration;
     RetainPtr<NSTimer> _timer;
     RetainPtr<NSDate> _startDate;
@@ -305,7 +305,7 @@ enum FeatureToAnimate {
 #endif
 }
 - (id)initWithScrollbar:(Scrollbar*)scrollbar featureToAnimate:(FeatureToAnimate)featureToAnimate animateFrom:(CGFloat)startValue animateTo:(CGFloat)endValue duration:(NSTimeInterval)duration;
-#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 101400
+#if ENABLE(WEBPROCESS_WINDOWSERVER_BLOCKING)
 - (void)setCurrentProgress:(NSTimer *)timer;
 - (void)setDuration:(NSTimeInterval)duration;
 - (void)stopAnimation;
@@ -316,7 +316,7 @@ enum FeatureToAnimate {
 
 - (id)initWithScrollbar:(Scrollbar*)scrollbar featureToAnimate:(FeatureToAnimate)featureToAnimate animateFrom:(CGFloat)startValue animateTo:(CGFloat)endValue duration:(NSTimeInterval)duration
 {
-#if __MAC_OS_X_VERSION_MIN_REQUIRED < 101400
+#if !ENABLE(WEBPROCESS_WINDOWSERVER_BLOCKING)
     self = [super initWithDuration:duration animationCurve:NSAnimationEaseInOut];
     if (!self)
         return nil;
@@ -332,7 +332,7 @@ enum FeatureToAnimate {
     _startValue = startValue;
     _endValue = endValue;
 
-#if __MAC_OS_X_VERSION_MIN_REQUIRED < 101400
+#if !ENABLE(WEBPROCESS_WINDOWSERVER_BLOCKING)
     [self setAnimationBlockingMode:NSAnimationNonblocking];
 #endif
 
@@ -345,7 +345,7 @@ enum FeatureToAnimate {
 
     _scrollerImp = scrollerImpForScrollbar(*_scrollbar);
 
-#if __MAC_OS_X_VERSION_MIN_REQUIRED < 101400
+#if !ENABLE(WEBPROCESS_WINDOWSERVER_BLOCKING)
     [super startAnimation];
 #else
     [[NSRunLoop mainRunLoop] addTimer:_timer.get() forMode:NSDefaultRunLoopMode];
@@ -363,13 +363,13 @@ enum FeatureToAnimate {
     _endValue = endValue;
 }
 
-#if __MAC_OS_X_VERSION_MIN_REQUIRED < 101400
+#if !ENABLE(WEBPROCESS_WINDOWSERVER_BLOCKING)
 - (void)setCurrentProgress:(NSAnimationProgress)progress
 #else
 - (void)setCurrentProgress:(NSTimer *)timer
 #endif
 {
-#if __MAC_OS_X_VERSION_MIN_REQUIRED < 101400
+#if !ENABLE(WEBPROCESS_WINDOWSERVER_BLOCKING)
     [super setCurrentProgress:progress];
 #else
     CGFloat progress = 0;
@@ -420,7 +420,7 @@ enum FeatureToAnimate {
     _scrollbar = 0;
 }
 
-#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 101400
+#if ENABLE(WEBPROCESS_WINDOWSERVER_BLOCKING)
 - (void)setDuration:(NSTimeInterval)duration
 {
     _duration = duration;
@@ -526,6 +526,23 @@ enum FeatureToAnimate {
 
     return _scrollbar->supportsUpdateOnSecondaryThread();
 }
+
+#if HAVE(OS_DARK_MODE_SUPPORT)
+- (NSAppearance *)effectiveAppearanceForScrollerImp:(NSScrollerImp *)scrollerImp
+{
+    UNUSED_PARAM(scrollerImp);
+
+    if (!_scrollbar)
+        return [NSAppearance currentAppearance];
+
+    // Keep this in sync with FrameView::paintScrollCorner.
+    // The base system does not support dark Aqua, so we might get a null result.
+    bool useDarkAppearance = _scrollbar->scrollableArea().useDarkAppearanceForScrollbars();
+    if (auto *appearance = [NSAppearance appearanceNamed:useDarkAppearance ? NSAppearanceNameDarkAqua : NSAppearanceNameAqua])
+        return appearance;
+    return [NSAppearance currentAppearance];
+}
+#endif
 
 - (void)setUpAlphaAnimation:(RetainPtr<WebScrollbarPartAnimation>&)scrollbarPartAnimation scrollerPainter:(NSScrollerImp *)scrollerPainter part:(WebCore::ScrollbarPart)part animateAlphaTo:(CGFloat)newAlpha duration:(NSTimeInterval)duration
 {
@@ -790,8 +807,8 @@ void ScrollAnimatorMac::adjustScrollPositionToBoundsIfNecessary()
     m_scrollableArea.setConstrainsScrollingToContentEdge(true);
 
     ScrollPosition currentScrollPosition = m_scrollableArea.scrollPosition();
-    ScrollPosition constainedPosition = m_scrollableArea.constrainScrollPosition(currentScrollPosition);
-    immediateScrollBy(constainedPosition - currentScrollPosition);
+    ScrollPosition constrainedPosition = m_scrollableArea.constrainScrollPosition(currentScrollPosition);
+    immediateScrollBy(constrainedPosition - currentScrollPosition);
 
     m_scrollableArea.setConstrainsScrollingToContentEdge(currentlyConstrainsToContentEdge);
 }
@@ -1109,9 +1126,6 @@ bool ScrollAnimatorMac::shouldScrollbarParticipateInHitTesting(Scrollbar* scroll
 {
     // Non-overlay scrollbars should always participate in hit testing.
     if (ScrollerStyle::recommendedScrollerStyle() != NSScrollerStyleOverlay)
-        return true;
-
-    if (scrollbar->isAlphaLocked())
         return true;
 
     // Overlay scrollbars should participate in hit testing whenever they are at all visible.

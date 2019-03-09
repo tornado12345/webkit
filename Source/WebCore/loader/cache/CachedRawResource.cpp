@@ -38,19 +38,19 @@
 
 namespace WebCore {
 
-CachedRawResource::CachedRawResource(CachedResourceRequest&& request, Type type, PAL::SessionID sessionID)
-    : CachedResource(WTFMove(request), type, sessionID)
+CachedRawResource::CachedRawResource(CachedResourceRequest&& request, Type type, const PAL::SessionID& sessionID, const CookieJar* cookieJar)
+    : CachedResource(WTFMove(request), type, sessionID, cookieJar)
     , m_identifier(0)
     , m_allowEncodedDataReplacement(true)
 {
     ASSERT(isMainOrMediaOrIconOrRawResource());
 }
 
-std::optional<SharedBufferDataView> CachedRawResource::calculateIncrementalDataChunk(const SharedBuffer* data) const
+Optional<SharedBufferDataView> CachedRawResource::calculateIncrementalDataChunk(const SharedBuffer* data) const
 {
     size_t previousDataLength = encodedSize();
     if (!data || data->size() <= previousDataLength)
-        return std::nullopt;
+        return WTF::nullopt;
     return data->getSomeData(previousDataLength);
 }
 
@@ -61,7 +61,7 @@ void CachedRawResource::updateBuffer(SharedBuffer& data)
         return;
 
     CachedResourceHandle<CachedRawResource> protectedThis(this);
-    ASSERT(dataBufferingPolicy() == BufferData);
+    ASSERT(dataBufferingPolicy() == DataBufferingPolicy::BufferData);
     m_data = &data;
 
     auto previousDataSize = encodedSize();
@@ -74,22 +74,22 @@ void CachedRawResource::updateBuffer(SharedBuffer& data)
     }
     setEncodedSize(data.size());
 
-    if (dataBufferingPolicy() == DoNotBufferData) {
+    if (dataBufferingPolicy() == DataBufferingPolicy::DoNotBufferData) {
         if (m_loader)
-            m_loader->setDataBufferingPolicy(DoNotBufferData);
+            m_loader->setDataBufferingPolicy(DataBufferingPolicy::DoNotBufferData);
         clear();
     } else
         CachedResource::updateBuffer(data);
 
     if (m_delayedFinishLoading) {
-        auto delayedFinishLoading = std::exchange(m_delayedFinishLoading, std::nullopt);
+        auto delayedFinishLoading = std::exchange(m_delayedFinishLoading, WTF::nullopt);
         finishLoading(delayedFinishLoading->buffer.get());
     }
 }
 
 void CachedRawResource::updateData(const char* data, unsigned length)
 {
-    ASSERT(dataBufferingPolicy() == DoNotBufferData);
+    ASSERT(dataBufferingPolicy() == DataBufferingPolicy::DoNotBufferData);
     notifyClientsDataWasReceived(data, length);
     CachedResource::updateData(data, length);
 }
@@ -99,12 +99,12 @@ void CachedRawResource::finishLoading(SharedBuffer* data)
     if (m_inIncrementalDataNotify) {
         // We may get here synchronously from updateBuffer() if the callback there ends up spinning a runloop.
         // In that case delay the call.
-        m_delayedFinishLoading = std::make_optional(DelayedFinishLoading { data });
+        m_delayedFinishLoading = makeOptional(DelayedFinishLoading { data });
         return;
     };
     CachedResourceHandle<CachedRawResource> protectedThis(this);
     DataBufferingPolicy dataBufferingPolicy = this->dataBufferingPolicy();
-    if (dataBufferingPolicy == BufferData) {
+    if (dataBufferingPolicy == DataBufferingPolicy::BufferData) {
         m_data = data;
 
         if (auto incrementalData = calculateIncrementalDataChunk(data)) {
@@ -118,9 +118,9 @@ void CachedRawResource::finishLoading(SharedBuffer* data)
 #endif
 
     CachedResource::finishLoading(data);
-    if (dataBufferingPolicy == BufferData && this->dataBufferingPolicy() == DoNotBufferData) {
+    if (dataBufferingPolicy == DataBufferingPolicy::BufferData && this->dataBufferingPolicy() == DataBufferingPolicy::DoNotBufferData) {
         if (m_loader)
-            m_loader->setDataBufferingPolicy(DoNotBufferData);
+            m_loader->setDataBufferingPolicy(DataBufferingPolicy::DoNotBufferData);
         clear();
     }
 }
@@ -288,7 +288,7 @@ static bool shouldIgnoreHeaderForCacheReuse(HTTPHeaderName name)
 
 bool CachedRawResource::canReuse(const ResourceRequest& newRequest) const
 {
-    if (dataBufferingPolicy() == DoNotBufferData)
+    if (dataBufferingPolicy() == DataBufferingPolicy::DoNotBufferData)
         return false;
 
     if (m_resourceRequest.httpMethod() != newRequest.httpMethod())
@@ -313,9 +313,9 @@ bool CachedRawResource::canReuse(const ResourceRequest& newRequest) const
     for (const auto& header : newHeaders) {
         if (header.keyAsHTTPHeaderName) {
             if (!shouldIgnoreHeaderForCacheReuse(header.keyAsHTTPHeaderName.value())
-                && header.value != oldHeaders.commonHeaders().get(header.keyAsHTTPHeaderName.value()))
+                && header.value != oldHeaders.get(header.keyAsHTTPHeaderName.value()))
                 return false;
-        } else if (header.value != oldHeaders.uncommonHeaders().get(header.key))
+        } else if (header.value != oldHeaders.get(header.key))
             return false;
     }
 
@@ -324,9 +324,9 @@ bool CachedRawResource::canReuse(const ResourceRequest& newRequest) const
     for (const auto& header : oldHeaders) {
         if (header.keyAsHTTPHeaderName) {
             if (!shouldIgnoreHeaderForCacheReuse(header.keyAsHTTPHeaderName.value())
-                && !newHeaders.commonHeaders().contains(header.keyAsHTTPHeaderName.value()))
+                && !newHeaders.contains(header.keyAsHTTPHeaderName.value()))
                 return false;
-        } else if (!newHeaders.uncommonHeaders().contains(header.key))
+        } else if (!newHeaders.contains(header.key))
             return false;
     }
 

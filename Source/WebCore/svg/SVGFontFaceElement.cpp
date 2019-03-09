@@ -33,6 +33,7 @@
 #include "Document.h"
 #include "ElementIterator.h"
 #include "FontCascade.h"
+#include "Logging.h"
 #include "SVGDocumentExtensions.h"
 #include "SVGFontElement.h"
 #include "SVGFontFaceSrcElement.h"
@@ -56,7 +57,13 @@ inline SVGFontFaceElement::SVGFontFaceElement(const QualifiedName& tagName, Docu
     , m_fontFaceRule(StyleRuleFontFace::create(MutableStyleProperties::create(HTMLStandardMode)))
     , m_fontElement(nullptr)
 {
+    LOG(Fonts, "SVGFontFaceElement %p ctor", this);
     ASSERT(hasTagName(font_faceTag));
+}
+
+SVGFontFaceElement::~SVGFontFaceElement()
+{
+    LOG(Fonts, "SVGFontFaceElement %p dtor", this);
 }
 
 Ref<SVGFontFaceElement> SVGFontFaceElement::create(const QualifiedName& tagName, Document& document)
@@ -297,7 +304,7 @@ Node::InsertedIntoAncestorResult SVGFontFaceElement::insertedIntoAncestor(Insert
         ASSERT(!m_fontElement);
         return InsertedIntoAncestorResult::Done;
     }
-    document().accessSVGExtensions().registerSVGFontFaceElement(this);
+    document().accessSVGExtensions().registerSVGFontFaceElement(*this);
 
     rebuildFontFace();
     return InsertedIntoAncestorResult::Done;
@@ -309,7 +316,7 @@ void SVGFontFaceElement::removedFromAncestor(RemovalType removalType, ContainerN
 
     if (removalType.disconnectedFromDocument) {
         m_fontElement = nullptr;
-        document().accessSVGExtensions().unregisterSVGFontFaceElement(this);
+        document().accessSVGExtensions().unregisterSVGFontFaceElement(*this);
         m_fontFaceRule->mutableProperties().clear();
 
         document().styleScope().didChangeStyleSheetEnvironment();

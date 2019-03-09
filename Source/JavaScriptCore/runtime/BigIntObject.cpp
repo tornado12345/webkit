@@ -45,7 +45,7 @@ BigIntObject* BigIntObject::create(VM& vm, JSGlobalObject* globalObject, JSBigIn
 }
 
 BigIntObject::BigIntObject(VM& vm, Structure* structure)
-    : JSWrapperObject(vm, structure)
+    : Base(vm, structure)
 {
 }
 
@@ -58,7 +58,7 @@ void BigIntObject::finishCreation(VM& vm, JSBigInt* bigInt)
 
 String BigIntObject::toStringName(const JSObject*, ExecState*)
 {
-    return ASCIILiteral("Object");
+    return "Object"_s;
 }
 
 JSValue BigIntObject::defaultValue(const JSObject* object, ExecState*, PreferredPrimitiveType)

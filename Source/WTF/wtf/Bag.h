@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-2018 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,8 +23,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef Bag_h
-#define Bag_h
+#pragma once
 
 #include <wtf/DumbPtrTraits.h>
 #include <wtf/FastMalloc.h>
@@ -138,26 +137,25 @@ public:
         result.m_node = unwrappedHead();
         return result;
     }
-    
-    iterator end() { return iterator(); }
+
+    const iterator begin() const
+    {
+        iterator result;
+        result.m_node = unwrappedHead();
+        return result;
+    }
+
+
+    iterator end() const { return iterator(); }
     
     bool isEmpty() const { return !m_head; }
     
 private:
-    Node* unwrappedHead() { return PtrTraits::unwrap(m_head); }
+    Node* unwrappedHead() const { return PtrTraits::unwrap(m_head); }
 
     typename PtrTraits::StorageType m_head { nullptr };
 };
 
-template<typename Poison, typename T> struct PoisonedPtrTraits;
-
-template<typename Poison, typename T>
-using PoisonedBag = Bag<T, PoisonedPtrTraits<Poison, Private::BagNode<T>>>;
-
 } // namespace WTF
 
 using WTF::Bag;
-using WTF::PoisonedBag;
-
-#endif // Bag_h
-

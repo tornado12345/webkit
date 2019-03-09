@@ -25,8 +25,6 @@
 
 #import <WebKit/WKFoundation.h>
 
-#if WK_API_ENABLED
-
 #import <WebKit/WKDOMNode.h>
 
 @class WKDOMElement;
@@ -42,6 +40,6 @@ WK_CLASS_AVAILABLE(macosx(10.10), ios(8.0))
 
 @property(readonly) WKDOMElement *body;
 
-@end
+- (id)parserYieldToken WK_API_AVAILABLE(macosx(10.14), ios(12.0));
 
-#endif // WK_API_ENABLED
+@end

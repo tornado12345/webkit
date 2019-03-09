@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2018 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,21 +33,18 @@
 #include "HTMLFrameOwnerElement.h"
 #include "Logging.h"
 #include "Page.h"
+#include "RegistrableDomain.h"
 #include "ResourceLoadStatistics.h"
 #include "ResourceRequest.h"
 #include "ResourceResponse.h"
+#include "RuntimeEnabledFeatures.h"
+#include "ScriptExecutionContext.h"
 #include "SecurityOrigin.h"
 #include "Settings.h"
-#include "URL.h"
+#include <wtf/URL.h>
 
 namespace WebCore {
 
-template<typename T> static inline String primaryDomain(const T& value)
-{
-    return ResourceLoadStatistics::primaryDomain(value);
-}
-
-static Seconds timestampResolution { 5_s };
 static const Seconds minimumNotificationInterval { 5_s };
 
 ResourceLoadObserver& ResourceLoadObserver::shared()
@@ -56,63 +53,42 @@ ResourceLoadObserver& ResourceLoadObserver::shared()
     return resourceLoadObserver;
 }
 
-static bool shouldEnableSiteSpecificQuirks(Page* page)
-{
-#if PLATFORM(IOS)
-    UNUSED_PARAM(page);
-
-    // There is currently no way to toggle the needsSiteSpecificQuirks setting on iOS so we always enable
-    // the site-specific quirks on iOS.
-    return true;
-#else
-    return page && page->settings().needsSiteSpecificQuirks();
-#endif
-}
-
-// FIXME: Temporary fix for <rdar://problem/32343256> until content can be updated.
-static bool areDomainsAssociated(Page* page, const String& firstDomain, const String& secondDomain)
-{
-    static NeverDestroyed<HashMap<String, unsigned>> metaDomainIdentifiers = [] {
-        HashMap<String, unsigned> map;
-
-        // Domains owned by Dow Jones & Company, Inc.
-        const unsigned dowJonesIdentifier = 1;
-        map.add(ASCIILiteral("dowjones.com"), dowJonesIdentifier);
-        map.add(ASCIILiteral("wsj.com"), dowJonesIdentifier);
-        map.add(ASCIILiteral("barrons.com"), dowJonesIdentifier);
-        map.add(ASCIILiteral("marketwatch.com"), dowJonesIdentifier);
-        map.add(ASCIILiteral("wsjplus.com"), dowJonesIdentifier);
-
-        return map;
-    }();
-
-    if (firstDomain == secondDomain)
-        return true;
-
-    ASSERT(!equalIgnoringASCIICase(firstDomain, secondDomain));
-
-    if (!shouldEnableSiteSpecificQuirks(page))
-        return false;
-
-    unsigned firstMetaDomainIdentifier = metaDomainIdentifiers.get().get(firstDomain);
-    if (!firstMetaDomainIdentifier)
-        return false;
-
-    return firstMetaDomainIdentifier == metaDomainIdentifiers.get().get(secondDomain);
-}
-
 void ResourceLoadObserver::setNotificationCallback(WTF::Function<void (Vector<ResourceLoadStatistics>&&)>&& notificationCallback)
 {
     ASSERT(!m_notificationCallback);
     m_notificationCallback = WTFMove(notificationCallback);
 }
 
-void ResourceLoadObserver::setRequestStorageAccessUnderOpenerCallback(WTF::Function<void(const String& domainInNeedOfStorageAccess, uint64_t openerPageID, const String& openerDomain, bool isTriggeredByUserGesture)>&& callback)
+void ResourceLoadObserver::setRequestStorageAccessUnderOpenerCallback(WTF::Function<void(const RegistrableDomain& domainInNeedOfStorageAccess, uint64_t openerPageID, const RegistrableDomain& openerDomain)>&& callback)
 {
     ASSERT(!m_requestStorageAccessUnderOpenerCallback);
     m_requestStorageAccessUnderOpenerCallback = WTFMove(callback);
 }
 
+void ResourceLoadObserver::setLogUserInteractionNotificationCallback(Function<void(PAL::SessionID, const RegistrableDomain&)>&& callback)
+{
+    ASSERT(!m_logUserInteractionNotificationCallback);
+    m_logUserInteractionNotificationCallback = WTFMove(callback);
+}
+
+void ResourceLoadObserver::setLogWebSocketLoadingNotificationCallback(Function<void(PAL::SessionID, const RegistrableDomain&, const RegistrableDomain&, WallTime)>&& callback)
+{
+    ASSERT(!m_logWebSocketLoadingNotificationCallback);
+    m_logWebSocketLoadingNotificationCallback = WTFMove(callback);
+}
+
+void ResourceLoadObserver::setLogSubresourceLoadingNotificationCallback(Function<void(PAL::SessionID, const RegistrableDomain&, const RegistrableDomain&, WallTime)>&& callback)
+{
+    ASSERT(!m_logSubresourceLoadingNotificationCallback);
+    m_logSubresourceLoadingNotificationCallback = WTFMove(callback);
+}
+
+void ResourceLoadObserver::setLogSubresourceRedirectNotificationCallback(Function<void(PAL::SessionID, const RegistrableDomain&, const RegistrableDomain&)>&& callback)
+{
+    ASSERT(!m_logSubresourceRedirectNotificationCallback);
+    m_logSubresourceRedirectNotificationCallback = WTFMove(callback);
+}
+    
 ResourceLoadObserver::ResourceLoadObserver()
     : m_notificationTimer(*this, &ResourceLoadObserver::notifyObserver)
 {
@@ -123,156 +99,71 @@ static inline bool is3xxRedirect(const ResourceResponse& response)
     return response.httpStatusCode() >= 300 && response.httpStatusCode() <= 399;
 }
 
-bool ResourceLoadObserver::shouldLog(Page* page) const
+bool ResourceLoadObserver::shouldLog(bool usesEphemeralSession) const
 {
-    // FIXME: Err on the safe side until we have sorted out what to do in worker contexts
-    if (!page)
-        return false;
-
-    return DeprecatedGlobalSettings::resourceLoadStatisticsEnabled() && !page->usesEphemeralSession() && m_notificationCallback;
-}
-
-static WallTime reduceTimeResolution(WallTime time)
-{
-    return WallTime::fromRawSeconds(std::floor(time.secondsSinceEpoch() / timestampResolution) * timestampResolution.seconds());
-}
-
-void ResourceLoadObserver::logFrameNavigation(const Frame& frame, const Frame& topFrame, const ResourceRequest& newRequest, const URL& redirectUrl)
-{
-    ASSERT(frame.document());
-    ASSERT(topFrame.document());
-    ASSERT(topFrame.page());
-
-    auto* page = topFrame.page();
-    if (!shouldLog(page))
-        return;
-
-    auto sourceURL = redirectUrl;
-    bool isRedirect = !redirectUrl.isNull();
-    if (!isRedirect)
-        sourceURL = nonNullOwnerURL(*frame.document());
-
-    auto& targetURL = newRequest.url();
-    auto& mainFrameURL = topFrame.document()->url();
-    
-    if (!targetURL.isValid() || !mainFrameURL.isValid())
-        return;
-
-    auto targetHost = targetURL.host();
-    auto mainFrameHost = mainFrameURL.host();
-
-    if (targetHost.isEmpty() || mainFrameHost.isEmpty() || targetHost == sourceURL.host())
-        return;
-
-    auto targetPrimaryDomain = primaryDomain(targetURL);
-    auto mainFramePrimaryDomain = primaryDomain(mainFrameURL);
-    auto sourcePrimaryDomain = primaryDomain(sourceURL);
-    bool shouldCallNotificationCallback = false;
-
-    if (targetHost != mainFrameHost
-        && !(areDomainsAssociated(page, targetPrimaryDomain, mainFramePrimaryDomain) || areDomainsAssociated(page, targetPrimaryDomain, sourcePrimaryDomain))) {
-        auto& targetStatistics = ensureResourceStatisticsForPrimaryDomain(targetPrimaryDomain);
-        targetStatistics.lastSeen = reduceTimeResolution(WallTime::now());
-        if (targetStatistics.subframeUnderTopFrameOrigins.add(mainFramePrimaryDomain).isNewEntry)
-            shouldCallNotificationCallback = true;
-    }
-
-    if (isRedirect
-        && !areDomainsAssociated(page, sourcePrimaryDomain, targetPrimaryDomain)) {
-        bool isNewRedirectToEntry = false;
-        bool isNewRedirectFromEntry = false;
-        if (frame.isMainFrame()) {
-            auto& redirectingOriginStatistics = ensureResourceStatisticsForPrimaryDomain(sourcePrimaryDomain);
-            isNewRedirectToEntry = redirectingOriginStatistics.topFrameUniqueRedirectsTo.add(targetPrimaryDomain).isNewEntry;
-            auto& targetStatistics = ensureResourceStatisticsForPrimaryDomain(targetPrimaryDomain);
-            isNewRedirectFromEntry = targetStatistics.topFrameUniqueRedirectsFrom.add(sourcePrimaryDomain).isNewEntry;
-        } else {
-            auto& redirectingOriginStatistics = ensureResourceStatisticsForPrimaryDomain(sourcePrimaryDomain);
-            isNewRedirectToEntry = redirectingOriginStatistics.subresourceUniqueRedirectsTo.add(targetPrimaryDomain).isNewEntry;
-            auto& targetStatistics = ensureResourceStatisticsForPrimaryDomain(targetPrimaryDomain);
-            isNewRedirectFromEntry = targetStatistics.subresourceUniqueRedirectsFrom.add(sourcePrimaryDomain).isNewEntry;
-        }
-
-        if (isNewRedirectToEntry || isNewRedirectFromEntry)
-            shouldCallNotificationCallback = true;
-    }
-
-    if (shouldCallNotificationCallback)
-        scheduleNotificationIfNeeded();
-}
-
-// FIXME: This quirk was added to address <rdar://problem/33325881> and should be removed once content is fixed.
-static bool resourceNeedsSSOQuirk(Page* page, const URL& url)
-{
-    if (!shouldEnableSiteSpecificQuirks(page))
-        return false;
-
-    return equalIgnoringASCIICase(url.host(), "sp.auth.adobe.com");
+    return DeprecatedGlobalSettings::resourceLoadStatisticsEnabled() && !usesEphemeralSession && m_notificationCallback;
 }
 
 void ResourceLoadObserver::logSubresourceLoading(const Frame* frame, const ResourceRequest& newRequest, const ResourceResponse& redirectResponse)
 {
     ASSERT(frame->page());
 
+    if (!frame)
+        return;
+
     auto* page = frame->page();
-    if (!shouldLog(page))
+    if (!page || !shouldLog(page->usesEphemeralSession()))
         return;
 
     bool isRedirect = is3xxRedirect(redirectResponse);
-    const URL& sourceURL = redirectResponse.url();
+    const URL& redirectedFromURL = redirectResponse.url();
     const URL& targetURL = newRequest.url();
-    const URL& mainFrameURL = frame ? frame->mainFrame().document()->url() : URL();
+    const URL& topFrameURL = frame ? frame->mainFrame().document()->url() : URL();
     
     auto targetHost = targetURL.host();
-    auto mainFrameHost = mainFrameURL.host();
+    auto topFrameHost = topFrameURL.host();
 
-    if (targetHost.isEmpty() || mainFrameHost.isEmpty() || targetHost == mainFrameHost || (isRedirect && targetHost == sourceURL.host()))
+    if (targetHost.isEmpty() || topFrameHost.isEmpty() || targetHost == topFrameHost || (isRedirect && targetHost == redirectedFromURL.host()))
         return;
 
-    auto targetPrimaryDomain = primaryDomain(targetURL);
-    auto mainFramePrimaryDomain = primaryDomain(mainFrameURL);
-    auto sourcePrimaryDomain = primaryDomain(sourceURL);
-    
-    if (areDomainsAssociated(page, targetPrimaryDomain, mainFramePrimaryDomain) || (isRedirect && areDomainsAssociated(page, targetPrimaryDomain, sourcePrimaryDomain)))
-        return;
+    RegistrableDomain targetDomain { targetURL };
+    RegistrableDomain topFrameDomain { topFrameURL };
+    RegistrableDomain redirectedFromDomain { redirectedFromURL };
 
-    if (resourceNeedsSSOQuirk(page, targetURL))
+    if (targetDomain == topFrameDomain || (isRedirect && targetDomain == redirectedFromDomain))
         return;
 
     bool shouldCallNotificationCallback = false;
     {
-        auto& targetStatistics = ensureResourceStatisticsForPrimaryDomain(targetPrimaryDomain);
-        targetStatistics.lastSeen = reduceTimeResolution(WallTime::now());
-        if (targetStatistics.subresourceUnderTopFrameOrigins.add(mainFramePrimaryDomain).isNewEntry)
+        auto& targetStatistics = ensureResourceStatisticsForRegistrableDomain(targetDomain);
+        auto lastSeen = ResourceLoadStatistics::reduceTimeResolution(WallTime::now());
+        targetStatistics.lastSeen = lastSeen;
+        if (targetStatistics.subresourceUnderTopFrameDomains.add(topFrameDomain).isNewEntry)
             shouldCallNotificationCallback = true;
+
+        m_logSubresourceLoadingNotificationCallback(page->sessionID(), targetDomain, topFrameDomain, lastSeen);
     }
 
     if (isRedirect) {
-        auto& redirectingOriginStatistics = ensureResourceStatisticsForPrimaryDomain(sourcePrimaryDomain);
-        bool isNewRedirectToEntry = redirectingOriginStatistics.subresourceUniqueRedirectsTo.add(targetPrimaryDomain).isNewEntry;
-        auto& targetStatistics = ensureResourceStatisticsForPrimaryDomain(targetPrimaryDomain);
-        bool isNewRedirectFromEntry = targetStatistics.subresourceUniqueRedirectsFrom.add(sourcePrimaryDomain).isNewEntry;
+        auto& redirectingOriginStatistics = ensureResourceStatisticsForRegistrableDomain(redirectedFromDomain);
+        bool isNewRedirectToEntry = redirectingOriginStatistics.subresourceUniqueRedirectsTo.add(targetDomain).isNewEntry;
+        auto& targetStatistics = ensureResourceStatisticsForRegistrableDomain(targetDomain);
+        bool isNewRedirectFromEntry = targetStatistics.subresourceUniqueRedirectsFrom.add(redirectedFromDomain).isNewEntry;
 
         if (isNewRedirectToEntry || isNewRedirectFromEntry)
             shouldCallNotificationCallback = true;
+
+        m_logSubresourceRedirectNotificationCallback(page->sessionID(), redirectedFromDomain, targetDomain);
     }
 
     if (shouldCallNotificationCallback)
         scheduleNotificationIfNeeded();
 }
 
-void ResourceLoadObserver::logWebSocketLoading(const Frame* frame, const URL& targetURL)
+void ResourceLoadObserver::logWebSocketLoading(const URL& targetURL, const URL& mainFrameURL, PAL::SessionID sessionID)
 {
-    // FIXME: Web sockets can run in detached frames. Decide how to count such connections.
-    // See LayoutTests/http/tests/websocket/construct-in-detached-frame.html
-    if (!frame)
+    if (!shouldLog(sessionID.isEphemeral()))
         return;
-
-    auto* page = frame->page();
-    if (!shouldLog(page))
-        return;
-
-    auto& mainFrameURL = frame->mainFrame().document()->url();
 
     auto targetHost = targetURL.host();
     auto mainFrameHost = mainFrameURL.host();
@@ -280,58 +171,63 @@ void ResourceLoadObserver::logWebSocketLoading(const Frame* frame, const URL& ta
     if (targetHost.isEmpty() || mainFrameHost.isEmpty() || targetHost == mainFrameHost)
         return;
     
-    auto targetPrimaryDomain = primaryDomain(targetURL);
-    auto mainFramePrimaryDomain = primaryDomain(mainFrameURL);
-    
-    if (areDomainsAssociated(page, targetPrimaryDomain, mainFramePrimaryDomain))
+    RegistrableDomain targetDomain { targetURL };
+    RegistrableDomain topFrameDomain { mainFrameURL };
+
+    if (targetDomain == topFrameDomain)
         return;
 
-    auto& targetStatistics = ensureResourceStatisticsForPrimaryDomain(targetPrimaryDomain);
-    targetStatistics.lastSeen = reduceTimeResolution(WallTime::now());
-    if (targetStatistics.subresourceUnderTopFrameOrigins.add(mainFramePrimaryDomain).isNewEntry)
+    auto lastSeen = ResourceLoadStatistics::reduceTimeResolution(WallTime::now());
+
+    auto& targetStatistics = ensureResourceStatisticsForRegistrableDomain(targetDomain);
+    targetStatistics.lastSeen = lastSeen;
+    if (targetStatistics.subresourceUnderTopFrameDomains.add(topFrameDomain).isNewEntry)
         scheduleNotificationIfNeeded();
+
+    m_logWebSocketLoadingNotificationCallback(sessionID, targetDomain, topFrameDomain, lastSeen);
 }
 
 void ResourceLoadObserver::logUserInteractionWithReducedTimeResolution(const Document& document)
 {
-    if (!shouldLog(document.page()))
+    if (!document.sessionID().isValid() || !shouldLog(document.sessionID().isEphemeral()))
         return;
-
-    ASSERT(document.page());
 
     auto& url = document.url();
-    if (url.isBlankURL() || url.isEmpty())
+    if (url.protocolIsAbout() || url.isLocalFile() || url.isEmpty())
         return;
 
-    auto domain = primaryDomain(url);
-    auto newTime = reduceTimeResolution(WallTime::now());
-    auto lastReportedUserInteraction = m_lastReportedUserInteractionMap.get(domain);
+    RegistrableDomain topFrameDomain { url };
+    auto newTime = ResourceLoadStatistics::reduceTimeResolution(WallTime::now());
+    auto lastReportedUserInteraction = m_lastReportedUserInteractionMap.get(topFrameDomain);
     if (newTime == lastReportedUserInteraction)
         return;
 
-    m_lastReportedUserInteractionMap.set(domain, newTime);
+    m_lastReportedUserInteractionMap.set(topFrameDomain, newTime);
 
-    auto& statistics = ensureResourceStatisticsForPrimaryDomain(domain);
+    auto& statistics = ensureResourceStatisticsForRegistrableDomain(topFrameDomain);
     statistics.hadUserInteraction = true;
     statistics.lastSeen = newTime;
     statistics.mostRecentUserInteractionTime = newTime;
 
-#if HAVE(CFNETWORK_STORAGE_PARTITIONING)
-    if (auto* opener = document.frame()->loader().opener()) {
-        if (auto* openerDocument = opener->document()) {
-            if (auto* openerFrame = openerDocument->frame()) {
-                if (auto openerPageID = openerFrame->loader().client().pageID()) {
-                    requestStorageAccessUnderOpener(domain, openerPageID.value(), *openerDocument, true);
+#if ENABLE(RESOURCE_LOAD_STATISTICS)
+    if (auto* frame = document.frame()) {
+        if (auto* opener = frame->loader().opener()) {
+            if (auto* openerDocument = opener->document()) {
+                if (auto* openerFrame = openerDocument->frame()) {
+                    if (auto openerPageID = openerFrame->loader().client().pageID())
+                        requestStorageAccessUnderOpener(topFrameDomain, openerPageID.value(), *openerDocument);
                 }
             }
         }
     }
+
+    m_logUserInteractionNotificationCallback(document.sessionID(), topFrameDomain);
 #endif
 
     m_notificationTimer.stop();
     notifyObserver();
 
-#if HAVE(CFNETWORK_STORAGE_PARTITIONING) && !RELEASE_LOG_DISABLED
+#if ENABLE(RESOURCE_LOAD_STATISTICS) && !RELEASE_LOG_DISABLED
     if (shouldLogUserInteraction()) {
         auto counter = ++m_loggingCounter;
 #define LOCAL_LOG(str, ...) \
@@ -342,7 +238,7 @@ void ResourceLoadObserver::logUserInteractionWithReducedTimeResolution(const Doc
             return s;
         };
         auto escapedURL = escapeForJSON(url.string());
-        auto escapedDomain = escapeForJSON(domain);
+        auto escapedDomain = escapeForJSON(topFrameDomain.string());
 
         LOCAL_LOG(R"({ "url": "%{public}s",)", escapedURL.utf8().data());
         LOCAL_LOG(R"(  "domain" : "%{public}s",)", escapedDomain.utf8().data());
@@ -353,37 +249,135 @@ void ResourceLoadObserver::logUserInteractionWithReducedTimeResolution(const Doc
 #endif
 }
 
-void ResourceLoadObserver::logWindowCreation(const URL& popupUrl, uint64_t openerPageID, Document& openerDocument)
-{
-#if HAVE(CFNETWORK_STORAGE_PARTITIONING)
-    requestStorageAccessUnderOpener(primaryDomain(popupUrl), openerPageID, openerDocument, false);
-#else
-    UNUSED_PARAM(popupUrl);
-    UNUSED_PARAM(openerPageID);
-    UNUSED_PARAM(openerDocument);
-#endif
-}
-
-#if HAVE(CFNETWORK_STORAGE_PARTITIONING)
-void ResourceLoadObserver::requestStorageAccessUnderOpener(const String& domainInNeedOfStorageAccess, uint64_t openerPageID, Document& openerDocument, bool isTriggeredByUserGesture)
+#if ENABLE(RESOURCE_LOAD_STATISTICS)
+void ResourceLoadObserver::requestStorageAccessUnderOpener(const RegistrableDomain& domainInNeedOfStorageAccess, uint64_t openerPageID, Document& openerDocument)
 {
     auto openerUrl = openerDocument.url();
-    auto openerPrimaryDomain = primaryDomain(openerUrl);
-    if (domainInNeedOfStorageAccess != openerPrimaryDomain
+    RegistrableDomain openerDomain { openerUrl };
+    if (domainInNeedOfStorageAccess != openerDomain
         && !openerDocument.hasRequestedPageSpecificStorageAccessWithUserInteraction(domainInNeedOfStorageAccess)
-        && !equalIgnoringASCIICase(openerUrl.string(), blankURL())) {
-        m_requestStorageAccessUnderOpenerCallback(domainInNeedOfStorageAccess, openerPageID, openerPrimaryDomain, isTriggeredByUserGesture);
+        && !equalIgnoringASCIICase(openerUrl.string(), WTF::blankURL())) {
+        m_requestStorageAccessUnderOpenerCallback(domainInNeedOfStorageAccess, openerPageID, openerDomain);
         // Remember user interaction-based requests since they don't need to be repeated.
-        if (isTriggeredByUserGesture)
-            openerDocument.setHasRequestedPageSpecificStorageAccessWithUserInteraction(domainInNeedOfStorageAccess);
+        openerDocument.setHasRequestedPageSpecificStorageAccessWithUserInteraction(domainInNeedOfStorageAccess);
     }
 }
 #endif
 
-ResourceLoadStatistics& ResourceLoadObserver::ensureResourceStatisticsForPrimaryDomain(const String& primaryDomain)
+void ResourceLoadObserver::logFontLoad(const Document& document, const String& familyName, bool loadStatus)
 {
-    auto addResult = m_resourceStatisticsMap.ensure(primaryDomain, [&primaryDomain] {
-        return ResourceLoadStatistics(primaryDomain);
+#if ENABLE(WEB_API_STATISTICS)
+    if (!shouldLog(document.sessionID().isEphemeral()))
+        return;
+    RegistrableDomain registrableDomain { document.url() };
+    auto& statistics = ensureResourceStatisticsForRegistrableDomain(registrableDomain);
+    bool shouldCallNotificationCallback = false;
+    if (!loadStatus) {
+        if (statistics.fontsFailedToLoad.add(familyName).isNewEntry)
+            shouldCallNotificationCallback = true;
+    } else {
+        if (statistics.fontsSuccessfullyLoaded.add(familyName).isNewEntry)
+            shouldCallNotificationCallback = true;
+    }
+    RegistrableDomain mainFrameRegistrableDomain { document.topDocument().url() };
+    if (statistics.topFrameRegistrableDomainsWhichAccessedWebAPIs.add(mainFrameRegistrableDomain.string()).isNewEntry)
+        shouldCallNotificationCallback = true;
+    if (shouldCallNotificationCallback)
+        scheduleNotificationIfNeeded();
+#else
+    UNUSED_PARAM(document);
+    UNUSED_PARAM(familyName);
+    UNUSED_PARAM(loadStatus);
+#endif
+}
+    
+void ResourceLoadObserver::logCanvasRead(const Document& document)
+{
+#if ENABLE(WEB_API_STATISTICS)
+    if (!shouldLog(document.sessionID().isEphemeral()))
+        return;
+    RegistrableDomain registrableDomain { document.url() };
+    auto& statistics = ensureResourceStatisticsForRegistrableDomain(registrableDomain);
+    RegistrableDomain mainFrameRegistrableDomain { document.topDocument().url() };
+    statistics.canvasActivityRecord.wasDataRead = true;
+    if (statistics.topFrameRegistrableDomainsWhichAccessedWebAPIs.add(mainFrameRegistrableDomain.string()).isNewEntry)
+        scheduleNotificationIfNeeded();
+#else
+    UNUSED_PARAM(document);
+#endif
+}
+
+void ResourceLoadObserver::logCanvasWriteOrMeasure(const Document& document, const String& textWritten)
+{
+#if ENABLE(WEB_API_STATISTICS)
+    if (!shouldLog(document.sessionID().isEphemeral()))
+        return;
+    RegistrableDomain registrableDomain { document.url() };
+    auto& statistics = ensureResourceStatisticsForRegistrableDomain(registrableDomain);
+    bool shouldCallNotificationCallback = false;
+    RegistrableDomain mainFrameRegistrableDomain { document.topDocument().url() };
+    if (statistics.canvasActivityRecord.recordWrittenOrMeasuredText(textWritten))
+        shouldCallNotificationCallback = true;
+    if (statistics.topFrameRegistrableDomainsWhichAccessedWebAPIs.add(mainFrameRegistrableDomain.string()).isNewEntry)
+        shouldCallNotificationCallback = true;
+    if (shouldCallNotificationCallback)
+        scheduleNotificationIfNeeded();
+#else
+    UNUSED_PARAM(document);
+    UNUSED_PARAM(textWritten);
+#endif
+}
+    
+void ResourceLoadObserver::logNavigatorAPIAccessed(const Document& document, const ResourceLoadStatistics::NavigatorAPI functionName)
+{
+#if ENABLE(WEB_API_STATISTICS)
+    if (!shouldLog(document.sessionID().isEphemeral()))
+        return;
+    RegistrableDomain registrableDomain { document.url() };
+    auto& statistics = ensureResourceStatisticsForRegistrableDomain(registrableDomain);
+    bool shouldCallNotificationCallback = false;
+    if (!statistics.navigatorFunctionsAccessed.contains(functionName)) {
+        statistics.navigatorFunctionsAccessed.add(functionName);
+        shouldCallNotificationCallback = true;
+    }
+    RegistrableDomain mainFrameRegistrableDomain { document.topDocument().url() };
+    if (statistics.topFrameRegistrableDomainsWhichAccessedWebAPIs.add(mainFrameRegistrableDomain.string()).isNewEntry)
+        shouldCallNotificationCallback = true;
+    if (shouldCallNotificationCallback)
+        scheduleNotificationIfNeeded();
+#else
+    UNUSED_PARAM(document);
+    UNUSED_PARAM(functionName);
+#endif
+}
+    
+void ResourceLoadObserver::logScreenAPIAccessed(const Document& document, const ResourceLoadStatistics::ScreenAPI functionName)
+{
+#if ENABLE(WEB_API_STATISTICS)
+    if (!shouldLog(document.sessionID().isEphemeral()))
+        return;
+    RegistrableDomain registrableDomain { document.url() };
+    auto& statistics = ensureResourceStatisticsForRegistrableDomain(registrableDomain);
+    bool shouldCallNotificationCallback = false;
+    if (!statistics.screenFunctionsAccessed.contains(functionName)) {
+        statistics.screenFunctionsAccessed.add(functionName);
+        shouldCallNotificationCallback = true;
+    }
+    RegistrableDomain mainFrameRegistrableDomain { document.topDocument().url() };
+    if (statistics.topFrameRegistrableDomainsWhichAccessedWebAPIs.add(mainFrameRegistrableDomain.string()).isNewEntry)
+        shouldCallNotificationCallback = true;
+    if (shouldCallNotificationCallback)
+        scheduleNotificationIfNeeded();
+#else
+    UNUSED_PARAM(document);
+    UNUSED_PARAM(functionName);
+#endif
+}
+    
+ResourceLoadStatistics& ResourceLoadObserver::ensureResourceStatisticsForRegistrableDomain(const RegistrableDomain& domain)
+{
+    auto addResult = m_resourceStatisticsMap.ensure(domain, [&domain] {
+        return ResourceLoadStatistics(domain);
     });
     return addResult.iterator->value;
 }
@@ -407,13 +401,13 @@ void ResourceLoadObserver::notifyObserver()
     m_notificationCallback(takeStatistics());
 }
 
-String ResourceLoadObserver::statisticsForOrigin(const String& origin)
+String ResourceLoadObserver::statisticsForURL(const URL& url)
 {
-    auto iter = m_resourceStatisticsMap.find(origin);
+    auto iter = m_resourceStatisticsMap.find(RegistrableDomain { url });
     if (iter == m_resourceStatisticsMap.end())
         return emptyString();
 
-    return "Statistics for " + origin + ":\n" + iter->value.toString();
+    return makeString("Statistics for ", url.host().toString(), ":\n", iter->value.toString());
 }
 
 Vector<ResourceLoadStatistics> ResourceLoadObserver::takeStatistics()

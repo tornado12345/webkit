@@ -25,7 +25,7 @@
 
 #import "config.h"
 
-#if WK_API_ENABLED && ENABLE(CONTENT_FILTERING)
+#if ENABLE(CONTENT_FILTERING)
 
 #import "ContentFiltering.h"
 #import "MockContentFilterSettings.h"
@@ -63,7 +63,7 @@ using DecisionPoint = MockContentFilterSettings::DecisionPoint;
     settings.setEnabled(true);
     settings.setDecision(static_cast<Decision>([decoder decodeIntForKey:@"Decision"]));
     settings.setDecisionPoint(static_cast<DecisionPoint>([decoder decodeIntForKey:@"DecisionPoint"]));
-    settings.setBlockedString(ASCIILiteral("blocked"));
+    settings.setBlockedString("blocked"_s);
     return self;
 }
 
@@ -129,4 +129,4 @@ using DecisionPoint = MockContentFilterSettings::DecisionPoint;
 
 @end
 
-#endif // WK_API_ENABLED && ENABLE(CONTENT_FILTERING)
+#endif // ENABLE(CONTENT_FILTERING)

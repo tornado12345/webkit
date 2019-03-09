@@ -34,15 +34,17 @@ namespace WebCore {
 namespace Layout {
 
 class Box;
+class Container;
 class InlineFormattingState;
-class LayoutContext;
+struct InvalidationResult;
+class LayoutState;
 enum class StyleDiff;
 
 // This class implements box invalidation for inline formatting context.
 class InlineInvalidation {
     WTF_MAKE_ISO_ALLOCATED(InlineInvalidation);
 public:
-    static void invalidate(const Box&, StyleDiff, LayoutContext&, InlineFormattingState&);
+    static InvalidationResult invalidate(const Box&, StyleDiff, LayoutState&, InlineFormattingState&);
 };
 
 }

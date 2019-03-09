@@ -62,7 +62,8 @@ class MeasurementSet {
         if (!this._primaryClusterPromise)
             this._primaryClusterPromise = this._fetchPrimaryCluster(noCache);
         var self = this;
-        this._primaryClusterPromise.catch(callback);
+        if (callback)
+            this._primaryClusterPromise.catch(callback);
         return this._primaryClusterPromise.then(function () {
             self._allFetches[self._primaryClusterEndTime] = self._primaryClusterPromise;
             return Promise.all(self.findClusters(startTime, endTime).map(function (clusterEndTime) {
@@ -76,12 +77,14 @@ class MeasurementSet {
         if (!this._callbackMap.has(clusterEndTime))
             this._callbackMap.set(clusterEndTime, new Set);
         var callbackSet = this._callbackMap.get(clusterEndTime);
-        callbackSet.add(callback);
+        if (callback)
+            callbackSet.add(callback);
 
         var promise = this._allFetches[clusterEndTime];
-        if (promise)
-            promise.then(callback, callback);
-        else {
+        if (promise) {
+            if (callback)
+                promise.then(callback, callback);
+        } else {
             promise = this._fetchSecondaryCluster(clusterEndTime);
             for (var existingCallback of callbackSet)
                 promise.then(existingCallback, existingCallback);
@@ -224,22 +227,25 @@ class MeasurementSet {
         var self = this;
         return Promise.all(promises).then(function (clusterSegmentations) {
             var segmentationSeries = [];
-            var addSegment = function (startingPoint, endingPoint) {
+            var addSegmentMergingIdenticalSegments = function (startingPoint, endingPoint) {
                 var value = Statistics.mean(timeSeries.valuesBetweenRange(startingPoint.seriesIndex, endingPoint.seriesIndex));
-                segmentationSeries.push({value: value, time: startingPoint.time, seriesIndex: startingPoint.seriesIndex, interval: function () { return null; }});
-                segmentationSeries.push({value: value, time: endingPoint.time, seriesIndex: endingPoint.seriesIndex, interval: function () { return null; }});
+                if (!segmentationSeries.length || value !== segmentationSeries[segmentationSeries.length - 1].value) {
+                    segmentationSeries.push({value: value, time: startingPoint.time, seriesIndex: startingPoint.seriesIndex, interval: function () { return null; }});
+                    segmentationSeries.push({value: value, time: endingPoint.time, seriesIndex: endingPoint.seriesIndex, interval: function () { return null; }});
+                } else
+                    segmentationSeries[segmentationSeries.length - 1].seriesIndex = endingPoint.seriesIndex;
             };
 
-            var startingIndex = 0;
-            for (var segmentation of clusterSegmentations) {
-                for (var endingIndex of segmentation) {
-                    addSegment(timeSeries.findPointByIndex(startingIndex), timeSeries.findPointByIndex(endingIndex));
+            let startingIndex = 0;
+            for (const segmentation of clusterSegmentations) {
+                for (const endingIndex of segmentation) {
+                    addSegmentMergingIdenticalSegments(timeSeries.findPointByIndex(startingIndex), timeSeries.findPointByIndex(endingIndex));
                     startingIndex = endingIndex;
                 }
             }
             if (extendToFuture)
                 timeSeries.extendToFuture();
-            addSegment(timeSeries.findPointByIndex(startingIndex), timeSeries.lastPoint());
+            addSegmentMergingIdenticalSegments(timeSeries.findPointByIndex(startingIndex), timeSeries.lastPoint());
             return segmentationSeries;
         });
     }

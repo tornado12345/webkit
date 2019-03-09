@@ -18,14 +18,12 @@
 #include <set>
 
 #include "rtc_base/arraysize.h"
-#include "rtc_base/basictypes.h"
 #include "rtc_base/bytebuffer.h"
 #include "rtc_base/byteorder.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/numerics/safe_minmax.h"
 #include "rtc_base/socket.h"
-#include "rtc_base/stringutils.h"
 #include "rtc_base/timeutils.h"
 
 // The following logging is for detailed (packet-level) analysis only.
@@ -187,8 +185,8 @@ void ReportStats() {
   char buffer[256];
   size_t len = 0;
   for (int i = 0; i < S_NUM_STATS; ++i) {
-    len += rtc::sprintfn(buffer, arraysize(buffer), "%s%s:%d",
-                               (i == 0) ? "" : ",", STAT_NAMES[i], g_stats[i]);
+    len += snprintf(buffer, arraysize(buffer), "%s%s:%d",
+                          (i == 0) ? "" : ",", STAT_NAMES[i], g_stats[i]);
     g_stats[i] = 0;
   }
   RTC_LOG(LS_INFO) << "Stats[" << buffer << "]";
@@ -730,7 +728,7 @@ bool PseudoTcp::process(Segment& seg) {
                          << "  rto: " << m_rx_rto;
 #endif  // _DEBUGMSG
       } else {
-        RTC_NOTREACHED();
+        RTC_LOG(LS_WARNING) << "rtt < 0";
       }
     }
 
@@ -900,9 +898,28 @@ bool PseudoTcp::process(Segment& seg) {
   bool bNewData = false;
 
   if (seg.len > 0) {
+    bool bRecover = false;
     if (bIgnoreData) {
       if (seg.seq == m_rcv_nxt) {
         m_rcv_nxt += seg.len;
+        // If we received a data segment out of order relative to a control
+        // segment, then we wrote it into the receive buffer at an offset (see
+        // "WriteOffset") below. So we need to advance the position in the
+        // buffer to avoid corrupting data. See bugs.webrtc.org/9208
+        //
+        // We advance the position in the buffer by N bytes by acting like we
+        // wrote N bytes and then immediately read them. We can only do this if
+        // there's not already data ready to read, but this should always be
+        // true in the problematic scenario, since control frames are always
+        // sent first in the stream.
+        size_t rcv_buffered;
+        if (m_rbuf.GetBuffered(&rcv_buffered) && rcv_buffered == 0) {
+          m_rbuf.ConsumeWriteBuffer(seg.len);
+          m_rbuf.ConsumeReadData(seg.len);
+          // After shifting the position in the buffer, we may have
+          // out-of-order packets ready to be recovered.
+          bRecover = true;
+        }
       }
     } else {
       uint32_t nOffset = seg.seq - m_rcv_nxt;
@@ -921,23 +938,9 @@ bool PseudoTcp::process(Segment& seg) {
         m_rcv_nxt += seg.len;
         m_rcv_wnd -= seg.len;
         bNewData = true;
-
-        RList::iterator it = m_rlist.begin();
-        while ((it != m_rlist.end()) && (it->seq <= m_rcv_nxt)) {
-          if (it->seq + it->len > m_rcv_nxt) {
-            sflags = sfImmediateAck;  // (Fast Recovery)
-            uint32_t nAdjust = (it->seq + it->len) - m_rcv_nxt;
-#if _DEBUGMSG >= _DBG_NORMAL
-            RTC_LOG(LS_INFO)
-                << "Recovered " << nAdjust << " bytes (" << m_rcv_nxt << " -> "
-                << m_rcv_nxt + nAdjust << ")";
-#endif  // _DEBUGMSG
-            m_rbuf.ConsumeWriteBuffer(nAdjust);
-            m_rcv_nxt += nAdjust;
-            m_rcv_wnd -= nAdjust;
-          }
-          it = m_rlist.erase(it);
-        }
+        // May be able to recover packets previously received out-of-order
+        // now.
+        bRecover = true;
       } else {
 #if _DEBUGMSG >= _DBG_NORMAL
         RTC_LOG(LS_INFO) << "Saving " << seg.len << " bytes (" << seg.seq
@@ -951,6 +954,24 @@ bool PseudoTcp::process(Segment& seg) {
           ++it;
         }
         m_rlist.insert(it, rseg);
+      }
+    }
+    if (bRecover) {
+      RList::iterator it = m_rlist.begin();
+      while ((it != m_rlist.end()) && (it->seq <= m_rcv_nxt)) {
+        if (it->seq + it->len > m_rcv_nxt) {
+          sflags = sfImmediateAck;  // (Fast Recovery)
+          uint32_t nAdjust = (it->seq + it->len) - m_rcv_nxt;
+#if _DEBUGMSG >= _DBG_NORMAL
+          RTC_LOG(LS_INFO) << "Recovered " << nAdjust << " bytes (" << m_rcv_nxt
+                           << " -> " << m_rcv_nxt + nAdjust << ")";
+#endif  // _DEBUGMSG
+          m_rbuf.ConsumeWriteBuffer(nAdjust);
+          m_rcv_nxt += nAdjust;
+          m_rcv_wnd -= nAdjust;
+          bNewData = true;
+        }
+        it = m_rlist.erase(it);
       }
     }
   }

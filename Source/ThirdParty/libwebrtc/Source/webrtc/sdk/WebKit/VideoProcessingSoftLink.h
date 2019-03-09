@@ -36,14 +36,20 @@
 #if (defined(TARGET_IPHONE_SIMULATOR)  && TARGET_IPHONE_SIMULATOR)
 #define ENABLE_VCP_ENCODER 0
 #elif (defined(TARGET_OS_IPHONE)  && TARGET_OS_IPHONE)
+#define ENABLE_VCP_ENCODER 1
+#elif (defined(TARGET_OS_MAC) && TARGET_OS_MAC)
+#define ENABLE_VCP_ENCODER (__MAC_OS_X_VERSION_MIN_REQUIRED >= 101300 && __MAC_OS_X_VERSION_MAX_ALLOWED >= 101304)
+#endif
+
+#endif
+
+#if !defined(ENABLE_VCP_ENCODER)
 #define ENABLE_VCP_ENCODER 0
-#elif (defined(TARGET_OS_MAC)  && TARGET_OS_MAC)
-#define ENABLE_VCP_ENCODER (__MAC_OS_X_VERSION_MAX_ALLOWED >= 101304)
 #endif
 
-#endif
-
+#if !defined(ALWAYS_INLINE)
 #define ALWAYS_INLINE inline
+#endif
 
 #ifdef __cplusplus
 #define WTF_EXTERN_C_BEGIN extern "C" {
@@ -100,7 +106,7 @@
     { \
         void** pointer = static_cast<void**>(dlsym(framework##Library(), #name)); \
         if (pointer) \
-            pointer##name = static_cast<type>(*pointer); \
+            pointer##name = (__bridge type)(*pointer); \
         get##name = name##Function; \
         return pointer##name; \
     }

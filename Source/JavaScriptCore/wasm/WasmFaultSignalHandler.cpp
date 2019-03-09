@@ -50,13 +50,16 @@ static const bool verbose = false;
 static Lock codeLocationsLock;
 static LazyNeverDestroyed<HashSet<std::tuple<void*, void*>>> codeLocations; // (start, end)
 
-#if ENABLE(WEBASSEMBLY_FAST_MEMORY)
-
 static bool fastHandlerInstalled { false };
+
+#if ENABLE(WEBASSEMBLY_FAST_MEMORY)
 
 static SignalAction trapHandler(Signal, SigInfo& sigInfo, PlatformRegisters& context)
 {
-    void* faultingInstruction = MachineContext::instructionPointer(context).untaggedExecutableAddress();
+    auto instructionPointer = MachineContext::instructionPointer(context);
+    if (!instructionPointer)
+        return SignalAction::NotHandled;
+    void* faultingInstruction = instructionPointer->untaggedExecutableAddress();
     dataLogLnIf(WasmFaultSignalHandlerInternal::verbose, "starting handler for fault at: ", RawPointer(faultingInstruction));
 
     dataLogLnIf(WasmFaultSignalHandlerInternal::verbose, "JIT memory start: ", RawPointer(startOfFixedExecutableMemoryPool()), " end: ", RawPointer(endOfFixedExecutableMemoryPool()));
@@ -120,20 +123,20 @@ bool fastMemoryEnabled()
 
 void enableFastMemory()
 {
+#if ENABLE(WEBASSEMBLY_FAST_MEMORY)
     static std::once_flag once;
     std::call_once(once, [] {
         if (!Options::useWebAssemblyFastMemory())
             return;
 
-#if ENABLE(WEBASSEMBLY_FAST_MEMORY)
         installSignalHandler(Signal::BadAccess, [] (Signal signal, SigInfo& sigInfo, PlatformRegisters& ucontext) {
             return trapHandler(signal, sigInfo, ucontext);
         });
 
         codeLocations.construct();
         fastHandlerInstalled = true;
-#endif // ENABLE(WEBASSEMBLY_FAST_MEMORY)
     });
+#endif // ENABLE(WEBASSEMBLY_FAST_MEMORY)
 }
     
 } } // namespace JSC::Wasm

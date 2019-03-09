@@ -43,7 +43,8 @@ public:
     const String& animationName() const { return m_animationName; }
     const RenderStyle& unanimatedStyle() const { return *m_unanimatedStyle; }
 
-    std::optional<double> bindingsCurrentTime() const final;
+    ExceptionOr<void> bindingsPlay() final;
+    ExceptionOr<void> bindingsPause() final;
 
 protected:
     void syncPropertiesWithBackingAnimation() final;
@@ -53,6 +54,7 @@ private:
 
     String m_animationName;
     std::unique_ptr<RenderStyle> m_unanimatedStyle;
+    bool m_stickyPaused { false };
 };
 
 } // namespace WebCore

@@ -31,6 +31,7 @@
 #include "IDBDatabaseIdentifier.h"
 #include "UniqueIDBDatabase.h"
 #include "UniqueIDBDatabaseConnection.h"
+#include <pal/HysteresisActivity.h>
 #include <wtf/CrossThreadTaskHandler.h>
 #include <wtf/HashMap.h>
 #include <wtf/Lock.h>
@@ -48,12 +49,14 @@ struct IDBGetRecordData;
 
 namespace IDBServer {
 
+const uint64_t defaultPerOriginQuota = 500 * MB;
+
 class IDBBackingStoreTemporaryFileHandler;
 
 class IDBServer : public RefCounted<IDBServer>, public CrossThreadTaskHandler {
 public:
-    static Ref<IDBServer> create(IDBBackingStoreTemporaryFileHandler&);
-    WEBCORE_EXPORT static Ref<IDBServer> create(const String& databaseDirectoryPath, IDBBackingStoreTemporaryFileHandler&);
+    static Ref<IDBServer> create(IDBBackingStoreTemporaryFileHandler&, WTF::Function<void(bool)>&& isClosingDatabaseCallback = [](bool) { });
+    WEBCORE_EXPORT static Ref<IDBServer> create(const String& databaseDirectoryPath, IDBBackingStoreTemporaryFileHandler&, WTF::Function<void(bool)>&& isClosingDatabaseCallback = [](bool) { });
 
     WEBCORE_EXPORT void registerConnection(IDBConnectionToClient&);
     WEBCORE_EXPORT void unregisterConnection(IDBConnectionToClient&);
@@ -104,9 +107,16 @@ public:
     WEBCORE_EXPORT void closeAndDeleteDatabasesModifiedSince(WallTime, Function<void ()>&& completionHandler);
     WEBCORE_EXPORT void closeAndDeleteDatabasesForOrigins(const Vector<SecurityOriginData>&, Function<void ()>&& completionHandler);
 
+    uint64_t perOriginQuota() const { return m_perOriginQuota; }
+    WEBCORE_EXPORT void setPerOriginQuota(uint64_t);
+
+    void closeDatabase(UniqueIDBDatabase*);
+    void didCloseDatabase(UniqueIDBDatabase*);
+    void hysteresisUpdated(PAL::HysteresisState);
+
 private:
-    IDBServer(IDBBackingStoreTemporaryFileHandler&);
-    IDBServer(const String& databaseDirectoryPath, IDBBackingStoreTemporaryFileHandler&);
+    IDBServer(IDBBackingStoreTemporaryFileHandler&, WTF::Function<void(bool)>&&);
+    IDBServer(const String& databaseDirectoryPath, IDBBackingStoreTemporaryFileHandler&, WTF::Function<void(bool)>&&);
 
     UniqueIDBDatabase& getOrCreateUniqueIDBDatabase(const IDBDatabaseIdentifier&);
 
@@ -119,6 +129,7 @@ private:
 
     HashMap<uint64_t, RefPtr<IDBConnectionToClient>> m_connectionMap;
     HashMap<IDBDatabaseIdentifier, std::unique_ptr<UniqueIDBDatabase>> m_uniqueIDBDatabaseMap;
+    HashSet<UniqueIDBDatabase*> m_uniqueIDBDatabasesInClose;
 
     HashMap<uint64_t, UniqueIDBDatabaseConnection*> m_databaseConnections;
     HashMap<IDBResourceIdentifier, UniqueIDBDatabaseTransaction*> m_transactions;
@@ -127,6 +138,11 @@ private:
 
     String m_databaseDirectoryPath;
     IDBBackingStoreTemporaryFileHandler& m_backingStoreTemporaryFileHandler;
+
+    uint64_t m_perOriginQuota { defaultPerOriginQuota };
+
+    WTF::Function<void(bool)> m_isClosingDatabaseCallback;
+    PAL::HysteresisActivity m_isClosingDatabaseHysteresis;
 };
 
 } // namespace IDBServer

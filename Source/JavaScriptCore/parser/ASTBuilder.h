@@ -446,8 +446,6 @@ public:
         unsigned parameterCount,
         SourceParseMode mode, bool isArrowFunctionBodyExpression)
     {
-        ASSERT(Options::useAsyncIterator() || (mode != SourceParseMode::AsyncGeneratorBodyMode && mode != SourceParseMode::AsyncGeneratorWrapperFunctionMode && mode != SourceParseMode::AsyncGeneratorWrapperMethodMode));
-
         return new (m_parserArena) FunctionMetadataNode(
             m_parserArena, startLocation, endLocation, startColumn, endColumn, 
             functionKeywordStart, functionNameStart, parametersStart, 
@@ -1072,6 +1070,10 @@ private:
     {
         return new (m_parserArena) DoubleNode(location, d);
     }
+    ExpressionNode* createBigIntWithSign(const JSTokenLocation& location, const Identifier& bigInt, uint8_t radix, bool sign)
+    {
+        return new (m_parserArena) BigIntNode(location, bigInt, radix, sign);
+    }
     ExpressionNode* createNumberFromBinaryOperation(const JSTokenLocation& location, double value, const NumberNode& originalNodeA, const NumberNode& originalNodeB)
     {
         if (originalNodeA.isIntegerNode() && originalNodeB.isIntegerNode())
@@ -1083,6 +1085,10 @@ private:
         if (originalNode.isIntegerNode())
             return createIntegerLikeNumber(location, value);
         return createDoubleLikeNumber(location, value);
+    }
+    ExpressionNode* createBigIntFromUnaryOperation(const JSTokenLocation& location, bool sign, const BigIntNode& originalNode)
+    {
+        return createBigIntWithSign(location, originalNode.identifier(), originalNode.radix(), sign);
     }
 
     void tryInferNameInPattern(DestructuringPattern pattern, ExpressionNode* defaultValue)
@@ -1154,6 +1160,11 @@ ExpressionNode* ASTBuilder::makeNegateNode(const JSTokenLocation& location, Expr
     if (n->isNumber()) {
         const NumberNode& numberNode = static_cast<const NumberNode&>(*n);
         return createNumberFromUnaryOperation(location, -numberNode.value(), numberNode);
+    }
+
+    if (n->isBigInt()) {
+        const BigIntNode& bigIntNode = static_cast<const BigIntNode&>(*n);
+        return createBigIntFromUnaryOperation(location, !bigIntNode.sign(), bigIntNode);
     }
 
     return new (m_parserArena) NegateNode(location, n);
@@ -1356,12 +1367,16 @@ ExpressionNode* ASTBuilder::makeFunctionCallNode(const JSTokenLocation& location
     }
     ASSERT(func->isDotAccessorNode());
     DotAccessorNode* dot = static_cast<DotAccessorNode*>(func);
-    FunctionCallDotNode* node;
+    FunctionCallDotNode* node = nullptr;
     if (!previousBaseWasSuper && (dot->identifier() == m_vm->propertyNames->builtinNames().callPublicName() || dot->identifier() == m_vm->propertyNames->builtinNames().callPrivateName()))
         node = new (m_parserArena) CallFunctionCallDotNode(location, dot->base(), dot->identifier(), args, divot, divotStart, divotEnd, callOrApplyChildDepth);
-    else if (!previousBaseWasSuper && (dot->identifier() == m_vm->propertyNames->builtinNames().applyPublicName() || dot->identifier() == m_vm->propertyNames->builtinNames().applyPrivateName()))
-        node = new (m_parserArena) ApplyFunctionCallDotNode(location, dot->base(), dot->identifier(), args, divot, divotStart, divotEnd, callOrApplyChildDepth);
-    else
+    else if (!previousBaseWasSuper && (dot->identifier() == m_vm->propertyNames->builtinNames().applyPublicName() || dot->identifier() == m_vm->propertyNames->builtinNames().applyPrivateName())) {
+        // FIXME: This check is only needed because we haven't taught the bytecode generator to inline
+        // Reflect.apply yet. See https://bugs.webkit.org/show_bug.cgi?id=190668.
+        if (!dot->base()->isResolveNode() || static_cast<ResolveNode*>(dot->base())->identifier() != "Reflect")
+            node = new (m_parserArena) ApplyFunctionCallDotNode(location, dot->base(), dot->identifier(), args, divot, divotStart, divotEnd, callOrApplyChildDepth);
+    }
+    if (!node)
         node = new (m_parserArena) FunctionCallDotNode(location, dot->base(), dot->identifier(), args, divot, divotStart, divotEnd);
     node->setSubexpressionInfo(dot->divot(), dot->divotEnd().offset);
     return node;

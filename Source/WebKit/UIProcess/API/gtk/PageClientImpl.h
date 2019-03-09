@@ -36,26 +36,31 @@
 #include <gtk/gtk.h>
 #include <memory>
 
+namespace WebCore {
+enum class DOMPasteAccessPolicy : uint8_t;
+}
+
 namespace WebKit {
 
 class DrawingAreaProxy;
 class WebPageNamespace;
+
+enum class UndoOrRedo : bool;
 
 class PageClientImpl : public PageClient
 #if ENABLE(FULLSCREEN_API)
     , public WebFullScreenManagerProxyClient
 #endif
 {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     explicit PageClientImpl(GtkWidget*);
 
     GtkWidget* viewWidget() { return m_viewWidget; }
 
-    void zoom(double);
-
 private:
     // PageClient
-    std::unique_ptr<DrawingAreaProxy> createDrawingAreaProxy() override;
+    std::unique_ptr<DrawingAreaProxy> createDrawingAreaProxy(WebProcessProxy&) override;
     void setViewNeedsDisplay(const WebCore::Region&) override;
     void requestScroll(const WebCore::FloatPoint& scrollPosition, const WebCore::IntPoint& scrollOrigin, bool isProgrammaticScroll) override;
     WebCore::FloatPoint viewScrollPosition() override;
@@ -72,21 +77,24 @@ private:
     void setCursor(const WebCore::Cursor&) override;
     void setCursorHiddenUntilMouseMoves(bool) override;
     void didChangeViewportProperties(const WebCore::ViewportAttributes&) override;
-    void registerEditCommand(Ref<WebEditCommandProxy>&&, WebPageProxy::UndoOrRedo) override;
+    void registerEditCommand(Ref<WebEditCommandProxy>&&, UndoOrRedo) override;
     void clearAllEditCommands() override;
-    bool canUndoRedo(WebPageProxy::UndoOrRedo) override;
-    void executeUndoRedo(WebPageProxy::UndoOrRedo) override;
+    bool canUndoRedo(UndoOrRedo) override;
+    void executeUndoRedo(UndoOrRedo) override;
     WebCore::FloatRect convertToDeviceSpace(const WebCore::FloatRect&) override;
     WebCore::FloatRect convertToUserSpace(const WebCore::FloatRect&) override;
     WebCore::IntPoint screenToRootView(const WebCore::IntPoint&) override;
     WebCore::IntRect rootViewToScreen(const WebCore::IntRect&) override;
+    WebCore::IntPoint accessibilityScreenToRootView(const WebCore::IntPoint&) override;
+    WebCore::IntRect rootViewToAccessibilityScreen(const WebCore::IntRect&) override;
     void doneWithKeyEvent(const NativeWebKeyboardEvent&, bool wasEventHandled) override;
     RefPtr<WebPopupMenuProxy> createPopupMenuProxy(WebPageProxy&) override;
     Ref<WebContextMenuProxy> createContextMenuProxy(WebPageProxy&, ContextMenuContextData&&, const UserData&) override;
 #if ENABLE(INPUT_TYPE_COLOR)
-    RefPtr<WebColorPicker> createColorPicker(WebPageProxy*, const WebCore::Color& intialColor, const WebCore::IntRect&) override;
+    RefPtr<WebColorPicker> createColorPicker(WebPageProxy*, const WebCore::Color& initialColor, const WebCore::IntRect&, Vector<WebCore::Color>&&) override;
 #endif
     void selectionDidChange() override;
+    RefPtr<ViewSnapshot> takeViewSnapshot() override;
 #if ENABLE(DRAG_SUPPORT)
     void startDrag(Ref<WebCore::SelectionData>&&, WebCore::DragOperation, RefPtr<ShareableBitmap>&& dragImage) override;
 #endif
@@ -98,7 +106,7 @@ private:
     void handleDownloadRequest(DownloadProxy*) override;
     void didChangeContentSize(const WebCore::IntSize&) override;
     void didCommitLoadForMainFrame(const String& mimeType, bool useCustomContentProvider) override;
-    void didFailLoadForMainFrame() override { }
+    void didFailLoadForMainFrame() override;
 
     // Auxiliary Client Creation
 #if ENABLE(FULLSCREEN_API)
@@ -124,6 +132,7 @@ private:
     void willRecordNavigationSnapshot(WebBackForwardListItem&) override;
     void didRemoveNavigationGestureSnapshot() override;
 
+    void didStartProvisionalLoadForMainFrame() override;
     void didFirstVisuallyNonEmptyLayoutForMainFrame() override;
     void didFinishLoadForMainFrame() override;
     void didSameDocumentNavigationForMainFrame(SameDocumentNavigationType) override;
@@ -139,9 +148,13 @@ private:
     void refView() override;
     void derefView() override;
 
-    void didRestoreScrollPosition() override { }
+    void didRestoreScrollPosition() override;
     void isPlayingAudioWillChange() final { }
     void isPlayingAudioDidChange() final { }
+
+    void didFinishProcessingAllPendingMouseEvents() final { }
+
+    void requestDOMPasteAccess(const WebCore::IntRect&, const String&, CompletionHandler<void(WebCore::DOMPasteAccessResponse)>&&) final;
 
 #if ENABLE(VIDEO) && USE(GSTREAMER)
     bool decidePolicyForInstallMissingMediaPluginsPermissionRequest(InstallMissingMediaPluginsPermissionRequest&) override;

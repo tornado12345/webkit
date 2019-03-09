@@ -25,14 +25,12 @@
 
 #import "WKWebProcessPlugInNodeHandle.h"
 
-#if WK_API_ENABLED
-
 typedef NS_ENUM(NSInteger, _WKAutoFillButtonType) {
     _WKAutoFillButtonTypeNone,
     _WKAutoFillButtonTypeCredentials,
     _WKAutoFillButtonTypeContacts,
-    _WKAutoFillButtonTypeStrongConfirmationPassword,
     _WKAutoFillButtonTypeStrongPassword,
+    _WKAutoFillButtonTypeCreditCard WK_API_AVAILABLE(macosx(WK_MAC_TBA), ios(WK_IOS_TBA)),
 } WK_API_AVAILABLE(macosx(10.13.4), ios(11.3));
 
 @interface WKWebProcessPlugInNodeHandle (WKPrivate)
@@ -43,5 +41,3 @@ typedef NS_ENUM(NSInteger, _WKAutoFillButtonType) {
 - (_WKAutoFillButtonType)htmlInputElementLastAutoFillButtonType WK_API_AVAILABLE(macosx(10.13.4), ios(11.3));
 
 @end
-
-#endif // WK_API_ENABLED

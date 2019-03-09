@@ -35,19 +35,15 @@
 #include "MessageWithMessagePorts.h"
 #include "WorkerGlobalScope.h"
 #include "WorkerThread.h"
+#include <wtf/CompletionHandler.h>
 
 namespace WebCore {
 
+static Lock allMessagePortsLock;
 static HashMap<MessagePortIdentifier, MessagePort*>& allMessagePorts()
 {
     static NeverDestroyed<HashMap<MessagePortIdentifier, MessagePort*>> map;
     return map;
-}
-
-static Lock& allMessagePortsLock()
-{
-    static NeverDestroyed<Lock> lock;
-    return lock;
 }
 
 void MessagePort::ref() const
@@ -61,7 +57,7 @@ void MessagePort::deref() const
     // This allows isExistingMessagePortLocallyReachable and notifyMessageAvailable to easily query the map and manipulate MessagePort instances.
 
     if (!--m_refCount) {
-        Locker<Lock> locker(allMessagePortsLock());
+        Locker<Lock> locker(allMessagePortsLock);
 
         if (m_refCount)
             return;
@@ -76,14 +72,14 @@ void MessagePort::deref() const
 
 bool MessagePort::isExistingMessagePortLocallyReachable(const MessagePortIdentifier& identifier)
 {
-    Locker<Lock> locker(allMessagePortsLock());
+    Locker<Lock> locker(allMessagePortsLock);
     auto* port = allMessagePorts().get(identifier);
     return port && port->isLocallyReachable();
 }
 
 void MessagePort::notifyMessageAvailable(const MessagePortIdentifier& identifier)
 {
-    Locker<Lock> locker(allMessagePortsLock());
+    Locker<Lock> locker(allMessagePortsLock);
     if (auto* port = allMessagePorts().get(identifier))
         port->messageAvailable();
 
@@ -101,7 +97,7 @@ MessagePort::MessagePort(ScriptExecutionContext& scriptExecutionContext, const M
 {
     LOG(MessagePorts, "Created MessagePort %s (%p) in process %" PRIu64, m_identifier.logString().utf8().data(), this, Process::identifier().toUInt64());
 
-    Locker<Lock> locker(allMessagePortsLock());
+    Locker<Lock> locker(allMessagePortsLock);
     allMessagePorts().set(m_identifier, this);
 
     m_scriptExecutionContext->createdMessagePort(*this);
@@ -114,7 +110,7 @@ MessagePort::~MessagePort()
 {
     LOG(MessagePorts, "Destroyed MessagePort %s (%p) in process %" PRIu64, m_identifier.logString().utf8().data(), this, Process::identifier().toUInt64());
 
-    ASSERT(allMessagePortsLock().isLocked());
+    ASSERT(allMessagePortsLock.isLocked());
 
     if (m_entangled)
         close();

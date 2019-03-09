@@ -127,7 +127,6 @@ bool ScrollableArea::scroll(ScrollDirection direction, ScrollGranularity granula
         step = scrollbar->totalSize();
         break;
     case ScrollByPixel:
-    case ScrollByPrecisePixel:
         step = scrollbar->pixelStep();
         break;
     }
@@ -368,6 +367,12 @@ void ScrollableArea::setScrollbarOverlayStyle(ScrollbarOverlayStyle overlayStyle
     }
 }
 
+bool ScrollableArea::useDarkAppearanceForScrollbars() const
+{
+    // If dark appearance is used or the overlay style is light (because of a dark page background), set the dark appearance.
+    return useDarkAppearance() || scrollbarOverlayStyle() == WebCore::ScrollbarOverlayStyleLight;
+}
+
 void ScrollableArea::invalidateScrollbar(Scrollbar& scrollbar, const IntRect& rect)
 {
     if (&scrollbar == horizontalScrollbar()) {
@@ -566,7 +571,7 @@ void ScrollableArea::serviceScrollAnimations()
         scrollAnimator->serviceScrollAnimations();
 }
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 bool ScrollableArea::isPinnedInBothDirections(const IntSize& scrollDelta) const
 {
     return isPinnedHorizontallyInDirection(scrollDelta.width()) && isPinnedVerticallyInDirection(scrollDelta.height());
@@ -589,7 +594,7 @@ bool ScrollableArea::isPinnedVerticallyInDirection(int verticalScrollDelta) cons
         return true;
     return false;
 }
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)
 
 int ScrollableArea::horizontalScrollbarIntrusion() const
 {
@@ -664,6 +669,11 @@ void ScrollableArea::scrollbarStyleChanged(ScrollbarStyle, bool)
     availableContentSizeChanged(AvailableSizeChangeReason::ScrollbarsChanged);
 }
 
+IntSize ScrollableArea::reachableTotalContentsSize() const
+{
+    return totalContentsSize();
+}
+
 IntSize ScrollableArea::totalContentsSize() const
 {
     IntSize totalContentsSize = contentsSize();
@@ -717,9 +727,9 @@ LayoutPoint ScrollableArea::constrainScrollPositionForOverhang(const LayoutRect&
         // If we still clip, push our rect "up" from the bottom right.
         scrollRect.intersect(documentRect);
         if (scrollRect.width() < idealScrollRectSize.width())
-            scrollRect.move(-(idealScrollRectSize.width() - scrollRect.width()), 0);
+            scrollRect.move(-(idealScrollRectSize.width() - scrollRect.width()), 0_lu);
         if (scrollRect.height() < idealScrollRectSize.height())
-            scrollRect.move(0, -(idealScrollRectSize.height() - scrollRect.height()));
+            scrollRect.move(0_lu, -(idealScrollRectSize.height() - scrollRect.height()));
     }
 
     return scrollRect.location() - toLayoutSize(scrollOrigin);

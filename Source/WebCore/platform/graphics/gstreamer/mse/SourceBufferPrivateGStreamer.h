@@ -67,7 +67,6 @@ public:
     void allSamplesInTrackEnqueued(const AtomicString&) final;
     bool isReadyForMoreSamples(const AtomicString&) final;
     void setActive(bool) final;
-    void stopAskingForMoreSamples(const AtomicString&) final;
     void notifyClientWhenReadyForMoreSamples(const AtomicString&) final;
 
     void setReadyForMoreSamples(bool);
@@ -76,6 +75,7 @@ public:
     void didReceiveInitializationSegment(const SourceBufferPrivateClient::InitializationSegment&);
     void didReceiveSample(MediaSample&);
     void didReceiveAllPendingSamples();
+    void appendParsingFailed();
 
     ContentType type() const { return m_type; }
 
@@ -86,7 +86,7 @@ private:
     MediaSourceGStreamer* m_mediaSource;
     ContentType m_type;
     Ref<MediaSourceClientGStreamerMSE> m_client;
-    SourceBufferPrivateClient* m_sourceBufferPrivateClient;
+    SourceBufferPrivateClient* m_sourceBufferPrivateClient { nullptr };
     bool m_isReadyForMoreSamples = true;
     bool m_notifyWhenReadyForMoreSamples = false;
     AtomicString m_trackId;

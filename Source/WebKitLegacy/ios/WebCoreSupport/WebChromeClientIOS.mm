@@ -25,7 +25,7 @@
 
 #import "WebChromeClientIOS.h"
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 #import "DOMNodeInternal.h"
 #import "PopupMenuIOS.h"
@@ -44,6 +44,8 @@
 #import "WebView.h"
 #import "WebViewInternal.h"
 #import "WebViewPrivate.h"
+#import <WebCore/ContentChangeObserver.h>
+#import <WebCore/DisabledAdaptations.h>
 #import <WebCore/FileChooser.h>
 #import <WebCore/FloatRect.h>
 #import <WebCore/Frame.h>
@@ -156,6 +158,10 @@ void WebChromeClientIOS::runOpenPanel(Frame&, FileChooser& chooser)
     [listener release];
 }
 
+void WebChromeClientIOS::showShareSheet(ShareDataWithParsedURL&, CompletionHandler<void(bool)>&&)
+{
+}
+
 #if ENABLE(IOS_TOUCH_EVENTS)
 
 void WebChromeClientIOS::didPreventDefaultForEvent()
@@ -178,16 +184,9 @@ void WebChromeClientIOS::setNeedsScrollNotifications(WebCore::Frame& frame, bool
 
 void WebChromeClientIOS::observedContentChange(WebCore::Frame& frame)
 {
-    [[webView() _UIKitDelegateForwarder] webView:webView() didObserveDeferredContentChange:WKObservedContentChange() forFrame:kit(&frame)];
-}
-
-void WebChromeClientIOS::clearContentChangeObservers(WebCore::Frame& frame)
-{
-    ASSERT(WebThreadCountOfObservedContentModifiers() > 0);
-    if (WebThreadCountOfObservedContentModifiers() > 0) {
-        WebThreadClearObservedContentModifiers();
-        observedContentChange(frame);
-    }
+    if (!frame.document())
+        return;
+    [[webView() _UIKitDelegateForwarder] webView:webView() didObserveDeferredContentChange:frame.document()->contentChangeObserver().observedContentChange() forFrame:kit(&frame)];
 }
 
 static inline NSString *nameForViewportFitValue(ViewportFit value)
@@ -235,6 +234,10 @@ FloatSize WebChromeClientIOS::overrideScreenSize() const
 void WebChromeClientIOS::dispatchViewportPropertiesDidChange(const WebCore::ViewportArguments& arguments) const
 {
     [[webView() _UIKitDelegateForwarder] webView:webView() didReceiveViewportArguments:dictionaryForViewportArguments(arguments)];
+}
+
+void WebChromeClientIOS::dispatchDisabledAdaptationsDidChange(const OptionSet<WebCore::DisabledAdaptations>&) const
+{
 }
 
 void WebChromeClientIOS::notifyRevealedSelectionByScrollingFrame(WebCore::Frame& frame)
@@ -331,7 +334,7 @@ bool WebChromeClientIOS::fetchCustomFixedPositionLayoutRect(IntRect& rect)
     return false;
 }
 
-void WebChromeClientIOS::updateViewportConstrainedLayers(HashMap<PlatformLayer*, std::unique_ptr<ViewportConstraints>>& layerMap, HashMap<PlatformLayer*, PlatformLayer*>& stickyContainers)
+void WebChromeClientIOS::updateViewportConstrainedLayers(HashMap<PlatformLayer*, std::unique_ptr<ViewportConstraints>>& layerMap, const HashMap<PlatformLayer*, PlatformLayer*>& stickyContainers)
 {
     [[webView() _fixedPositionContent] setViewportConstrainedLayers:layerMap stickyContainerMap:stickyContainers];
 }
@@ -386,4 +389,4 @@ int WebChromeClientIOS::deviceOrientation() const
 }
 #endif
 
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)

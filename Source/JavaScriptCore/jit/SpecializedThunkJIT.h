@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010-2018 Apple Inc. All rights reserved.
+ * Copyright (C) 2010-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -65,21 +65,10 @@ namespace JSC {
             m_failures.append(emitLoadJSCell(src, dst));
         }
         
-        void loadJSStringArgument(VM& vm, int argument, RegisterID dst)
+        void loadJSStringArgument(int argument, RegisterID dst)
         {
             loadCellArgument(argument, dst);
-            m_failures.append(branchStructure(NotEqual, 
-                Address(dst, JSCell::structureIDOffset()), 
-                vm.stringStructure.get()));
-        }
-        
-        void loadArgumentWithSpecificClass(const ClassInfo* classInfo, int argument, RegisterID dst, RegisterID scratch)
-        {
-            loadCellArgument(argument, dst);
-            emitLoadStructure(*vm(), dst, scratch, dst);
-            appendFailure(branchPtr(NotEqual, Address(scratch, Structure::classInfoOffset()), TrustedImmPtr(PoisonedClassInfoPtr(classInfo).bits())));
-            // We have to reload the argument since emitLoadStructure clobbered it.
-            loadCellArgument(argument, dst);
+            m_failures.append(branchIfNotString(dst));
         }
         
         void loadInt32Argument(int argument, RegisterID dst, Jump& failTarget)
@@ -135,7 +124,7 @@ namespace JSC {
             Jump lowNonZero = branchTestPtr(NonZero, regT1);
             Jump highNonZero = branchTestPtr(NonZero, regT0);
             move(TrustedImm32(0), regT0);
-            move(TrustedImm32(Int32Tag), regT1);
+            move(TrustedImm32(JSValue::Int32Tag), regT1);
             lowNonZero.link(this);
             highNonZero.link(this);
 #endif

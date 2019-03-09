@@ -676,6 +676,34 @@ bool convertToASCII(short*, size_t);
 bool toASCII(short*, size_t);
 ```
 
+[](#names-if-exists) The getter function for a member variable should not have any suffix or prefix indicating the function can optionally create or initialize the member variable. Suffix the getter function which does not automatically create the object with `IfExists` if there is a variant which does.
+
+###### Right:
+
+```cpp
+StyleResolver* styleResolverIfExists();
+StyleResolver& styleResolver();
+```
+
+###### Wrong:
+
+```cpp
+StyleResolver* styleResolver();
+StyleResolver& ensureStyleResolver();
+```
+
+###### Right:
+
+```cpp
+Frame* frame();
+```
+
+###### Wrong:
+
+```cpp
+Frame* frameIfExists();
+```
+
 [](#names-variable-name-in-function-decl) Leave meaningless variable names out of function declarations. A good rule of thumb is if the parameter type name contains the parameter name (without trailing numbers or pluralization), then the parameter name isn't needed. Usually, there should be a parameter name for bools, strings, and numerical types.
 
 ###### Right:
@@ -1126,16 +1154,16 @@ namespace WebCore {
 } // namespace WebCore
 ```
 
-[](#using-position) In implementation files, put all other "using" statements at the beginning of the file, before any namespace definitions and after any "include" statements.
+[](#using-position) In implementation files, put all "using namespace" statements inside namespace definitions.
 
 ###### Right:
 
 ```cpp
 // HTMLSelectElement.cpp
 
-using namespace other;
-
 namespace WebCore {
+
+using namespace other;
 
 } // namespace WebCore
 ```
@@ -1145,9 +1173,9 @@ namespace WebCore {
 ```cpp
 // HTMLSelectElement.cpp
 
-namespace WebCore {
-
 using namespace other;
+
+namespace WebCore {
 
 } // namespace WebCore
 ```

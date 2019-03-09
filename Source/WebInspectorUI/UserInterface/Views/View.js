@@ -108,6 +108,7 @@ WI.View = class View extends WI.Object
 
         this._subviews.insertAtIndex(view, beforeIndex);
 
+        console.assert(!view.element.parentNode || this._element.contains(view.element.parentNode), "Subview DOM element must be a descendant of the parent view element.");
         if (!view.element.parentNode)
             this._element.insertBefore(view.element, referenceView ? referenceView.element : null);
 
@@ -117,7 +118,7 @@ WI.View = class View extends WI.Object
     removeSubview(view)
     {
         console.assert(view instanceof WI.View);
-        console.assert(view.element.parentNode === this._element, "Subview DOM element must be a child of the parent view element.");
+        console.assert(this._element.contains(view.element), "Subview DOM element must be a child of the parent view element.");
 
         let index = this._subviews.lastIndexOf(view);
         if (index === -1) {
@@ -126,7 +127,7 @@ WI.View = class View extends WI.Object
         }
 
         this._subviews.splice(index, 1);
-        this._element.removeChild(view.element);
+        view.element.remove();
 
         view._didMoveToParent(null);
     }
@@ -213,6 +214,13 @@ WI.View = class View extends WI.Object
         // Should not be called directly; use updateLayout() instead.
     }
 
+    didLayoutSubtree()
+    {
+        // Implemented by subclasses.
+
+        // Called after the view and its entire subtree have finished layout.
+    }
+
     sizeDidChange()
     {
         // Implemented by subclasses.
@@ -266,6 +274,7 @@ WI.View = class View extends WI.Object
     {
         this._dirty = false;
         this._dirtyDescendantsCount = 0;
+        let isInitialLayout = !this._didInitialLayout;
 
         if (!this._didInitialLayout) {
             this.initialLayout();
@@ -278,7 +287,7 @@ WI.View = class View extends WI.Object
         this.layout();
 
         if (WI.settings.enableLayoutFlashing.value)
-            this._drawLayoutFlashingOutline();
+            this._drawLayoutFlashingOutline(isInitialLayout);
 
         for (let view of this._subviews) {
             view._setLayoutReason(this._layoutReason);
@@ -286,6 +295,8 @@ WI.View = class View extends WI.Object
         }
 
         this._layoutReason = null;
+
+        this.didLayoutSubtree();
     }
 
     _setLayoutReason(layoutReason)
@@ -296,14 +307,15 @@ WI.View = class View extends WI.Object
         this._layoutReason = layoutReason || WI.View.LayoutReason.Dirty;
     }
 
-    _drawLayoutFlashingOutline()
+    _drawLayoutFlashingOutline(isInitialLayout)
     {
         if (this._layoutFlashingTimeout)
             clearTimeout(this._layoutFlashingTimeout);
         else
             this._layoutFlashingPreviousOutline = this._element.style.outline;
 
-        this._element.style.outline = "1px solid hsla(39, 100%, 51%, 0.8)";
+        let hue = isInitialLayout ? 20 : 40;
+        this._element.style.outline = `1px solid hsla(${hue}, 100%, 51%, 0.8)`;
 
         this._layoutFlashingTimeout = setTimeout(() => {
             if (this._element)

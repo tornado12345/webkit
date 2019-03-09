@@ -53,7 +53,7 @@ inline EventSource::EventSource(ScriptExecutionContext& context, const URL& url,
     : ActiveDOMObject(&context)
     , m_url(url)
     , m_withCredentials(eventSourceInit.withCredentials)
-    , m_decoder(TextResourceDecoder::create(ASCIILiteral("text/plain"), "UTF-8"))
+    , m_decoder(TextResourceDecoder::create("text/plain"_s, "UTF-8"))
     , m_connectTimer(*this, &EventSource::connect)
 {
 }
@@ -74,7 +74,7 @@ ExceptionOr<Ref<EventSource>> EventSource::create(ScriptExecutionContext& contex
     }
 
     auto source = adoptRef(*new EventSource(context, fullURL, eventSourceInit));
-    source->setPendingActivity(source.ptr());
+    source->setPendingActivity(source.get());
     source->scheduleInitialConnect();
     source->suspendIfNeeded();
     return WTFMove(source);
@@ -99,12 +99,12 @@ void EventSource::connect()
         request.setHTTPHeaderField(HTTPHeaderName::LastEventID, m_lastEventId);
 
     ThreadableLoaderOptions options;
-    options.sendLoadCallbacks = SendCallbacks;
+    options.sendLoadCallbacks = SendCallbackPolicy::SendCallbacks;
     options.credentials = m_withCredentials ? FetchOptions::Credentials::Include : FetchOptions::Credentials::SameOrigin;
     options.preflightPolicy = PreflightPolicy::Prevent;
     options.mode = FetchOptions::Mode::Cors;
     options.cache = FetchOptions::Cache::NoStore;
-    options.dataBufferingPolicy = DoNotBufferData;
+    options.dataBufferingPolicy = DataBufferingPolicy::DoNotBufferData;
     options.contentSecurityPolicyEnforcement = scriptExecutionContext()->shouldBypassMainWorldContentSecurityPolicy() ? ContentSecurityPolicyEnforcement::DoNotEnforce : ContentSecurityPolicyEnforcement::EnforceConnectSrcDirective;
     options.initiator = cachedResourceRequestInitiators().eventsource;
 
@@ -125,7 +125,7 @@ void EventSource::networkRequestEnded()
     if (m_state != CLOSED)
         scheduleReconnect();
     else
-        unsetPendingActivity(this);
+        unsetPendingActivity(*this);
 }
 
 void EventSource::scheduleInitialConnect()
@@ -140,7 +140,7 @@ void EventSource::scheduleReconnect()
 {
     m_state = CONNECTING;
     m_connectTimer.startOneShot(1_ms * m_reconnectDelay);
-    dispatchEvent(Event::create(eventNames().errorEvent, false, false));
+    dispatchEvent(Event::create(eventNames().errorEvent, Event::CanBubble::No, Event::IsCancelable::No));
 }
 
 void EventSource::close()
@@ -158,7 +158,7 @@ void EventSource::close()
         m_loader->cancel();
     else {
         m_state = CLOSED;
-        unsetPendingActivity(this);
+        unsetPendingActivity(*this);
     }
 }
 
@@ -196,13 +196,13 @@ void EventSource::didReceiveResponse(unsigned long, const ResourceResponse& resp
 
     if (!responseIsValid(response)) {
         m_loader->cancel();
-        dispatchEvent(Event::create(eventNames().errorEvent, false, false));
+        dispatchEvent(Event::create(eventNames().errorEvent, Event::CanBubble::No, Event::IsCancelable::No));
         return;
     }
 
     m_eventStreamOrigin = SecurityOriginData::fromURL(response.url()).toString();
     m_state = OPEN;
-    dispatchEvent(Event::create(eventNames().openEvent, false, false));
+    dispatchEvent(Event::create(eventNames().openEvent, Event::CanBubble::No, Event::IsCancelable::No));
 }
 
 void EventSource::didReceiveData(const char* data, int length)
@@ -260,11 +260,11 @@ void EventSource::abortConnectionAttempt()
         m_loader->cancel();
     else {
         m_state = CLOSED;
-        unsetPendingActivity(this);
+        unsetPendingActivity(*this);
     }
 
     ASSERT(m_state == CLOSED);
-    dispatchEvent(Event::create(eventNames().errorEvent, false, false));
+    dispatchEvent(Event::create(eventNames().errorEvent, Event::CanBubble::No, Event::IsCancelable::No));
 }
 
 void EventSource::parseEventStream()
@@ -278,8 +278,8 @@ void EventSource::parseEventStream()
             m_discardTrailingNewline = false;
         }
 
-        std::optional<unsigned> lineLength;
-        std::optional<unsigned> fieldLength;
+        Optional<unsigned> lineLength;
+        Optional<unsigned> fieldLength;
         for (unsigned i = position; !lineLength && i < size; ++i) {
             switch (m_receiveBuffer[i]) {
             case ':':
@@ -315,7 +315,7 @@ void EventSource::parseEventStream()
         m_receiveBuffer.remove(0, position);
 }
 
-void EventSource::parseEventStreamLine(unsigned position, std::optional<unsigned> fieldLength, unsigned lineLength)
+void EventSource::parseEventStreamLine(unsigned position, Optional<unsigned> fieldLength, unsigned lineLength)
 {
     if (!lineLength) {
         if (!m_data.isEmpty())

@@ -53,9 +53,9 @@ void link(State& state)
 
     state.jitCode->common.requiredRegisterCountForExit = graph.requiredRegisterCountForExit();
     
-    if (!graph.m_plan.inlineCallFrames->isEmpty())
-        state.jitCode->common.inlineCallFrames = graph.m_plan.inlineCallFrames;
-    
+    if (!graph.m_plan.inlineCallFrames()->isEmpty())
+        state.jitCode->common.inlineCallFrames = graph.m_plan.inlineCallFrames();
+
     graph.registerFrozenValues();
 
     // Create the entrypoint. Note that we use this entrypoint totally differently
@@ -125,8 +125,8 @@ void link(State& state)
         
         state.jitCode->common.compilation = compilation;
     }
-    
-    switch (graph.m_plan.mode) {
+
+    switch (graph.m_plan.mode()) {
     case FTLMode: {
         bool requiresArityFixup = codeBlock->numParameters() != 1;
         if (codeBlock->codeType() == FunctionCode && requiresArityFixup) {
@@ -171,7 +171,7 @@ void link(State& state)
                 state.allocationFailed = true;
                 return;
             }
-            linkBuffer->link(callArityCheck, FunctionPtr<OperationPtrTag>(codeBlock->m_isConstructor ? operationConstructArityCheck : operationCallArityCheck));
+            linkBuffer->link(callArityCheck, FunctionPtr<OperationPtrTag>(codeBlock->isConstructor() ? operationConstructArityCheck : operationCallArityCheck));
             linkBuffer->link(callLookupExceptionHandlerFromCallerFrame, FunctionPtr<OperationPtrTag>(lookupExceptionHandlerFromCallerFrame));
             linkBuffer->link(callArityFixup, FunctionPtr<JITThunkPtrTag>(vm.getCTIStub(arityFixupGenerator).code()));
             linkBuffer->link(mainPathJumps, state.generatedFunction);

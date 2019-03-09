@@ -228,13 +228,12 @@ void ContentFilter::didDecide(State state)
 
     ContentFilterUnblockHandler unblockHandler { m_blockingContentFilter->unblockHandler() };
     unblockHandler.setUnreachableURL(m_documentLoader.documentURL());
-    RefPtr<Frame> frame { m_documentLoader.frame() };
+    auto frame { m_documentLoader.frame() };
     String unblockRequestDeniedScript { m_blockingContentFilter->unblockRequestDeniedScript() };
     if (!unblockRequestDeniedScript.isEmpty() && frame) {
-        static_assert(std::is_base_of<ThreadSafeRefCounted<AbstractFrame>, Frame>::value, "AbstractFrame must be ThreadSafeRefCounted.");
-        unblockHandler.wrapWithDecisionHandler([frame = WTFMove(frame), script = unblockRequestDeniedScript.isolatedCopy()](bool unblocked) {
-            if (!unblocked)
-                frame->script().executeScript(script);
+        unblockHandler.wrapWithDecisionHandler([scriptController = makeWeakPtr(frame->script()), script = unblockRequestDeniedScript.isolatedCopy()](bool unblocked) {
+            if (!unblocked && scriptController)
+                scriptController->executeScript(script);
         });
     }
     m_documentLoader.frameLoader()->client().contentFilterDidBlockLoad(WTFMove(unblockHandler));
@@ -246,7 +245,7 @@ void ContentFilter::didDecide(State state)
 void ContentFilter::deliverResourceData(CachedResource& resource)
 {
     ASSERT(m_state == State::Allowed);
-    ASSERT(resource.dataBufferingPolicy() == BufferData);
+    ASSERT(resource.dataBufferingPolicy() == DataBufferingPolicy::BufferData);
     if (auto* resourceBuffer = resource.resourceBuffer())
         m_documentLoader.dataReceived(resource, resourceBuffer->data(), resourceBuffer->size());
 }
@@ -286,7 +285,7 @@ void ContentFilter::handleProvisionalLoadFailure(const ResourceError& error)
     ASSERT(m_blockedError.failingURL() == error.failingURL());
 
     RefPtr<SharedBuffer> replacementData { m_blockingContentFilter->replacementData() };
-    ResourceResponse response { URL(), ASCIILiteral("text/html"), static_cast<long long>(replacementData->size()), ASCIILiteral("UTF-8") };
+    ResourceResponse response { URL(), "text/html"_s, static_cast<long long>(replacementData->size()), "UTF-8"_s };
     SubstituteData substituteData { WTFMove(replacementData), error.failingURL(), response, SubstituteData::SessionHistoryVisibility::Hidden };
     SetForScope<bool> loadingBlockedPage { m_isLoadingBlockedPage, true };
     m_documentLoader.frameLoader()->load(FrameLoadRequest(*m_documentLoader.frame(), blockedPageURL(), ShouldOpenExternalURLsPolicy::ShouldNotAllow, substituteData));

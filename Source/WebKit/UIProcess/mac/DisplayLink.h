@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 Apple Inc. All rights reserved.
+ * Copyright (C) 2018-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,34 +25,42 @@
 
 #pragma once
 
-#if PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 101400
+#if ENABLE(WEBPROCESS_WINDOWSERVER_BLOCKING)
 
 #include <CoreVideo/CVDisplayLink.h>
-
 #include <WebCore/PlatformScreen.h>
-#include <wtf/HashSet.h>
+#include <wtf/HashMap.h>
+#include <wtf/Lock.h>
+
+namespace IPC {
+class Connection;
+}
 
 namespace WebKit {
-
-class WebPageProxy;
     
 class DisplayLink {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
-    DisplayLink(WebCore::PlatformDisplayID, WebPageProxy&);
+    explicit DisplayLink(WebCore::PlatformDisplayID);
     ~DisplayLink();
     
-    void addObserver(unsigned observerID);
-    void removeObserver(unsigned observerID);
+    void addObserver(IPC::Connection&, unsigned observerID);
+    void removeObserver(IPC::Connection&, unsigned observerID);
+    void removeObservers(IPC::Connection&);
     bool hasObservers() const;
+
+    WebCore::PlatformDisplayID displayID() const { return m_displayID; }
 
 private:
     static CVReturn displayLinkCallback(CVDisplayLinkRef, const CVTimeStamp*, const CVTimeStamp*, CVOptionFlags, CVOptionFlags*, void* data);
     
     CVDisplayLinkRef m_displayLink { nullptr };
-    HashSet<unsigned> m_observers;
+    Lock m_observersLock;
+    HashMap<RefPtr<IPC::Connection>, Vector<unsigned>> m_observers;
+    WebCore::PlatformDisplayID m_displayID;
 };
 
-}
+} // namespace WebKit
 
 #endif
 

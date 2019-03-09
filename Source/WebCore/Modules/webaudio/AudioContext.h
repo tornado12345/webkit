@@ -89,7 +89,7 @@ public:
 
     Document* document() const; // ASSERTs if document no longer exists.
 
-    const Document* hostingDocument() const override;
+    Document* hostingDocument() const final;
 
     AudioDestinationNode* destination() { return m_destinationNode.get(); }
     size_t currentSampleFrame() const { return m_destinationNode->currentSampleFrame(); }
@@ -117,6 +117,8 @@ public:
 
     enum class State { Suspended, Running, Interrupted, Closed };
     State state() const;
+
+    bool wouldTaintOrigin(const URL&) const;
 
     // The AudioNode create methods are called on the main thread (from JavaScript).
     Ref<AudioBufferSourceNode> createBufferSource();
@@ -154,13 +156,13 @@ public:
     void derefFinishedSourceNodes();
 
     // We schedule deletion of all marked nodes at the end of each realtime render quantum.
-    void markForDeletion(AudioNode*);
+    void markForDeletion(AudioNode&);
     void deleteMarkedNodes();
 
     // AudioContext can pull node(s) at the end of each render quantum even when they are not connected to any downstream nodes.
     // These two methods are called by the nodes who want to add/remove themselves into/from the automatic pull lists.
-    void addAutomaticPullNode(AudioNode*);
-    void removeAutomaticPullNode(AudioNode*);
+    void addAutomaticPullNode(AudioNode&);
+    void removeAutomaticPullNode(AudioNode&);
 
     // Called right before handlePostRenderTasks() to handle nodes which need to be pulled even when they are not connected to anything.
     void processAutomaticPullNodes(size_t framesToProcess);

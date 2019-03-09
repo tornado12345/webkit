@@ -26,7 +26,7 @@
 #import "config.h"
 #import "SmartMagnificationController.h"
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 #import "SmartMagnificationControllerMessages.h"
 #import "ViewGestureGeometryCollectorMessages.h"
@@ -37,14 +37,11 @@
 #import "WebPageProxy.h"
 #import "WebProcessProxy.h"
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+ALLOW_DEPRECATED_DECLARATIONS_BEGIN
 
 #import "UIKitSPI.h"
 
-#pragma clang diagnostic pop
-
-using namespace WebCore;
+ALLOW_DEPRECATED_DECLARATIONS_END
 
 static const float smartMagnificationPanScrollThresholdZoomedOut = 60;
 static const float smartMagnificationPanScrollThresholdIPhone = 100;
@@ -55,6 +52,7 @@ static const double smartMagnificationMaximumScale = 1.6;
 static const double smartMagnificationMinimumScale = 0;
 
 namespace WebKit {
+using namespace WebCore;
 
 SmartMagnificationController::SmartMagnificationController(WKContentView *contentView)
     : m_webPageProxy(*contentView.page)
@@ -130,6 +128,11 @@ void SmartMagnificationController::magnify(FloatPoint origin, FloatRect targetRe
     [m_contentView _zoomToRect:targetRect withOrigin:origin fitEntireRect:NO minimumScale:minimumScale maximumScale:maximumScale minimumScrollDistance:0];
 }
 
+void SmartMagnificationController::scrollToRect(FloatPoint origin, FloatRect targetRect)
+{
+    [m_contentView _scrollToRect:targetRect withOrigin:origin minimumScrollDistance:0];
+}
+
 } // namespace WebKit
 
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)

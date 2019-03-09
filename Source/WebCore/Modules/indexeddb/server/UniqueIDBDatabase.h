@@ -72,7 +72,8 @@ typedef Function<void(const IDBError&, const IDBGetResult&)> GetResultCallback;
 typedef Function<void(const IDBError&, const IDBGetAllResult&)> GetAllResultsCallback;
 typedef Function<void(const IDBError&, uint64_t)> CountCallback;
 
-class UniqueIDBDatabase {
+class UniqueIDBDatabase : public CanMakeWeakPtr<UniqueIDBDatabase> {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     UniqueIDBDatabase(IDBServer&, const IDBDatabaseIdentifier&);
     UniqueIDBDatabase(UniqueIDBDatabase&) = delete;
@@ -81,7 +82,7 @@ public:
     void openDatabaseConnection(IDBConnectionToClient&, const IDBRequestData&);
 
     const IDBDatabaseInfo& info() const;
-    IDBServer& server() { return m_server; }
+    IDBServer& server() { return *m_server; }
     const IDBDatabaseIdentifier& identifier() const { return m_identifier; }
 
     void createObjectStore(UniqueIDBDatabaseTransaction&, const IDBObjectStoreInfo&, ErrorCallback);
@@ -118,7 +119,10 @@ public:
 
     bool hardClosedForUserDelete() const { return m_hardClosedForUserDelete; }
 
+    void setQuota(uint64_t);
 private:
+    enum class CloseState { Start, Done };
+
     void handleDatabaseOperations();
     void handleCurrentOperation();
     void performCurrentOpenOperation();
@@ -212,6 +216,8 @@ private:
     RefPtr<UniqueIDBDatabaseTransaction> takeNextRunnableTransaction(bool& hadDeferredTransactions);
 
     bool prepareToFinishTransaction(UniqueIDBDatabaseTransaction&);
+    
+    void clearStalePendingOpenDBRequests();
 
     void postDatabaseTask(CrossThreadTask&&);
     void postDatabaseTaskReply(CrossThreadTask&&);
@@ -221,7 +227,9 @@ private:
     void maybeFinishHardClose();
     bool isDoneWithHardClose();
 
-    IDBServer& m_server;
+    void notifyServerAboutClose(CloseState);
+
+    RefPtr<IDBServer> m_server;
     IDBDatabaseIdentifier m_identifier;
     
     ListHashSet<RefPtr<ServerOpenDBRequest>> m_pendingOpenDBRequests;
@@ -248,6 +256,7 @@ private:
     HashMap<uint64_t, GetResultCallback> m_getResultCallbacks;
     HashMap<uint64_t, GetAllResultsCallback> m_getAllResultsCallbacks;
     HashMap<uint64_t, CountCallback> m_countCallbacks;
+    Deque<uint64_t> m_callbackQueue;
 
     Timer m_operationAndTransactionTimer;
 

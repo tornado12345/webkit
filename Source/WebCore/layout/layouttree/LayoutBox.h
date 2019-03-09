@@ -27,6 +27,7 @@
 
 #if ENABLE(LAYOUT_FORMATTING_CONTEXT)
 
+#include "LayoutReplaced.h"
 #include "RenderStyle.h"
 #include <wtf/IsoMalloc.h>
 #include <wtf/WeakPtr.h>
@@ -38,40 +39,81 @@ namespace Layout {
 class Container;
 class TreeBuilder;
 
-class Box {
+class Box : public CanMakeWeakPtr<Box> {
     WTF_MAKE_ISO_ALLOCATED(Box);
 public:
-    friend class TreeBuilder;
+    enum class ElementType {
+        Document,
+        Body,
+        TableCell,
+        TableColumn,
+        TableRow,
+        TableColumnGroup,
+        TableRowGroup,
+        TableHeaderGroup,
+        TableFooterGroup,
+        Image,
+        IFrame,
+        GenericElement
+    };
 
+    struct ElementAttributes {
+        ElementType elementType;
+    };
+
+    enum BaseTypeFlag {
+        BoxFlag               = 1 << 0,
+        ContainerFlag         = 1 << 1,
+        BlockContainerFlag    = 1 << 2,
+        InlineBoxFlag         = 1 << 3,
+        InlineContainerFlag   = 1 << 4,
+        LineBreakBoxFlag      = 1 << 5
+    };
+    typedef unsigned BaseTypeFlags;
+
+    Box(Optional<ElementAttributes>, RenderStyle&&);
     virtual ~Box();
 
     bool establishesFormattingContext() const;
-    virtual bool establishesBlockFormattingContext() const;
+    bool establishesBlockFormattingContext() const;
+    bool establishesBlockFormattingContextOnly() const;
     virtual bool establishesInlineFormattingContext() const { return false; }
 
     bool isInFlow() const { return !isFloatingOrOutOfFlowPositioned(); }
     bool isPositioned() const { return isInFlowPositioned() || isOutOfFlowPositioned(); }
     bool isInFlowPositioned() const { return isRelativelyPositioned() || isStickyPositioned(); }
-    bool isOutOfFlowPositioned() const { return isAbsolutelyPositioned() || isFixedPositioned(); }
+    bool isOutOfFlowPositioned() const { return isAbsolutelyPositioned(); }
     bool isRelativelyPositioned() const;
     bool isStickyPositioned() const;
     bool isAbsolutelyPositioned() const;
     bool isFixedPositioned() const;
     bool isFloatingPositioned() const;
+    bool isLeftFloatingPositioned() const;
+    bool isRightFloatingPositioned() const;
+    bool hasFloatClear() const;
 
     bool isFloatingOrOutOfFlowPositioned() const { return isFloatingPositioned() || isOutOfFlowPositioned(); }
 
     const Container* containingBlock() const;
     const Container& formattingContextRoot() const;
-    bool isDescendantOf(Container&) const;
+    const Container& initialContainingBlock() const;
 
-    bool isAnonymous() const { return m_isAnonymous; }
+    bool isDescendantOf(const Container&) const;
+
+    bool isAnonymous() const { return !m_elementAttributes; }
 
     bool isBlockLevelBox() const;
     bool isInlineLevelBox() const;
     bool isInlineBlockBox() const;
     bool isBlockContainerBox() const;
     bool isInitialContainingBlock() const;
+
+    bool isDocumentBox() const { return m_elementAttributes && m_elementAttributes.value().elementType == ElementType::Document; }
+    bool isBodyBox() const { return m_elementAttributes && m_elementAttributes.value().elementType == ElementType::Body; }
+    bool isTableCell() const { return m_elementAttributes && m_elementAttributes.value().elementType == ElementType::TableCell; }
+    bool isReplaced() const { return isImage() || isIFrame(); }
+    bool isIFrame() const { return m_elementAttributes && m_elementAttributes.value().elementType == ElementType::IFrame; }
+    bool isImage() const { return m_elementAttributes && m_elementAttributes.value().elementType == ElementType::Image; }
 
     const Container* parent() const { return m_parent; }
     const Box* nextSibling() const { return m_nextSibling; }
@@ -81,42 +123,39 @@ public:
     const Box* previousInFlowSibling() const;
     const Box* previousInFlowOrFloatingSibling() const;
 
-    typedef unsigned BaseTypeFlags;
     bool isContainer() const { return m_baseTypeFlags & ContainerFlag; }
     bool isBlockContainer() const { return m_baseTypeFlags & BlockContainerFlag; }
     bool isInlineBox() const { return m_baseTypeFlags & InlineBoxFlag; }
     bool isInlineContainer() const { return m_baseTypeFlags & InlineContainerFlag; }
+    bool isLineBreakBox() const { return m_baseTypeFlags & LineBreakBoxFlag; }
 
-    const RenderStyle& style() const { return m_style; }
-    auto& weakPtrFactory() const { return m_weakFactory; }
-
-protected:
-    enum BaseTypeFlag {
-        ContainerFlag         = 1 << 0,
-        BlockContainerFlag    = 1 << 1,
-        InlineBoxFlag         = 1 << 2,
-        InlineContainerFlag   = 1 << 3
-    };
-    Box(RenderStyle&&, BaseTypeFlags);
-
+    bool isPaddingApplicable() const;
     bool isOverflowVisible() const;
 
-private:
+    const RenderStyle& style() const { return m_style; }
+
+    const Replaced* replaced() const { return m_replaced.get(); }
+    // FIXME: Temporary until after intrinsic size change is tracked by Replaced.
+    Replaced* replaced() { return m_replaced.get(); }
+
     void setParent(Container& parent) { m_parent = &parent; }
     void setNextSibling(Box& nextSibling) { m_nextSibling = &nextSibling; }
     void setPreviousSibling(Box& previousSibling) { m_previousSibling = &previousSibling; }
-    void setIsAnonymous() { m_isAnonymous = true; }
 
-    WeakPtrFactory<Box> m_weakFactory;
+protected:
+    Box(Optional<ElementAttributes>, RenderStyle&&, BaseTypeFlags);
+
+private:
     RenderStyle m_style;
+    Optional<ElementAttributes> m_elementAttributes;
 
     Container* m_parent { nullptr };
     Box* m_previousSibling { nullptr };
     Box* m_nextSibling { nullptr };
 
-    unsigned m_baseTypeFlags : 4;
-    unsigned m_isAnonymous : 1;
+    std::unique_ptr<Replaced> m_replaced;
 
+    unsigned m_baseTypeFlags : 5;
 };
 
 }

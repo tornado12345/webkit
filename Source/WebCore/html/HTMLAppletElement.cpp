@@ -27,7 +27,6 @@
 #include "ElementIterator.h"
 #include "Frame.h"
 #include "FrameLoader.h"
-#include "HTMLDocument.h"
 #include "HTMLNames.h"
 #include "HTMLParamElement.h"
 #include "RenderEmbeddedObject.h"
@@ -48,7 +47,7 @@ inline HTMLAppletElement::HTMLAppletElement(const QualifiedName& tagName, Docume
 {
     ASSERT(hasTagName(appletTag));
 
-    m_serviceType = ASCIILiteral { "application/x-java-applet" };
+    m_serviceType = "application/x-java-applet"_s;
 }
 
 Ref<HTMLAppletElement> HTMLAppletElement::create(const QualifiedName& tagName, Document& document)
@@ -115,7 +114,7 @@ void HTMLAppletElement::updateWidget(CreatePlugins createPlugins)
         return;
     }
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
     UNUSED_PARAM(createPlugins);
 #else
     // FIXME: It's sadness that we have this special case here.
@@ -141,7 +140,7 @@ void HTMLAppletElement::updateWidget(CreatePlugins createPlugins)
 
     const AtomicString& codeBase = attributeWithoutSynchronization(codebaseAttr);
     if (!codeBase.isNull()) {
-        paramNames.append(ASCIILiteral("codeBase"));
+        paramNames.append("codeBase"_s);
         paramValues.append(codeBase.string());
     }
 
@@ -153,16 +152,16 @@ void HTMLAppletElement::updateWidget(CreatePlugins createPlugins)
 
     const AtomicString& archive = attributeWithoutSynchronization(archiveAttr);
     if (!archive.isNull()) {
-        paramNames.append(ASCIILiteral("archive"));
+        paramNames.append("archive"_s);
         paramValues.append(archive.string());
     }
 
-    paramNames.append(ASCIILiteral("baseURL"));
+    paramNames.append("baseURL"_s);
     paramValues.append(document().baseURL().string());
 
     const AtomicString& mayScript = attributeWithoutSynchronization(mayscriptAttr);
     if (!mayScript.isNull()) {
-        paramNames.append(ASCIILiteral("mayScript"));
+        paramNames.append("mayScript"_s);
         paramValues.append(mayScript.string());
     }
 
@@ -178,7 +177,7 @@ void HTMLAppletElement::updateWidget(CreatePlugins createPlugins)
     ASSERT(frame);
 
     renderer->setWidget(frame->loader().subframeLoader().createJavaAppletWidget(roundedIntSize(LayoutSize(contentWidth, contentHeight)), *this, paramNames, paramValues));
-#endif // !PLATFORM(IOS)
+#endif // !PLATFORM(IOS_FAMILY)
 }
 
 bool HTMLAppletElement::canEmbedJava() const

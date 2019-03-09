@@ -16,29 +16,32 @@
 #include <string>
 #include <vector>
 
+#include "absl/types/optional.h"
 #include "api/audio_codecs/audio_decoder_factory.h"
 #include "api/call/transport.h"
-#include "api/optional.h"
+#include "api/crypto/cryptooptions.h"
+#include "api/media_transport_interface.h"
 #include "api/rtpparameters.h"
 #include "api/rtpreceiverinterface.h"
 #include "call/rtp_config.h"
-#include "common_types.h"  // NOLINT(build/include)
 #include "rtc_base/scoped_ref_ptr.h"
-#include "typedefs.h"  // NOLINT(build/include)
 
 namespace webrtc {
 class AudioSinkInterface;
+class FrameDecryptorInterface;
 
 class AudioReceiveStream {
  public:
   struct Stats {
+    Stats();
+    ~Stats();
     uint32_t remote_ssrc = 0;
     int64_t bytes_rcvd = 0;
     uint32_t packets_rcvd = 0;
     uint32_t packets_lost = 0;
     float fraction_lost = 0.0f;
     std::string codec_name;
-    rtc::Optional<int> codec_payload_type;
+    absl::optional<int> codec_payload_type;
     uint32_t ext_seqnum = 0;
     uint32_t jitter_ms = 0;
     uint32_t jitter_buffer_ms = 0;
@@ -60,6 +63,7 @@ class AudioReceiveStream {
     float secondary_discarded_rate = 0.0f;
     float accelerate_rate = 0.0f;
     float preemptive_expand_rate = 0.0f;
+    uint64_t delayed_packet_outage_samples = 0;
     int32_t decoding_calls_to_silence_generator = 0;
     int32_t decoding_calls_to_neteq = 0;
     int32_t decoding_normal = 0;
@@ -68,13 +72,20 @@ class AudioReceiveStream {
     int32_t decoding_plc_cng = 0;
     int32_t decoding_muted_output = 0;
     int64_t capture_start_ntp_time_ms = 0;
+    uint64_t jitter_buffer_flushes = 0;
   };
 
   struct Config {
+    Config();
+    ~Config();
+
     std::string ToString() const;
 
     // Receive-stream specific RTP settings.
     struct Rtp {
+      Rtp();
+      ~Rtp();
+
       std::string ToString() const;
 
       // Synchronization source (stream identifier) to be received.
@@ -98,12 +109,12 @@ class AudioReceiveStream {
 
     Transport* rtcp_send_transport = nullptr;
 
-    // TODO(solenberg): Remove once clients don't use it anymore.
-    int voe_channel_id = -1;
+    MediaTransportInterface* media_transport = nullptr;
 
     // NetEq settings.
     size_t jitter_buffer_max_packets = 50;
     bool jitter_buffer_fast_accelerate = false;
+    int jitter_buffer_min_delay_ms = 0;
 
     // Identifier for an A/V synchronization group. Empty string to disable.
     // TODO(pbos): Synchronize streams in a sync group, not just one video
@@ -114,6 +125,16 @@ class AudioReceiveStream {
     std::map<int, SdpAudioFormat> decoder_map;
 
     rtc::scoped_refptr<AudioDecoderFactory> decoder_factory;
+
+    absl::optional<AudioCodecPairId> codec_pair_id;
+
+    // Per PeerConnection crypto options.
+    webrtc::CryptoOptions crypto_options;
+
+    // An optional custom frame decryptor that allows the entire frame to be
+    // decrypted in whatever way the caller choses. This is not required by
+    // default.
+    rtc::scoped_refptr<webrtc::FrameDecryptorInterface> frame_decryptor;
   };
 
   // Reconfigure the stream according to the Configuration.
@@ -127,8 +148,6 @@ class AudioReceiveStream {
   virtual void Stop() = 0;
 
   virtual Stats GetStats() const = 0;
-  // TODO(solenberg): Remove, once AudioMonitor is gone.
-  virtual int GetOutputLevel() const = 0;
 
   // Sets an audio sink that receives unmixed audio from the receive stream.
   // Ownership of the sink is managed by the caller.

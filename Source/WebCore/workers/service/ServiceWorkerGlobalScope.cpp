@@ -62,7 +62,8 @@ void ServiceWorkerGlobalScope::skipWaiting(Ref<DeferredPromise>&& promise)
 
     callOnMainThread([workerThread = makeRef(thread()), requestIdentifier]() mutable {
         if (auto* connection = SWContextManager::singleton().connection()) {
-            connection->skipWaiting(workerThread->identifier(), [workerThread = WTFMove(workerThread), requestIdentifier] {
+            auto identifier = workerThread->identifier();
+            connection->skipWaiting(identifier, [workerThread = WTFMove(workerThread), requestIdentifier] {
                 workerThread->runLoop().postTask([requestIdentifier](auto& context) {
                     auto& scope = downcast<ServiceWorkerGlobalScope>(context);
                     if (auto promise = scope.m_pendingSkipWaitingPromises.take(requestIdentifier))
@@ -128,6 +129,22 @@ void ServiceWorkerGlobalScope::updateExtendedEventsSet(ExtendableEvent* newEvent
         if (auto* connection = SWContextManager::singleton().connection())
             connection->setServiceWorkerHasPendingEvents(threadIdentifier, hasPendingEvents);
     });
+}
+
+const ServiceWorkerContextData::ImportedScript* ServiceWorkerGlobalScope::scriptResource(const URL& url) const
+{
+    auto iterator = m_contextData.scriptResourceMap.find(url);
+    return iterator == m_contextData.scriptResourceMap.end() ? nullptr : &iterator->value;
+}
+
+void ServiceWorkerGlobalScope::setScriptResource(const URL& url, ServiceWorkerContextData::ImportedScript&& script)
+{
+    callOnMainThread([threadIdentifier = thread().identifier(), url = url.isolatedCopy(), script = script.isolatedCopy()] {
+        if (auto* connection = SWContextManager::singleton().connection())
+            connection->setScriptResource(threadIdentifier, url, script);
+    });
+
+    m_contextData.scriptResourceMap.set(url, WTFMove(script));
 }
 
 } // namespace WebCore

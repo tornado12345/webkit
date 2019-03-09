@@ -46,13 +46,15 @@ class SQLiteStatement;
 class SQLiteTransaction;
 
 class SQLiteDatabase {
+    WTF_MAKE_FAST_ALLOCATED;
     WTF_MAKE_NONCOPYABLE(SQLiteDatabase);
     friend class SQLiteTransaction;
 public:
     WEBCORE_EXPORT SQLiteDatabase();
     WEBCORE_EXPORT ~SQLiteDatabase();
 
-    WEBCORE_EXPORT bool open(const String& filename, bool forWebSQLDatabase = false);
+    enum class OpenMode { ReadOnly, ReadWrite, ReadWriteCreate };
+    WEBCORE_EXPORT bool open(const String& filename, OpenMode = OpenMode::ReadWriteCreate);
     bool isOpen() const { return m_db; }
     WEBCORE_EXPORT void close();
 
@@ -63,7 +65,7 @@ public:
     
     WEBCORE_EXPORT bool tableExists(const String&);
     void clearAllTables();
-    int runVacuumCommand();
+    WEBCORE_EXPORT int runVacuumCommand();
     int runIncrementalVacuumCommand();
     
     bool transactionInProgress() const { return m_transactionInProgress; }
@@ -102,7 +104,7 @@ public:
     
     sqlite3* sqlite3Handle() const
     {
-#if !PLATFORM(IOS)
+#if !PLATFORM(IOS_FAMILY)
         ASSERT(m_sharable || m_openingThread == &Thread::current() || !m_db);
 #endif
         return m_db;
@@ -140,7 +142,8 @@ private:
     static int authorizerFunction(void*, int, const char*, const char*, const char*, const char*);
 
     void enableAuthorizer(bool enable);
-    
+    void useWALJournalMode();
+
     int pageSize();
 
     void overrideUnauthorizedFunctions();

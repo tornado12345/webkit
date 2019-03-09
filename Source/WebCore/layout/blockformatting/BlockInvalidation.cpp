@@ -29,8 +29,10 @@
 #if ENABLE(LAYOUT_FORMATTING_CONTEXT)
 
 #include "BlockFormattingState.h"
+#include "Invalidation.h"
 #include "LayoutBox.h"
-#include "LayoutContext.h"
+#include "LayoutContainer.h"
+#include "LayoutState.h"
 #include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
@@ -38,9 +40,37 @@ namespace Layout {
 
 WTF_MAKE_ISO_ALLOCATED_IMPL(BlockInvalidation);
 
-void BlockInvalidation::invalidate(const Box& layoutBox, StyleDiff, LayoutContext& layoutContext, BlockFormattingState&)
+static bool invalidationStopsAtFormattingContextBoundary(const Container& formattingContextRoot, const Box&, StyleDiff)
 {
-    layoutContext.markNeedsUpdate(layoutBox, LayoutContext::UpdateType::All);
+    UNUSED_PARAM(formattingContextRoot);
+
+    ASSERT(formattingContextRoot.establishesFormattingContext());
+    return true;
+}
+
+static LayoutState::UpdateType computeUpdateType(const Box&, StyleDiff, BlockFormattingState&)
+{
+    return LayoutState::UpdateType::All;
+}
+
+static LayoutState::UpdateType computeUpdateTypeForAncestor(const Container&, StyleDiff, BlockFormattingState&)
+{
+    return LayoutState::UpdateType::All;
+}
+
+InvalidationResult BlockInvalidation::invalidate(const Box& layoutBox, StyleDiff styleDiff, LayoutState& layoutState,
+    BlockFormattingState& formattingState)
+{
+    // Invalidate this box and the containing block chain all the way up to the formatting context root (and beyond if needed).
+    layoutState.markNeedsUpdate(layoutBox, computeUpdateType(layoutBox, styleDiff, formattingState));
+    for (auto* containingBlock = layoutBox.containingBlock(); containingBlock; containingBlock = containingBlock->containingBlock()) {
+        if (containingBlock->establishesFormattingContext() && invalidationStopsAtFormattingContextBoundary(*containingBlock, layoutBox, styleDiff))
+            return { containingBlock };
+        layoutState.markNeedsUpdate(*containingBlock, computeUpdateTypeForAncestor(*containingBlock, styleDiff, formattingState));
+    }
+    // Invalidation always stops at the initial containing block.
+    ASSERT_NOT_REACHED();
+    return { nullptr };
 }
 
 }

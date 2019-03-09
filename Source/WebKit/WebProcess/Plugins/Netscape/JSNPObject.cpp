@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010-2018 Apple Inc. All rights reserved.
+ * Copyright (C) 2010-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -47,10 +47,9 @@
 #include <wtf/Assertions.h>
 #include <wtf/text/WTFString.h>
 
+namespace WebKit {
 using namespace JSC;
 using namespace WebCore;
-
-namespace WebKit {
 
 static NPIdentifier npIdentifierFromIdentifier(PropertyName propertyName)
 {
@@ -524,7 +523,7 @@ EncodedJSValue JSNPObject::methodGetter(ExecState* exec, EncodedJSValue thisValu
     return JSValue::encode(JSNPMethod::create(exec, thisObj->globalObject(), propertyName.publicName(), npIdentifier));
 }
 
-JSObject* JSNPObject::throwInvalidAccessError(ExecState* exec, ThrowScope& scope)
+JSC::Exception* JSNPObject::throwInvalidAccessError(ExecState* exec, ThrowScope& scope)
 {
     return throwException(exec, scope, createReferenceError(exec, "Trying to access object from destroyed plug-in."));
 }

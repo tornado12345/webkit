@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 Apple Inc. All rights reserved.
+ * Copyright (C) 2018-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,38 +26,33 @@
 #include "config.h"
 #include "DisplayLink.h"
 
-#if PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 101400
+#if ENABLE(WEBPROCESS_WINDOWSERVER_BLOCKING)
 
-#include "DrawingAreaMessages.h"
-#include "WebPageProxy.h"
-#include "WebProcessProxy.h"
+#include "WebProcessMessages.h"
 #include <wtf/ProcessPrivilege.h>
 
 namespace WebKit {
     
-DisplayLink::DisplayLink(WebCore::PlatformDisplayID displayID, WebPageProxy& webPageProxy)
+DisplayLink::DisplayLink(WebCore::PlatformDisplayID displayID)
+    : m_displayID(displayID)
 {
-    RELEASE_ASSERT(hasProcessPrivilege(ProcessPrivilege::CanCommunicateWithWindowServer));
+    ASSERT(hasProcessPrivilege(ProcessPrivilege::CanCommunicateWithWindowServer));
     CVReturn error = CVDisplayLinkCreateWithCGDisplay(displayID, &m_displayLink);
     if (error) {
         WTFLogAlways("Could not create a display link: %d", error);
         return;
     }
     
-    error = CVDisplayLinkSetOutputCallback(m_displayLink, displayLinkCallback, &webPageProxy);
+    error = CVDisplayLinkSetOutputCallback(m_displayLink, displayLinkCallback, this);
     if (error) {
         WTFLogAlways("Could not set the display link output callback: %d", error);
         return;
     }
-
-    error = CVDisplayLinkStart(m_displayLink);
-    if (error)
-        WTFLogAlways("Could not start the display link: %d", error);
 }
 
 DisplayLink::~DisplayLink()
 {
-    RELEASE_ASSERT(hasProcessPrivilege(ProcessPrivilege::CanCommunicateWithWindowServer));
+    ASSERT(hasProcessPrivilege(ProcessPrivilege::CanCommunicateWithWindowServer));
     ASSERT(m_displayLink);
     if (!m_displayLink)
         return;
@@ -66,30 +61,73 @@ DisplayLink::~DisplayLink()
     CVDisplayLinkRelease(m_displayLink);
 }
 
-void DisplayLink::addObserver(unsigned observerID)
+void DisplayLink::addObserver(IPC::Connection& connection, unsigned observerID)
 {
-    m_observers.add(observerID);
+    ASSERT(RunLoop::isMain());
+    bool isRunning = !m_observers.isEmpty();
+
+    {
+        LockHolder locker(m_observersLock);
+        m_observers.ensure(&connection, [] {
+            return Vector<unsigned> { };
+        }).iterator->value.append(observerID);
+    }
+
+    if (!isRunning) {
+        CVReturn error = CVDisplayLinkStart(m_displayLink);
+        if (error)
+            WTFLogAlways("Could not start the display link: %d", error);
+    }
 }
 
-void DisplayLink::removeObserver(unsigned observerID)
+void DisplayLink::removeObserver(IPC::Connection& connection, unsigned observerID)
 {
-    m_observers.remove(observerID);
+    ASSERT(RunLoop::isMain());
+
+    {
+        LockHolder locker(m_observersLock);
+
+        auto it = m_observers.find(&connection);
+        if (it == m_observers.end())
+            return;
+        bool removed = it->value.removeFirst(observerID);
+        ASSERT_UNUSED(removed, removed);
+        if (it->value.isEmpty())
+            m_observers.remove(it);
+    }
+
+    if (m_observers.isEmpty())
+        CVDisplayLinkStop(m_displayLink);
+}
+
+void DisplayLink::removeObservers(IPC::Connection& connection)
+{
+    ASSERT(RunLoop::isMain());
+
+    {
+        LockHolder locker(m_observersLock);
+        m_observers.remove(&connection);
+    }
+
+    if (m_observers.isEmpty())
+        CVDisplayLinkStop(m_displayLink);
 }
 
 bool DisplayLink::hasObservers() const
 {
+    ASSERT(RunLoop::isMain());
     return !m_observers.isEmpty();
 }
 
 CVReturn DisplayLink::displayLinkCallback(CVDisplayLinkRef displayLinkRef, const CVTimeStamp*, const CVTimeStamp*, CVOptionFlags, CVOptionFlags*, void* data)
 {
-    WebPageProxy* webPageProxy = reinterpret_cast<WebPageProxy*>(data);
-    callOnMainThread([webPageProxy = makeRefPtr(webPageProxy)] {
-        webPageProxy->process().send(Messages::DrawingArea::DisplayWasRefreshed(), webPageProxy->pageID());
-    });
+    auto* displayLink = static_cast<DisplayLink*>(data);
+    LockHolder locker(displayLink->m_observersLock);
+    for (auto& connection : displayLink->m_observers.keys())
+        connection->send(Messages::WebProcess::DisplayWasRefreshed(displayLink->m_displayID), 0);
     return kCVReturnSuccess;
 }
 
-}
+} // namespace WebKit
 
 #endif

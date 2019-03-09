@@ -46,16 +46,12 @@
 #include <dlfcn.h>
 #endif
 
-#if PLATFORM(WIN)
-#include <WebKitSystemInterface/WebKitSystemInterface.h>
-#endif
-
 WTF_DECLARE_CF_TYPE_TRAIT(CFURL);
 
 namespace WebCore {
 
 // FIXME: Make this a NetworkingContext property.
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 bool ResourceRequest::s_httpPipeliningEnabled = true;
 #else
 bool ResourceRequest::s_httpPipeliningEnabled = false;
@@ -128,15 +124,15 @@ static inline void setHeaderFields(CFMutableURLRequestRef request, const HTTPHea
 static inline CFURLRequestCachePolicy toPlatformRequestCachePolicy(ResourceRequestCachePolicy policy)
 {
     switch (policy) {
-    case UseProtocolCachePolicy:
+    case ResourceRequestCachePolicy::UseProtocolCachePolicy:
         return kCFURLRequestCachePolicyProtocolDefault;
-    case ReturnCacheDataElseLoad:
+    case ResourceRequestCachePolicy::ReturnCacheDataElseLoad:
         return kCFURLRequestCachePolicyReturnCacheDataElseLoad;
-    case ReturnCacheDataDontLoad:
+    case ResourceRequestCachePolicy::ReturnCacheDataDontLoad:
         return kCFURLRequestCachePolicyReturnCacheDataDontLoad;
-    case ReloadIgnoringCacheData:
-    case DoNotUseAnyCache:
-    case RefreshAnyCacheData:
+    case ResourceRequestCachePolicy::ReloadIgnoringCacheData:
+    case ResourceRequestCachePolicy::DoNotUseAnyCache:
+    case ResourceRequestCachePolicy::RefreshAnyCacheData:
         return kCFURLRequestCachePolicyReloadIgnoringCache;
     }
 
@@ -144,7 +140,23 @@ static inline CFURLRequestCachePolicy toPlatformRequestCachePolicy(ResourceReque
     return kCFURLRequestCachePolicyReloadIgnoringCache;
 }
 
-#if PLATFORM(IOS) && __IPHONE_OS_VERSION_MIN_REQUIRED >= 120000
+static inline ResourceRequestCachePolicy fromPlatformRequestCachePolicy(CFURLRequestCachePolicy policy)
+{
+    switch (policy) {
+    case kCFURLRequestCachePolicyProtocolDefault:
+        return ResourceRequestCachePolicy::UseProtocolCachePolicy;
+    case kCFURLRequestCachePolicyReloadIgnoringCache:
+        return ResourceRequestCachePolicy::ReloadIgnoringCacheData;
+    case kCFURLRequestCachePolicyReturnCacheDataElseLoad:
+        return ResourceRequestCachePolicy::ReturnCacheDataElseLoad;
+    case kCFURLRequestCachePolicyReturnCacheDataDontLoad:
+        return ResourceRequestCachePolicy::ReturnCacheDataDontLoad;
+    default:
+        return ResourceRequestCachePolicy::ReloadIgnoringCacheData;
+    }
+}
+
+#if PLATFORM(IOS_FAMILY) && __IPHONE_OS_VERSION_MIN_REQUIRED >= 120000
 static CFURLRef siteForCookies(ResourceRequest::SameSiteDisposition disposition, CFURLRef url)
 {
     switch (disposition) {
@@ -187,7 +199,7 @@ void ResourceRequest::doUpdatePlatformRequest()
 
     CFURLRequestSetShouldHandleHTTPCookies(cfRequest, allowCookies());
 
-#if PLATFORM(IOS) && __IPHONE_OS_VERSION_MIN_REQUIRED >= 120000
+#if PLATFORM(IOS_FAMILY) && __IPHONE_OS_VERSION_MIN_REQUIRED >= 120000
     _CFURLRequestSetProtocolProperty(cfRequest, CFSTR("_kCFHTTPCookiePolicyPropertySiteForCookies"), siteForCookies(m_sameSiteDisposition, url.get()));
 
     int isTopSite = m_isTopSite;
@@ -259,8 +271,8 @@ void ResourceRequest::doUpdateResourceRequest()
 
     m_url = CFURLRequestGetURL(m_cfRequest.get());
 
-    if (!m_cachePolicy)
-        m_cachePolicy = (ResourceRequestCachePolicy)CFURLRequestGetCachePolicy(m_cfRequest.get());
+    if (m_cachePolicy == ResourceRequestCachePolicy::UseProtocolCachePolicy)
+        m_cachePolicy = fromPlatformRequestCachePolicy(CFURLRequestGetCachePolicy(m_cfRequest.get()));
     m_timeoutInterval = CFURLRequestGetTimeoutInterval(m_cfRequest.get());
     m_firstPartyForCookies = CFURLRequestGetMainDocumentURL(m_cfRequest.get());
     if (CFStringRef method = CFURLRequestCopyHTTPRequestMethod(m_cfRequest.get())) {
@@ -272,7 +284,7 @@ void ResourceRequest::doUpdateResourceRequest()
     if (resourcePrioritiesEnabled())
         m_priority = toResourceLoadPriority(CFURLRequestGetRequestPriority(m_cfRequest.get()));
 
-#if PLATFORM(IOS) && __IPHONE_OS_VERSION_MIN_REQUIRED >= 120000
+#if PLATFORM(IOS_FAMILY) && __IPHONE_OS_VERSION_MIN_REQUIRED >= 120000
     RetainPtr<CFURLRef> siteForCookies = adoptCF(checked_cf_cast<CFURLRef>(_CFURLRequestCopyProtocolPropertyForKey(m_cfRequest.get(), CFSTR("_kCFHTTPCookiePolicyPropertySiteForCookies"))));
     m_sameSiteDisposition = !siteForCookies ? SameSiteDisposition::Unspecified : (registrableDomainsAreEqual(siteForCookies.get(), m_url) ? SameSiteDisposition::SameSite : SameSiteDisposition::CrossSite);
 
@@ -355,6 +367,7 @@ void ResourceRequest::updateFromDelegatePreservingOldProperties(const ResourceRe
     bool isHiddenFromInspector = hiddenFromInspector();
     auto oldRequester = requester();
     auto oldInitiatorIdentifier = initiatorIdentifier();
+    auto oldInspectorInitiatorNodeIdentifier = inspectorInitiatorNodeIdentifier();
 
     *this = delegateProvidedRequest;
 
@@ -363,6 +376,8 @@ void ResourceRequest::updateFromDelegatePreservingOldProperties(const ResourceRe
     setHiddenFromInspector(isHiddenFromInspector);
     setRequester(oldRequester);
     setInitiatorIdentifier(oldInitiatorIdentifier);
+    if (oldInspectorInitiatorNodeIdentifier)
+        setInspectorInitiatorNodeIdentifier(*oldInspectorInitiatorNodeIdentifier);
 }
 
 bool ResourceRequest::httpPipeliningEnabled()
@@ -402,7 +417,7 @@ unsigned initializeMaximumHTTPConnectionCountPerHost()
     return unlimitedRequestCount;
 }
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 void initializeHTTPConnectionSettingsOnStartup()
 {
     // This need to be called from WebKitInitialize so the calls happen early enough, before any requests are made. <rdar://problem/9691871>

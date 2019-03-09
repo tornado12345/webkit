@@ -76,7 +76,7 @@ void MapPrototype::finishCreation(VM& vm, JSGlobalObject* globalObject)
     putDirectWithoutTransition(vm, vm.propertyNames->iteratorSymbol, entries, static_cast<unsigned>(PropertyAttribute::DontEnum));
     putDirectWithoutTransition(vm, vm.propertyNames->toStringTagSymbol, jsString(&vm, "Map"), PropertyAttribute::DontEnum | PropertyAttribute::ReadOnly);
 
-    JSC_NATIVE_GETTER(vm.propertyNames->size, mapProtoFuncSize, PropertyAttribute::DontEnum | PropertyAttribute::Accessor);
+    JSC_NATIVE_GETTER_WITHOUT_TRANSITION(vm.propertyNames->size, mapProtoFuncSize, PropertyAttribute::DontEnum | PropertyAttribute::Accessor);
 }
 
 ALWAYS_INLINE static JSMap* getMap(CallFrame* callFrame, JSValue thisValue)
@@ -92,7 +92,7 @@ ALWAYS_INLINE static JSMap* getMap(CallFrame* callFrame, JSValue thisValue)
     auto* map = jsDynamicCast<JSMap*>(vm, thisValue.asCell());
     if (LIKELY(map))
         return map;
-    throwTypeError(callFrame, scope, ASCIILiteral("Map operation called on non-Map object"));
+    throwTypeError(callFrame, scope, "Map operation called on non-Map object"_s);
     return nullptr;
 }
 

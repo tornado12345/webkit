@@ -68,7 +68,6 @@ class FloatSize;
 class GraphicsContext;
 class GraphicsContextImpl;
 class SharedBuffer;
-class URL;
 struct Length;
 
 // This class gets notified when an image creates or destroys decoded frames and when it advances animation frames.
@@ -93,6 +92,7 @@ public:
     virtual bool isGradientImage() const { return false; }
     virtual bool isSVGImage() const { return false; }
     virtual bool isPDFDocumentImage() const { return false; }
+    virtual bool isCustomPaintImage() const { return false; }
 
     virtual bool currentFrameKnownToBeOpaque() const = 0;
     virtual bool isAnimated() const { return false; }
@@ -114,9 +114,9 @@ public:
     FloatRect rect() const { return FloatRect(FloatPoint(), size()); }
     float width() const { return size().width(); }
     float height() const { return size().height(); }
-    virtual std::optional<IntPoint> hotSpot() const { return std::nullopt; }
+    virtual Optional<IntPoint> hotSpot() const { return WTF::nullopt; }
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
     virtual FloatSize originalSize() const { return size(); }
 #endif
 
@@ -138,7 +138,7 @@ public:
     virtual void stopAnimation() {}
     virtual void resetAnimation() {}
     virtual bool isAnimating() const { return false; }
-    bool animationPending() const { return m_animationStartTimer.isActive(); }
+    bool animationPending() const { return m_animationStartTimer && m_animationStartTimer->isActive(); }
 
     // Typically the CachedImage that owns us.
     ImageObserver* imageObserver() const { return m_imageObserver; }
@@ -174,7 +174,7 @@ public:
 #endif
 
     virtual void drawPattern(GraphicsContext&, const FloatRect& destRect, const FloatRect& srcRect, const AffineTransform& patternTransform,
-        const FloatPoint& phase, const FloatSize& spacing, CompositeOperator, BlendMode = BlendModeNormal);
+        const FloatPoint& phase, const FloatSize& spacing, CompositeOperator, BlendMode = BlendMode::Normal);
 
 #if !ASSERT_DISABLED
     virtual bool notSolidColor() { return true; }
@@ -200,7 +200,7 @@ protected:
 private:
     RefPtr<SharedBuffer> m_encodedImageData;
     ImageObserver* m_imageObserver;
-    Timer m_animationStartTimer;
+    std::unique_ptr<Timer> m_animationStartTimer;
 };
 
 WTF::TextStream& operator<<(WTF::TextStream&, const Image&);

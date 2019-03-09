@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -85,8 +85,6 @@ TestOptions::TestOptions(const std::string& pathOrURL, const std::string& absolu
             enableModernMediaControls = parseBooleanTestHeaderValue(value);
         else if (key == "enablePointerLock")
             enablePointerLock = parseBooleanTestHeaderValue(value);
-        else if (key == "enableWebAuthentication")
-            enableWebAuthentication = parseBooleanTestHeaderValue(value);
         else if (key == "enableDragDestinationActionLoad")
             enableDragDestinationActionLoad = parseBooleanTestHeaderValue(value);
         else if (key == "layerBackedWebView")
@@ -99,13 +97,27 @@ TestOptions::TestOptions(const std::string& pathOrURL, const std::string& absolu
             dumpJSConsoleLogInStdErr = parseBooleanTestHeaderValue(value);
         else if (key == "allowCrossOriginSubresourcesToAskForCredentials")
             allowCrossOriginSubresourcesToAskForCredentials = parseBooleanTestHeaderValue(value);
-        else if (key == "enableCSSAnimationsAndCSSTransitionsBackedByWebAnimations")
-            enableCSSAnimationsAndCSSTransitionsBackedByWebAnimations = parseBooleanTestHeaderValue(value);
+        else if (key == "experimental:WebAnimationsCSSIntegrationEnabled")
+            enableWebAnimationsCSSIntegration = parseBooleanTestHeaderValue(value);
+        else if (key == "internal:selectionAcrossShadowBoundariesEnabled")
+            enableSelectionAcrossShadowBoundaries = parseBooleanTestHeaderValue(value);
+        else if (key == "enableColorFilter")
+            enableColorFilter = parseBooleanTestHeaderValue(value);
+        else if (key == "jscOptions")
+            jscOptions = value;
+        else if (key == "experimental:WebGPUEnabled")
+            enableWebGPU = parseBooleanTestHeaderValue(value);
+        else if (key == "internal:CSSLogicalEnabled")
+            enableCSSLogical = parseBooleanTestHeaderValue(value);
+        else if (key == "internal:AdClickAttributionEnabled")
+            adClickAttributionEnabled = parseBooleanTestHeaderValue(value);
         pairStart = pairEnd + 1;
     }
 }
 
 bool TestOptions::webViewIsCompatibleWithOptions(const TestOptions& other) const
 {
-    return other.layerBackedWebView == layerBackedWebView;
+    return other.layerBackedWebView == layerBackedWebView
+        && other.jscOptions == jscOptions
+        && other.enableWebAnimationsCSSIntegration == enableWebAnimationsCSSIntegration;
 }

@@ -42,26 +42,30 @@
 namespace WebCore {
 namespace IDBServer {
 
-Ref<IDBServer> IDBServer::create(IDBBackingStoreTemporaryFileHandler& fileHandler)
+Ref<IDBServer> IDBServer::create(IDBBackingStoreTemporaryFileHandler& fileHandler, WTF::Function<void(bool)>&& isClosingDatabaseCallback)
 {
-    return adoptRef(*new IDBServer(fileHandler));
+    return adoptRef(*new IDBServer(fileHandler, WTFMove(isClosingDatabaseCallback)));
 }
 
-Ref<IDBServer> IDBServer::create(const String& databaseDirectoryPath, IDBBackingStoreTemporaryFileHandler& fileHandler)
+Ref<IDBServer> IDBServer::create(const String& databaseDirectoryPath, IDBBackingStoreTemporaryFileHandler& fileHandler, WTF::Function<void(bool)>&& isClosingDatabaseCallback)
 {
-    return adoptRef(*new IDBServer(databaseDirectoryPath, fileHandler));
+    return adoptRef(*new IDBServer(databaseDirectoryPath, fileHandler, WTFMove(isClosingDatabaseCallback)));
 }
 
-IDBServer::IDBServer(IDBBackingStoreTemporaryFileHandler& fileHandler)
+IDBServer::IDBServer(IDBBackingStoreTemporaryFileHandler& fileHandler, WTF::Function<void(bool)>&& isClosingDatabaseCallback)
     : CrossThreadTaskHandler("IndexedDatabase Server")
     , m_backingStoreTemporaryFileHandler(fileHandler)
+    , m_isClosingDatabaseCallback(WTFMove(isClosingDatabaseCallback))
+    , m_isClosingDatabaseHysteresis([&](PAL::HysteresisState state) { m_isClosingDatabaseCallback(state == PAL::HysteresisState::Started); })
 {
 }
 
-IDBServer::IDBServer(const String& databaseDirectoryPath, IDBBackingStoreTemporaryFileHandler& fileHandler)
+IDBServer::IDBServer(const String& databaseDirectoryPath, IDBBackingStoreTemporaryFileHandler& fileHandler, WTF::Function<void(bool)>&& isClosingDatabaseCallback)
     : CrossThreadTaskHandler("IndexedDatabase Server")
     , m_databaseDirectoryPath(databaseDirectoryPath)
     , m_backingStoreTemporaryFileHandler(fileHandler)
+    , m_isClosingDatabaseCallback(WTFMove(isClosingDatabaseCallback))
+    , m_isClosingDatabaseHysteresis([&](PAL::HysteresisState state) { m_isClosingDatabaseCallback(state == PAL::HysteresisState::Started); })
 {
     LOG(IndexedDB, "IDBServer created at path %s", databaseDirectoryPath.utf8().data());
 }
@@ -126,7 +130,7 @@ std::unique_ptr<IDBBackingStore> IDBServer::createBackingStore(const IDBDatabase
     if (m_databaseDirectoryPath.isEmpty())
         return MemoryIDBBackingStore::create(identifier);
 
-    return std::make_unique<SQLiteIDBBackingStore>(identifier, m_databaseDirectoryPath, m_backingStoreTemporaryFileHandler);
+    return std::make_unique<SQLiteIDBBackingStore>(identifier, m_databaseDirectoryPath, m_backingStoreTemporaryFileHandler, m_perOriginQuota);
 }
 
 void IDBServer::openDatabase(const IDBRequestData& requestData)
@@ -459,7 +463,7 @@ void IDBServer::performGetAllDatabaseNames(uint64_t serverConnectionIdentifier, 
 {
     String directory = IDBDatabaseIdentifier::databaseDirectoryRelativeToRoot(mainFrameOrigin, openingOrigin, m_databaseDirectoryPath);
 
-    Vector<String> entries = FileSystem::listDirectory(directory, ASCIILiteral("*"));
+    Vector<String> entries = FileSystem::listDirectory(directory, "*"_s);
     Vector<String> databases;
     databases.reserveInitialCapacity(entries.size());
     for (auto& entry : entries) {
@@ -509,8 +513,8 @@ void IDBServer::closeAndDeleteDatabasesModifiedSince(WallTime modificationTime, 
     }
 
     HashSet<UniqueIDBDatabase*> openDatabases;
-    for (auto* connection : m_databaseConnections.values())
-        openDatabases.add(&connection->database());
+    for (auto& database : m_uniqueIDBDatabaseMap.values())
+        openDatabases.add(database.get());
 
     for (auto& database : openDatabases)
         database->immediateCloseForUserDelete();
@@ -525,11 +529,11 @@ void IDBServer::closeAndDeleteDatabasesForOrigins(const Vector<SecurityOriginDat
     ASSERT_UNUSED(addResult, addResult.isNewEntry);
 
     HashSet<UniqueIDBDatabase*> openDatabases;
-    for (auto* connection : m_databaseConnections.values()) {
-        const auto& identifier = connection->database().identifier();
+    for (auto& database : m_uniqueIDBDatabaseMap.values()) {
+        const auto& identifier = database->identifier();
         for (auto& origin : origins) {
             if (identifier.isRelatedToOrigin(origin)) {
-                openDatabases.add(&connection->database());
+                openDatabases.add(database.get());
                 break;
             }
         }
@@ -543,11 +547,14 @@ void IDBServer::closeAndDeleteDatabasesForOrigins(const Vector<SecurityOriginDat
 
 static void removeAllDatabasesForOriginPath(const String& originPath, WallTime modifiedSince)
 {
+    LOG(IndexedDB, "removeAllDatabasesForOriginPath with originPath %s", originPath.utf8().data());
     Vector<String> databasePaths = FileSystem::listDirectory(originPath, "*");
 
     for (auto& databasePath : databasePaths) {
-        String databaseFile = FileSystem::pathByAppendingComponent(databasePath, "IndexedDB.sqlite3");
+        if (FileSystem::fileIsDirectory(databasePath, FileSystem::ShouldFollowSymbolicLinks::No))
+            removeAllDatabasesForOriginPath(databasePath, modifiedSince);
 
+        String databaseFile = FileSystem::pathByAppendingComponent(databasePath, "IndexedDB.sqlite3");
         if (modifiedSince > -WallTime::infinity() && FileSystem::fileExists(databaseFile)) {
             auto modificationTime = FileSystem::getFileModificationTime(databaseFile);
             if (!modificationTime)
@@ -623,6 +630,11 @@ void IDBServer::performCloseAndDeleteDatabasesForOrigins(const Vector<SecurityOr
         for (const auto& origin : origins) {
             String originPath = FileSystem::pathByAppendingComponent(m_databaseDirectoryPath, origin.databaseIdentifier());
             removeAllDatabasesForOriginPath(originPath, -WallTime::infinity());
+
+            for (const auto& topOriginPath : FileSystem::listDirectory(m_databaseDirectoryPath, "*")) {
+                originPath = FileSystem::pathByAppendingComponent(topOriginPath, origin.databaseIdentifier());
+                removeAllDatabasesForOriginPath(originPath, -WallTime::infinity());
+            }
         }
     }
 
@@ -634,6 +646,37 @@ void IDBServer::didPerformCloseAndDeleteDatabases(uint64_t callbackID)
     auto callback = m_deleteDatabaseCompletionHandlers.take(callbackID);
     ASSERT(callback);
     callback();
+}
+
+void IDBServer::setPerOriginQuota(uint64_t quota)
+{
+    m_perOriginQuota = quota;
+
+    for (auto& database : m_uniqueIDBDatabaseMap.values())
+        database->setQuota(quota);
+}
+
+void IDBServer::closeDatabase(UniqueIDBDatabase* database)
+{
+    ASSERT(isMainThread());
+    if (m_databaseDirectoryPath.isEmpty())
+        return;
+
+    auto addResult = m_uniqueIDBDatabasesInClose.add(database);
+    if (addResult.isNewEntry && m_uniqueIDBDatabasesInClose.size() == 1)
+        m_isClosingDatabaseHysteresis.start();
+}
+
+void IDBServer::didCloseDatabase(UniqueIDBDatabase* database)
+{
+    ASSERT(isMainThread());
+    if (m_databaseDirectoryPath.isEmpty())
+        return;
+
+    if (m_uniqueIDBDatabasesInClose.remove(database)) {
+        if (m_uniqueIDBDatabasesInClose.isEmpty())
+            m_isClosingDatabaseHysteresis.stop();
+    }
 }
 
 } // namespace IDBServer

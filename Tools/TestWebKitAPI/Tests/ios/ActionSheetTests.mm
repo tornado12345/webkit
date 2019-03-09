@@ -26,7 +26,7 @@
 #import "config.h"
 #import "Test.h"
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 #import "ClassMethodSwizzler.h"
 #import "InstanceMethodSwizzler.h"
@@ -90,13 +90,13 @@ static UIViewController *overrideViewControllerForFullscreenPresentation()
     return gOverrideViewControllerForFullscreenPresentation.get();
 }
 
-TEST(ActionSheetTests, DismissingActionSheetShouldNotDismissPresentingViewController)
+TEST(ActionSheetTests, DISABLED_DismissingActionSheetShouldNotDismissPresentingViewController)
 {
     IPadUserInterfaceSwizzler iPadUserInterface;
     UIApplicationInitialize();
 
     auto navigationDelegate = adoptNS([[TestNavigationDelegate alloc] init]);
-    auto window = [[TestWKWebViewControllerWindow alloc] initWithFrame:CGRectMake(0, 0, 1024, 768)];
+    auto window = adoptNS([[TestWKWebViewControllerWindow alloc] initWithFrame:CGRectMake(0, 0, 1024, 768)]);
     auto rootViewController = adoptNS([[UIViewController alloc] init]);
     auto navigationController = adoptNS([[UINavigationController alloc] initWithRootViewController:rootViewController.get()]);
     auto observer = adoptNS([[ActionSheetObserver alloc] init]);
@@ -250,14 +250,14 @@ TEST(ActionSheetTests, CopyImageElementWithHREFAndTitle)
     [webView _doAfterNextPresentationUpdate:^() {
         NSArray <NSString *> *pasteboardTypes = [[UIPasteboard generalPasteboard] pasteboardTypes];
         EXPECT_EQ(2UL, pasteboardTypes.count);
-        EXPECT_WK_STREQ((NSString *)kUTTypePNG, pasteboardTypes.firstObject);
-        EXPECT_WK_STREQ((NSString *)kUTTypeURL, pasteboardTypes.lastObject);
+        EXPECT_WK_STREQ((__bridge NSString *)kUTTypePNG, pasteboardTypes.firstObject);
+        EXPECT_WK_STREQ((__bridge NSString *)kUTTypeURL, pasteboardTypes.lastObject);
         NSArray <NSItemProvider *> *itemProviders = [[UIPasteboard generalPasteboard] itemProviders];
         EXPECT_EQ(1UL, itemProviders.count);
         itemProvider = itemProviders.firstObject;
         EXPECT_EQ(2UL, [itemProvider registeredTypeIdentifiers].count);
-        EXPECT_WK_STREQ((NSString *)kUTTypePNG, [itemProvider registeredTypeIdentifiers].firstObject);
-        EXPECT_WK_STREQ((NSString *)kUTTypeURL, [itemProvider registeredTypeIdentifiers].lastObject);
+        EXPECT_WK_STREQ((__bridge NSString *)kUTTypePNG, [itemProvider registeredTypeIdentifiers].firstObject);
+        EXPECT_WK_STREQ((__bridge NSString *)kUTTypeURL, [itemProvider registeredTypeIdentifiers].lastObject);
         done = true;
     }];
     TestWebKitAPI::Util::run(&done);
@@ -290,14 +290,14 @@ TEST(ActionSheetTests, CopyImageElementWithHREF)
     [webView _doAfterNextPresentationUpdate:^() {
         NSArray <NSString *> *pasteboardTypes = [[UIPasteboard generalPasteboard] pasteboardTypes];
         EXPECT_EQ(2UL, pasteboardTypes.count);
-        EXPECT_WK_STREQ((NSString *)kUTTypePNG, pasteboardTypes.firstObject);
-        EXPECT_WK_STREQ((NSString *)kUTTypeURL, pasteboardTypes.lastObject);
+        EXPECT_WK_STREQ((__bridge NSString *)kUTTypePNG, pasteboardTypes.firstObject);
+        EXPECT_WK_STREQ((__bridge NSString *)kUTTypeURL, pasteboardTypes.lastObject);
         NSArray <NSItemProvider *> *itemProviders = [[UIPasteboard generalPasteboard] itemProviders];
         EXPECT_EQ(1UL, itemProviders.count);
         itemProvider = itemProviders.firstObject;
         EXPECT_EQ(2UL, [itemProvider registeredTypeIdentifiers].count);
-        EXPECT_WK_STREQ((NSString *)kUTTypePNG, [itemProvider registeredTypeIdentifiers].firstObject);
-        EXPECT_WK_STREQ((NSString *)kUTTypeURL, [itemProvider registeredTypeIdentifiers].lastObject);
+        EXPECT_WK_STREQ((__bridge NSString *)kUTTypePNG, [itemProvider registeredTypeIdentifiers].firstObject);
+        EXPECT_WK_STREQ((__bridge NSString *)kUTTypeURL, [itemProvider registeredTypeIdentifiers].lastObject);
         done = true;
     }];
     TestWebKitAPI::Util::run(&done);
@@ -329,12 +329,12 @@ TEST(ActionSheetTests, CopyImageElementWithoutHREF)
     [webView _doAfterNextPresentationUpdate:^() {
         NSArray <NSString *> *pasteboardTypes = [[UIPasteboard generalPasteboard] pasteboardTypes];
         EXPECT_EQ(1UL, pasteboardTypes.count);
-        EXPECT_WK_STREQ((NSString *)kUTTypePNG, pasteboardTypes.firstObject);
+        EXPECT_WK_STREQ((__bridge NSString *)kUTTypePNG, pasteboardTypes.firstObject);
         NSArray <NSItemProvider *> *itemProviders = [[UIPasteboard generalPasteboard] itemProviders];
         EXPECT_EQ(1UL, itemProviders.count);
         NSItemProvider *itemProvider = itemProviders.firstObject;
         EXPECT_EQ(1UL, itemProvider.registeredTypeIdentifiers.count);
-        EXPECT_WK_STREQ((NSString *)kUTTypePNG, itemProvider.registeredTypeIdentifiers.firstObject);
+        EXPECT_WK_STREQ((__bridge NSString *)kUTTypePNG, itemProvider.registeredTypeIdentifiers.firstObject);
         done = true;
     }];
     TestWebKitAPI::Util::run(&done);
@@ -368,4 +368,4 @@ TEST(ActionSheetTests, CopyLinkWritesURLAndPlainText)
 
 } // namespace TestWebKitAPI
 
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)

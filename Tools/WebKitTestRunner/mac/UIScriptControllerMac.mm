@@ -46,18 +46,7 @@ namespace WTR {
 
 NSString *nsString(JSStringRef string)
 {
-    return (NSString *)adoptCF(JSStringCopyCFString(kCFAllocatorDefault, string)).autorelease();
-}
-
-void UIScriptController::doAsyncTask(JSValueRef callback)
-{
-    unsigned callbackID = m_context->prepareForAsyncTask(callback, CallbackTypeNonPersistent);
-
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (!m_context)
-            return;
-        m_context->asyncTaskComplete(callbackID);
-    });
+    return CFBridgingRelease(JSStringCopyCFString(kCFAllocatorDefault, string));
 }
 
 void UIScriptController::doAfterPresentationUpdate(JSValueRef callback)
@@ -77,22 +66,12 @@ void UIScriptController::doAfterVisibleContentRectUpdate(JSValueRef callback)
 
 void UIScriptController::replaceTextAtRange(JSStringRef text, int location, int length)
 {
-#if WK_API_ENABLED
-    if (location == -1)
-        location = NSNotFound;
-
     auto* webView = TestController::singleton().mainWebView()->platformView();
-    [webView _insertText:nsString(text) replacementRange:NSMakeRange(location, length)];
-#else
-    UNUSED_PARAM(text);
-    UNUSED_PARAM(location);
-    UNUSED_PARAM(length);
-#endif
+    [webView _insertText:nsString(text) replacementRange:NSMakeRange(location == -1 ? NSNotFound : location, length)];
 }
 
 void UIScriptController::zoomToScale(double scale, JSValueRef callback)
 {
-#if WK_API_ENABLED
     unsigned callbackID = m_context->prepareForAsyncTask(callback, CallbackTypeNonPersistent);
 
     auto* webView = TestController::singleton().mainWebView()->platformView();
@@ -103,15 +82,10 @@ void UIScriptController::zoomToScale(double scale, JSValueRef callback)
             return;
         m_context->asyncTaskComplete(callbackID);
     }];
-#else
-    UNUSED_PARAM(scale);
-    UNUSED_PARAM(callback);
-#endif
 }
 
 void UIScriptController::simulateAccessibilitySettingsChangeNotification(JSValueRef callback)
 {
-#if WK_API_ENABLED
     unsigned callbackID = m_context->prepareForAsyncTask(callback, CallbackTypeNonPersistent);
 
     auto* webView = TestController::singleton().mainWebView()->platformView();
@@ -123,37 +97,6 @@ void UIScriptController::simulateAccessibilitySettingsChangeNotification(JSValue
             return;
         m_context->asyncTaskComplete(callbackID);
     }];
-#else
-    UNUSED_PARAM(callback);
-#endif
-}
-
-JSObjectRef UIScriptController::contentsOfUserInterfaceItem(JSStringRef interfaceItem) const
-{
-#if WK_API_ENABLED
-    TestRunnerWKWebView *webView = TestController::singleton().mainWebView()->platformView();
-    NSDictionary *contentDictionary = [webView _contentsOfUserInterfaceItem:toWTFString(toWK(interfaceItem))];
-    return JSValueToObject(m_context->jsContext(), [JSValue valueWithObject:contentDictionary inContext:[JSContext contextWithJSGlobalContextRef:m_context->jsContext()]].JSValueRef, nullptr);
-#else
-    UNUSED_PARAM(interfaceItem);
-    return nullptr;
-#endif
-}
-
-void UIScriptController::overridePreference(JSStringRef preferenceRef, JSStringRef valueRef)
-{
-#if WK_API_ENABLED
-    TestRunnerWKWebView *webView = TestController::singleton().mainWebView()->platformView();
-    WKPreferences *preferences = webView.configuration.preferences;
-
-    String preference = toWTFString(toWK(preferenceRef));
-    String value = toWTFString(toWK(valueRef));
-    if (preference == "WebKitMinimumFontSize")
-        preferences.minimumFontSize = value.toDouble();
-#else
-    UNUSED_PARAM(preferenceRef);
-    UNUSED_PARAM(valueRef);
-#endif
 }
 
 void UIScriptController::simulateRotation(DeviceOrientation*, JSValueRef)
@@ -164,44 +107,14 @@ void UIScriptController::simulateRotationLikeSafari(DeviceOrientation*, JSValueR
 {
 }
 
-void UIScriptController::findString(JSStringRef, unsigned long options, unsigned long maxCount)
+bool UIScriptController::isShowingDataListSuggestions() const
 {
-}
-
-void UIScriptController::removeViewFromWindow(JSValueRef callback)
-{
-#if WK_API_ENABLED
-    unsigned callbackID = m_context->prepareForAsyncTask(callback, CallbackTypeNonPersistent);
-
-    auto* mainWebView = TestController::singleton().mainWebView();
-    mainWebView->removeFromWindow();
-
-    [mainWebView->platformView() _doAfterNextPresentationUpdate: ^ {
-        if (!m_context)
-            return;
-        m_context->asyncTaskComplete(callbackID);
-    }];
-#else
-    UNUSED_PARAM(callback);
-#endif
-}
-
-void UIScriptController::addViewToWindow(JSValueRef callback)
-{
-#if WK_API_ENABLED
-    unsigned callbackID = m_context->prepareForAsyncTask(callback, CallbackTypeNonPersistent);
-
-    auto* mainWebView = TestController::singleton().mainWebView();
-    mainWebView->addToWindow();
-
-    [mainWebView->platformView() _doAfterNextPresentationUpdate: ^ {
-        if (!m_context)
-            return;
-        m_context->asyncTaskComplete(callbackID);
-    }];
-#else
-    UNUSED_PARAM(callback);
-#endif
+    TestRunnerWKWebView *webView = TestController::singleton().mainWebView()->platformView();
+    for (NSWindow *childWindow in webView.window.childWindows) {
+        if ([childWindow isKindOfClass:NSClassFromString(@"WKDataListSuggestionWindow")])
+            return true;
+    }
+    return false;
 }
 
 static void playBackEvents(UIScriptContext *context, NSString *eventStream, JSValueRef callback)
@@ -236,17 +149,13 @@ void UIScriptController::completeBackSwipe(JSValueRef callback)
 void UIScriptController::platformPlayBackEventStream(JSStringRef eventStream, JSValueRef callback)
 {
     RetainPtr<CFStringRef> stream = adoptCF(JSStringCopyCFString(kCFAllocatorDefault, eventStream));
-    playBackEvents(m_context, (NSString *)stream.get(), callback);
+    playBackEvents(m_context, (__bridge NSString *)stream.get(), callback);
 }
 
 void UIScriptController::firstResponderSuppressionForWebView(bool shouldSuppress)
 {
-#if WK_API_ENABLED
     auto* webView = TestController::singleton().mainWebView()->platformView();
     [webView _setShouldSuppressFirstResponderChanges:shouldSuppress];
-#else
-    UNUSED_PARAM(shouldSuppress);
-#endif
 }
 
 void UIScriptController::makeWindowContentViewFirstResponder()
@@ -259,6 +168,34 @@ bool UIScriptController::isWindowContentViewFirstResponder() const
 {
     NSWindow *window = [TestController::singleton().mainWebView()->platformView() window];
     return [window firstResponder] == [window contentView];
+}
+
+void UIScriptController::toggleCapsLock(JSValueRef callback)
+{
+    m_capsLockOn = !m_capsLockOn;
+    NSWindow *window = [TestController::singleton().mainWebView()->platformView() window];
+    NSEvent *fakeEvent = [NSEvent keyEventWithType:NSEventTypeFlagsChanged
+        location:NSZeroPoint
+        modifierFlags:m_capsLockOn ? NSEventModifierFlagCapsLock : 0
+        timestamp:0
+        windowNumber:window.windowNumber
+        context:nullptr
+        characters:@""
+        charactersIgnoringModifiers:@""
+        isARepeat:NO
+        keyCode:57];
+    [window sendEvent:fakeEvent];
+    doAsyncTask(callback);
+}
+
+NSView *UIScriptController::platformContentView() const
+{
+    return TestController::singleton().mainWebView()->platformView();
+}
+
+JSObjectRef UIScriptController::calendarType() const
+{
+    return nullptr;
 }
 
 } // namespace WTR

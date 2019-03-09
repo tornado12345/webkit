@@ -2,21 +2,44 @@
 #
 # See http://trac.webkit.org/wiki/TestExpectations for more information on this file.
 
-# Selectively re-enable viewport tests that work
-fast/viewport/ios/ipad/width-is-device-width.html [ Pass ]
-
 editing/input/focus-change-with-marked-text.html [ Pass ]
+http/tests/security/xss-DENIED-xsl-external-entity-no-logging.xml [ Pass ]
 
 # No service worker implementation for WK1
 imported/w3c/web-platform-tests/service-workers [ Skip ]
+imported/w3c/web-platform-tests/server-timing/service_worker_idl.html [ Skip ]
 http/wpt/service-workers [ Skip ]
 http/wpt/cache-storage [ Skip ]
 http/tests/cache-storage [ Skip ]
+imported/w3c/web-platform-tests/fetch/api/request/destination [ Skip ]
+imported/w3c/web-platform-tests/fetch/cross-origin-resource-policy [ Skip ]
 
 # Skip WebRTC for now in WK1
 imported/w3c/web-platform-tests/webrtc [ Skip ]
 webrtc [ Skip ]
-fast/events/constructors/media-stream-event-constructor.html
+
+# Not supported on WK1
+media/no-fullscreen-when-hidden.html [ Skip ]
+
+# Skip pointerevents on WK1
+pointerevents [ Skip ]
+imported/w3c/web-platform-tests/pointerevents [ Skip ]
+
+# Datalist is unsupported in WK1
+fast/forms/datalist [ WontFix ]
+imported/w3c/web-platform-tests/html/semantics/forms/the-datalist-element [ WontFix ]
+
+# No support for testing key commands with modifiers in WK1
+fast/events/ios/focus-tab-previous-field.html [ Skip ]
+fast/events/ios/key-command-italic-dispatches-keydown.html [ Skip ]
+fast/events/ios/key-command-italic.html [ Skip ]
+fast/events/ios/type-digits-holding-control-key.html [ Skip ]
+
+# <input type=color> is not supported in WebKit1 on iOS.
+fast/forms/color/input-color-onchange-event.html [ Failure ]
+fast/forms/color/input-color-readonly.html [ Failure ]
+fast/forms/color/input-value-sanitization-color.html [ Failure ]
+fast/forms/color/color-setrangetext.html [ Failure ]
 
 # <rdar://problem/6501130> LayoutTests: Enable editing tests after we support editing
 editing/deleting/4922367.html
@@ -559,10 +582,8 @@ compositing/layer-creation/fixed-position-under-transform.html [ Failure ]
 compositing/layer-creation/no-compositing-for-preserve-3d.html [ Failure ]
 compositing/layer-creation/no-compositing-for-sticky.html [ Failure ]
 compositing/layer-creation/overflow-scroll-overlap.html [ Failure ]
-compositing/overflow/automatically-opt-into-composited-scrolling.html [ Failure ]
 compositing/overflow/clipping-behaviour-change-is-not-propagated-to-descendants.html [ Failure ]
 compositing/overflow/clipping-behaviour-change-is-not-propagated-to-descendants2.html [ Failure ]
-compositing/overflow/composited-scrolling-creates-a-stacking-container.html [ Failure ]
 compositing/overflow/composited-scrolling-paint-phases.html [ Failure ]
 compositing/overflow/content-gains-scrollbars.html [ Failure ]
 compositing/overflow/overflow-scroll.html [ Failure ]
@@ -683,7 +704,6 @@ css3/filters/backdrop/backdrop-filter-with-border-radius-and-reflection-add.html
 css3/filters/backdrop/backdrop-filter-with-border-radius-and-reflection.html [ ImageOnlyFailure ]
 css3/filters/backdrop/backdrop-filter-with-clip-path.html [ ImageOnlyFailure ]
 css3/flexbox/content-height-with-scrollbars.html [ ImageOnlyFailure ]
-css3/masking/mask-repeat-space-border.html [ ImageOnlyFailure ]
 
 # CSS tests that pass:
 css3/flexbox/csswg/ttwf-reftest-flex-wrap-reverse.html [ Pass ]
@@ -1010,8 +1030,6 @@ animations/stop-animation-on-suspend.html [ Pass Failure ]
 legacy-animation-engine/animations/stop-animation-on-suspend.html [ Pass Failure ]
 animations/suspend-resume-animation-events.html [ Pass Failure ]
 legacy-animation-engine/animations/suspend-resume-animation-events.html [ Pass Failure ]
-animations/trigger-container-scroll-empty.html [ Failure ]
-legacy-animation-engine/animations/trigger-container-scroll-empty.html [ Failure ]
 
 # IndexedDB is not supported on iOS WK1.
 storage/indexeddb
@@ -1366,6 +1384,7 @@ webkit.org/b/156069 fast/dom/HTMLAnchorElement/anchor-file-blob-download-include
 webkit.org/b/156069 fast/dom/HTMLAnchorElement/anchor-file-blob-download-includes-doublequote.html [ Skip ]
 webkit.org/b/156069 fast/dom/HTMLAnchorElement/anchor-file-blob-download-includes-slashes.html [ Skip ]
 webkit.org/b/156069 fast/dom/HTMLAnchorElement/anchor-file-blob-download-includes-unicode.html [ Skip ]
+webkit.org/b/156069 fast/dom/HTMLAnchorElement/anchor-file-blob-download-then-revoke.html [ Skip ]
 webkit.org/b/156069 http/tests/download/area-download.html [ Skip ]
 webkit.org/b/156069 http/tests/security/anchor-download-allow-blob.html [ Skip ]
 webkit.org/b/156069 http/tests/security/anchor-download-allow-data.html [ Skip ]
@@ -1376,6 +1395,7 @@ webkit.org/b/156069 http/tests/download/anchor-download-no-value.html [ Skip ]
 # testRunner.setShouldDownloadUndisplayableMIMETypes() is not supported on WK1.
 fast/dom/HTMLAnchorElement/anchor-file-blob-convert-to-download.html [ Skip ]
 fast/dom/HTMLAnchorElement/anchor-file-blob-convert-to-download-async-delegate.html [ Skip ]
+http/tests/download/convert-cached-load-to-download.html [ Skip ]
 
 webkit.org/b/137572 scrollbars/scrollbar-iframe-click-does-not-blur-content.html [ Failure ]
 
@@ -1389,6 +1409,13 @@ fast/scrolling/ios/scrollTo-at-page-load.html [ Failure ]
 fast/scrolling/ios/scrolling-content-clip-to-viewport.html [ Failure ]
 fast/scrolling/ios/touch-stacking.html [ Failure ]
 fast/scrolling/ios/touch-scroll-visibility-hidden.html [ Skip ]
+
+# These tests require API for finding string which is not available in WK1.
+# See https://webkit.org/b/178789#c15
+platform/ios/fast/scrolling/find-text-in-overflow-node-indicator-position-limit.html [ ImageOnlyFailure ]
+platform/ios/fast/scrolling/find-text-in-overflow-node-indicator-position.html [ ImageOnlyFailure ]
+platform/ios/fast/scrolling/find-text-in-overflow-node.html [ Failure ]
+platform/ios/fast/scrolling/find-text-in-subframe.html [ Failure ]
 
 # dumpPolicyDelegateCallbacks is not supported in DumpRenderTree
 fast/loader/iframe-src-invalid-url.html [ Skip ]
@@ -1440,7 +1467,6 @@ http/tests/navigation/page-cache-iframe-provisional-load.html [ Crash Pass Failu
 imported/blink/editing/execCommand/4128080-2.html [ Crash Failure ]
 imported/blink/editing/undo/crash-redo-with-iframes.html [ Crash Pass ]
 imported/blink/paint/deprecatedpaintlayer/non-self-painting-layer-overrides-visibility.html [ Crash Pass ]
-imported/w3c/web-platform-tests/fetch/api/redirect/redirect-location.html [ Crash Pass ]
 platform/ios/ios/fast/coordinates/document-elementFromPoint.html [ Timeout Failure ]
 platform/ios/ios/fast/coordinates/touch-event-zoomed.html [ Crash Timeout ]
 platform/ios/ios/fast/coordinates/touch-event.html [ Crash Timeout ]
@@ -1748,7 +1774,7 @@ fetch/fetch-error-messages.html [ Crash Pass ]
 http/tests/navigation/metaredirect-subframeload.html [ Crash Pass ]
 http/tests/security/xss-DENIED-xml-external-entity.xhtml [ Pass Failure ]
 http/tests/security/xss-DENIED-xsl-external-entity-redirect.xml [ Pass Failure ]
-http/tests/security/xss-DENIED-xsl-external-entity.xml [ Pass Failure ]
+http/tests/security/xss-DENIED-xsl-external-entity.xml [ Skip ]
 imported/blink/compositing/ancestor-painted-layer-should-appear.html [ Pass ImageOnlyFailure ]
 imported/blink/compositing/invisible-subtree-compositing-and-preserves-3d.html [ Pass ImageOnlyFailure ]
 imported/blink/compositing/will-change/stacking-context-creation.html [ Pass ImageOnlyFailure ]
@@ -1874,7 +1900,6 @@ fast/forms/selection-direction.html [ Timeout ]
 
 # Failure as of 09/21/2016
 css2.1/t1008-c44-ln-box-02-d-ag.html [ Failure ]
-fast/text-autosizing/ios/ipad/text-size-adjust-inline-style.html [ ImageOnlyFailure ]
 fast/text-autosizing/ios/text-size-adjust-inline-style.html [ ImageOnlyFailure ]
 
 # Flaky as of 09/21/2016
@@ -1897,7 +1922,6 @@ imported/blink/imported/csswg-test/css-writing-modes-3/bidi-override-001.html [ 
 imported/blink/imported/csswg-test/css-writing-modes-3/bidi-plaintext-004.html [ Pass ImageOnlyFailure ]
 imported/blink/imported/csswg-test/css-writing-modes-3/bidi-unset-007.html [ Pass ImageOnlyFailure ]
 imported/blink/imported/csswg-test/css-writing-modes-3/block-embed-001.html [ Pass ImageOnlyFailure ]
-imported/w3c/web-platform-tests/fetch/api/redirect/redirect-count.html [ Crash Pass ]
 imported/mozilla/svg/text/clipPath-content.svg [ Pass ImageOnlyFailure ]
 
 # Skipping timeouts that are impacting testing
@@ -1912,6 +1936,8 @@ fast/canvas/canvas-createPattern-video-modify.html [ Skip ]
 fast/dom/beforeload/video-before-load.html [ Skip ]
 fast/dom/FileList-iterator.html [ Skip ]
 fast/dom/HTMLAnchorElement/anchor-file-blob-download-no-extension.html [ Skip ]
+fast/forms/scroll-into-view-and-show-validation-message.html [ Skip ]
+fast/forms/navigation-dismisses-validation-bubbles.html [ Skip ]
 fast/forms/validation-bubble-disappears-when-input-detached.html [ Skip ]
 fast/forms/validation-bubble-disappears-when-input-moved.html [ Skip ]
 fast/forms/validation-bubble-disappears-when-input-no-longer-visible.html [ Skip ]
@@ -1927,7 +1953,6 @@ http/tests/appcache/video.html [ Skip ]
 http/tests/download/anchor-download-attribute-content-disposition.html [ Skip ]
 http/tests/download/anchor-download-no-extension.html [ Skip ]
 http/tests/misc/empty-urls.html [ Skip ]
-http/tests/navigation/navigation-dismisses-validation-bubbles.html [ Skip ]
 http/tests/security/canvas-remote-read-remote-video-allowed-anonymous.html [ Skip ]
 http/tests/security/canvas-remote-read-remote-video-allowed-with-credentials.html [ Skip ]
 http/tests/security/canvas-remote-read-remote-video-blocked-no-crossorigin.html [ Skip ]
@@ -1961,7 +1986,15 @@ webkit.org/b/180062 fast/text/user-installed-fonts [ ImageOnlyFailure ]
 http/tests/xmlhttprequest/range-test.html [ Skip ]
 
 # Skip anything related to WebAuthN
-http/tests/webauthn/ [ Skip ]
 http/wpt/credential-management/ [ Skip ]
 http/wpt/webauthn/ [ Skip ]
 imported/w3c/web-platform-tests/credential-management/ [ Skip ]
+
+webkit.org/b/189594 imported/w3c/web-platform-tests/css/css-animations/pending-style-changes-001.html [ Pass Failure ]
+
+# Not supported on WK1
+css-custom-properties-api [ Skip ]
+fast/css-custom-paint [ Skip ]
+css-typedom [ Skip ]
+
+webkit.org/b/188762 fast/writing-mode/english-rl-text-with-spelling-marker.html [ ImageOnlyFailure ]

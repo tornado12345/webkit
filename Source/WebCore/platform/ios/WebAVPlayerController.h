@@ -23,7 +23,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if PLATFORM(IOS) && HAVE(AVKIT)
+#if PLATFORM(IOS_FAMILY) && HAVE(AVKIT)
 
 #import <pal/spi/cocoa/AVKitSPI.h>
 
@@ -51,6 +51,7 @@ class PlaybackSessionInterfaceAVKit;
 @property BOOL canScanBackward;
 @property (readonly) BOOL canSeekToBeginning;
 @property (readonly) BOOL canSeekToEnd;
+@property (readonly) BOOL isScrubbing;
 
 @property BOOL canPlay;
 @property (getter=isPlaying) BOOL playing;
@@ -83,7 +84,7 @@ class PlaybackSessionInterfaceAVKit;
 @property (retain) WebAVMediaSelectionOption *currentLegibleMediaSelectionOption;
 
 @property (readonly, getter=isPlayingOnExternalScreen) BOOL playingOnExternalScreen;
-@property (readonly, getter=isPlayingOnSecondScreen) BOOL playingOnSecondScreen;
+@property (nonatomic, getter=isPlayingOnSecondScreen) BOOL playingOnSecondScreen;
 @property (getter=isExternalPlaybackActive) BOOL externalPlaybackActive;
 @property AVPlayerControllerExternalPlaybackType externalPlaybackType;
 @property (retain) NSString *externalPlaybackAirPlayDeviceLocalizedName;
@@ -96,8 +97,6 @@ class PlaybackSessionInterfaceAVKit;
 
 @property (NS_NONATOMIC_IOSONLY, retain, readwrite) AVValueTiming *minTiming;
 @property (NS_NONATOMIC_IOSONLY, retain, readwrite) AVValueTiming *maxTiming;
-
-- (void)resetMediaState;
 @end
 
 #endif

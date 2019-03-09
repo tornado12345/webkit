@@ -30,7 +30,6 @@
 #include "DOMEventsClasses.h"
 #include "DOMHTMLClasses.h"
 #include "WebKitGraphics.h"
-
 #include <WebCore/Attr.h>
 #include <WebCore/BString.h>
 #include <WebCore/COMPtr.h>
@@ -54,9 +53,11 @@
 #include <WebCore/Range.h>
 #include <WebCore/RenderElement.h>
 #include <WebCore/RenderTreeAsText.h>
+#include <WebCore/ScrollIntoViewOptions.h>
 #include <WebCore/StyledElement.h>
-
 #include <initguid.h>
+#include <wtf/text/win/WCharStringExtras.h>
+
 // {3B0C0EFF-478B-4b0b-8290-D2321E08E23E}
 DEFINE_GUID(IID_DOMElement, 0x3b0c0eff, 0x478b, 0x4b0b, 0x82, 0x90, 0xd2, 0x32, 0x1e, 0x8, 0xe2, 0x3e);
 
@@ -413,7 +414,7 @@ HRESULT DOMNode::setTextContent(_In_ BSTR /*text*/)
 HRESULT DOMNode::addEventListener(_In_ BSTR type, _In_opt_ IDOMEventListener* listener, BOOL useCapture)
 {
     auto webListener = WebEventListener::create(listener);
-    m_node->addEventListener(type, WTFMove(webListener), useCapture);
+    m_node->addEventListener(ucharFrom(type), WTFMove(webListener), useCapture);
 
     return S_OK;
 }
@@ -425,7 +426,7 @@ HRESULT DOMNode::removeEventListener(_In_ BSTR type, _In_opt_ IDOMEventListener*
     if (!m_node)
         return E_FAIL;
     auto webListener = WebEventListener::create(listener);
-    m_node->removeEventListener(type, webListener, useCapture);
+    m_node->removeEventListener(ucharFrom(type), webListener, useCapture);
     return S_OK;
 }
 
@@ -923,7 +924,7 @@ HRESULT DOMWindow::addEventListener(_In_ BSTR type, _In_opt_ IDOMEventListener* 
     if (!m_window)
         return E_FAIL;
     auto webListener = WebEventListener::create(listener);
-    m_window->addEventListener(type, WTFMove(webListener), useCapture);
+    m_window->addEventListener(ucharFrom(type), WTFMove(webListener), useCapture);
     return S_OK;
 }
 
@@ -934,7 +935,7 @@ HRESULT DOMWindow::removeEventListener(_In_ BSTR type, _In_opt_ IDOMEventListene
     if (!m_window)
         return E_FAIL;
     auto webListener = WebEventListener::create(listener);
-    m_window->removeEventListener(type, webListener, useCapture);
+    m_window->removeEventListener(ucharFrom(type), webListener, useCapture);
     return S_OK;
 }
 
@@ -1291,11 +1292,11 @@ HRESULT DOMElement::font(_Out_ WebFontDescription* webFontDescription)
     UChar* familyCharactersBuffer = new UChar[family.length()];
     StringView(family.string()).getCharactersWithUpconvert(familyCharactersBuffer);
 
-    webFontDescription->family = familyCharactersBuffer;
+    webFontDescription->family = wcharFrom(familyCharactersBuffer);
     webFontDescription->familyLength = family.length();
     webFontDescription->size = fontDescription.computedSize();
     webFontDescription->bold = isFontWeightBold(fontDescription.weight());
-    webFontDescription->italic = fontDescription.italic();
+    webFontDescription->italic = isItalic(fontDescription.italic());
 
     return S_OK;
 }

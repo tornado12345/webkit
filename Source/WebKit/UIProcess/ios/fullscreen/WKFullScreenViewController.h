@@ -25,7 +25,7 @@
 
 #pragma once
 
-#if ENABLE(FULLSCREEN_API) && PLATFORM(IOS)
+#if ENABLE(FULLSCREEN_API) && PLATFORM(IOS_FAMILY)
 
 #import <UIKit/UIViewController.h>
 
@@ -36,10 +36,12 @@ NS_ASSUME_NONNULL_BEGIN
 @interface WKFullScreenViewController : UIViewController
 @property (retain, nonatomic) id target;
 @property (assign, nonatomic) SEL action;
-@property (retain, nonatomic) NSString *location;
+@property (copy, nonatomic) NSString *location;
 @property (assign, nonatomic) BOOL prefersStatusBarHidden;
+@property (assign, nonatomic) BOOL prefersHomeIndicatorAutoHidden;
 @property (assign, nonatomic, getter=isPlaying) BOOL playing;
 @property (assign, nonatomic, getter=isPictureInPictureActive) BOOL pictureInPictureActive;
+@property (assign, nonatomic, getter=isAnimating) BOOL animating;
 
 - (id)initWithWebView:(WKWebView *)webView;
 - (void)showUI;
@@ -49,4 +51,4 @@ NS_ASSUME_NONNULL_BEGIN
 
 NS_ASSUME_NONNULL_END
 
-#endif // ENABLE(FULLSCREEN_API) && PLATFORM(IOS)
+#endif // ENABLE(FULLSCREEN_API) && PLATFORM(IOS_FAMILY)

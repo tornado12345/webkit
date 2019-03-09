@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 Andy VanWagoner (thetalecrafter@gmail.com)
+ * Copyright (C) 2018 Andy VanWagoner (andy@vanwagoner.family)
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -55,10 +55,10 @@ const ClassInfo IntlPluralRulesConstructor::s_info = { "Function", &InternalFunc
 @end
 */
 
-IntlPluralRulesConstructor* IntlPluralRulesConstructor::create(VM& vm, Structure* structure, IntlPluralRulesPrototype* pluralRulesPrototype, Structure* pluralRulesStructure)
+IntlPluralRulesConstructor* IntlPluralRulesConstructor::create(VM& vm, Structure* structure, IntlPluralRulesPrototype* pluralRulesPrototype)
 {
     IntlPluralRulesConstructor* constructor = new (NotNull, allocateCell<IntlPluralRulesConstructor>(vm.heap)) IntlPluralRulesConstructor(vm, structure);
-    constructor->finishCreation(vm, pluralRulesPrototype, pluralRulesStructure);
+    constructor->finishCreation(vm, pluralRulesPrototype);
     return constructor;
 }
 
@@ -75,13 +75,12 @@ IntlPluralRulesConstructor::IntlPluralRulesConstructor(VM& vm, Structure* struct
 {
 }
 
-void IntlPluralRulesConstructor::finishCreation(VM& vm, IntlPluralRulesPrototype* pluralRulesPrototype, Structure* pluralRulesStructure)
+void IntlPluralRulesConstructor::finishCreation(VM& vm, IntlPluralRulesPrototype* pluralRulesPrototype)
 {
-    Base::finishCreation(vm, ASCIILiteral("PluralRules"));
+    Base::finishCreation(vm, "PluralRules"_s, NameVisibility::Visible, NameAdditionMode::WithoutStructureTransition);
     putDirectWithoutTransition(vm, vm.propertyNames->prototype, pluralRulesPrototype, PropertyAttribute::DontEnum | PropertyAttribute::DontDelete | PropertyAttribute::ReadOnly);
-    putDirectWithoutTransition(vm, vm.propertyNames->length, jsNumber(0), PropertyAttribute::ReadOnly | PropertyAttribute::DontEnum | PropertyAttribute::DontDelete);
-    pluralRulesPrototype->putDirectWithoutTransition(vm, vm.propertyNames->constructor, this, PropertyAttribute::DontEnum | PropertyAttribute::DontDelete);
-    m_pluralRulesStructure.set(vm, this, pluralRulesStructure);
+    putDirectWithoutTransition(vm, vm.propertyNames->length, jsNumber(0), PropertyAttribute::ReadOnly | PropertyAttribute::DontEnum);
+    pluralRulesPrototype->putDirectWithoutTransition(vm, vm.propertyNames->constructor, this, static_cast<unsigned>(PropertyAttribute::DontEnum));
 }
 
 static EncodedJSValue JSC_HOST_CALL constructIntlPluralRules(ExecState* state)
@@ -91,7 +90,7 @@ static EncodedJSValue JSC_HOST_CALL constructIntlPluralRules(ExecState* state)
 
     // 13.2.1 Intl.PluralRules ([ locales [ , options ] ])
     // https://tc39.github.io/ecma402/#sec-intl.pluralrules
-    Structure* structure = InternalFunction::createSubclassStructure(state, state->newTarget(), jsCast<IntlPluralRulesConstructor*>(state->jsCallee())->pluralRulesStructure());
+    Structure* structure = InternalFunction::createSubclassStructure(state, state->newTarget(), jsCast<IntlPluralRulesConstructor*>(state->jsCallee())->pluralRulesStructure(vm));
     RETURN_IF_EXCEPTION(scope, encodedJSValue());
     IntlPluralRules* pluralRules = IntlPluralRules::create(vm, structure);
     ASSERT(pluralRules);
@@ -118,24 +117,13 @@ EncodedJSValue JSC_HOST_CALL IntlPluralRulesConstructorFuncSupportedLocalesOf(Ex
 
     // 13.3.2 Intl.PluralRules.supportedLocalesOf (locales [, options ])
     // https://tc39.github.io/ecma402/#sec-intl.pluralrules.supportedlocalesof
-    JSGlobalObject* globalObject = state->jsCallee()->globalObject();
+    JSGlobalObject* globalObject = state->jsCallee()->globalObject(vm);
     const HashSet<String> availableLocales = globalObject->intlNumberFormatAvailableLocales();
 
     Vector<String> requestedLocales = canonicalizeLocaleList(*state, state->argument(0));
     RETURN_IF_EXCEPTION(scope, encodedJSValue());
 
-    scope.release();
-    return JSValue::encode(supportedLocales(*state, availableLocales, requestedLocales, state->argument(1)));
-}
-
-void IntlPluralRulesConstructor::visitChildren(JSCell* cell, SlotVisitor& visitor)
-{
-    IntlPluralRulesConstructor* thisObject = jsCast<IntlPluralRulesConstructor*>(cell);
-    ASSERT_GC_OBJECT_INHERITS(thisObject, info());
-
-    Base::visitChildren(thisObject, visitor);
-
-    visitor.append(thisObject->m_pluralRulesStructure);
+    RELEASE_AND_RETURN(scope, JSValue::encode(supportedLocales(*state, availableLocales, requestedLocales, state->argument(1))));
 }
 
 } // namespace JSC

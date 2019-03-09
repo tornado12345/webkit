@@ -96,6 +96,7 @@ namespace JSC { namespace DFG {
     /* variable from the scratch buffer. */\
     macro(ExtractOSREntryLocal, NodeResultJS) \
     macro(ExtractCatchLocal, NodeResultJS) \
+    macro(ClearCatchLocals, NodeMustGenerate) \
     \
     /* Tier-up checks from the DFG to the FTL. */\
     macro(CheckTierUpInLoop, NodeMustGenerate) \
@@ -110,9 +111,13 @@ namespace JSC { namespace DFG {
     macro(InvalidationPoint, NodeMustGenerate) \
     \
     /* Nodes for bitwise operations. */\
-    macro(BitAnd, NodeResultInt32) \
-    macro(BitOr, NodeResultInt32) \
-    macro(BitXor, NodeResultInt32) \
+    macro(ArithBitNot, NodeResultInt32 | NodeMustGenerate) \
+    macro(ValueBitAnd, NodeResultJS | NodeMustGenerate) \
+    macro(ArithBitAnd, NodeResultInt32) \
+    macro(ValueBitOr, NodeResultJS | NodeMustGenerate) \
+    macro(ArithBitOr, NodeResultInt32) \
+    macro(ValueBitXor, NodeResultJS | NodeMustGenerate) \
+    macro(ArithBitXor, NodeResultInt32) \
     macro(BitLShift, NodeResultInt32) \
     macro(BitRShift, NodeResultInt32) \
     macro(BitURShift, NodeResultInt32) \
@@ -162,8 +167,15 @@ namespace JSC { namespace DFG {
     macro(ArithSqrt, NodeResultDouble | NodeMustGenerate) \
     macro(ArithUnary, NodeResultDouble | NodeMustGenerate) \
     \
+    /* BigInt is a valid operand for negate operations */\
+    macro(ValueNegate, NodeResultJS | NodeMustGenerate) \
+    \
     /* Add of values may either be arithmetic, or result in string concatenation. */\
     macro(ValueAdd, NodeResultJS | NodeMustGenerate) \
+    \
+    macro(ValueSub, NodeResultJS | NodeMustGenerate) \
+    macro(ValueMul, NodeResultJS | NodeMustGenerate) \
+    macro(ValueDiv, NodeResultJS | NodeMustGenerate) \
     \
     /* Add of values that always convers its inputs to strings. May have two or three kids. */\
     macro(StrCat, NodeResultJS | NodeMustGenerate) \
@@ -246,12 +258,14 @@ namespace JSC { namespace DFG {
     macro(CheckNotEmpty, NodeMustGenerate) \
     macro(AssertNotEmpty, NodeMustGenerate) \
     macro(CheckBadCell, NodeMustGenerate) \
-    macro(CheckInBounds, NodeMustGenerate) \
+    macro(CheckInBounds, NodeMustGenerate | NodeResultJS) \
     macro(CheckStringIdent, NodeMustGenerate) \
     macro(CheckTypeInfoFlags, NodeMustGenerate) /* Takes an OpInfo with the flags you want to test are set */\
     macro(CheckSubClass, NodeMustGenerate) \
     macro(ParseInt, NodeMustGenerate | NodeResultJS) \
     macro(GetPrototypeOf, NodeMustGenerate | NodeResultJS) \
+    macro(ObjectCreate, NodeMustGenerate | NodeResultJS) \
+    macro(ObjectKeys, NodeMustGenerate | NodeResultJS) \
     \
     /* Atomics object functions. */\
     macro(AtomicsAdd, NodeResultJS | NodeMustGenerate | NodeHasVarArgs) \
@@ -324,6 +338,8 @@ namespace JSC { namespace DFG {
     macro(NewArrayBuffer, NodeResultJS) \
     macro(NewTypedArray, NodeResultJS | NodeMustGenerate) \
     macro(NewRegexp, NodeResultJS) \
+    macro(NewSymbol, NodeResultJS) \
+    macro(NewStringObject, NodeResultJS) \
     /* Rest Parameter */\
     macro(GetRestLength, NodeResultInt32) \
     macro(CreateRest, NodeResultJS | NodeMustGenerate) \
@@ -344,12 +360,14 @@ namespace JSC { namespace DFG {
     \
     /* Nodes for misc operations. */\
     macro(OverridesHasInstance, NodeMustGenerate | NodeResultBoolean) \
-    macro(InstanceOf, NodeResultBoolean) \
+    macro(InstanceOf, NodeMustGenerate | NodeResultBoolean) \
     macro(InstanceOfCustom, NodeMustGenerate | NodeResultBoolean) \
+    macro(MatchStructure, NodeMustGenerate | NodeResultBoolean) \
     \
     macro(IsCellWithType, NodeResultBoolean) \
     macro(IsEmpty, NodeResultBoolean) \
     macro(IsUndefined, NodeResultBoolean) \
+    macro(IsUndefinedOrNull, NodeResultBoolean) \
     macro(IsBoolean, NodeResultBoolean) \
     macro(IsNumber, NodeResultBoolean) \
     macro(NumberIsInteger, NodeResultBoolean) \
@@ -367,9 +385,9 @@ namespace JSC { namespace DFG {
     macro(CallStringConstructor, NodeResultJS | NodeMustGenerate) \
     macro(NumberToStringWithRadix, NodeResultJS | NodeMustGenerate) \
     macro(NumberToStringWithValidRadixConstant, NodeResultJS) \
-    macro(NewStringObject, NodeResultJS) \
     macro(MakeRope, NodeResultJS) \
-    macro(In, NodeResultBoolean | NodeMustGenerate) \
+    macro(InByVal, NodeResultBoolean | NodeMustGenerate) \
+    macro(InById, NodeResultBoolean | NodeMustGenerate) \
     macro(ProfileType, NodeMustGenerate) \
     macro(ProfileControlFlow, NodeMustGenerate) \
     macro(SetFunctionName, NodeMustGenerate) \
@@ -392,11 +410,8 @@ namespace JSC { namespace DFG {
     macro(GetArgument, NodeResultJS) \
     \
     macro(NewFunction, NodeResultJS) \
-    \
     macro(NewGeneratorFunction, NodeResultJS) \
-    \
     macro(NewAsyncGeneratorFunction, NodeResultJS) \
-    \
     macro(NewAsyncFunction, NodeResultJS) \
     \
     /* Block terminals. */\
@@ -437,7 +452,7 @@ namespace JSC { namespace DFG {
     \
     /* For-in enumeration opcodes */\
     macro(GetEnumerableLength, NodeMustGenerate | NodeResultJS) \
-    macro(HasIndexedProperty, NodeResultBoolean) \
+    macro(HasIndexedProperty, NodeResultBoolean | NodeHasVarArgs) \
     macro(HasStructureProperty, NodeResultBoolean) \
     macro(HasGenericProperty, NodeResultBoolean) \
     macro(GetDirectPname, NodeMustGenerate | NodeHasVarArgs | NodeResultJS) \
@@ -461,6 +476,7 @@ namespace JSC { namespace DFG {
     macro(WeakMapSet, NodeMustGenerate | NodeHasVarArgs) \
     macro(ExtractValueFromWeakMapGet, NodeResultJS) \
     \
+    macro(StringValueOf, NodeMustGenerate | NodeResultJS) \
     macro(StringSlice, NodeResultJS) \
     macro(ToLowerCase, NodeResultJS) \
     /* Nodes for DOM JIT */\
@@ -473,6 +489,16 @@ namespace JSC { namespace DFG {
     \
     /* Used for $vm performance debugging */ \
     macro(CPUIntrinsic, NodeResultJS | NodeMustGenerate) \
+    \
+    /* Used to provide feedback to the IC profiler. */ \
+    macro(FilterCallLinkStatus, NodeMustGenerate) \
+    macro(FilterGetByIdStatus, NodeMustGenerate) \
+    macro(FilterInByIdStatus, NodeMustGenerate) \
+    macro(FilterPutByIdStatus, NodeMustGenerate) \
+    /* Data view access */ \
+    macro(DataViewGetInt, NodeMustGenerate | NodeResultJS) /* The gets are must generate for now because they do bounds checks */ \
+    macro(DataViewGetFloat, NodeMustGenerate | NodeResultDouble) \
+    macro(DataViewSet, NodeMustGenerate | NodeMustGenerate | NodeHasVarArgs) \
 
 
 // This enum generates a monotonically increasing id for all Node types,

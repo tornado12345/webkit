@@ -31,10 +31,10 @@
 
 namespace WebCore {
 
-Ref<CSSAnimation> CSSAnimation::create(Element& target, const Animation& backingAnimation, const RenderStyle* oldStyle, const RenderStyle& newStyle)
+Ref<CSSAnimation> CSSAnimation::create(Element& owningElement, const Animation& backingAnimation, const RenderStyle* oldStyle, const RenderStyle& newStyle)
 {
-    auto result = adoptRef(*new CSSAnimation(target, backingAnimation, newStyle));
-    result->initialize(target, oldStyle, newStyle);
+    auto result = adoptRef(*new CSSAnimation(owningElement, backingAnimation, newStyle));
+    result->initialize(oldStyle, newStyle);
     return result;
 }
 
@@ -49,59 +49,70 @@ void CSSAnimation::syncPropertiesWithBackingAnimation()
 {
     DeclarativeAnimation::syncPropertiesWithBackingAnimation();
 
+    if (!effect())
+        return;
+
     suspendEffectInvalidation();
 
     auto& animation = backingAnimation();
-    auto* timing = effect()->timing();
+    auto* animationEffect = effect();
 
     switch (animation.fillMode()) {
-    case AnimationFillModeNone:
-        timing->setFill(FillMode::None);
+    case AnimationFillMode::None:
+        animationEffect->setFill(FillMode::None);
         break;
-    case AnimationFillModeBackwards:
-        timing->setFill(FillMode::Backwards);
+    case AnimationFillMode::Backwards:
+        animationEffect->setFill(FillMode::Backwards);
         break;
-    case AnimationFillModeForwards:
-        timing->setFill(FillMode::Forwards);
+    case AnimationFillMode::Forwards:
+        animationEffect->setFill(FillMode::Forwards);
         break;
-    case AnimationFillModeBoth:
-        timing->setFill(FillMode::Both);
+    case AnimationFillMode::Both:
+        animationEffect->setFill(FillMode::Both);
         break;
     }
 
     switch (animation.direction()) {
     case Animation::AnimationDirectionNormal:
-        timing->setDirection(PlaybackDirection::Normal);
+        animationEffect->setDirection(PlaybackDirection::Normal);
         break;
     case Animation::AnimationDirectionAlternate:
-        timing->setDirection(PlaybackDirection::Alternate);
+        animationEffect->setDirection(PlaybackDirection::Alternate);
         break;
     case Animation::AnimationDirectionReverse:
-        timing->setDirection(PlaybackDirection::Reverse);
+        animationEffect->setDirection(PlaybackDirection::Reverse);
         break;
     case Animation::AnimationDirectionAlternateReverse:
-        timing->setDirection(PlaybackDirection::AlternateReverse);
+        animationEffect->setDirection(PlaybackDirection::AlternateReverse);
         break;
     }
 
     auto iterationCount = animation.iterationCount();
-    timing->setIterations(iterationCount == Animation::IterationCountInfinite ? std::numeric_limits<double>::infinity() : iterationCount);
+    animationEffect->setIterations(iterationCount == Animation::IterationCountInfinite ? std::numeric_limits<double>::infinity() : iterationCount);
+
+    animationEffect->setDelay(Seconds(animation.delay()));
+    animationEffect->setIterationDuration(Seconds(animation.duration()));
 
     // Synchronize the play state
-    if (backingAnimation().playState() == AnimPlayStatePlaying && playState() == WebAnimation::PlayState::Paused)
-        play();
-    else if (backingAnimation().playState() == AnimPlayStatePaused && playState() == WebAnimation::PlayState::Running)
+    if (animation.playState() == AnimationPlayState::Playing && playState() == WebAnimation::PlayState::Paused) {
+        if (!m_stickyPaused)
+            play();
+    } else if (animation.playState() == AnimationPlayState::Paused && playState() == WebAnimation::PlayState::Running)
         pause();
 
     unsuspendEffectInvalidation();
 }
 
-std::optional<double> CSSAnimation::bindingsCurrentTime() const
+ExceptionOr<void> CSSAnimation::bindingsPlay()
 {
-    auto currentTime = WebAnimation::bindingsCurrentTime();
-    if (currentTime)
-        return std::max(0.0, std::min(currentTime.value(), effect()->timing()->activeDuration().milliseconds()));
-    return currentTime;
+    m_stickyPaused = false;
+    return DeclarativeAnimation::bindingsPlay();
+}
+
+ExceptionOr<void> CSSAnimation::bindingsPause()
+{
+    m_stickyPaused = true;
+    return DeclarativeAnimation::bindingsPause();
 }
 
 } // namespace WebCore

@@ -23,7 +23,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 #import "WebChromeClient.h"
 
@@ -47,6 +47,7 @@ private:
     bool runJavaScriptPrompt(WebCore::Frame&, const WTF::String& message, const WTF::String& defaultValue, WTF::String& result) final;
 
     void runOpenPanel(WebCore::Frame&, WebCore::FileChooser&) final;
+    void showShareSheet(WebCore::ShareDataWithParsedURL&, CompletionHandler<void(bool)>&&) final;
 
 #if ENABLE(TOUCH_EVENTS)
     void didPreventDefaultForEvent() final;
@@ -55,10 +56,10 @@ private:
     void didReceiveMobileDocType(bool) final;
     void setNeedsScrollNotifications(WebCore::Frame&, bool) final;
     void observedContentChange(WebCore::Frame&) final;
-    void clearContentChangeObservers(WebCore::Frame&) final;
     WebCore::FloatSize screenSize() const final;
     WebCore::FloatSize availableScreenSize() const final;
     WebCore::FloatSize overrideScreenSize() const final;
+    void dispatchDisabledAdaptationsDidChange(const OptionSet<WebCore::DisabledAdaptations>&) const final;
     void dispatchViewportPropertiesDidChange(const WebCore::ViewportArguments&) const final;
     void notifyRevealedSelectionByScrollingFrame(WebCore::Frame&) final;
     bool isStopping() final;
@@ -76,7 +77,7 @@ private:
 
     void didFlushCompositingLayers() final;
 
-    void updateViewportConstrainedLayers(HashMap<PlatformLayer*, std::unique_ptr<WebCore::ViewportConstraints>>&, HashMap<PlatformLayer*, PlatformLayer*>&) final;
+    void updateViewportConstrainedLayers(HashMap<PlatformLayer*, std::unique_ptr<WebCore::ViewportConstraints>>&, const HashMap<PlatformLayer*, PlatformLayer*>&) final;
 
     bool fetchCustomFixedPositionLayoutRect(WebCore::IntRect&) final;
     void addOrUpdateScrollingLayer(WebCore::Node*, PlatformLayer*, PlatformLayer*, const WebCore::IntSize&, bool allowHorizontalScrollbar, bool allowVerticalScrollbar) final;

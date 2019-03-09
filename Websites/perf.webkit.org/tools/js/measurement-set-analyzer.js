@@ -49,7 +49,14 @@ class MeasurementSetAnalyzer {
         const metric = Metric.findById(measurementSet.metricId());
         const platform = Platform.findById(measurementSet.platformId());
         this._logger.info(`==== "${metric.fullName()}" on "${platform.name()}" ====`);
-        await measurementSet.fetchBetween(this._startTime, this._endTime);
+        try {
+            await measurementSet.fetchBetween(this._startTime, this._endTime);
+        } catch (error) {
+            if (error != 'ConfigurationNotFound')
+                throw error;
+            this._logger.warn(`Skipping analysis for "${metric.fullName()}" on "${platform.name()}" as time series does not exit.`);
+            return;
+        }
         const currentTimeSeries = measurementSet.fetchedTimeSeries('current', false, false);
         const rawValues = currentTimeSeries.values();
         if (!rawValues || rawValues.length < 2)
@@ -101,10 +108,11 @@ class MeasurementSetAnalyzer {
         const startCommitSet = rangeWithMostSignificantChange.startPoint.commitSet();
         const endCommitSet = rangeWithMostSignificantChange.endPoint.commitSet();
         const summary = `Potential ${rangeWithMostSignificantChange.valueChangeSummary.changeLabel} on ${platform.name()} between ${CommitSet.diff(startCommitSet, endCommitSet)}`;
+        const confirmingTaskArguments = Triggerable.findByTestConfiguration(metric.test(), platform) ? ['Confirm', 4, true] : [];
 
         // FIXME: The iteration count should be smarter than hard-coding.
         const analysisTask = await AnalysisTask.create(summary, rangeWithMostSignificantChange.startPoint,
-            rangeWithMostSignificantChange.endPoint, 'Confirm', 4);
+            rangeWithMostSignificantChange.endPoint, ...confirmingTaskArguments);
 
         this._logger.info(`Created analysis task with id "${analysisTask.id()}" to confirm: "${summary}".`);
     }

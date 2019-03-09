@@ -43,6 +43,12 @@ RuntimeEnabledFeatures::RuntimeEnabledFeatures()
 #if ENABLE(MEDIA_STREAM) && PLATFORM(COCOA)
     m_isMediaDevicesEnabled = false;
 #endif
+#if PLATFORM(WATCHOS)
+    m_isWebSocketEnabled = false;
+#endif
+#if PLATFORM(GTK) && ENABLE(INPUT_TYPE_COLOR)
+    m_isInputTypeColorEnabled = true;
+#endif
 }
 
 RuntimeEnabledFeatures& RuntimeEnabledFeatures::sharedFeatures()

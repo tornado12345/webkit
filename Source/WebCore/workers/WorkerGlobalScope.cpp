@@ -33,7 +33,7 @@
 #include "IDBConnectionProxy.h"
 #include "ImageBitmapOptions.h"
 #include "InspectorInstrumentation.h"
-#include "MIMETypeRegistry.h"
+#include "Microtasks.h"
 #include "Performance.h"
 #include "ScheduledAction.h"
 #include "ScriptSourceCode.h"
@@ -61,6 +61,7 @@ WorkerGlobalScope::WorkerGlobalScope(const URL& url, Ref<SecurityOrigin>&& origi
     , m_thread(thread)
     , m_script(std::make_unique<WorkerScriptController>(this))
     , m_inspectorController(std::make_unique<WorkerInspectorController>(*this))
+    , m_microtaskQueue(std::make_unique<MicrotaskQueue>())
     , m_isOnline(isOnline)
     , m_shouldBypassMainWorldContentSecurityPolicy(shouldBypassMainWorldContentSecurityPolicy)
     , m_eventQueue(*this)
@@ -69,7 +70,7 @@ WorkerGlobalScope::WorkerGlobalScope(const URL& url, Ref<SecurityOrigin>&& origi
     , m_connectionProxy(connectionProxy)
 #endif
     , m_socketProvider(socketProvider)
-    , m_performance(Performance::create(*this, timeOrigin))
+    , m_performance(Performance::create(this, timeOrigin))
     , m_sessionID(sessionID)
 {
 #if !ENABLE(INDEXED_DATABASE)
@@ -82,7 +83,7 @@ WorkerGlobalScope::WorkerGlobalScope(const URL& url, Ref<SecurityOrigin>&& origi
         origin->grantStorageAccessFromFileURLsQuirk();
 
     setSecurityOriginPolicy(SecurityOriginPolicy::create(WTFMove(origin)));
-    setContentSecurityPolicy(std::make_unique<ContentSecurityPolicy>(*this));
+    setContentSecurityPolicy(std::make_unique<ContentSecurityPolicy>(URL { m_url }, *this));
 }
 
 WorkerGlobalScope::~WorkerGlobalScope()
@@ -104,6 +105,25 @@ String WorkerGlobalScope::origin() const
     return securityOrigin ? securityOrigin->toString() : emptyString();
 }
 
+void WorkerGlobalScope::prepareForTermination()
+{
+#if ENABLE(INDEXED_DATABASE)
+    stopIndexedDatabase();
+#endif
+
+    stopActiveDOMObjects();
+
+    m_inspectorController->workerTerminating();
+
+    // Event listeners would keep DOMWrapperWorld objects alive for too long. Also, they have references to JS objects,
+    // which become dangling once Heap is destroyed.
+    removeAllEventListeners();
+
+    // MicrotaskQueue and RejectedPromiseTracker reference Heap.
+    m_microtaskQueue = nullptr;
+    removeRejectedPromiseTracker();
+}
+
 void WorkerGlobalScope::removeAllEventListeners()
 {
     EventTarget::removeAllEventListeners();
@@ -118,7 +138,7 @@ bool WorkerGlobalScope::isSecureContext() const
 
 void WorkerGlobalScope::applyContentSecurityPolicyResponseHeaders(const ContentSecurityPolicyResponseHeaders& contentSecurityPolicyResponseHeaders)
 {
-    contentSecurityPolicy()->didReceiveHeaders(contentSecurityPolicyResponseHeaders);
+    contentSecurityPolicy()->didReceiveHeaders(contentSecurityPolicyResponseHeaders, String { });
 }
 
 URL WorkerGlobalScope::completeURL(const String& url) const
@@ -285,21 +305,14 @@ ExceptionOr<void> WorkerGlobalScope::importScripts(const Vector<String>& urls)
             return Exception { NetworkError };
 
         auto scriptLoader = WorkerScriptLoader::create();
-        scriptLoader->loadSynchronously(this, url, FetchOptions::Mode::NoCors, cachePolicy, shouldBypassMainWorldContentSecurityPolicy ? ContentSecurityPolicyEnforcement::DoNotEnforce : ContentSecurityPolicyEnforcement::EnforceScriptSrcDirective, resourceRequestIdentifier());
-
-        // If the fetching attempt failed, throw a NetworkError exception and abort all these steps.
-        if (scriptLoader->failed())
-            return Exception { NetworkError, scriptLoader->error().localizedDescription() };
-
-#if ENABLE(SERVICE_WORKER)
-        if (isServiceWorkerGlobalScope && !MIMETypeRegistry::isSupportedJavaScriptMIMEType(scriptLoader->responseMIMEType()))
-            return Exception { NetworkError };
-#endif
+        auto cspEnforcement = shouldBypassMainWorldContentSecurityPolicy ? ContentSecurityPolicyEnforcement::DoNotEnforce : ContentSecurityPolicyEnforcement::EnforceScriptSrcDirective;
+        if (auto exception = scriptLoader->loadSynchronously(this, url, FetchOptions::Mode::NoCors, cachePolicy, cspEnforcement, resourceRequestIdentifier()))
+            return WTFMove(*exception);
 
         InspectorInstrumentation::scriptImported(*this, scriptLoader->identifier(), scriptLoader->script());
 
         NakedPtr<JSC::Exception> exception;
-        m_script->evaluate(ScriptSourceCode(scriptLoader->script(), scriptLoader->responseURL()), exception);
+        m_script->evaluate(ScriptSourceCode(scriptLoader->script(), URL(scriptLoader->responseURL())), exception);
         if (exception) {
             m_script->setException(exception);
             return { };
@@ -364,7 +377,7 @@ WorkerEventQueue& WorkerGlobalScope::eventQueue() const
     return m_eventQueue;
 }
 
-#if ENABLE(SUBTLE_CRYPTO)
+#if ENABLE(WEB_CRYPTO)
 
 bool WorkerGlobalScope::wrapCryptoKey(const Vector<uint8_t>& key, Vector<uint8_t>& wrappedKey)
 {
@@ -403,12 +416,12 @@ bool WorkerGlobalScope::unwrapCryptoKey(const Vector<uint8_t>& wrappedKey, Vecto
     return result;
 }
 
-#endif // ENABLE(SUBTLE_CRYPTO)
+#endif // ENABLE(WEB_CRYPTO)
 
 Crypto& WorkerGlobalScope::crypto()
 {
     if (!m_crypto)
-        m_crypto = Crypto::create(*this);
+        m_crypto = Crypto::create(this);
     return *m_crypto;
 }
 

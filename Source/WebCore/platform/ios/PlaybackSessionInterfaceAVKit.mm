@@ -27,7 +27,7 @@
 #import "config.h"
 #import "PlaybackSessionInterfaceAVKit.h"
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 #if HAVE(AVKIT)
 
 #import "Logging.h"
@@ -77,11 +77,6 @@ PlaybackSessionInterfaceAVKit::~PlaybackSessionInterfaceAVKit()
     invalidate();
 }
 
-void PlaybackSessionInterfaceAVKit::resetMediaState()
-{
-    [m_playerController resetMediaState];
-}
-
 void PlaybackSessionInterfaceAVKit::durationChanged(double duration)
 {
     WebAVPlayerController* playerController = m_playerController.get();
@@ -100,6 +95,9 @@ void PlaybackSessionInterfaceAVKit::durationChanged(double duration)
 
 void PlaybackSessionInterfaceAVKit::currentTimeChanged(double currentTime, double anchorTime)
 {
+    if ([m_playerController isScrubbing])
+        return;
+
     NSTimeInterval anchorTimeStamp = ![m_playerController rate] ? NAN : anchorTime;
     AVValueTiming *timing = [getAVValueTimingClass() valueTimingWithAnchorValue:currentTime
         anchorTimeStamp:anchorTimeStamp rate:0];
@@ -128,7 +126,7 @@ void PlaybackSessionInterfaceAVKit::seekableRangesChanged(const TimeRanges& time
 {
     RetainPtr<NSMutableArray> seekableRanges = adoptNS([[NSMutableArray alloc] init]);
 
-#if !ENABLE(EXTRA_ZOOM_MODE)
+#if !PLATFORM(WATCHOS)
     for (unsigned i = 0; i < timeRanges.length(); i++) {
         double start = timeRanges.start(i).releaseReturnValue();
         double end = timeRanges.end(i).releaseReturnValue();
@@ -219,4 +217,4 @@ void PlaybackSessionInterfaceAVKit::invalidate()
 }
 
 #endif // HAVE(AVKIT)
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)

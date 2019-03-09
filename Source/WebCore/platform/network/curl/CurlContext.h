@@ -28,13 +28,13 @@
 
 #include "CurlProxySettings.h"
 #include "CurlSSLHandle.h"
-#include "URL.h"
 
 #include <wtf/Lock.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/Noncopyable.h>
 #include <wtf/Seconds.h>
 #include <wtf/Threading.h>
+#include <wtf/URL.h>
 
 #if OS(WINDOWS)
 #include <windows.h>
@@ -104,8 +104,10 @@ public:
 
     // Proxy
     const CurlProxySettings& proxySettings() const { return m_proxySettings; }
-    void setProxySettings(const CurlProxySettings& settings) { m_proxySettings = settings; }
+    void setProxySettings(CurlProxySettings&& settings) { m_proxySettings = WTFMove(settings); }
     void setProxyUserPass(const String& user, const String& password) { m_proxySettings.setUserPass(user, password); }
+    void setDefaultProxyAuthMethod() { m_proxySettings.setDefaultAuthMethod(); }
+    void setProxyAuthMethod(long authMethod) { m_proxySettings.setAuthMethod(authMethod); }
 
     // SSL
     CurlSSLHandle& sslHandle() { return m_sslHandle; }
@@ -116,6 +118,7 @@ public:
     // Timeout
     Seconds dnsCacheTimeout() const { return m_dnsCacheTimeout; }
     Seconds connectTimeout() const { return m_connectTimeout; }
+    Seconds defaultTimeoutInterval() const { return m_defaultTimeoutInterval; }
 
 #ifndef NDEBUG
     FILE* getLogFile() const { return m_logFile; }
@@ -133,6 +136,7 @@ private:
 
     Seconds m_dnsCacheTimeout { Seconds::fromMinutes(5) };
     Seconds m_connectTimeout { 30.0 };
+    Seconds m_defaultTimeoutInterval { 60.0 };
 
 #ifndef NDEBUG
     FILE* m_logFile { nullptr };
@@ -192,6 +196,8 @@ private:
 
 // CurlHandle -------------------------------------------------
 
+class CertificateInfo;
+class CurlSSLVerifier;
 class HTTPHeaderMap;
 class NetworkLoadMetrics;
 
@@ -213,8 +219,7 @@ public:
     virtual ~CurlHandle();
 
     CURL* handle() const { return m_handle; }
-
-    void initialize();
+    const URL& url() const { return m_url; }
 
     CURLcode perform();
     CURLcode pause(int);
@@ -224,6 +229,7 @@ public:
     void enableShareHandle();
 
     void setUrl(const URL&);
+    void enableSSLForHost(const String&);
 
     void appendRequestHeaders(const HTTPHeaderMap&);
     void appendRequestHeader(const String& name, const String& value);
@@ -240,11 +246,12 @@ public:
     void setInFileSizeLarge(curl_off_t);
     void setHttpCustomRequest(const String&);
 
+    void enableConnectionOnly();
+
     void enableAcceptEncoding();
     void enableAllowedProtocols();
 
-    void enableHttpAuthentication(long);
-    void setHttpAuthUserPass(const String&, const String&);
+    void setHttpAuthUserPass(const String&, const String&, long authType = CURLAUTH_ANY);
 
     void setCACertPath(const char*);
     void setSslVerifyPeer(VerifyPeer);
@@ -252,6 +259,7 @@ public:
     void setSslCert(const char*);
     void setSslCertType(const char*);
     void setSslKeyPassword(const char*);
+    void setSslCipherList(const char*);
 
     void enableProxyIfExists();
 
@@ -266,13 +274,18 @@ public:
     void setSslCtxCallbackFunction(curl_ssl_ctx_callback, void*);
 
     // Status
-    std::optional<uint16_t> getPrimaryPort();
-    std::optional<long> getResponseCode();
-    std::optional<long> getHttpConnectCode();
-    std::optional<long long> getContentLength();
-    std::optional<long> getHttpAuthAvail();
-    std::optional<long> getHttpVersion();
-    std::optional<NetworkLoadMetrics> getNetworkLoadMetrics();
+    Optional<String> getProxyUrl();
+    Optional<long> getResponseCode();
+    Optional<long> getHttpConnectCode();
+    Optional<long long> getContentLength();
+    Optional<long> getHttpAuthAvail();
+    Optional<long> getProxyAuthAvail();
+    Optional<long> getHttpVersion();
+    Optional<NetworkLoadMetrics> getNetworkLoadMetrics(const WTF::Seconds& domainLookupStart);
+    void addExtraNetworkLoadMetrics(NetworkLoadMetrics&);
+
+    int sslErrors() const;
+    Optional<CertificateInfo> certificateInfo() const;
 
     static long long maxCurlOffT();
 
@@ -285,10 +298,35 @@ private:
     void enableRequestHeaders();
     static int expectedSizeOfCurlOffT();
 
+    static CURLcode willSetupSslCtxCallback(CURL*, void* sslCtx, void* userData);
+    CURLcode willSetupSslCtx(void* sslCtx);
+
     CURL* m_handle { nullptr };
     char m_errorBuffer[CURL_ERROR_SIZE] { };
 
+    URL m_url;
     CurlSList m_requestHeaders;
+    std::unique_ptr<CurlSSLVerifier> m_sslVerifier;
+};
+
+class CurlSocketHandle : public CurlHandle {
+    WTF_MAKE_NONCOPYABLE(CurlSocketHandle);
+
+public:
+    struct WaitResult {
+        bool readable { false };
+        bool writable { false };
+    };
+
+    CurlSocketHandle(const URL&, Function<void(CURLcode)>&& errorHandler);
+
+    bool connect();
+    size_t send(const uint8_t*, size_t);
+    Optional<size_t> receive(uint8_t*, size_t);
+    Optional<WaitResult> wait(const Seconds& timeout, bool alsoWaitForWrite);
+
+private:
+    Function<void(CURLcode)> m_errorHandler;
 };
 
 } // namespace WebCore

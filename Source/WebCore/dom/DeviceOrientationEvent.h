@@ -25,13 +25,14 @@
 
 #pragma once
 
+#include "DeviceOrientationOrMotionEvent.h"
 #include "Event.h"
 
 namespace WebCore {
 
 class DeviceOrientationData;
 
-class DeviceOrientationEvent final : public Event {
+class DeviceOrientationEvent final : public Event, public DeviceOrientationOrMotionEvent {
 public:
     static Ref<DeviceOrientationEvent> create(const AtomicString& eventType, DeviceOrientationData* orientation)
     {
@@ -45,19 +46,19 @@ public:
 
     virtual ~DeviceOrientationEvent();
 
-    std::optional<double> alpha() const;
-    std::optional<double> beta() const;
-    std::optional<double> gamma() const;
+    Optional<double> alpha() const;
+    Optional<double> beta() const;
+    Optional<double> gamma() const;
 
-#if PLATFORM(IOS)
-    std::optional<double> compassHeading() const;
-    std::optional<double> compassAccuracy() const;
+#if PLATFORM(IOS_FAMILY)
+    Optional<double> compassHeading() const;
+    Optional<double> compassAccuracy() const;
 
-    void initDeviceOrientationEvent(const AtomicString& type, bool bubbles, bool cancelable, std::optional<double> alpha, std::optional<double> beta, std::optional<double> gamma, std::optional<double> compassHeading, std::optional<double> compassAccuracy);
+    void initDeviceOrientationEvent(const AtomicString& type, bool bubbles, bool cancelable, Optional<double> alpha, Optional<double> beta, Optional<double> gamma, Optional<double> compassHeading, Optional<double> compassAccuracy);
 #else
-    std::optional<bool> absolute() const;
+    Optional<bool> absolute() const;
 
-    void initDeviceOrientationEvent(const AtomicString& type, bool bubbles, bool cancelable, std::optional<double> alpha, std::optional<double> beta, std::optional<double> gamma, std::optional<bool> absolute);
+    void initDeviceOrientationEvent(const AtomicString& type, bool bubbles, bool cancelable, Optional<double> alpha, Optional<double> beta, Optional<double> gamma, Optional<bool> absolute);
 #endif
 
 private:

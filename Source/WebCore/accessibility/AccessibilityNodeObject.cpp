@@ -380,6 +380,7 @@ bool AccessibilityNodeObject::canHaveChildren() const
     case AccessibilityRole::MenuItemCheckbox:
     case AccessibilityRole::MenuItemRadio:
     case AccessibilityRole::Splitter:
+    case AccessibilityRole::Meter:
         return false;
     case AccessibilityRole::DocumentMath:
 #if ENABLE(MATHML)
@@ -560,7 +561,7 @@ bool AccessibilityNodeObject::isInputImage() const
 
 bool AccessibilityNodeObject::isProgressIndicator() const
 {
-    return roleValue() == AccessibilityRole::ProgressIndicator;
+    return roleValue() == AccessibilityRole::ProgressIndicator || roleValue() == AccessibilityRole::Meter;
 }
 
 bool AccessibilityNodeObject::isSlider() const
@@ -1063,6 +1064,10 @@ void AccessibilityNodeObject::alterSliderValue(bool increase)
 {
     if (roleValue() != AccessibilityRole::Slider)
         return;
+    
+    auto element = this->element();
+    if (!element || element->isDisabledFormControl())
+        return;
 
     if (!getAttribute(stepAttr).isEmpty())
         changeValueByStep(increase);
@@ -1441,6 +1446,14 @@ void AccessibilityNodeObject::helpText(Vector<AccessibilityText>& textOrder) con
     String describedBy = ariaDescribedByAttribute();
     if (!describedBy.isEmpty())
         textOrder.append(AccessibilityText(describedBy, AccessibilityTextSource::Summary));
+    else if (isControl()) {
+        // For controls, use their fieldset parent's described-by text if available.
+        auto matchFunc = [] (const AccessibilityObject& object) {
+            return object.isFieldset() && !object.ariaDescribedByAttribute().isEmpty();
+        };
+        if (const auto* parent = AccessibilityObject::matchedParent(*this, false, WTFMove(matchFunc)))
+            textOrder.append(AccessibilityText(parent->ariaDescribedByAttribute(), AccessibilityTextSource::Summary));
+    }
 
     // Summary attribute used as help text on tables.
     const AtomicString& summary = getAttribute(summaryAttr);
@@ -1461,7 +1474,7 @@ void AccessibilityNodeObject::helpText(Vector<AccessibilityText>& textOrder) con
     }
 }
 
-void AccessibilityNodeObject::accessibilityText(Vector<AccessibilityText>& textOrder)
+void AccessibilityNodeObject::accessibilityText(Vector<AccessibilityText>& textOrder) const
 {
     titleElementText(textOrder);
     alternativeText(textOrder);
@@ -1733,6 +1746,18 @@ String AccessibilityNodeObject::textUnderElement(AccessibilityTextUnderElementMo
     if (is<Text>(node))
         return downcast<Text>(*node).wholeText();
 
+    // The Accname specification states that if the current node is hidden, and not directly
+    // referenced by aria-labelledby or aria-describedby, and is not a host language text
+    // alternative, the empty string should be returned.
+    if (isHidden() && !is<HTMLLabelElement>(node) && (node && !ancestorsOfType<HTMLCanvasElement>(*node).first())) {
+        AccessibilityObject::AccessibilityChildrenVector labelFor;
+        AccessibilityObject::AccessibilityChildrenVector descriptionFor;
+        ariaLabelledByReferencingElements(labelFor);
+        ariaDescribedByReferencingElements(descriptionFor);
+        if (!labelFor.size() && !descriptionFor.size())
+            return String();
+    }
+
     StringBuilder builder;
     for (AccessibilityObject* child = firstChild(); child; child = child->nextSibling()) {
         if (mode.ignoredChildNode && child->node() == mode.ignoredChildNode)
@@ -1940,6 +1965,29 @@ static String accessibleNameForNode(Node* node, Node* labelledbyNode)
         String valueDescription = axObject->valueDescription();
         if (!valueDescription.isEmpty())
             return valueDescription;
+
+        // The Accname specification states that if the name is being calculated for a combobox
+        // or listbox inside a labeling element, return the text alternative of the chosen option.
+        AccessibilityObject::AccessibilityChildrenVector children;
+        if (axObject->isListBox())
+            axObject->selectedChildren(children);
+        else if (axObject->isComboBox()) {
+            for (const auto& child : axObject->children()) {
+                if (child->isListBox()) {
+                    child->selectedChildren(children);
+                    break;
+                }
+            }
+        }
+
+        StringBuilder builder;
+        String childText;
+        for (const auto& child : children)
+            appendNameToStringBuilder(builder, accessibleNameForNode(child->node()));
+
+        childText = builder.toString();
+        if (!childText.isEmpty())
+            return childText;
     }
     
     if (is<HTMLInputElement>(*node))
@@ -1950,7 +1998,7 @@ static String accessibleNameForNode(Node* node, Node* labelledbyNode)
         if (axObject->accessibleNameDerivesFromContent())
             text = axObject->textUnderElement(AccessibilityTextUnderElementMode(AccessibilityTextUnderElementMode::TextUnderElementModeIncludeNameFromContentsChildren, true, labelledbyNode));
     } else
-        text = element.innerText();
+        text = element.innerText().simplifyWhiteSpace();
 
     if (!text.isEmpty())
         return text;
@@ -2189,7 +2237,6 @@ bool AccessibilityNodeObject::canSetSelectedAttribute() const
     switch (roleValue()) {
     case AccessibilityRole::Cell:
     case AccessibilityRole::GridCell:
-    case AccessibilityRole::RadioButton:
     case AccessibilityRole::RowHeader:
     case AccessibilityRole::Row:
     case AccessibilityRole::TabList:

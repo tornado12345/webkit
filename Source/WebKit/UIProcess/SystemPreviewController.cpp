@@ -26,7 +26,10 @@
 #include "config.h"
 #include "SystemPreviewController.h"
 
+#if USE(SYSTEM_PREVIEW)
+
 #include "WebPageProxy.h"
+#include <WebCore/MIMETypeRegistry.h>
 
 namespace WebKit {
 
@@ -35,20 +38,11 @@ SystemPreviewController::SystemPreviewController(WebPageProxy& webPageProxy)
 {
 }
 
-void SystemPreviewController::sendPageBack()
+bool SystemPreviewController::canPreview(const String& mimeType) const
 {
-    m_webPageProxy.goBack();
+    return WebCore::MIMETypeRegistry::isSystemPreviewMIMEType(mimeType);
 }
 
-#if !PLATFORM(IOS) || !USE(QUICK_LOOK)
-bool SystemPreviewController::canPreview(const String&) const
-{
-    return false;
 }
 
-void SystemPreviewController::showPreview(const WebCore::URL&)
-{
-}
 #endif
-
-}

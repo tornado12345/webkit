@@ -74,6 +74,13 @@ enum TracePointCode {
     DisplayListRecordStart,
     DisplayListRecordEnd,
     DisplayRefreshDispatchingToMainThread,
+    ComputeEventRegionsStart,
+    ComputeEventRegionsEnd,
+
+    ScheduleRenderingUpdate,
+    TriggerRenderingUpdate,
+    RenderingUpdateStart,
+    RenderingUpdateEnd,
 
     WebKitRange = 10000,
     WebHTMLViewPaintStart,
@@ -96,6 +103,8 @@ enum TracePointCode {
     CommitLayerTreeEnd,
     ProcessLaunchStart,
     ProcessLaunchEnd,
+    InitializeSandboxStart,
+    InitializeSandboxEnd,
 };
 
 #ifdef __cplusplus

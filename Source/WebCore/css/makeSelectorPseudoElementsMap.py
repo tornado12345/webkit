@@ -92,12 +92,10 @@ output_file.write("""
 #include "config.h"
 #include "SelectorPseudoTypeMap.h"
 
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunknown-pragmas"
-#pragma clang diagnostic ignored "-Wdeprecated-register"
-#pragma clang diagnostic ignored "-Wimplicit-fallthrough"
-#endif
+IGNORE_WARNINGS_BEGIN("implicit-fallthrough")
+
+// Older versions of gperf like to use the `register` keyword.
+#define register
 
 namespace WebCore {
 
@@ -196,9 +194,7 @@ CSSSelector::PseudoElementType parsePseudoElementString(const StringImpl& pseudo
 
 } // namespace WebCore
 
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#endif
+IGNORE_WARNINGS_END
 
 """)
 output_file.close()

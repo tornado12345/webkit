@@ -28,6 +28,7 @@
 #include <JavaScriptCore/Strong.h>
 #include <wtf/Forward.h>
 #include <wtf/RefPtr.h>
+#include <wtf/WeakPtr.h>
 #include <wtf/text/TextPosition.h>
 
 #if PLATFORM(COCOA)
@@ -60,7 +61,6 @@ class LoadableModuleScript;
 class ModuleFetchParameters;
 class ScriptSourceCode;
 class SecurityOrigin;
-class URL;
 class Widget;
 struct ExceptionDetails;
 
@@ -70,7 +70,7 @@ enum ReasonForCallingCanExecuteScripts {
     NotAboutToExecuteScript
 };
 
-class ScriptController {
+class ScriptController : public CanMakeWeakPtr<ScriptController> {
     WTF_MAKE_FAST_ALLOCATED;
 
     using RootObjectMap = HashMap<void*, Ref<JSC::Bindings::RootObject>>;
@@ -83,14 +83,14 @@ public:
 
     JSDOMWindow* globalObject(DOMWrapperWorld& world)
     {
-        return JSC::jsCast<JSDOMWindow*>(windowProxy().jsWindowProxy(world).window());
+        return JSC::jsCast<JSDOMWindow*>(jsWindowProxy(world).window());
     }
 
     static void getAllWorlds(Vector<Ref<DOMWrapperWorld>>&);
 
     JSC::JSValue executeScript(const ScriptSourceCode&, ExceptionDetails* = nullptr);
     WEBCORE_EXPORT JSC::JSValue executeScript(const String& script, bool forceUserGesture = false, ExceptionDetails* = nullptr);
-    WEBCORE_EXPORT JSC::JSValue executeScriptInWorld(DOMWrapperWorld&, const String& script, bool forceUserGesture = false);
+    WEBCORE_EXPORT JSC::JSValue executeScriptInWorld(DOMWrapperWorld&, const String& script, bool forceUserGesture = false, ExceptionDetails* = nullptr);
 
     // Returns true if argument is a JavaScript URL.
     bool executeIfJavaScriptURL(const URL&, ShouldReplaceDocumentIfJavaScriptURL shouldReplaceDocumentIfJavaScriptURL = ReplaceDocumentIfJavaScriptURL);
@@ -166,6 +166,7 @@ private:
     void disconnectPlatformScriptObjects();
 
     WEBCORE_EXPORT WindowProxy& windowProxy();
+    WEBCORE_EXPORT JSWindowProxy& jsWindowProxy(DOMWrapperWorld&);
 
     Frame& m_frame;
     const String* m_sourceURL;

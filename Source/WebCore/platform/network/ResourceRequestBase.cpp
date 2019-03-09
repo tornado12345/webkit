@@ -29,12 +29,13 @@
 #include "HTTPHeaderNames.h"
 #include "PublicSuffix.h"
 #include "ResourceRequest.h"
+#include "ResourceResponse.h"
 #include "SecurityPolicy.h"
 #include <wtf/PointerComparison.h>
 
 namespace WebCore {
 
-#if PLATFORM(IOS) || USE(CFURLCONNECTION)
+#if PLATFORM(IOS_FAMILY) || USE(CFURLCONNECTION)
 double ResourceRequestBase::s_defaultTimeoutInterval = INT_MAX;
 #else
 // Will use NSURLRequest default timeout unless set to a non-zero value with setDefaultTimeoutInterval().
@@ -66,10 +67,12 @@ void ResourceRequestBase::setAsIsolatedCopy(const ResourceRequest& other)
     setInitiatorIdentifier(other.initiatorIdentifier().isolatedCopy());
     setCachePartition(other.cachePartition().isolatedCopy());
 
-    if (!other.isSameSiteUnspecified()) {
+    if (auto inspectorInitiatorNodeIdentifier = other.inspectorInitiatorNodeIdentifier())
+        setInspectorInitiatorNodeIdentifier(*inspectorInitiatorNodeIdentifier);
+
+    if (!other.isSameSiteUnspecified())
         setIsSameSite(other.isSameSite());
-        setIsTopSite(other.isTopSite());
-    }
+    setIsTopSite(other.isTopSite());
 
     updateResourceRequest();
     m_httpHeaderFields = other.httpHeaderFields().isolatedCopy();
@@ -141,13 +144,13 @@ ResourceRequest ResourceRequestBase::redirectedRequest(const ResourceResponse& r
     request.setURL(location.isEmpty() ? URL { } : URL { redirectResponse.url(), location });
 
     if (shouldUseGet(*this, redirectResponse)) {
-        request.setHTTPMethod(ASCIILiteral("GET"));
+        request.setHTTPMethod("GET"_s);
         request.setHTTPBody(nullptr);
         request.clearHTTPContentType();
         request.m_httpHeaderFields.remove(HTTPHeaderName::ContentLength);
     }
 
-    if (shouldClearReferrerOnHTTPSToHTTPRedirect && !request.url().protocolIs("https") && WebCore::protocolIs(request.httpReferrer(), "https"))
+    if (shouldClearReferrerOnHTTPSToHTTPRedirect && !request.url().protocolIs("https") && WTF::protocolIs(request.httpReferrer(), "https"))
         request.clearHTTPReferrer();
 
     if (!protocolHostAndPortAreEqual(request.url(), redirectResponse.url()))
@@ -480,7 +483,7 @@ void ResourceRequestBase::setResponseContentDispositionEncodingFallbackArray(con
 
 FormData* ResourceRequestBase::httpBody() const
 {
-    updateResourceRequest(UpdateHTTPBody);
+    updateResourceRequest(HTTPBodyUpdatePolicy::UpdateHTTPBody);
 
     return m_httpBody.get();
 }
@@ -576,6 +579,28 @@ void ResourceRequestBase::setHTTPHeaderFields(HTTPHeaderMap headerFields)
     m_platformRequestUpdated = false;
 }
 
+#if USE(SYSTEM_PREVIEW)
+bool ResourceRequestBase::isSystemPreview() const
+{
+    return m_isSystemPreview;
+}
+
+void ResourceRequestBase::setSystemPreview(bool s)
+{
+    m_isSystemPreview = s;
+}
+
+const IntRect& ResourceRequestBase::systemPreviewRect() const
+{
+    return m_systemPreviewRect;
+}
+
+void ResourceRequestBase::setSystemPreviewRect(const IntRect& rect)
+{
+    m_systemPreviewRect = rect;
+}
+#endif
+
 bool equalIgnoringHeaderFields(const ResourceRequestBase& a, const ResourceRequestBase& b)
 {
     if (a.url() != b.url())
@@ -668,7 +693,7 @@ void ResourceRequestBase::updatePlatformRequest(HTTPBodyUpdatePolicy bodyPolicy)
         m_platformRequestUpdated = true;
     }
 
-    if (!m_platformRequestBodyUpdated && bodyPolicy == UpdateHTTPBody) {
+    if (!m_platformRequestBodyUpdated && bodyPolicy == HTTPBodyUpdatePolicy::UpdateHTTPBody) {
         ASSERT(m_resourceRequestBodyUpdated);
         const_cast<ResourceRequest&>(asResourceRequest()).doUpdatePlatformHTTPBody();
         m_platformRequestBodyUpdated = true;
@@ -683,7 +708,7 @@ void ResourceRequestBase::updateResourceRequest(HTTPBodyUpdatePolicy bodyPolicy)
         m_resourceRequestUpdated = true;
     }
 
-    if (!m_resourceRequestBodyUpdated && bodyPolicy == UpdateHTTPBody) {
+    if (!m_resourceRequestBodyUpdated && bodyPolicy == HTTPBodyUpdatePolicy::UpdateHTTPBody) {
         ASSERT(m_platformRequestBodyUpdated);
         const_cast<ResourceRequest&>(asResourceRequest()).doUpdateResourceHTTPBody();
         m_resourceRequestBodyUpdated = true;

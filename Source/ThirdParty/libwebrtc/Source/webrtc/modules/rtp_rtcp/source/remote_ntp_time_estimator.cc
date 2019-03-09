@@ -10,6 +10,8 @@
 
 #include "modules/rtp_rtcp/include/remote_ntp_time_estimator.h"
 
+#include <cstdint>
+
 #include "rtc_base/logging.h"
 #include "system_wrappers/include/clock.h"
 

@@ -29,6 +29,7 @@
 #if ENABLE(DFG_JIT)
 
 #include "DFGAbstractInterpreterInlines.h"
+#include "DFGBlockSet.h"
 #include "DFGClobberSet.h"
 #include "DFGGraph.h"
 #include "DFGInPlaceAbstractState.h"
@@ -56,8 +57,8 @@ public:
         ASSERT(m_graph.m_refCountState == EverythingIsLive);
         
         m_count = 0;
-        
-        if (m_verbose && !shouldDumpGraphAtEachPhase(m_graph.m_plan.mode)) {
+
+        if (m_verbose && !shouldDumpGraphAtEachPhase(m_graph.m_plan.mode())) {
             dataLog("Graph before CFA:\n");
             m_graph.dump();
         }
@@ -81,57 +82,6 @@ public:
         } while (m_changed);
         
         if (m_graph.m_form != SSA) {
-            if (m_verbose)
-                dataLog("   Widening state at OSR entry block.\n");
-            
-            ASSERT(!m_changed);
-            
-            // Widen the abstract values at the block that serves as the must-handle OSR entry.
-            for (BlockIndex blockIndex = m_graph.numBlocks(); blockIndex--;) {
-                BasicBlock* block = m_graph.block(blockIndex);
-                if (!block)
-                    continue;
-                
-                if (!block->isOSRTarget)
-                    continue;
-                if (block->bytecodeBegin != m_graph.m_plan.osrEntryBytecodeIndex)
-                    continue;
-                
-                if (m_verbose)
-                    dataLog("   Found must-handle block: ", *block, "\n");
-                
-                bool changed = false;
-                for (size_t i = m_graph.m_plan.mustHandleValues.size(); i--;) {
-                    int operand = m_graph.m_plan.mustHandleValues.operandForIndex(i);
-                    JSValue value = m_graph.m_plan.mustHandleValues[i];
-                    Node* node = block->variablesAtHead.operand(operand);
-                    if (!node) {
-                        if (m_verbose)
-                            dataLog("   Not live: ", VirtualRegister(operand), "\n");
-                        continue;
-                    }
-                    
-                    if (m_verbose)
-                        dataLog("   Widening ", VirtualRegister(operand), " with ", value, "\n");
-
-                    AbstractValue& target = block->valuesAtHead.operand(operand);
-                    changed |= target.mergeOSREntryValue(m_graph, value);
-                    target.fixTypeForRepresentation(
-                        m_graph, resultFor(node->variableAccessData()->flushFormat()));
-                }
-                
-                if (changed || !block->cfaHasVisited) {
-                    m_changed = true;
-                    block->cfaShouldRevisit = true;
-                }
-            }
-
-            // Propagate any of the changes we just introduced.
-            while (m_changed) {
-                m_changed = false;
-                performForwardCFA();
-            }
-            
             // Make sure we record the intersection of all proofs that we ever allowed the
             // compiler to rely upon.
             for (BlockIndex blockIndex = m_graph.numBlocks(); blockIndex--;) {
@@ -140,8 +90,15 @@ public:
                     continue;
                 
                 block->intersectionOfCFAHasVisited &= block->cfaHasVisited;
-                for (unsigned i = block->intersectionOfPastValuesAtHead.size(); i--;)
-                    block->intersectionOfPastValuesAtHead[i].filter(block->valuesAtHead[i]);
+                for (unsigned i = block->intersectionOfPastValuesAtHead.size(); i--;) {
+                    AbstractValue value = block->valuesAtHead[i];
+                    // We need to guarantee that when we do an OSR entry, we validate the incoming
+                    // value as if it could be live past an invalidation point. Otherwise, we may
+                    // OSR enter with a value with the wrong structure, and an InvalidationPoint's
+                    // promise of filtering the structure set of certain values is no longer upheld.
+                    value.m_structure.observeInvalidationPoint();
+                    block->intersectionOfPastValuesAtHead[i].filter(value);
+                }
             }
         }
         
@@ -157,6 +114,7 @@ private:
             return;
         if (m_verbose)
             dataLog("   Block ", *block, ":\n");
+        
         m_state.beginBasicBlock(block);
         if (m_verbose) {
             dataLog("      head vars: ", block->valuesAtHead, "\n");
@@ -171,7 +129,7 @@ private:
                 if (!safeToExecute(m_state, m_graph, node))
                     dataLog("(UNSAFE) ");
                 
-                dataLog(m_state.variables(), " ", m_interpreter);
+                dataLog(m_state.variablesForDebugging(), " ", m_interpreter);
                 
                 dataLogF("\n");
             }
@@ -181,7 +139,8 @@ private:
                 break;
             }
             
-            if (m_state.didClobberOrFolded() != writesOverlap(m_graph, node, JSCell_structureID))
+            if (!ASSERT_DISABLED
+                && m_state.didClobberOrFolded() != writesOverlap(m_graph, node, JSCell_structureID))
                 DFG_CRASH(m_graph, node, toCString("AI-clobberize disagreement; AI says ", m_state.clobberState(), " while clobberize says ", writeSet(m_graph, node)).data());
         }
         if (m_verbose) {
@@ -202,7 +161,7 @@ private:
     {
         ++m_count;
         if (m_verbose)
-            dataLogF("CFA [%u]\n", ++m_count);
+            dataLogF("CFA [%u]\n", m_count);
         
         for (BlockIndex blockIndex = 0; blockIndex < m_graph.numBlocks(); ++blockIndex)
             performBlockCFA(m_graph.block(blockIndex));

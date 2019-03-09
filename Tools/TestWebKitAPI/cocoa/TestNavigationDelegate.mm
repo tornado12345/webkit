@@ -29,9 +29,15 @@
 #import "Utilities.h"
 #import <wtf/RetainPtr.h>
 
-#if WK_API_ENABLED
-
 @implementation TestNavigationDelegate
+
+- (void)webView:(WKWebView *)webView decidePolicyForNavigationAction:(WKNavigationAction *)navigationAction decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler
+{
+    if (_decidePolicyForNavigationAction)
+        _decidePolicyForNavigationAction(navigationAction, decisionHandler);
+    else
+        decisionHandler(WKNavigationActionPolicyAllow);
+}
 
 - (void)webView:(WKWebView *)webView didStartProvisionalNavigation:(WKNavigation *)navigation
 {
@@ -116,9 +122,9 @@
 
     self.navigationDelegate = nil;
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
     __block bool presentationUpdateHappened = false;
-    [self _doAfterNextPresentationUpdate:^{
+    [self _doAfterNextPresentationUpdateWithoutWaitingForAnimatedResizeForTesting:^{
         presentationUpdateHappened = true;
     }];
     TestWebKitAPI::Util::run(&presentationUpdateHappened);
@@ -126,5 +132,3 @@
 }
 
 @end
-
-#endif

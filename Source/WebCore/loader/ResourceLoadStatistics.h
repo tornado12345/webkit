@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2017 Apple Inc.  All rights reserved.
+ * Copyright (C) 2016-2018 Apple Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,9 +25,12 @@
 
 #pragma once
 
-#include "URL.h"
+#include "CanvasActivityRecord.h"
+#include "RegistrableDomain.h"
 #include <wtf/HashCountedSet.h>
 #include <wtf/HashSet.h>
+#include <wtf/OptionSet.h>
+#include <wtf/URL.h>
 #include <wtf/WallTime.h>
 #include <wtf/text/StringHash.h>
 #include <wtf/text/WTFString.h>
@@ -38,8 +41,8 @@ class KeyedDecoder;
 class KeyedEncoder;
 
 struct ResourceLoadStatistics {
-    explicit ResourceLoadStatistics(const String& primaryDomain)
-        : highLevelDomain(primaryDomain)
+    explicit ResourceLoadStatistics(const RegistrableDomain& domain)
+        : registrableDomain { domain }
     {
     }
 
@@ -50,17 +53,16 @@ struct ResourceLoadStatistics {
     ResourceLoadStatistics(ResourceLoadStatistics&&) = default;
     ResourceLoadStatistics& operator=(ResourceLoadStatistics&&) = default;
 
-    WEBCORE_EXPORT static String primaryDomain(const URL&);
-    WEBCORE_EXPORT static String primaryDomain(const String& host);
+    WEBCORE_EXPORT static WallTime reduceTimeResolution(WallTime);
 
     WEBCORE_EXPORT void encode(KeyedEncoder&) const;
     WEBCORE_EXPORT bool decode(KeyedDecoder&, unsigned modelVersion);
 
-    String toString() const;
+    WEBCORE_EXPORT String toString() const;
 
     WEBCORE_EXPORT void merge(const ResourceLoadStatistics&);
 
-    String highLevelDomain;
+    RegistrableDomain registrableDomain;
 
     WallTime lastSeen;
     
@@ -71,19 +73,21 @@ struct ResourceLoadStatistics {
     bool grandfathered { false };
 
     // Storage access
-    HashSet<String> storageAccessUnderTopFrameOrigins;
+    HashSet<RegistrableDomain> storageAccessUnderTopFrameDomains;
 
     // Top frame stats
-    HashCountedSet<String> topFrameUniqueRedirectsTo;
-    HashCountedSet<String> topFrameUniqueRedirectsFrom;
+    HashSet<RegistrableDomain> topFrameUniqueRedirectsTo;
+    HashSet<RegistrableDomain> topFrameUniqueRedirectsFrom;
+    HashSet<RegistrableDomain> topFrameLinkDecorationsFrom;
+    bool gotLinkDecorationFromPrevalentResource { false };
 
     // Subframe stats
-    HashCountedSet<String> subframeUnderTopFrameOrigins;
+    HashSet<RegistrableDomain> subframeUnderTopFrameDomains;
     
     // Subresource stats
-    HashCountedSet<String> subresourceUnderTopFrameOrigins;
-    HashCountedSet<String> subresourceUniqueRedirectsTo;
-    HashCountedSet<String> subresourceUniqueRedirectsFrom;
+    HashSet<RegistrableDomain> subresourceUnderTopFrameDomains;
+    HashSet<RegistrableDomain> subresourceUniqueRedirectsTo;
+    HashSet<RegistrableDomain> subresourceUniqueRedirectsFrom;
 
     // Prevalent resource stats
     bool isPrevalentResource { false };
@@ -92,9 +96,34 @@ struct ResourceLoadStatistics {
     unsigned timesAccessedAsFirstPartyDueToUserInteraction { 0 };
     unsigned timesAccessedAsFirstPartyDueToStorageAccessAPI { 0 };
 
-    // In-memory only
-    bool isMarkedForCookiePartitioning { false };
-    bool isMarkedForCookieBlocking { false };
+    enum class NavigatorAPI : uint64_t {
+        AppVersion = 1 << 0,
+        UserAgent = 1 << 1,
+        Plugins = 1 << 2,
+        MimeTypes = 1 << 3,
+        CookieEnabled = 1 << 4,
+        JavaEnabled = 1 << 5,
+    };
+    enum class ScreenAPI : uint64_t {
+        Height = 1 << 0,
+        Width = 1 << 1,
+        ColorDepth = 1 << 2,
+        PixelDepth = 1 << 3,
+        AvailLeft = 1 << 4,
+        AvailTop = 1 << 5,
+        AvailHeight = 1 << 6,
+        AvailWidth = 1 << 7,
+    };
+#if ENABLE(WEB_API_STATISTICS)
+    // This set represents the registrable domain of the top frame where web API
+    // were used in the top frame or one of its subframes.
+    HashCountedSet<String> topFrameRegistrableDomainsWhichAccessedWebAPIs;
+    HashSet<String> fontsFailedToLoad;
+    HashSet<String> fontsSuccessfullyLoaded;
+    CanvasActivityRecord canvasActivityRecord;
+    OptionSet<NavigatorAPI> navigatorFunctionsAccessed;
+    OptionSet<ScreenAPI> screenFunctionsAccessed;
+#endif
 };
 
 } // namespace WebCore

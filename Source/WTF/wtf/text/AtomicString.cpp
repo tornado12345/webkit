@@ -21,13 +21,13 @@
  */
 
 #include "config.h"
-#include "AtomicString.h"
+#include <wtf/text/AtomicString.h>
 
 #include <mutex>
 #include <wtf/MainThread.h>
 #include <wtf/text/IntegerToStringConversion.h>
 
-#include "dtoa.h"
+#include <wtf/dtoa.h>
 
 namespace WTF {
 
@@ -99,6 +99,12 @@ AtomicString AtomicString::number(unsigned long number)
 AtomicString AtomicString::number(unsigned long long number)
 {
     return numberToStringUnsigned<AtomicString>(number);
+}
+
+AtomicString AtomicString::number(float number)
+{
+    NumberToStringBuffer buffer;
+    return numberToString(number, buffer);
 }
 
 AtomicString AtomicString::number(double number)

@@ -108,11 +108,8 @@ class EmptyChromeClient : public ChromeClient {
 
     IntPoint screenToRootView(const IntPoint& p) const final { return p; }
     IntRect rootViewToScreen(const IntRect& r) const final { return r; }
-
-#if PLATFORM(IOS)
     IntPoint accessibilityScreenToRootView(const IntPoint& p) const final { return p; };
     IntRect rootViewToAccessibilityScreen(const IntRect& r) const final { return r; };
-#endif
 
     PlatformPageClient platformPageClient() const final { return 0; }
     void contentsSizeChanged(Frame&, const IntSize&) const final { }
@@ -132,13 +129,18 @@ class EmptyChromeClient : public ChromeClient {
     std::unique_ptr<ColorChooser> createColorChooser(ColorChooserClient&, const Color&) final;
 #endif
 
+#if ENABLE(DATALIST_ELEMENT)
+    std::unique_ptr<DataListSuggestionPicker> createDataListSuggestionPicker(DataListSuggestionsClient&) final;
+#endif
+
     void runOpenPanel(Frame&, FileChooser&) final;
+    void showShareSheet(ShareDataWithParsedURL&, CompletionHandler<void(bool)>&&) final;
     void loadIconForFiles(const Vector<String>&, FileIconLoader&) final { }
 
     void elementDidFocus(Element&) final { }
     void elementDidBlur(Element&) final { }
 
-#if !PLATFORM(IOS)
+#if !PLATFORM(IOS_FAMILY)
     void setCursor(const Cursor&) final { }
     void setCursorHiddenUntilMouseMoves(bool) final { }
 #endif
@@ -146,7 +148,7 @@ class EmptyChromeClient : public ChromeClient {
     void scrollRectIntoView(const IntRect&) const final { }
 
     void attachRootGraphicsLayer(Frame&, GraphicsLayer*) final { }
-    void attachViewOverlayGraphicsLayer(Frame&, GraphicsLayer*) final { }
+    void attachViewOverlayGraphicsLayer(GraphicsLayer*) final { }
     void setNeedsOneShotDrawingSynchronization() final { }
     void scheduleCompositingLayerFlush() final { }
 
@@ -160,11 +162,10 @@ class EmptyChromeClient : public ChromeClient {
     void didPreventDefaultForEvent() final { }
 #endif
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
     void didReceiveMobileDocType(bool) final { }
     void setNeedsScrollNotifications(Frame&, bool) final { }
     void observedContentChange(Frame&) final { }
-    void clearContentChangeObservers(Frame&) final { }
     void notifyRevealedSelectionByScrollingFrame(Frame&) final { }
     void didLayout(LayoutType) final { }
     void didStartOverflowScroll() final { }
@@ -178,13 +179,13 @@ class EmptyChromeClient : public ChromeClient {
 
     void webAppOrientationsUpdated() final { };
     void showPlaybackTargetPicker(bool, RouteSharingPolicy, const String&) final { };
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)
 
 #if ENABLE(ORIENTATION_EVENTS)
     int deviceOrientation() const final { return 0; }
 #endif
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
     bool isStopping() final { return false; }
 #endif
 
@@ -198,11 +199,7 @@ class EmptyChromeClient : public ChromeClient {
     RefPtr<Icon> createIconForFiles(const Vector<String>& /* filenames */) final { return nullptr; }
 };
 
-WEBCORE_EXPORT void fillWithEmptyClients(PageConfiguration&);
-WEBCORE_EXPORT UniqueRef<EditorClient> createEmptyEditorClient();
 DiagnosticLoggingClient& emptyDiagnosticLoggingClient();
-
-class EmptyFrameNetworkingContext;
-WEBCORE_EXPORT Ref<FrameNetworkingContext> createEmptyFrameNetworkingContext();
+WEBCORE_EXPORT PageConfiguration pageConfigurationWithEmptyClients();
 
 }

@@ -44,7 +44,6 @@
 
 #include <wtf/MainThread.h>
 #include <wtf/NeverDestroyed.h>
-#include <wtf/text/win/WCharStringExtras.h>
 
 SOFT_LINK_LIBRARY(Mf);
 SOFT_LINK_OPTIONAL(Mf, MFCreateSourceResolver, HRESULT, STDAPICALLTYPE, (IMFSourceResolver**));
@@ -54,14 +53,11 @@ SOFT_LINK_OPTIONAL(Mf, MFCreateTopologyNode, HRESULT, STDAPICALLTYPE, (MF_TOPOLO
 SOFT_LINK_OPTIONAL(Mf, MFGetService, HRESULT, STDAPICALLTYPE, (IUnknown*, REFGUID, REFIID, LPVOID*));
 SOFT_LINK_OPTIONAL(Mf, MFCreateAudioRendererActivate, HRESULT, STDAPICALLTYPE, (IMFActivate**));
 SOFT_LINK_OPTIONAL(Mf, MFCreateVideoRendererActivate, HRESULT, STDAPICALLTYPE, (HWND, IMFActivate**));
-SOFT_LINK_OPTIONAL(Mf, MFCreateSampleGrabberSinkActivate, HRESULT, STDAPICALLTYPE, (IMFMediaType*, IMFSampleGrabberSinkCallback*, IMFActivate**));
 SOFT_LINK_OPTIONAL(Mf, MFGetSupportedMimeTypes, HRESULT, STDAPICALLTYPE, (PROPVARIANT*));
 
 SOFT_LINK_LIBRARY(Mfplat);
 SOFT_LINK_OPTIONAL(Mfplat, MFStartup, HRESULT, STDAPICALLTYPE, (ULONG, DWORD));
 SOFT_LINK_OPTIONAL(Mfplat, MFShutdown, HRESULT, STDAPICALLTYPE, ());
-SOFT_LINK_OPTIONAL(Mfplat, MFCreateMemoryBuffer, HRESULT, STDAPICALLTYPE, (DWORD, IMFMediaBuffer**));
-SOFT_LINK_OPTIONAL(Mfplat, MFCreateSample, HRESULT, STDAPICALLTYPE, (IMFSample**));
 SOFT_LINK_OPTIONAL(Mfplat, MFCreateMediaType, HRESULT, STDAPICALLTYPE, (IMFMediaType**));
 SOFT_LINK_OPTIONAL(Mfplat, MFFrameRateToAverageTimePerFrame, HRESULT, STDAPICALLTYPE, (UINT32, UINT32, UINT64*));
 
@@ -95,8 +91,8 @@ MediaPlayerPrivateMediaFoundation::MediaPlayerPrivateMediaFoundation(MediaPlayer
     , m_hasAudio(false)
     , m_hasVideo(false)
     , m_preparingToPlay(false)
-    , m_hwndVideo(nullptr)
     , m_volume(1.0)
+    , m_hwndVideo(nullptr)
     , m_networkState(MediaPlayer::Empty)
     , m_readyState(MediaPlayer::HaveNothing)
 {
@@ -145,7 +141,7 @@ static const HashSet<String, ASCIICaseInsensitiveHash>& mimeTypeCache()
     if (SUCCEEDED(hr)) {
         CALPWSTR mimeTypeArray = propVarMimeTypeArray.calpwstr;
         for (unsigned i = 0; i < mimeTypeArray.cElems; i++)
-            cachedTypes.get().add(nullTerminatedWCharToString(mimeTypeArray.pElems[i]));
+            cachedTypes.get().add(mimeTypeArray.pElems[i]);
     }
 
     PropVariantClear(&propVarMimeTypeArray);
@@ -253,7 +249,7 @@ void MediaPlayerPrivateMediaFoundation::seek(float time)
     propVariant.hVal.QuadPart = static_cast<__int64>(time * tenMegahertz);
     
     HRESULT hr = m_mediaSession->Start(&GUID_NULL, &propVariant);
-    ASSERT(SUCCEEDED(hr));
+    ASSERT_UNUSED(hr, SUCCEEDED(hr));
     PropVariantClear(&propVariant);
 
     m_player->timeChanged();
@@ -314,7 +310,7 @@ bool MediaPlayerPrivateMediaFoundation::setAllChannelVolumes(float volume)
 
     UINT32 channelsCount;
     HRESULT hr = audioVolume->GetChannelCount(&channelsCount);
-    ASSERT(SUCCEEDED(hr));
+    ASSERT_UNUSED(hr, SUCCEEDED(hr));
 
     Vector<float> volumes(channelsCount, volume);
     return SUCCEEDED(audioVolume->SetAllVolumes(channelsCount, volumes.data()));
@@ -426,7 +422,7 @@ bool MediaPlayerPrivateMediaFoundation::createSession()
     // Get next event.
     AsyncCallback* callback = new AsyncCallback(this, true);
     HRESULT hr = m_mediaSession->BeginGetEvent(callback, nullptr);
-    ASSERT(SUCCEEDED(hr));
+    ASSERT_UNUSED(hr, SUCCEEDED(hr));
 
     return true;
 }
@@ -459,7 +455,7 @@ bool MediaPlayerPrivateMediaFoundation::endSession()
         return false;
 
     HRESULT hr = MFShutdownPtr()();
-    ASSERT(SUCCEEDED(hr));
+    ASSERT_UNUSED(hr, SUCCEEDED(hr));
 
     return true;
 }
@@ -473,7 +469,7 @@ bool MediaPlayerPrivateMediaFoundation::startCreateMediaSource(const String& url
         return false;
 
     COMPtr<IUnknown> cancelCookie;
-    Vector<wchar_t> urlSource = stringToNullTerminatedWChar(url);
+    Vector<wchar_t> urlSource = url.wideCharacters();
 
     AsyncCallback* callback = new AsyncCallback(this, false);
 
@@ -499,7 +495,7 @@ bool MediaPlayerPrivateMediaFoundation::endCreatedMediaSource(IMFAsyncResult* as
     hr = asyncResult->GetStatus();
     m_loadingProgress = SUCCEEDED(hr);
 
-    callOnMainThread([weakPtr = m_weakPtrFactory.createWeakPtr(*this)] {
+    callOnMainThread([weakPtr = makeWeakPtr(*this)] {
         if (!weakPtr)
             return;
         weakPtr->onCreatedMediaSource();
@@ -528,7 +524,7 @@ bool MediaPlayerPrivateMediaFoundation::endGetEvent(IMFAsyncResult* asyncResult)
 
     switch (mediaEventType) {
     case MESessionTopologySet: {
-        callOnMainThread([weakPtr = m_weakPtrFactory.createWeakPtr(*this)] {
+        callOnMainThread([weakPtr = makeWeakPtr(*this)] {
             if (!weakPtr)
                 return;
             weakPtr->onTopologySet();
@@ -537,7 +533,7 @@ bool MediaPlayerPrivateMediaFoundation::endGetEvent(IMFAsyncResult* asyncResult)
     }
 
     case MESessionStarted: {
-        callOnMainThread([weakPtr = m_weakPtrFactory.createWeakPtr(*this)] {
+        callOnMainThread([weakPtr = makeWeakPtr(*this)] {
             if (!weakPtr)
                 return;
             weakPtr->onSessionStarted();
@@ -546,7 +542,7 @@ bool MediaPlayerPrivateMediaFoundation::endGetEvent(IMFAsyncResult* asyncResult)
     }
 
     case MEBufferingStarted: {
-        callOnMainThread([weakPtr = m_weakPtrFactory.createWeakPtr(*this)] {
+        callOnMainThread([weakPtr = makeWeakPtr(*this)] {
             if (!weakPtr)
                 return;
             weakPtr->onBufferingStarted();
@@ -555,7 +551,7 @@ bool MediaPlayerPrivateMediaFoundation::endGetEvent(IMFAsyncResult* asyncResult)
     }
 
     case MEBufferingStopped: {
-        callOnMainThread([weakPtr = m_weakPtrFactory.createWeakPtr(*this)] {
+        callOnMainThread([weakPtr = makeWeakPtr(*this)] {
             if (!weakPtr)
                 return;
             weakPtr->onBufferingStopped();
@@ -564,7 +560,7 @@ bool MediaPlayerPrivateMediaFoundation::endGetEvent(IMFAsyncResult* asyncResult)
     }
 
     case MESessionEnded: {
-        callOnMainThread([weakPtr = m_weakPtrFactory.createWeakPtr(*this)] {
+        callOnMainThread([weakPtr = makeWeakPtr(*this)] {
             if (!weakPtr)
                 return;
             weakPtr->onSessionEnded();
@@ -905,7 +901,7 @@ void MediaPlayerPrivateMediaFoundation::onCreatedMediaSource()
 
     // Set the topology on the media session.
     HRESULT hr = m_mediaSession->SetTopology(0, m_topology.get());
-    ASSERT(SUCCEEDED(hr));
+    ASSERT_UNUSED(hr, SUCCEEDED(hr));
 }
 
 void MediaPlayerPrivateMediaFoundation::onTopologySet()
@@ -1723,7 +1719,7 @@ HRESULT MediaPlayerPrivateMediaFoundation::CustomVideoPresenter::processInputNot
     
     // Invalidate the video area
     if (m_mediaPlayer) {
-        callOnMainThread([weakPtr = m_mediaPlayer->m_weakPtrFactory.createWeakPtr(*m_mediaPlayer)] {
+        callOnMainThread([weakPtr = makeWeakPtr(*m_mediaPlayer)] {
             if (weakPtr)
                 weakPtr->invalidateFrameView();
         });
@@ -2962,6 +2958,8 @@ void MediaPlayerPrivateMediaFoundation::Direct3DPresenter::paintCurrentFrame(Web
             break;
         case D3DFMT_X8R8G8B8:
             cairoFormat = CAIRO_FORMAT_RGB24;
+            break;
+        default:
             break;
         }
 

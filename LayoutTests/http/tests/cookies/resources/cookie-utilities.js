@@ -32,6 +32,8 @@ function getDOMCookies()
 {
     if (!g_baseDocumentWhenFetchingDOMCookies)
         g_baseDocumentWhenFetchingDOMCookies = document;
+    if (!g_baseDocumentWhenFetchingDOMCookies.cookie)
+        return {};
     let cookies = g_baseDocumentWhenFetchingDOMCookies.cookie.split("; ");
     let result = {};
     for (let keyAndValuePair of cookies) {
@@ -227,4 +229,20 @@ function shouldHaveDOMCookieWithValue(name, expectedValue)
         testPassed(`Has DOM cookie "${name}" with value ${value}.`);
     else
         testFailed(`DOM cookie "${name}" should have value ${expectedValue}. Was ${value}.`);
+}
+
+function setCookieUsingWebSocketFromHost(host)
+{
+    var promise = new Promise(resolve => {
+        var websocket = new WebSocket(`ws://${host}:8880/websocket/tests/hybi/cookie?set`);
+        websocket.onclose = () => resolve();
+    });
+    return promise;
+}
+
+function createExpiresDateFromMaxAge(maxAgeInSeconds)
+{
+    let date = new Date();
+    date.setTime(date.getTime() + (maxAgeInSeconds * 1000));
+    return date.toUTCString();
 }

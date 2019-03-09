@@ -41,17 +41,10 @@ NetworkProcessCreationParameters::NetworkProcessCreationParameters()
 
 void NetworkProcessCreationParameters::encode(IPC::Encoder& encoder) const
 {
-    encoder << defaultSessionParameters;
-    encoder << privateBrowsingEnabled;
     encoder.encodeEnum(cacheModel);
-    encoder << diskCacheSizeOverride;
     encoder << canHandleHTTPSServerTrustEvaluation;
-    encoder << cacheStorageDirectory;
-    encoder << cacheStoragePerOriginQuota;
-    encoder << cacheStorageDirectoryExtensionHandle;
     encoder << diskCacheDirectory;
     encoder << diskCacheDirectoryExtensionHandle;
-    encoder << shouldEnableNetworkCache;
     encoder << shouldEnableNetworkCacheEfficacyLogging;
 #if ENABLE(NETWORK_CACHE_SPECULATIVE_REVALIDATION)
     encoder << shouldEnableNetworkCacheSpeculativeRevalidation;
@@ -59,53 +52,30 @@ void NetworkProcessCreationParameters::encode(IPC::Encoder& encoder) const
 #if PLATFORM(MAC)
     encoder << uiProcessCookieStorageIdentifier;
 #endif
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
     encoder << cookieStorageDirectoryExtensionHandle;
     encoder << containerCachesDirectoryExtensionHandle;
     encoder << parentBundleDirectoryExtensionHandle;
 #endif
     encoder << shouldSuppressMemoryPressureHandler;
     encoder << shouldUseTestingNetworkSession;
-    encoder << loadThrottleLatency;
     encoder << urlSchemesRegisteredForCustomProtocols;
-    encoder << presentingApplicationPID;
 #if PLATFORM(COCOA)
-    encoder << parentProcessName;
     encoder << uiProcessBundleIdentifier;
-    encoder << nsURLCacheMemoryCapacity;
-    encoder << nsURLCacheDiskCapacity;
-    encoder << sourceApplicationBundleIdentifier;
-    encoder << sourceApplicationSecondaryIdentifier;
-#if PLATFORM(IOS)
+    encoder << uiProcessSDKVersion;
+#if PLATFORM(IOS_FAMILY)
     encoder << ctDataConnectionServiceType;
 #endif
-    encoder << httpProxy;
-    encoder << httpsProxy;
-#if PLATFORM(COCOA)
     IPC::encode(encoder, networkATSContext.get());
-#endif
-    encoder << cookieStoragePartitioningEnabled;
     encoder << storageAccessAPIEnabled;
+    encoder << suppressesConnectionTerminationOnSystemChange;
 #endif
+    encoder << defaultDataStoreParameters;
 #if USE(SOUP)
-    encoder << cookiePersistentStoragePath;
-    encoder << cookiePersistentStorageType;
     encoder.encodeEnum(cookieAcceptPolicy);
     encoder << ignoreTLSErrors;
     encoder << languages;
     encoder << proxySettings;
-#elif USE(CURL)
-    encoder << cookiePersistentStorageFile;
-#endif
-#if HAVE(CFNETWORK_STORAGE_PARTITIONING) && !RELEASE_LOG_DISABLED
-    encoder << logCookieInformation;
-#endif
-#if OS(LINUX)
-    encoder << memoryPressureMonitorHandle;
-#endif
-#if ENABLE(NETWORK_CAPTURE)
-    encoder << recordReplayMode;
-    encoder << recordReplayCacheLocation;
 #endif
 
     encoder << urlSchemesRegisteredAsSecure;
@@ -116,47 +86,32 @@ void NetworkProcessCreationParameters::encode(IPC::Encoder& encoder) const
     encoder << urlSchemesRegisteredAsCORSEnabled;
     encoder << urlSchemesRegisteredAsCanDisplayOnlyIfCanRequest;
 
-    encoder << trackNetworkActivity;
+#if ENABLE(PROXIMITY_NETWORKING)
+    encoder << wirelessContextIdentifier;
+#endif
+
+#if ENABLE(SERVICE_WORKER)
+    encoder << serviceWorkerRegistrationDirectory << serviceWorkerRegistrationDirectoryExtensionHandle << urlSchemesServiceWorkersCanHandle << shouldDisableServiceWorkerProcessTerminationDelay;
+#endif
+    encoder << shouldEnableITPDatabase;
 }
 
 bool NetworkProcessCreationParameters::decode(IPC::Decoder& decoder, NetworkProcessCreationParameters& result)
 {
-    std::optional<NetworkSessionCreationParameters> defaultSessionParameters;
-    decoder >> defaultSessionParameters;
-    if (!defaultSessionParameters)
-        return false;
-    result.defaultSessionParameters = WTFMove(*defaultSessionParameters);
-
-    if (!decoder.decode(result.privateBrowsingEnabled))
-        return false;
     if (!decoder.decodeEnum(result.cacheModel))
-        return false;
-    if (!decoder.decode(result.diskCacheSizeOverride))
         return false;
     if (!decoder.decode(result.canHandleHTTPSServerTrustEvaluation))
         return false;
-    if (!decoder.decode(result.cacheStorageDirectory))
-        return false;
-    if (!decoder.decode(result.cacheStoragePerOriginQuota))
-        return false;
-    
-    std::optional<SandboxExtension::Handle> cacheStorageDirectoryExtensionHandle;
-    decoder >> cacheStorageDirectoryExtensionHandle;
-    if (!cacheStorageDirectoryExtensionHandle)
-        return false;
-    result.cacheStorageDirectoryExtensionHandle = WTFMove(*cacheStorageDirectoryExtensionHandle);
 
     if (!decoder.decode(result.diskCacheDirectory))
         return false;
     
-    std::optional<SandboxExtension::Handle> diskCacheDirectoryExtensionHandle;
+    Optional<SandboxExtension::Handle> diskCacheDirectoryExtensionHandle;
     decoder >> diskCacheDirectoryExtensionHandle;
     if (!diskCacheDirectoryExtensionHandle)
         return false;
     result.diskCacheDirectoryExtensionHandle = WTFMove(*diskCacheDirectoryExtensionHandle);
 
-    if (!decoder.decode(result.shouldEnableNetworkCache))
-        return false;
     if (!decoder.decode(result.shouldEnableNetworkCacheEfficacyLogging))
         return false;
 #if ENABLE(NETWORK_CACHE_SPECULATIVE_REVALIDATION)
@@ -167,20 +122,20 @@ bool NetworkProcessCreationParameters::decode(IPC::Decoder& decoder, NetworkProc
     if (!decoder.decode(result.uiProcessCookieStorageIdentifier))
         return false;
 #endif
-#if PLATFORM(IOS)
-    std::optional<SandboxExtension::Handle> cookieStorageDirectoryExtensionHandle;
+#if PLATFORM(IOS_FAMILY)
+    Optional<SandboxExtension::Handle> cookieStorageDirectoryExtensionHandle;
     decoder >> cookieStorageDirectoryExtensionHandle;
     if (!cookieStorageDirectoryExtensionHandle)
         return false;
     result.cookieStorageDirectoryExtensionHandle = WTFMove(*cookieStorageDirectoryExtensionHandle);
 
-    std::optional<SandboxExtension::Handle> containerCachesDirectoryExtensionHandle;
+    Optional<SandboxExtension::Handle> containerCachesDirectoryExtensionHandle;
     decoder >> containerCachesDirectoryExtensionHandle;
     if (!containerCachesDirectoryExtensionHandle)
         return false;
     result.containerCachesDirectoryExtensionHandle = WTFMove(*containerCachesDirectoryExtensionHandle);
 
-    std::optional<SandboxExtension::Handle> parentBundleDirectoryExtensionHandle;
+    Optional<SandboxExtension::Handle> parentBundleDirectoryExtensionHandle;
     decoder >> parentBundleDirectoryExtensionHandle;
     if (!parentBundleDirectoryExtensionHandle)
         return false;
@@ -190,48 +145,32 @@ bool NetworkProcessCreationParameters::decode(IPC::Decoder& decoder, NetworkProc
         return false;
     if (!decoder.decode(result.shouldUseTestingNetworkSession))
         return false;
-    if (!decoder.decode(result.loadThrottleLatency))
-        return false;
     if (!decoder.decode(result.urlSchemesRegisteredForCustomProtocols))
         return false;
-    if (!decoder.decode(result.presentingApplicationPID))
-        return false;
 #if PLATFORM(COCOA)
-    if (!decoder.decode(result.parentProcessName))
-        return false;
     if (!decoder.decode(result.uiProcessBundleIdentifier))
         return false;
-    if (!decoder.decode(result.nsURLCacheMemoryCapacity))
+    if (!decoder.decode(result.uiProcessSDKVersion))
         return false;
-    if (!decoder.decode(result.nsURLCacheDiskCapacity))
-        return false;
-    if (!decoder.decode(result.sourceApplicationBundleIdentifier))
-        return false;
-    if (!decoder.decode(result.sourceApplicationSecondaryIdentifier))
-        return false;
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
     if (!decoder.decode(result.ctDataConnectionServiceType))
         return false;
 #endif
-    if (!decoder.decode(result.httpProxy))
-        return false;
-    if (!decoder.decode(result.httpsProxy))
-        return false;
-#if PLATFORM(COCOA)
     if (!IPC::decode(decoder, result.networkATSContext))
-        return false;
-#endif
-    if (!decoder.decode(result.cookieStoragePartitioningEnabled))
         return false;
     if (!decoder.decode(result.storageAccessAPIEnabled))
         return false;
+    if (!decoder.decode(result.suppressesConnectionTerminationOnSystemChange))
+        return false;
 #endif
 
+    Optional<WebsiteDataStoreParameters> defaultDataStoreParameters;
+    decoder >> defaultDataStoreParameters;
+    if (!defaultDataStoreParameters)
+        return false;
+    result.defaultDataStoreParameters = WTFMove(*defaultDataStoreParameters);
+
 #if USE(SOUP)
-    if (!decoder.decode(result.cookiePersistentStoragePath))
-        return false;
-    if (!decoder.decode(result.cookiePersistentStorageType))
-        return false;
     if (!decoder.decodeEnum(result.cookieAcceptPolicy))
         return false;
     if (!decoder.decode(result.ignoreTLSErrors))
@@ -239,26 +178,6 @@ bool NetworkProcessCreationParameters::decode(IPC::Decoder& decoder, NetworkProc
     if (!decoder.decode(result.languages))
         return false;
     if (!decoder.decode(result.proxySettings))
-        return false;
-#elif USE(CURL)
-    if (!decoder.decode(result.cookiePersistentStorageFile))
-        return false;
-#endif
-
-#if HAVE(CFNETWORK_STORAGE_PARTITIONING) && !RELEASE_LOG_DISABLED
-    if (!decoder.decode(result.logCookieInformation))
-        return false;
-#endif
-
-#if OS(LINUX)
-    if (!decoder.decode(result.memoryPressureMonitorHandle))
-        return false;
-#endif
-
-#if ENABLE(NETWORK_CAPTURE)
-    if (!decoder.decode(result.recordReplayMode))
-        return false;
-    if (!decoder.decode(result.recordReplayCacheLocation))
         return false;
 #endif
 
@@ -277,7 +196,29 @@ bool NetworkProcessCreationParameters::decode(IPC::Decoder& decoder, NetworkProc
     if (!decoder.decode(result.urlSchemesRegisteredAsCanDisplayOnlyIfCanRequest))
         return false;
 
-    if (!decoder.decode(result.trackNetworkActivity))
+#if ENABLE(PROXIMITY_NETWORKING)
+    if (!decoder.decode(result.wirelessContextIdentifier))
+        return false;
+#endif
+
+#if ENABLE(SERVICE_WORKER)
+    if (!decoder.decode(result.serviceWorkerRegistrationDirectory))
+        return false;
+    
+    Optional<SandboxExtension::Handle> serviceWorkerRegistrationDirectoryExtensionHandle;
+    decoder >> serviceWorkerRegistrationDirectoryExtensionHandle;
+    if (!serviceWorkerRegistrationDirectoryExtensionHandle)
+        return false;
+    result.serviceWorkerRegistrationDirectoryExtensionHandle = WTFMove(*serviceWorkerRegistrationDirectoryExtensionHandle);
+    
+    if (!decoder.decode(result.urlSchemesServiceWorkersCanHandle))
+        return false;
+    
+    if (!decoder.decode(result.shouldDisableServiceWorkerProcessTerminationDelay))
+        return false;
+#endif
+
+    if (!decoder.decode(result.shouldEnableITPDatabase))
         return false;
 
     return true;

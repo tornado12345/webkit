@@ -66,21 +66,20 @@ Ref<ServicesOverlayController::Highlight> ServicesOverlayController::Highlight::
 }
 
 ServicesOverlayController::Highlight::Highlight(ServicesOverlayController& controller, Type type, RetainPtr<DDHighlightRef> ddHighlight, Ref<WebCore::Range>&& range)
-    : m_range(WTFMove(range))
+    : m_controller(&controller)
+    , m_range(WTFMove(range))
+    , m_graphicsLayer(GraphicsLayer::create(controller.page().chrome().client().graphicsLayerFactory(), *this))
     , m_type(type)
-    , m_controller(&controller)
 {
     ASSERT(ddHighlight);
 
-    auto& page = controller.page();
-    m_graphicsLayer = GraphicsLayer::create(page.chrome().client().graphicsLayerFactory(), *this);
     m_graphicsLayer->setDrawsContent(true);
 
     setDDHighlight(ddHighlight.get());
 
     // Set directly on the PlatformCALayer so that when we leave the 'from' value implicit
     // in our animations, we get the right initial value regardless of flush timing.
-    downcast<GraphicsLayerCA>(*layer()).platformCALayer()->setOpacity(0);
+    downcast<GraphicsLayerCA>(layer()).platformCALayer()->setOpacity(0);
 
     controller.didCreateHighlight(this);
 }
@@ -113,7 +112,7 @@ void ServicesOverlayController::Highlight::setDDHighlight(DDHighlightRef highlig
 
 void ServicesOverlayController::Highlight::invalidate()
 {
-    layer()->removeFromParent();
+    layer().removeFromParent();
     m_controller = nullptr;
 }
 
@@ -122,7 +121,7 @@ void ServicesOverlayController::Highlight::notifyFlushRequired(const GraphicsLay
     if (!m_controller)
         return;
 
-    m_controller->page().chrome().client().scheduleCompositingLayerFlush();
+    m_controller->page().renderingUpdateScheduler().scheduleRenderingUpdate();
 }
 
 void ServicesOverlayController::Highlight::paintContents(const GraphicsLayer*, GraphicsContext& graphicsContext, GraphicsLayerPaintingPhase, const FloatRect&, GraphicsLayerPaintBehavior)
@@ -132,7 +131,9 @@ void ServicesOverlayController::Highlight::paintContents(const GraphicsLayer*, G
 
     CGContextRef cgContext = graphicsContext.platformContext();
 
+    ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     CGLayerRef highlightLayer = DDHighlightGetLayerWithContext(ddHighlight(), cgContext);
+    ALLOW_DEPRECATED_DECLARATIONS_END
     CGRect highlightBoundingRect = DDHighlightGetBoundingRect(ddHighlight());
     highlightBoundingRect.origin = CGPointZero;
 
@@ -155,8 +156,8 @@ void ServicesOverlayController::Highlight::fadeIn()
     [animation setRemovedOnCompletion:false];
     [animation setToValue:@1];
 
-    RefPtr<PlatformCAAnimation> platformAnimation = PlatformCAAnimationCocoa::create(animation.get());
-    downcast<GraphicsLayerCA>(*layer()).platformCALayer()->addAnimationForKey("FadeHighlightIn", *platformAnimation);
+    auto platformAnimation = PlatformCAAnimationCocoa::create(animation.get());
+    downcast<GraphicsLayerCA>(layer()).platformCALayer()->addAnimationForKey("FadeHighlightIn", platformAnimation.get());
 }
 
 void ServicesOverlayController::Highlight::fadeOut()
@@ -173,8 +174,8 @@ void ServicesOverlayController::Highlight::fadeOut()
         retainedSelf->didFinishFadeOutAnimation();
     }];
 
-    RefPtr<PlatformCAAnimation> platformAnimation = PlatformCAAnimationCocoa::create(animation.get());
-    downcast<GraphicsLayerCA>(*layer()).platformCALayer()->addAnimationForKey("FadeHighlightOut", *platformAnimation);
+    auto platformAnimation = PlatformCAAnimationCocoa::create(animation.get());
+    downcast<GraphicsLayerCA>(layer()).platformCALayer()->addAnimationForKey("FadeHighlightOut", platformAnimation.get());
     [CATransaction commit];
 }
 
@@ -186,7 +187,7 @@ void ServicesOverlayController::Highlight::didFinishFadeOutAnimation()
     if (m_controller->activeHighlight() == this)
         return;
 
-    layer()->removeFromParent();
+    layer().removeFromParent();
 }
 
 static IntRect textQuadsToBoundingRectForRange(Range& range)
@@ -712,7 +713,8 @@ void ServicesOverlayController::determineActiveHighlight(bool& mouseIsOverActive
         m_activeHighlight = WTFMove(m_nextActiveHighlight);
 
         if (m_activeHighlight) {
-            m_servicesOverlay->layer().addChild(m_activeHighlight->layer());
+            Ref<GraphicsLayer> highlightLayer = m_activeHighlight->layer();
+            m_servicesOverlay->layer().addChild(WTFMove(highlightLayer));
             m_activeHighlight->fadeIn();
         }
     }

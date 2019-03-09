@@ -29,6 +29,8 @@
 #include "CSSPropertyNames.h"
 #include "CSSValueKeywords.h"
 #include "CSSValuePool.h"
+#include "Chrome.h"
+#include "ChromeClient.h"
 #include "DOMTokenList.h"
 #include "DocumentFragment.h"
 #include "ElementAncestorIterator.h"
@@ -74,7 +76,6 @@ namespace WebCore {
 WTF_MAKE_ISO_ALLOCATED_IMPL(HTMLElement);
 
 using namespace HTMLNames;
-using namespace WTF;
 
 Ref<HTMLElement> HTMLElement::create(const QualifiedName& tagName, Document& document)
 {
@@ -187,7 +188,7 @@ void HTMLElement::collectStyleForPresentationAttribute(const QualifiedName& name
             addPropertyToPresentationAttributeStyle(style, CSSPropertyWordWrap, CSSValueBreakWord);
             addPropertyToPresentationAttributeStyle(style, CSSPropertyWebkitNbspMode, CSSValueSpace);
             addPropertyToPresentationAttributeStyle(style, CSSPropertyLineBreak, CSSValueAfterWhiteSpace);
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
             addPropertyToPresentationAttributeStyle(style, CSSPropertyWebkitTextSizeAdjust, CSSValueNone);
 #endif
             break;
@@ -448,6 +449,14 @@ void HTMLElement::parseAttribute(const QualifiedName& name, const AtomicString& 
             setTabIndexExplicitly(optionalTabIndex.value());
         return;
     }
+    
+    if (name == inputmodeAttr) {
+        auto& document = this->document();
+        if (this == document.focusedElement()) {
+            if (auto* page = document.page())
+                page->chrome().client().focusedElementDidChangeInputMode(*this, canonicalInputMode());
+        }
+    }
 
     auto& eventName = eventNameForEventHandlerAttribute(name);
     if (!eventName.isNull())
@@ -639,15 +648,15 @@ String HTMLElement::contentEditable() const
 {
     switch (contentEditableType(*this)) {
     case ContentEditableType::Inherit:
-        return ASCIILiteral("inherit");
+        return "inherit"_s;
     case ContentEditableType::True:
-        return ASCIILiteral("true");
+        return "true"_s;
     case ContentEditableType::False:
-        return ASCIILiteral("false");
+        return "false"_s;
     case ContentEditableType::PlaintextOnly:
-        return ASCIILiteral("plaintext-only");
+        return "plaintext-only"_s;
     }
-    return ASCIILiteral("inherit");
+    return "inherit"_s;
 }
 
 ExceptionOr<void> HTMLElement::setContentEditable(const String& enabled)
@@ -800,7 +809,7 @@ TextDirection HTMLElement::directionalityIfhasDirAutoAttribute(bool& isAuto) con
 {
     if (!(selfOrAncestorHasDirAutoAttribute() && hasDirectionAuto())) {
         isAuto = false;
-        return LTR;
+        return TextDirection::LTR;
     }
 
     isAuto = true;
@@ -815,7 +824,7 @@ TextDirection HTMLElement::directionality(Node** strongDirectionalityTextNode) c
         UCharDirection textDirection = textElement.value().defaultWritingDirection(&hasStrongDirectionality);
         if (strongDirectionalityTextNode)
             *strongDirectionalityTextNode = hasStrongDirectionality ? &textElement : nullptr;
-        return (textDirection == U_LEFT_TO_RIGHT) ? LTR : RTL;
+        return (textDirection == U_LEFT_TO_RIGHT) ? TextDirection::LTR : TextDirection::RTL;
     }
 
     RefPtr<Node> node = firstChild();
@@ -842,14 +851,14 @@ TextDirection HTMLElement::directionality(Node** strongDirectionalityTextNode) c
             if (hasStrongDirectionality) {
                 if (strongDirectionalityTextNode)
                     *strongDirectionalityTextNode = node.get();
-                return (textDirection == U_LEFT_TO_RIGHT) ? LTR : RTL;
+                return (textDirection == U_LEFT_TO_RIGHT) ? TextDirection::LTR : TextDirection::RTL;
             }
         }
         node = NodeTraversal::next(*node, this);
     }
     if (strongDirectionalityTextNode)
         *strongDirectionalityTextNode = nullptr;
-    return LTR;
+    return TextDirection::LTR;
 }
 
 void HTMLElement::dirAttributeChanged(const AtomicString& value)
@@ -1085,6 +1094,21 @@ void HTMLElement::setAutocorrect(bool autocorrect)
 }
 
 #endif
+
+InputMode HTMLElement::canonicalInputMode() const
+{
+    return inputModeForAttributeValue(attributeWithoutSynchronization(inputmodeAttr));
+}
+
+const AtomicString& HTMLElement::inputMode() const
+{
+    return stringForInputMode(canonicalInputMode());
+}
+
+void HTMLElement::setInputMode(const AtomicString& value)
+{
+    setAttributeWithoutSynchronization(inputmodeAttr, value);
+}
 
 } // namespace WebCore
 

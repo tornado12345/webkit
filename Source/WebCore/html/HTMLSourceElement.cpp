@@ -28,7 +28,6 @@
 
 #include "Event.h"
 #include "EventNames.h"
-#include "HTMLDocument.h"
 #include "HTMLNames.h"
 #include "HTMLPictureElement.h"
 #include "Logging.h"
@@ -48,7 +47,7 @@ using namespace HTMLNames;
 
 inline HTMLSourceElement::HTMLSourceElement(const QualifiedName& tagName, Document& document)
     : HTMLElement(tagName, document)
-    , ActiveDOMObject(&document)
+    , ActiveDOMObject(document)
     , m_errorEventTimer(*this, &HTMLSourceElement::errorEventTimerFired)
 {
     LOG(Media, "HTMLSourceElement::HTMLSourceElement - %p", this);
@@ -115,7 +114,7 @@ void HTMLSourceElement::cancelPendingErrorEvent()
 void HTMLSourceElement::errorEventTimerFired()
 {
     LOG(Media, "HTMLSourceElement::errorEventTimerFired - %p", this);
-    dispatchEvent(Event::create(eventNames().errorEvent, false, true));
+    dispatchEvent(Event::create(eventNames().errorEvent, Event::CanBubble::No, Event::IsCancelable::Yes));
 }
 
 bool HTMLSourceElement::isURLAttribute(const Attribute& attribute) const
@@ -133,9 +132,10 @@ bool HTMLSourceElement::canSuspendForDocumentSuspension() const
     return true;
 }
 
-void HTMLSourceElement::suspend(ReasonForSuspension why)
+void HTMLSourceElement::suspend(ReasonForSuspension reason)
 {
-    if (why == PageCache) {
+    // FIXME: Shouldn't this also stop the timer for PageWillBeSuspended?
+    if (reason == ReasonForSuspension::PageCache) {
         m_shouldRescheduleErrorEventOnResume = m_errorEventTimer.isActive();
         m_errorEventTimer.stop();
     }
@@ -159,7 +159,7 @@ void HTMLSourceElement::parseAttribute(const QualifiedName& name, const AtomicSt
     HTMLElement::parseAttribute(name, value);
     if (name == srcsetAttr || name == sizesAttr || name == mediaAttr || name == typeAttr) {
         if (name == mediaAttr)
-            m_cachedParsedMediaAttribute = std::nullopt;
+            m_cachedParsedMediaAttribute = WTF::nullopt;
         auto parent = makeRefPtr(parentNode());
         if (is<HTMLPictureElement>(parent))
             downcast<HTMLPictureElement>(*parent).sourcesChanged();

@@ -25,7 +25,7 @@
 
 #include "config.h"
 
-#if WK_API_ENABLED && PLATFORM(MAC)
+#if PLATFORM(MAC)
 
 #import "PlatformUtilities.h"
 #import "TestWKWebView.h"
@@ -42,7 +42,7 @@
 static RetainPtr<TestWKWebView> createWebViewWithCustomPasteboardDataEnabled()
 {
     auto webView = adoptNS([[TestWKWebView alloc] initWithFrame:NSMakeRect(0, 0, 400, 400)]);
-    auto preferences = (WKPreferencesRef)[[webView configuration] preferences];
+    auto preferences = (__bridge WKPreferencesRef)[[webView configuration] preferences];
     WKPreferencesSetDataTransferItemsEnabled(preferences, true);
     WKPreferencesSetCustomPasteboardDataEnabled(preferences, true);
     return webView;
@@ -240,7 +240,7 @@ TEST(PasteWebArchive, StripsMSOListWhenMissingMSOHTMLElement)
     EXPECT_WK_STREQ("rgb(255, 0, 0)", [webView stringByEvaluatingJavaScript:@"document.queryCommandValue('foreColor')"]);
 }
 
-#endif // WK_API_ENABLED && PLATFORM(MAC)
+#endif // PLATFORM(MAC)
 
 
 

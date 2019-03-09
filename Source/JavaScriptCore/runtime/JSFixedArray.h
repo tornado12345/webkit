@@ -81,7 +81,7 @@ public:
 
         if (indexingType == ContiguousShape || indexingType == Int32Shape) {
             for (unsigned i = 0; i < length; i++) {
-                JSValue value = array->butterfly()->contiguous().at(i).get();
+                JSValue value = array->butterfly()->contiguous().at(array, i).get();
                 value = !!value ? value : jsUndefined();
                 result->buffer()[i].set(vm, result, value);
             }
@@ -90,7 +90,7 @@ public:
 
         if (indexingType == DoubleShape) {
             for (unsigned i = 0; i < length; i++) {
-                double d = array->butterfly()->contiguousDouble().at(i);
+                double d = array->butterfly()->contiguousDouble().at(array, i);
                 JSValue value = std::isnan(d) ? jsUndefined() : JSValue(JSValue::EncodeAsDouble, d);
                 result->buffer()[i].set(vm, result, value);
             }
@@ -149,6 +149,11 @@ public:
 
     static void dumpToStream(const JSCell*, PrintStream&);
 
+    static Checked<size_t, RecordOverflow> allocationSize(Checked<size_t, RecordOverflow> numItems)
+    {
+        return offsetOfData() + numItems * sizeof(WriteBarrier<Unknown>);
+    }
+
 private:
     JSFixedArray(VM& vm, Structure* structure, unsigned size)
         : Base(vm, structure)
@@ -156,11 +161,6 @@ private:
     {
         for (unsigned i = 0; i < m_size; i++)
             buffer()[i].setStartingValue(JSValue());
-    }
-
-    static Checked<size_t, RecordOverflow> allocationSize(Checked<size_t, RecordOverflow> numItems)
-    {
-        return offsetOfData() + numItems * sizeof(WriteBarrier<Unknown>);
     }
 
     unsigned m_size;

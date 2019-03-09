@@ -14,10 +14,7 @@ describe('/api/manifest', function () {
     it("should generate an empty manifest when database is empty", () => {
         return TestServer.remoteAPI().getJSON('/api/manifest').then((manifest) => {
             assert.deepEqual(Object.keys(manifest).sort(), ['all', 'bugTrackers', 'builders', 'dashboard', 'dashboards',
-                'elapsedTime', 'fileUploadSizeLimit', 'metrics', 'repositories', 'siteTitle', 'status', 'summaryPages', 'testAgeToleranceInHours', 'tests', 'triggerables']);
-
-            assert.equal(typeof(manifest.elapsedTime), 'number');
-            delete manifest.elapsedTime;
+                'fileUploadSizeLimit', 'metrics', 'repositories', 'siteTitle', 'status', 'summaryPages', 'testAgeToleranceInHours', 'tests', 'triggerables']);
 
             assert.deepStrictEqual(manifest, {
                 siteTitle: TestServer.testConfig().siteTitle,
@@ -55,6 +52,23 @@ describe('/api/manifest', function () {
             assert.equal(tracker.bugUrl(123), 'https://webkit.org/b/123');
             assert.equal(tracker.newBugUrl(), 'https://bugs.webkit.org/');
         });
+    });
+
+    it("should clear Bug and BugTracker static maps when reset", async () => {
+        await TestServer.database().insert('bug_trackers', bugzillaData);
+        const content = await TestServer.remoteAPI().getJSON('/api/manifest');
+        assert.deepEqual(content.bugTrackers, {1: {name: 'Bugzilla', bugUrl: 'https://webkit.org/b/$number',
+            newBugUrl: 'https://bugs.webkit.org/', repositories: null}});
+
+        Manifest._didFetchManifest(content);
+        const trackerFromFirstFetch = BugTracker.findById(1);
+
+        Manifest.reset();
+        assert(!BugTracker.findById(1));
+
+        Manifest._didFetchManifest(content);
+        const trackerFromSecondFetch = BugTracker.findById(1);
+        assert(trackerFromFirstFetch != trackerFromSecondFetch);
     });
 
     it("should generate manifest with bug trackers and repositories", () => {

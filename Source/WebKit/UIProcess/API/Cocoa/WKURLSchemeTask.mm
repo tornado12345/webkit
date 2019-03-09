@@ -26,16 +26,12 @@
 #import "config.h"
 #import "WKURLSchemeTaskInternal.h"
 
-#if WK_API_ENABLED
-
 #import "WebURLSchemeHandler.h"
 #import "WebURLSchemeTask.h"
 #import <WebCore/ResourceError.h>
 #import <WebCore/ResourceResponse.h>
 #import <WebCore/SharedBuffer.h>
 #import <wtf/BlockPtr.h>
-
-using namespace WebCore;
 
 static void raiseExceptionIfNecessary(WebKit::WebURLSchemeTask::ExceptionType exceptionType)
 {
@@ -71,7 +67,7 @@ static void raiseExceptionIfNecessary(WebKit::WebURLSchemeTask::ExceptionType ex
 
 - (NSURLRequest *)request
 {
-    return _urlSchemeTask->task().request().nsURLRequest(UpdateHTTPBody);
+    return _urlSchemeTask->task().request().nsURLRequest(WebCore::HTTPBodyUpdatePolicy::UpdateHTTPBody);
 }
 
 - (void)didReceiveResponse:(NSURLResponse *)response
@@ -112,5 +108,3 @@ static void raiseExceptionIfNecessary(WebKit::WebURLSchemeTask::ExceptionType ex
 }
 
 @end
-
-#endif // #if WK_API_ENABLED

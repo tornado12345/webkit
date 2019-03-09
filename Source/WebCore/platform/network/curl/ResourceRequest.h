@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2003, 2006 Apple Inc.  All rights reserved.
  * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
- * Copyright (C) 2018 Sony Interactive Entertainment Inc.
+ * Copyright (C) 2019 Sony Interactive Entertainment Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -36,23 +36,23 @@ namespace WebCore {
 class ResourceRequest : public ResourceRequestBase {
 public:
     ResourceRequest(const String& url)
-        : ResourceRequestBase(URL(ParsedURLString, url), UseProtocolCachePolicy)
+        : ResourceRequestBase(URL({ }, url), ResourceRequestCachePolicy::UseProtocolCachePolicy)
     {
     }
 
     ResourceRequest(const URL& url)
-        : ResourceRequestBase(url, UseProtocolCachePolicy)
+        : ResourceRequestBase(url, ResourceRequestCachePolicy::UseProtocolCachePolicy)
     {
     }
 
-    ResourceRequest(const URL& url, const String& referrer, ResourceRequestCachePolicy policy = UseProtocolCachePolicy)
+    ResourceRequest(const URL& url, const String& referrer, ResourceRequestCachePolicy policy = ResourceRequestCachePolicy::UseProtocolCachePolicy)
         : ResourceRequestBase(url, policy)
     {
         setHTTPReferrer(referrer);
     }
 
     ResourceRequest()
-        : ResourceRequestBase(URL(), UseProtocolCachePolicy)
+        : ResourceRequestBase(URL(), ResourceRequestCachePolicy::UseProtocolCachePolicy)
     {
     }
 
@@ -61,7 +61,7 @@ public:
     {
     }
 
-    void updateFromDelegatePreservingOldProperties(const ResourceRequest& delegateProvidedRequest) { *this = delegateProvidedRequest; }
+    WEBCORE_EXPORT void updateFromDelegatePreservingOldProperties(const ResourceRequest&);
 
     // Needed for compatibility.
     CFURLRequestRef cfURLRequest(HTTPBodyUpdatePolicy) const { return 0; }

@@ -118,15 +118,15 @@ Ref<HTMLCollection> HTMLMapElement::areas()
 Node::InsertedIntoAncestorResult HTMLMapElement::insertedIntoAncestor(InsertionType insertionType, ContainerNode& parentOfInsertedTree)
 {
     Node::InsertedIntoAncestorResult request = HTMLElement::insertedIntoAncestor(insertionType, parentOfInsertedTree);
-    if (insertionType.connectedToDocument)
+    if (insertionType.treeScopeChanged)
         treeScope().addImageMap(*this);
     return request;
 }
 
 void HTMLMapElement::removedFromAncestor(RemovalType removalType, ContainerNode& oldParentOfRemovedTree)
 {
-    if (removalType.disconnectedFromDocument)
-        treeScope().removeImageMap(*this);
+    if (removalType.treeScopeChanged)
+        oldParentOfRemovedTree.treeScope().removeImageMap(*this);
     HTMLElement::removedFromAncestor(removalType, oldParentOfRemovedTree);
 }
 

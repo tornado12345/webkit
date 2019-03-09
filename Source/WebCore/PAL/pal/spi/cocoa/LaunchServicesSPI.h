@@ -30,8 +30,8 @@
 #if USE(APPLE_INTERNAL_SDK)
 
 #if PLATFORM(MAC)
-#import <LaunchServices/LaunchServicesPriv.h>
-#elif PLATFORM(IOS)
+#import <CoreServices/CoreServicesPriv.h>
+#elif PLATFORM(IOS_FAMILY)
 #import <MobileCoreServices/LSAppLinkPriv.h>
 #endif
 
@@ -51,11 +51,11 @@ typedef void (^LSAppLinkOpenCompletionHandler)(BOOL success, NSError *error);
 @interface LSBundleProxy : LSResourceProxy <NSSecureCoding>
 @end
 
+#if HAVE(APP_LINKS)
 @interface LSApplicationProxy : LSBundleProxy <NSSecureCoding>
 - (NSString *)localizedNameForContext:(NSString *)context;
 @end
 
-#if HAVE(APP_LINKS)
 @interface LSAppLink : NSObject <NSSecureCoding>
 @end
 
@@ -79,6 +79,7 @@ enum LSSessionID {
 
 typedef const struct CF_BRIDGED_TYPE(id) __LSASN* LSASNRef;
 typedef enum LSSessionID LSSessionID;
+typedef struct ProcessSerialNumber ProcessSerialNumber;
 
 WTF_EXTERN_C_BEGIN
 
@@ -86,6 +87,9 @@ extern const CFStringRef _kLSDisplayNameKey;
 
 LSASNRef _LSGetCurrentApplicationASN();
 OSStatus _LSSetApplicationInformationItem(LSSessionID, LSASNRef, CFStringRef keyToSetRef, CFTypeRef valueToSetRef, CFDictionaryRef* newInformationDictRef);
+CFTypeRef _LSCopyApplicationInformationItem(LSSessionID, LSASNRef, CFTypeRef);
+
+OSStatus _RegisterApplication(CFDictionaryRef, ProcessSerialNumber*);
 
 WTF_EXTERN_C_END
 

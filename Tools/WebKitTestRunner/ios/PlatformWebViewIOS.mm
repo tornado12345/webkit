@@ -28,7 +28,7 @@
 
 #import "TestController.h"
 #import "TestRunnerWKWebView.h"
-#import "UIKitTestSPI.h"
+#import "UIKitSPI.h"
 #import <WebKit/WKImageCG.h>
 #import <WebKit/WKPreferencesPrivate.h>
 #import <WebKit/WKSnapshotConfiguration.h>
@@ -47,10 +47,10 @@
     CGPoint _fakeOrigin;
     BOOL _initialized;
 }
-@property (nonatomic, assign) WTR::PlatformWebView* platformWebView;
+@property (nonatomic) WTR::PlatformWebView* platformWebView;
 @end
 
-static Vector<WebKitTestRunnerWindow*> allWindows;
+static Vector<WebKitTestRunnerWindow *> allWindows;
 
 @implementation WebKitTestRunnerWindow
 @synthesize platformWebView = _platformWebView;
@@ -181,6 +181,7 @@ PlatformWebView::PlatformWebView(WKWebViewConfiguration* configuration, const Te
     m_view = [[TestRunnerWKWebView alloc] initWithFrame:viewRectForWindowRect(rect, WebViewSizingMode::Default) configuration:configuration];
 
     [m_window.rootViewController.view addSubview:m_view];
+    [m_view becomeFirstResponder];
     [m_window makeKeyAndVisible];
 }
 
@@ -285,13 +286,26 @@ void PlatformWebView::removeChromeInputField()
 
 void PlatformWebView::makeWebViewFirstResponder()
 {
-    // FIXME: iOS equivalent?
-    // [m_window makeFirstResponder:m_view];
+    [m_view becomeFirstResponder];
 }
 
 void PlatformWebView::changeWindowScaleIfNeeded(float)
 {
     // Retina only surface.
+}
+
+void PlatformWebView::setEditable(bool editable)
+{
+    m_view._editable = editable;
+}
+
+bool PlatformWebView::drawsBackground() const
+{
+    return false;
+}
+
+void PlatformWebView::setDrawsBackground(bool)
+{
 }
 
 #if !HAVE(IOSURFACE)
@@ -356,9 +370,7 @@ RetainPtr<CGImageRef> PlatformWebView::windowSnapshotImage()
 
 void PlatformWebView::setNavigationGesturesEnabled(bool enabled)
 {
-#if WK_API_ENABLED
     [platformView() setAllowsBackForwardNavigationGestures:enabled];
-#endif
 }
 
 } // namespace WTR

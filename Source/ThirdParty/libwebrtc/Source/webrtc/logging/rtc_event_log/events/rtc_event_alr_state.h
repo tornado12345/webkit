@@ -11,9 +11,9 @@
 #ifndef LOGGING_RTC_EVENT_LOG_EVENTS_RTC_EVENT_ALR_STATE_H_
 #define LOGGING_RTC_EVENT_LOG_EVENTS_RTC_EVENT_ALR_STATE_H_
 
-#include "logging/rtc_event_log/events/rtc_event.h"
+#include <memory>
 
-#include "typedefs.h"  // NOLINT(build/include)
+#include "logging/rtc_event_log/events/rtc_event.h"
 
 namespace webrtc {
 
@@ -25,6 +25,13 @@ class RtcEventAlrState final : public RtcEvent {
   Type GetType() const override;
 
   bool IsConfigEvent() const override;
+
+  std::unique_ptr<RtcEventAlrState> Copy() const;
+
+  bool in_alr() const { return in_alr_; }
+
+ private:
+  RtcEventAlrState(const RtcEventAlrState& other);
 
   const bool in_alr_;
 };

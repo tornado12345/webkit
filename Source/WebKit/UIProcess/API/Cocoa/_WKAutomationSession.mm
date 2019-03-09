@@ -26,19 +26,17 @@
 #import "config.h"
 #import "_WKAutomationSessionInternal.h"
 
-#if WK_API_ENABLED
-
 #import "AutomationSessionClient.h"
 #import "WKAPICast.h"
 #import "WKProcessPool.h"
-#import "WeakObjCPtr.h"
 #import "WebAutomationSession.h"
 #import "_WKAutomationSessionConfiguration.h"
 #import "_WKAutomationSessionDelegate.h"
+#import <wtf/WeakObjCPtr.h>
 
 @implementation _WKAutomationSession {
     RetainPtr<_WKAutomationSessionConfiguration> _configuration;
-    WebKit::WeakObjCPtr<id <_WKAutomationSessionDelegate>> _delegate;
+    WeakObjCPtr<id <_WKAutomationSessionDelegate>> _delegate;
 }
 
 - (instancetype)init
@@ -127,5 +125,3 @@
 }
 
 @end
-
-#endif // WK_API_ENABLED

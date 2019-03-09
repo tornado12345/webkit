@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 Apple Inc. All rights reserved.
+ * Copyright (C) 2018, 2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,6 +25,8 @@
 
 #pragma once
 
+#if ENABLE(WEBDRIVER_ACTIONS_API)
+
 #include "WebEvent.h"
 #include <wtf/CompletionHandler.h>
 #include <wtf/HashSet.h>
@@ -39,55 +41,66 @@ namespace Inspector { namespace Protocol { namespace Automation {
 enum class ErrorMessage;
 enum class KeyboardInteractionType;
 enum class MouseInteraction;
+enum class MouseMoveOrigin;
 enum class VirtualKey;
 } } }
 
 namespace WebKit {
 
 class AutomationCommandError;
-using AutomationCompletionHandler = WTF::CompletionHandler<void(std::optional<AutomationCommandError>)>;
+using AutomationCompletionHandler = WTF::CompletionHandler<void(Optional<AutomationCommandError>)>;
 
 class WebPageProxy;
 
 using KeyboardInteraction = Inspector::Protocol::Automation::KeyboardInteractionType;
 using VirtualKey = Inspector::Protocol::Automation::VirtualKey;
+using VirtualKeySet = HashSet<VirtualKey, WTF::IntHash<VirtualKey>, WTF::StrongEnumHashTraits<VirtualKey>>;
 using CharKey = char; // For WebDriver, this only needs to support ASCII characters on 102-key keyboard.
 using MouseButton = WebMouseEvent::Button;
 using MouseInteraction = Inspector::Protocol::Automation::MouseInteraction;
+using MouseMoveOrigin = Inspector::Protocol::Automation::MouseMoveOrigin;
+
+enum class SimulatedInputSourceType {
+    Null, // Used to induce a minimum duration.
+    Keyboard,
+    Mouse,
+    Touch,
+};
+
+enum class TouchInteraction {
+    TouchDown,
+    MoveTo,
+    LiftUp,
+};
 
 struct SimulatedInputSourceState {
-    std::optional<CharKey> pressedCharKey;
-    std::optional<VirtualKey> pressedVirtualKey;
-    std::optional<MouseButton> pressedMouseButton;
-    std::optional<WebCore::IntPoint> location;
-    std::optional<Seconds> duration;
+    Optional<CharKey> pressedCharKey;
+    VirtualKeySet pressedVirtualKeys;
+    Optional<MouseButton> pressedMouseButton;
+    Optional<MouseMoveOrigin> origin;
+    Optional<String> nodeHandle;
+    Optional<WebCore::IntPoint> location;
+    Optional<Seconds> duration;
 
-    static SimulatedInputSourceState emptyState() { return SimulatedInputSourceState(); }
+    static SimulatedInputSourceState emptyStateForSourceType(SimulatedInputSourceType);
 };
 
 struct SimulatedInputSource : public RefCounted<SimulatedInputSource> {
 public:
-    enum class Type {
-        Null, // Used to induce a minimum duration.
-        Keyboard,
-        Mouse,
-        Touch,
-    };
-
-    Type type;
+    SimulatedInputSourceType type;
 
     // The last state associated with this input source.
     SimulatedInputSourceState state;
 
-    static Ref<SimulatedInputSource> create(Type type)
+    static Ref<SimulatedInputSource> create(SimulatedInputSourceType type)
     {
         return adoptRef(*new SimulatedInputSource(type));
     }
 
 private:
-    SimulatedInputSource(Type type)
+    SimulatedInputSource(SimulatedInputSourceType type)
         : type(type)
-        , state(SimulatedInputSourceState::emptyState())
+        , state(SimulatedInputSourceState::emptyStateForSourceType(type))
     { }
 };
 
@@ -110,8 +123,16 @@ public:
     class Client {
     public:
         virtual ~Client() { }
+#if ENABLE(WEBDRIVER_MOUSE_INTERACTIONS)
         virtual void simulateMouseInteraction(WebPageProxy&, MouseInteraction, WebMouseEvent::Button, const WebCore::IntPoint& locationInView, AutomationCompletionHandler&&) = 0;
-        virtual void simulateKeyboardInteraction(WebPageProxy&, KeyboardInteraction, std::optional<VirtualKey>, std::optional<CharKey>, AutomationCompletionHandler&&) = 0;
+#endif
+#if ENABLE(WEBDRIVER_TOUCH_INTERACTIONS)
+        virtual void simulateTouchInteraction(WebPageProxy&, TouchInteraction, const WebCore::IntPoint& locationInView, Optional<Seconds> duration, AutomationCompletionHandler&&) = 0;
+#endif
+#if ENABLE(WEBDRIVER_KEYBOARD_INTERACTIONS)
+        virtual void simulateKeyboardInteraction(WebPageProxy&, KeyboardInteraction, WTF::Variant<VirtualKey, CharKey>&&, AutomationCompletionHandler&&) = 0;
+#endif
+        virtual void viewportInViewCenterPointOfElement(WebPageProxy&, uint64_t frameID, const String& nodeHandle, Function<void (Optional<WebCore::IntPoint>, Optional<AutomationCommandError>)>&&) = 0;
     };
 
     static Ref<SimulatedInputDispatcher> create(WebPageProxy& page, SimulatedInputDispatcher::Client& client)
@@ -121,7 +142,7 @@ public:
 
     ~SimulatedInputDispatcher();
 
-    void run(Vector<SimulatedInputKeyFrame>&& keyFrames, HashSet<Ref<SimulatedInputSource>>& inputSources, AutomationCompletionHandler&&);
+    void run(uint64_t frameID, Vector<SimulatedInputKeyFrame>&& keyFrames, HashSet<Ref<SimulatedInputSource>>& inputSources, AutomationCompletionHandler&&);
     void cancel();
 
     bool isActive() const;
@@ -133,15 +154,18 @@ private:
     void transitionBetweenKeyFrames(const SimulatedInputKeyFrame&, const SimulatedInputKeyFrame&, AutomationCompletionHandler&&);
 
     void transitionToNextInputSourceState();
-    void transitionInputSourceToState(SimulatedInputSource&, const SimulatedInputSourceState& newState, AutomationCompletionHandler&&);
-    void finishDispatching(std::optional<AutomationCommandError>);
+    void transitionInputSourceToState(SimulatedInputSource&, SimulatedInputSourceState& newState, AutomationCompletionHandler&&);
+    void finishDispatching(Optional<AutomationCommandError>);
 
     void keyFrameTransitionDurationTimerFired();
     bool isKeyFrameTransitionComplete() const;
 
+    void resolveLocation(const WebCore::IntPoint& currentLocation, Optional<WebCore::IntPoint> location, MouseMoveOrigin, Optional<String> nodeHandle, Function<void (Optional<WebCore::IntPoint>, Optional<AutomationCommandError>)>&&);
+
     WebPageProxy& m_page;
     SimulatedInputDispatcher::Client& m_client;
 
+    Optional<uint64_t> m_frameID;
     AutomationCompletionHandler m_runCompletionHandler;
     AutomationCompletionHandler m_keyFrameTransitionCompletionHandler;
     RunLoop::Timer<SimulatedInputDispatcher> m_keyFrameTransitionDurationTimer;
@@ -158,3 +182,5 @@ private:
 };
 
 } // namespace WebKit
+
+#endif // ENABLE(WEBDRIVER_ACTIONS_API)

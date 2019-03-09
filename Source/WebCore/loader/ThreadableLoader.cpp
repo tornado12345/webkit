@@ -89,9 +89,6 @@ ThreadableLoaderOptions ThreadableLoaderOptions::isolatedCopy() const
     copy.initiatorContext = this->initiatorContext;
     copy.clientCredentialPolicy = this->clientCredentialPolicy;
     copy.maxRedirectCount = this->maxRedirectCount;
-    copy.derivedCachedDataTypesToRetrieve.reserveInitialCapacity(this->derivedCachedDataTypesToRetrieve.size());
-    for (auto& derivedCachedDataType : this->derivedCachedDataTypesToRetrieve)
-        copy.derivedCachedDataTypesToRetrieve.uncheckedAppend(derivedCachedDataType.isolatedCopy());
     copy.preflightPolicy = this->preflightPolicy;
 
     // ThreadableLoaderOptions
@@ -131,7 +128,7 @@ void ThreadableLoader::logError(ScriptExecutionContext& context, const ResourceE
 
     // We further reduce logging to some errors.
     // FIXME: Log more errors when making so do not make some layout tests flaky.
-    if (error.domain() != errorDomainWebKitInternal && !error.isAccessControl())
+    if (error.domain() != errorDomainWebKitInternal && error.domain() != errorDomainWebKitServiceWorker && !error.isAccessControl())
         return;
 
     const char* messageStart;
@@ -144,7 +141,7 @@ void ThreadableLoader::logError(ScriptExecutionContext& context, const ResourceE
     else
         messageStart = "Cannot load ";
 
-    String messageEnd = error.isAccessControl() ? ASCIILiteral(" due to access control checks.") : ASCIILiteral(".");
+    String messageEnd = error.isAccessControl() ? " due to access control checks."_s : "."_s;
     context.addConsoleMessage(MessageSource::JS, MessageLevel::Error, makeString(messageStart, error.failingURL().string(), messageEnd));
 }
 

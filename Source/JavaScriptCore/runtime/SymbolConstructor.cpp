@@ -68,7 +68,7 @@ putDirectWithoutTransition(vm, Identifier::fromString(&vm, #name), Symbol::creat
 
 void SymbolConstructor::finishCreation(VM& vm, SymbolPrototype* prototype)
 {
-    Base::finishCreation(vm, prototype->classInfo(vm)->className);
+    Base::finishCreation(vm, vm.propertyNames->Symbol.string(), NameVisibility::Visible, NameAdditionMode::WithoutStructureTransition);
     putDirectWithoutTransition(vm, vm.propertyNames->prototype, prototype, PropertyAttribute::DontEnum | PropertyAttribute::DontDelete | PropertyAttribute::ReadOnly);
     putDirectWithoutTransition(vm, vm.propertyNames->length, jsNumber(0), PropertyAttribute::ReadOnly | PropertyAttribute::DontEnum);
 
@@ -98,7 +98,7 @@ EncodedJSValue JSC_HOST_CALL symbolConstructorFor(ExecState* exec)
     return JSValue::encode(Symbol::create(exec->vm(), exec->vm().symbolRegistry().symbolForKey(string)));
 }
 
-const char* const SymbolKeyForTypeError = "Symbol.keyFor requires that the first argument be a symbol";
+const ASCIILiteral SymbolKeyForTypeError { "Symbol.keyFor requires that the first argument be a symbol"_s };
 
 EncodedJSValue JSC_HOST_CALL symbolConstructorKeyFor(ExecState* exec)
 {
@@ -107,7 +107,7 @@ EncodedJSValue JSC_HOST_CALL symbolConstructorKeyFor(ExecState* exec)
 
     JSValue symbolValue = exec->argument(0);
     if (!symbolValue.isSymbol())
-        return JSValue::encode(throwTypeError(exec, scope, ASCIILiteral(SymbolKeyForTypeError)));
+        return JSValue::encode(throwTypeError(exec, scope, SymbolKeyForTypeError));
 
     SymbolImpl& uid = asSymbol(symbolValue)->privateName().uid();
     if (!uid.symbolRegistry())

@@ -26,7 +26,7 @@
 #import "config.h"
 #import "AccessibilityObject.h"
 
-#if HAVE(ACCESSIBILITY) && PLATFORM(IOS)
+#if HAVE(ACCESSIBILITY) && PLATFORM(IOS_FAMILY)
 
 #import "AccessibilityRenderObject.h"
 #import "EventNames.h"
@@ -39,6 +39,12 @@ namespace WebCore {
     
 void AccessibilityObject::detachFromParent()
 {
+}
+
+// On iOS, we don't have to return the value in the title. We can return the actual title, given the API.
+bool AccessibilityObject::fileUploadButtonReturnsValueInTitle() const
+{
+    return false;
 }
 
 void AccessibilityObject::overrideAttachmentParent(AccessibilityObject*)
@@ -96,4 +102,4 @@ bool AccessibilityObject::isInputTypePopupButton() const
 
 } // WebCore
 
-#endif // HAVE(ACCESSIBILITY) && PLATFORM(IOS)
+#endif // HAVE(ACCESSIBILITY) && PLATFORM(IOS_FAMILY)

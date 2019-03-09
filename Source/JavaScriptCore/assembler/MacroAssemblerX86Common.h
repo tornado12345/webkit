@@ -408,6 +408,24 @@ public:
         m_assembler.popcnt_rr(src, dst);
     }
 
+    void byteSwap32(RegisterID dst)
+    {
+        m_assembler.bswapl_r(dst);
+    }
+
+    void byteSwap16(RegisterID dst)
+    {
+        m_assembler.rolw_i8r(8, dst);
+        zeroExtend16To32(dst, dst);
+    }
+
+#if CPU(X86_64)
+    void byteSwap64(RegisterID dst)
+    {
+        m_assembler.bswapq_r(dst);
+    }
+#endif
+
     // Only used for testing purposes.
     void illegalInstruction()
     {
@@ -1330,6 +1348,16 @@ public:
         store32(TrustedImm32(0), address);
     }
 
+    void storeZero16(ImplicitAddress address)
+    {
+        store16(TrustedImm32(0), address);
+    }
+
+    void storeZero16(BaseIndex address)
+    {
+        store16(TrustedImm32(0), address);
+    }
+
     void store8(TrustedImm32 imm, Address address)
     {
         TrustedImm32 imm8(static_cast<int8_t>(imm.m_value));
@@ -1416,7 +1444,7 @@ public:
         m_assembler.movw_im(static_cast<int16_t>(imm.m_value), address.offset, address.base, address.index, address.scale);
     }
 
-    void store16(TrustedImm32 imm, Address address)
+    void store16(TrustedImm32 imm, ImplicitAddress address)
     {
         m_assembler.movw_im(static_cast<int16_t>(imm.m_value), address.offset, address.base);
     }
@@ -3105,7 +3133,7 @@ public:
         }
     }
 
-    static std::optional<ResultCondition> commuteCompareToZeroIntoTest(RelationalCondition cond)
+    static Optional<ResultCondition> commuteCompareToZeroIntoTest(RelationalCondition cond)
     {
         switch (cond) {
         case Equal:
@@ -3118,7 +3146,7 @@ public:
             return PositiveOrZero;
             break;
         default:
-            return std::nullopt;
+            return WTF::nullopt;
         }
     }
 

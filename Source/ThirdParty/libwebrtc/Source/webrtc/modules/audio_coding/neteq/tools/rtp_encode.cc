@@ -21,6 +21,8 @@
 #include <map>
 #include <string>
 
+#include "absl/memory/memory.h"
+#include "api/audio/audio_frame.h"
 #include "api/audio_codecs/L16/audio_encoder_L16.h"
 #include "api/audio_codecs/g711/audio_encoder_g711.h"
 #include "api/audio_codecs/g722/audio_encoder_g722.h"
@@ -32,28 +34,30 @@
 #include "modules/audio_coding/neteq/tools/input_audio_file.h"
 #include "rtc_base/flags.h"
 #include "rtc_base/numerics/safe_conversions.h"
-#include "rtc_base/ptr_util.h"
-#include "typedefs.h"  // NOLINT(build/include)
 
 namespace webrtc {
 namespace test {
 namespace {
 
 // Define command line flags.
-DEFINE_bool(list_codecs, false, "Enumerate all codecs");
-DEFINE_string(codec, "opus", "Codec to use");
-DEFINE_int(frame_len, 0, "Frame length in ms; 0 indicates codec default value");
-DEFINE_int(bitrate, 0, "Bitrate in kbps; 0 indicates codec default value");
-DEFINE_int(payload_type,
-           -1,
-           "RTP payload type; -1 indicates codec default value");
-DEFINE_int(cng_payload_type,
-           -1,
-           "RTP payload type for CNG; -1 indicates default value");
-DEFINE_int(ssrc, 0, "SSRC to write to the RTP header");
-DEFINE_bool(dtx, false, "Use DTX/CNG");
-DEFINE_int(sample_rate, 48000, "Sample rate of the input file");
-DEFINE_bool(help, false, "Print this message");
+WEBRTC_DEFINE_bool(list_codecs, false, "Enumerate all codecs");
+WEBRTC_DEFINE_string(codec, "opus", "Codec to use");
+WEBRTC_DEFINE_int(frame_len,
+                  0,
+                  "Frame length in ms; 0 indicates codec default value");
+WEBRTC_DEFINE_int(bitrate,
+                  0,
+                  "Bitrate in kbps; 0 indicates codec default value");
+WEBRTC_DEFINE_int(payload_type,
+                  -1,
+                  "RTP payload type; -1 indicates codec default value");
+WEBRTC_DEFINE_int(cng_payload_type,
+                  -1,
+                  "RTP payload type for CNG; -1 indicates default value");
+WEBRTC_DEFINE_int(ssrc, 0, "SSRC to write to the RTP header");
+WEBRTC_DEFINE_bool(dtx, false, "Use DTX/CNG");
+WEBRTC_DEFINE_int(sample_rate, 48000, "Sample rate of the input file");
+WEBRTC_DEFINE_bool(help, false, "Print this message");
 
 // Add new codecs here, and to the map below.
 enum class CodecType {
@@ -242,15 +246,20 @@ std::unique_ptr<AudioEncoder> CreateEncoder(CodecType codec_type,
   return nullptr;
 }
 
-AudioEncoderCng::Config GetCngConfig(int sample_rate_hz) {
-  AudioEncoderCng::Config cng_config;
+AudioEncoderCngConfig GetCngConfig(int sample_rate_hz) {
+  AudioEncoderCngConfig cng_config;
   const auto default_payload_type = [&] {
     switch (sample_rate_hz) {
-      case 8000: return 13;
-      case 16000: return 98;
-      case 32000: return 99;
-      case 48000: return 100;
-      default: RTC_NOTREACHED();
+      case 8000:
+        return 13;
+      case 16000:
+        return 98;
+      case 32000:
+        return 99;
+      case 48000:
+        return 100;
+      default:
+        RTC_NOTREACHED();
     }
     return 0;
   };
@@ -304,10 +313,10 @@ int RunRtpEncode(int argc, char* argv[]) {
 
   // Create an external VAD/CNG encoder if needed.
   if (FLAG_dtx && !codec_it->second.internal_dtx) {
-    AudioEncoderCng::Config cng_config = GetCngConfig(codec->SampleRateHz());
+    AudioEncoderCngConfig cng_config = GetCngConfig(codec->SampleRateHz());
     RTC_DCHECK(codec);
     cng_config.speech_encoder = std::move(codec);
-    codec = rtc::MakeUnique<AudioEncoderCng>(std::move(cng_config));
+    codec = CreateComfortNoiseEncoder(std::move(cng_config));
   }
   RTC_DCHECK(codec);
 

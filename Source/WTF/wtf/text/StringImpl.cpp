@@ -2,7 +2,7 @@
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Dirk Mueller ( mueller@kde.org )
- * Copyright (C) 2003-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2003-2018 Apple Inc. All rights reserved.
  * Copyright (C) 2006 Andrew Wellington (proton@wiretapped.net)
  *
  * This library is free software; you can redistribute it and/or
@@ -23,19 +23,20 @@
  */
 
 #include "config.h"
-#include "StringImpl.h"
+#include <wtf/text/StringImpl.h>
 
-#include "AtomicString.h"
-#include "StringBuffer.h"
-#include "StringHash.h"
 #include <wtf/ProcessID.h>
 #include <wtf/StdLibExtras.h>
+#include <wtf/text/AtomicString.h>
 #include <wtf/text/CString.h>
+#include <wtf/text/ExternalStringImpl.h>
+#include <wtf/text/StringBuffer.h>
+#include <wtf/text/StringHash.h>
 #include <wtf/text/StringView.h>
 #include <wtf/text/SymbolImpl.h>
 #include <wtf/text/SymbolRegistry.h>
 #include <wtf/unicode/CharacterNames.h>
-#include <wtf/unicode/UTF8.h>
+#include <wtf/unicode/UTF8Conversion.h>
 
 #if STRING_STATS
 #include <unistd.h>
@@ -132,6 +133,12 @@ StringImpl::~StringImpl()
         fastFree(const_cast<LChar*>(m_data8));
         return;
     }
+    if (ownership == BufferExternal) {
+        auto* external = static_cast<ExternalStringImpl*>(this);
+        external->freeExternalBuffer(const_cast<LChar*>(m_data8), sizeInBytes());
+        external->m_free.~ExternalStringImplFreeFunction();
+        return;
+    }
 
     ASSERT(ownership == BufferSubstring);
     ASSERT(substringBuffer());
@@ -186,7 +193,7 @@ template<typename CharacterType> inline Ref<StringImpl> StringImpl::createUninit
     // Allocate a single buffer large enough to contain the StringImpl
     // struct as well as the data which it contains. This removes one
     // heap allocation from this call.
-    if (length > ((std::numeric_limits<unsigned>::max() - sizeof(StringImpl)) / sizeof(CharacterType)))
+    if (length > maxInternalLength<CharacterType>())
         CRASH();
     StringImpl* string = static_cast<StringImpl*>(fastMalloc(allocationSize<CharacterType>(length)));
 
@@ -204,22 +211,24 @@ Ref<StringImpl> StringImpl::createUninitialized(unsigned length, UChar*& data)
     return createUninitializedInternal(length, data);
 }
 
-template<typename CharacterType> inline Ref<StringImpl> StringImpl::reallocateInternal(Ref<StringImpl>&& originalString, unsigned length, CharacterType*& data)
+template<typename CharacterType> inline Expected<Ref<StringImpl>, UTF8ConversionError> StringImpl::reallocateInternal(Ref<StringImpl>&& originalString, unsigned length, CharacterType*& data)
 {
     ASSERT(originalString->hasOneRef());
     ASSERT(originalString->bufferOwnership() == BufferInternal);
 
     if (!length) {
         data = 0;
-        return *empty();
+        return Ref<StringImpl>(*empty());
     }
 
     // Same as createUninitialized() except here we use fastRealloc.
-    if (length > ((std::numeric_limits<unsigned>::max() - sizeof(StringImpl)) / sizeof(CharacterType)))
-        CRASH();
+    if (length > maxInternalLength<CharacterType>())
+        return makeUnexpected(UTF8ConversionError::OutOfMemory);
 
     originalString->~StringImpl();
-    auto* string = static_cast<StringImpl*>(fastRealloc(&originalString.leakRef(), allocationSize<CharacterType>(length)));
+    StringImpl* string;
+    if (!tryFastRealloc(&originalString.leakRef(), allocationSize<CharacterType>(length)).getValue(string))
+        return makeUnexpected(UTF8ConversionError::OutOfMemory);
 
     data = string->tailPointer<CharacterType>();
     return constructInternal<CharacterType>(*string, length);
@@ -227,11 +236,25 @@ template<typename CharacterType> inline Ref<StringImpl> StringImpl::reallocateIn
 
 Ref<StringImpl> StringImpl::reallocate(Ref<StringImpl>&& originalString, unsigned length, LChar*& data)
 {
+    auto expectedStringImpl = tryReallocate(WTFMove(originalString), length, data);
+    RELEASE_ASSERT(expectedStringImpl);
+    return WTFMove(expectedStringImpl.value());
+}
+
+Ref<StringImpl> StringImpl::reallocate(Ref<StringImpl>&& originalString, unsigned length, UChar*& data)
+{
+    auto expectedStringImpl = tryReallocate(WTFMove(originalString), length, data);
+    RELEASE_ASSERT(expectedStringImpl);
+    return WTFMove(expectedStringImpl.value());
+}
+
+Expected<Ref<StringImpl>, UTF8ConversionError> StringImpl::tryReallocate(Ref<StringImpl>&& originalString, unsigned length, LChar*& data)
+{
     ASSERT(originalString->is8Bit());
     return reallocateInternal(WTFMove(originalString), length, data);
 }
 
-Ref<StringImpl> StringImpl::reallocate(Ref<StringImpl>&& originalString, unsigned length, UChar*& data)
+Expected<Ref<StringImpl>, UTF8ConversionError> StringImpl::tryReallocate(Ref<StringImpl>&& originalString, unsigned length, UChar*& data)
 {
     ASSERT(!originalString->is8Bit());
     return reallocateInternal(WTFMove(originalString), length, data);
@@ -266,7 +289,7 @@ Ref<StringImpl> StringImpl::create8BitIfPossible(const UChar* characters, unsign
     auto string = createUninitializedInternalNonEmpty(length, data);
 
     for (size_t i = 0; i < length; ++i) {
-        if (characters[i] & 0xFF00)
+        if (!isLatin1(characters[i]))
             return create(characters, length);
         data[i] = static_cast<LChar>(characters[i]);
     }
@@ -284,7 +307,7 @@ Ref<StringImpl> StringImpl::create(const LChar* string)
     if (!string)
         return *empty();
     size_t length = strlen(reinterpret_cast<const char*>(string));
-    if (length > std::numeric_limits<unsigned>::max())
+    if (length > MaxLength)
         CRASH();
     return create(string, length);
 }
@@ -354,7 +377,7 @@ Ref<StringImpl> StringImpl::convertToLowercaseWithoutLocale()
         return newImpl;
     }
 
-    if (m_length > static_cast<unsigned>(std::numeric_limits<int32_t>::max()))
+    if (m_length > MaxLength)
         CRASH();
     int32_t length = m_length;
 
@@ -391,7 +414,7 @@ Ref<StringImpl> StringImpl::convertToLowercaseWithoutLocaleStartingAtFailingInde
         if (!(character & ~0x7F))
             data8[i] = toASCIILower(character);
         else {
-            ASSERT(u_tolower(character) <= 0xFF);
+            ASSERT(isLatin1(u_tolower(character)));
             data8[i] = static_cast<LChar>(u_tolower(character));
         }
     }
@@ -406,7 +429,7 @@ Ref<StringImpl> StringImpl::convertToUppercaseWithoutLocale()
     // few actual calls to upper() are no-ops, so it wouldn't be worth
     // the extra time for pre-scanning.
 
-    if (m_length > static_cast<unsigned>(std::numeric_limits<int32_t>::max()))
+    if (m_length > MaxLength)
         CRASH();
     int32_t length = m_length;
 
@@ -436,7 +459,7 @@ Ref<StringImpl> StringImpl::convertToUppercaseWithoutLocale()
                 ++numberSharpSCharacters;
             ASSERT(u_toupper(character) <= 0xFFFF);
             UChar upper = u_toupper(character);
-            if (UNLIKELY(upper > 0xFF)) {
+            if (UNLIKELY(!isLatin1(upper))) {
                 // Since this upper-cased character does not fit in an 8-bit string, we need to take the 16-bit path.
                 goto upconvert;
             }
@@ -457,7 +480,7 @@ Ref<StringImpl> StringImpl::convertToUppercaseWithoutLocale()
                 *dest++ = 'S';
                 *dest++ = 'S';
             } else {
-                ASSERT(u_toupper(character) <= 0xFF);
+                ASSERT(isLatin1(u_toupper(character)));
                 *dest++ = static_cast<LChar>(u_toupper(character));
             }
         }
@@ -518,7 +541,7 @@ Ref<StringImpl> StringImpl::convertToLowercaseWithLocale(const AtomicString& loc
     // this last part into a shared function that takes a locale string, since this is
     // just like the end of that function.
 
-    if (m_length > static_cast<unsigned>(std::numeric_limits<int32_t>::max()))
+    if (m_length > MaxLength)
         CRASH();
     int length = m_length;
 
@@ -549,7 +572,7 @@ Ref<StringImpl> StringImpl::convertToUppercaseWithLocale(const AtomicString& loc
     if (!needsTurkishCasingRules(localeIdentifier) || find('i') == notFound)
         return convertToUppercaseWithoutLocale();
 
-    if (m_length > static_cast<unsigned>(std::numeric_limits<int32_t>::max()))
+    if (m_length > MaxLength)
         CRASH();
     int length = m_length;
 
@@ -605,7 +628,7 @@ SlowPath:
                 if (isASCII(character))
                     data8[i] = toASCIILower(character);
                 else {
-                    ASSERT(u_foldCase(character, U_FOLD_CASE_DEFAULT) <= 0xFF);
+                    ASSERT(isLatin1(u_foldCase(character, U_FOLD_CASE_DEFAULT)));
                     data8[i] = static_cast<LChar>(u_foldCase(character, U_FOLD_CASE_DEFAULT));
                 }
             }
@@ -634,7 +657,7 @@ SlowPath:
         }
     }
 
-    if (m_length > static_cast<unsigned>(std::numeric_limits<int32_t>::max()))
+    if (m_length > MaxLength)
         CRASH();
 
     auto upconvertedCharacters = StringView(*this).upconvertedCharacters();
@@ -912,7 +935,7 @@ size_t StringImpl::find(const LChar* matchString, unsigned index)
     if (!matchString)
         return notFound;
     size_t matchStringLength = strlen(reinterpret_cast<const char*>(matchString));
-    if (matchStringLength > std::numeric_limits<unsigned>::max())
+    if (matchStringLength > MaxLength)
         CRASH();
     unsigned matchLength = matchStringLength;
     if (!matchLength)
@@ -1230,12 +1253,12 @@ Ref<StringImpl> StringImpl::replace(UChar target, UChar replacement)
         return *this;
 
     if (is8Bit()) {
-        if (target > 0xFF) {
+        if (!isLatin1(target)) {
             // Looking for a 16-bit character in an 8-bit string, so we're done.
             return *this;
         }
 
-        if (replacement <= 0xFF) {
+        if (isLatin1(replacement)) {
             LChar* data;
             LChar oldChar = static_cast<LChar>(target);
             LChar newChar = static_cast<LChar>(replacement);
@@ -1284,7 +1307,7 @@ Ref<StringImpl> StringImpl::replace(unsigned position, unsigned lengthToReplace,
     if (!lengthToReplace && !lengthToInsert)
         return *this;
 
-    if ((length() - lengthToReplace) >= (std::numeric_limits<unsigned>::max() - lengthToInsert))
+    if ((length() - lengthToReplace) >= (MaxLength - lengthToInsert))
         CRASH();
 
     if (is8Bit() && (!string || string->is8Bit())) {
@@ -1341,12 +1364,12 @@ Ref<StringImpl> StringImpl::replace(UChar pattern, const LChar* replacement, uns
     if (!matchCount)
         return *this;
 
-    if (repStrLength && matchCount > std::numeric_limits<unsigned>::max() / repStrLength)
+    if (repStrLength && matchCount > MaxLength / repStrLength)
         CRASH();
 
     unsigned replaceSize = matchCount * repStrLength;
     unsigned newSize = m_length - matchCount;
-    if (newSize >= (std::numeric_limits<unsigned>::max() - replaceSize))
+    if (newSize >= (MaxLength - replaceSize))
         CRASH();
 
     newSize += replaceSize;
@@ -1417,12 +1440,12 @@ Ref<StringImpl> StringImpl::replace(UChar pattern, const UChar* replacement, uns
     if (!matchCount)
         return *this;
 
-    if (repStrLength && matchCount > std::numeric_limits<unsigned>::max() / repStrLength)
+    if (repStrLength && matchCount > MaxLength / repStrLength)
         CRASH();
 
     unsigned replaceSize = matchCount * repStrLength;
     unsigned newSize = m_length - matchCount;
-    if (newSize >= (std::numeric_limits<unsigned>::max() - replaceSize))
+    if (newSize >= (MaxLength - replaceSize))
         CRASH();
 
     newSize += replaceSize;
@@ -1502,10 +1525,10 @@ Ref<StringImpl> StringImpl::replace(StringImpl* pattern, StringImpl* replacement
         return *this;
     
     unsigned newSize = m_length - matchCount * patternLength;
-    if (repStrLength && matchCount > std::numeric_limits<unsigned>::max() / repStrLength)
+    if (repStrLength && matchCount > MaxLength / repStrLength)
         CRASH();
 
-    if (newSize > (std::numeric_limits<unsigned>::max() - matchCount * repStrLength))
+    if (newSize > (MaxLength - matchCount * repStrLength))
         CRASH();
 
     newSize += matchCount * repStrLength;
@@ -1726,7 +1749,7 @@ static inline void putUTF8Triple(char*& buffer, UChar character)
     *buffer++ = static_cast<char>((character & 0x3F) | 0x80);
 }
 
-bool StringImpl::utf8Impl(const UChar* characters, unsigned length, char*& buffer, size_t bufferSize, ConversionMode mode)
+UTF8ConversionError StringImpl::utf8Impl(const UChar* characters, unsigned length, char*& buffer, size_t bufferSize, ConversionMode mode)
 {
     if (mode == StrictConversionReplacingUnpairedSurrogatesWithFFFD) {
         const UChar* charactersEnd = characters + length;
@@ -1754,13 +1777,13 @@ bool StringImpl::utf8Impl(const UChar* characters, unsigned length, char*& buffe
         // Only produced from strict conversion.
         if (result == sourceIllegal) {
             ASSERT(strict);
-            return false;
+            return UTF8ConversionError::IllegalSource;
         }
 
         // Check for an unconverted high surrogate.
         if (result == sourceExhausted) {
             if (strict)
-                return false;
+                return UTF8ConversionError::SourceExhausted;
             // This should be one unpaired high surrogate. Treat it the same
             // was as an unpaired high surrogate would have been handled in
             // the middle of a string with non-strict conversion - which is
@@ -1774,15 +1797,15 @@ bool StringImpl::utf8Impl(const UChar* characters, unsigned length, char*& buffe
         }
     }
     
-    return true;
+    return UTF8ConversionError::None;
 }
 
-CString StringImpl::utf8ForCharacters(const LChar* characters, unsigned length)
+Expected<CString, UTF8ConversionError> StringImpl::utf8ForCharacters(const LChar* characters, unsigned length)
 {
     if (!length)
         return CString("", 0);
-    if (length > std::numeric_limits<unsigned>::max() / 3)
-        return CString();
+    if (length > MaxLength / 3)
+        return makeUnexpected(UTF8ConversionError::OutOfMemory);
     Vector<char, 1024> bufferVector(length * 3);
     char* buffer = bufferVector.data();
     const LChar* source = characters;
@@ -1791,20 +1814,21 @@ CString StringImpl::utf8ForCharacters(const LChar* characters, unsigned length)
     return CString(bufferVector.data(), buffer - bufferVector.data());
 }
 
-CString StringImpl::utf8ForCharacters(const UChar* characters, unsigned length, ConversionMode mode)
+Expected<CString, UTF8ConversionError> StringImpl::utf8ForCharacters(const UChar* characters, unsigned length, ConversionMode mode)
 {
     if (!length)
         return CString("", 0);
-    if (length > std::numeric_limits<unsigned>::max() / 3)
-        return CString();
+    if (length > MaxLength / 3)
+        return makeUnexpected(UTF8ConversionError::OutOfMemory);
     Vector<char, 1024> bufferVector(length * 3);
     char* buffer = bufferVector.data();
-    if (!utf8Impl(characters, length, buffer, bufferVector.size(), mode))
-        return CString();
+    UTF8ConversionError error = utf8Impl(characters, length, buffer, bufferVector.size(), mode);
+    if (error != UTF8ConversionError::None)
+        return makeUnexpected(error);
     return CString(bufferVector.data(), buffer - bufferVector.data());
 }
 
-CString StringImpl::utf8ForRange(unsigned offset, unsigned length, ConversionMode mode) const
+Expected<CString, UTF8ConversionError> StringImpl::tryGetUtf8ForRange(unsigned offset, unsigned length, ConversionMode mode) const
 {
     ASSERT(offset <= this->length());
     ASSERT(offset + length <= this->length());
@@ -1822,8 +1846,8 @@ CString StringImpl::utf8ForRange(unsigned offset, unsigned length, ConversionMod
     //  * We could allocate a CStringBuffer with an appropriate size to
     //    have a good chance of being able to write the string into the
     //    buffer without reallocing (say, 1.5 x length).
-    if (length > std::numeric_limits<unsigned>::max() / 3)
-        return CString();
+    if (length > MaxLength / 3)
+        return makeUnexpected(UTF8ConversionError::OutOfMemory);
     Vector<char, 1024> bufferVector(length * 3);
 
     char* buffer = bufferVector.data();
@@ -1834,16 +1858,24 @@ CString StringImpl::utf8ForRange(unsigned offset, unsigned length, ConversionMod
         ConversionResult result = convertLatin1ToUTF8(&characters, characters + length, &buffer, buffer + bufferVector.size());
         ASSERT_UNUSED(result, result != targetExhausted); // (length * 3) should be sufficient for any conversion
     } else {
-        if (!utf8Impl(this->characters16() + offset, length, buffer, bufferVector.size(), mode))
-            return CString();
+        UTF8ConversionError error = utf8Impl(this->characters16() + offset, length, buffer, bufferVector.size(), mode);
+        if (error != UTF8ConversionError::None)
+            return makeUnexpected(error);
     }
 
     return CString(bufferVector.data(), buffer - bufferVector.data());
 }
 
+Expected<CString, UTF8ConversionError> StringImpl::tryGetUtf8(ConversionMode mode) const
+{
+    return tryGetUtf8ForRange(0, length(), mode);
+}
+
 CString StringImpl::utf8(ConversionMode mode) const
 {
-    return utf8ForRange(0, length(), mode);
+    auto expectedString = tryGetUtf8ForRange(0, length(), mode);
+    RELEASE_ASSERT(expectedString);
+    return expectedString.value();
 }
 
 NEVER_INLINE unsigned StringImpl::hashSlowCase() const

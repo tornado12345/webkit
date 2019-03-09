@@ -28,11 +28,17 @@
 #include "DataRef.h"
 #include "Length.h"
 #include "StyleCustomPropertyData.h"
+#include "TextDecorationThickness.h"
+#include "TextUnderlineOffset.h"
 #include <wtf/RefCounted.h>
 #include <wtf/text/AtomicString.h>
 
 #if ENABLE(TEXT_AUTOSIZING)
 #include "TextSizeAdjustment.h"
+#endif
+
+#if ENABLE(DARK_MODE_CSS)
+#include "StyleSupportedColorSchemes.h"
 #endif
 
 namespace WebCore {
@@ -79,6 +85,9 @@ public:
     RefPtr<CursorList> cursorData;
     Length indent;
     float effectiveZoom;
+
+    TextUnderlineOffset textUnderlineOffset;
+    TextDecorationThickness textDecorationThickness;
     
     Length wordSpacing;
 
@@ -90,13 +99,13 @@ public:
     unsigned hasAutoWidows : 1;
     unsigned hasAutoOrphans : 1;
     
-    unsigned textSecurity : 2; // ETextSecurity
-    unsigned userModify : 2; // EUserModify (editing)
-    unsigned wordBreak : 2; // EWordBreak
-    unsigned overflowWrap : 1; // EOverflowWrap
-    unsigned nbspMode : 1; // ENBSPMode
+    unsigned textSecurity : 2; // TextSecurity
+    unsigned userModify : 2; // UserModify (editing)
+    unsigned wordBreak : 2; // WordBreak
+    unsigned overflowWrap : 1; // OverflowWrap
+    unsigned nbspMode : 1; // NBSPMode
     unsigned lineBreak : 3; // LineBreak
-    unsigned userSelect : 2; // EUserSelect
+    unsigned userSelect : 2; // UserSelect
     unsigned colorSpace : 1; // ColorSpace
     unsigned speakAs : 4; // ESpeakAs
     unsigned hyphens : 2; // Hyphens
@@ -113,7 +122,7 @@ public:
 #if ENABLE(CSS_IMAGE_ORIENTATION)
     unsigned imageOrientation : 4; // ImageOrientationEnum
 #endif
-    unsigned imageRendering : 3; // EImageRendering
+    unsigned imageRendering : 3; // ImageRendering
     unsigned lineSnap : 2; // LineSnap
     unsigned lineAlign : 1; // LineAlign
 #if ENABLE(ACCELERATED_OVERFLOW_SCROLLING)
@@ -128,11 +137,11 @@ public:
     unsigned textJustify : 2; // TextJustify
 #endif
     unsigned textDecorationSkip : 5; // TextDecorationSkip
-    unsigned textUnderlinePosition : 3; // TextUnderlinePosition
+    unsigned textUnderlinePosition : 2; // TextUnderlinePosition
     unsigned rubyPosition : 2; // RubyPosition
     unsigned textZoom: 1; // TextZoom
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
     unsigned touchCalloutEnabled : 1;
 #endif
 
@@ -159,7 +168,7 @@ public:
 
     AtomicString textEmphasisCustomMark;
     RefPtr<QuotesData> quotes;
-    DataRef<StyleFilterData> colorFilter;
+    DataRef<StyleFilterData> appleColorFilter;
 
     AtomicString lineGrid;
     unsigned tabSize;
@@ -174,6 +183,10 @@ public:
 
 #if ENABLE(TOUCH_EVENTS)
     Color tapHighlightColor;
+#endif
+
+#if ENABLE(DARK_MODE_CSS)
+    StyleSupportedColorSchemes supportedColorSchemes;
 #endif
 
 private:

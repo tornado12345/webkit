@@ -81,11 +81,6 @@ struct BasicBlock;
 struct StorageAccessData {
     PropertyOffset offset;
     unsigned identifierNumber;
-
-    // This needs to know the inferred type. For puts, this is necessary because we need to remember
-    // what check is needed. For gets, this is necessary because otherwise AI might forget what type is
-    // guaranteed.
-    InferredType::Descriptor inferredType;
 };
 
 struct MultiPutByOffsetData {
@@ -96,17 +91,39 @@ struct MultiPutByOffsetData {
     bool reallocatesStorage() const;
 };
 
+struct MatchStructureVariant {
+    RegisteredStructure structure;
+    bool result;
+};
+
+struct MatchStructureData {
+    Vector<MatchStructureVariant, 2> variants;
+};
+
 struct NewArrayBufferData {
     union {
         struct {
             unsigned vectorLengthHint;
-            unsigned indexingType;
+            unsigned indexingMode;
         };
         uint64_t asQuadWord;
     };
 };
 static_assert(sizeof(IndexingType) <= sizeof(unsigned), "");
 static_assert(sizeof(NewArrayBufferData) == sizeof(uint64_t), "");
+
+struct DataViewData {
+    union {
+        struct {
+            uint8_t byteSize;
+            bool isSigned;
+            bool isFloatingPoint; // Used for the DataViewSet node.
+            TriState isLittleEndian;
+        };
+        uint64_t asQuadWord;
+    };
+};
+static_assert(sizeof(DataViewData) == sizeof(uint64_t), "");
 
 struct BranchTarget {
     BranchTarget()
@@ -439,6 +456,15 @@ public:
         m_opInfo = set;
     }
 
+    void convertToCheckStructureOrEmpty(RegisteredStructureSet* set)
+    {
+        if (SpecCellCheck & SpecEmpty)
+            setOpAndDefaultFlags(CheckStructureOrEmpty);
+        else
+            setOpAndDefaultFlags(CheckStructure);
+        m_opInfo = set;
+    }
+
     void convertCheckStructureOrEmptyToCheckStructure()
     {
         ASSERT(op() == CheckStructureOrEmpty);
@@ -672,7 +698,7 @@ public:
     
     void convertToToString()
     {
-        ASSERT(m_op == ToPrimitive);
+        ASSERT(m_op == ToPrimitive || m_op == StringValueOf);
         m_op = ToString;
     }
 
@@ -724,24 +750,35 @@ public:
 
     void convertToNewObject(RegisteredStructure structure)
     {
-        ASSERT(m_op == CallObjectConstructor || m_op == CreateThis);
+        ASSERT(m_op == CallObjectConstructor || m_op == CreateThis || m_op == ObjectCreate);
         setOpAndDefaultFlags(NewObject);
         children.reset();
         m_opInfo = structure;
         m_opInfo2 = OpInfoWrapper();
     }
+
+    void convertToNewArrayBuffer(FrozenValue* immutableButterfly);
     
     void convertToDirectCall(FrozenValue*);
 
     void convertToCallDOM(Graph&);
 
-    void convertToRegExpExecNonGlobalOrSticky(FrozenValue* regExp);
-    void convertToRegExpMatchFastGlobal(FrozenValue* regExp);
+    void convertToRegExpExecNonGlobalOrStickyWithoutChecks(FrozenValue* regExp);
+    void convertToRegExpMatchFastGlobalWithoutChecks(FrozenValue* regExp);
 
     void convertToSetRegExpObjectLastIndex()
     {
         setOp(SetRegExpObjectLastIndex);
         m_opInfo = false;
+    }
+
+    void convertToInById(unsigned identifierNumber)
+    {
+        ASSERT(m_op == InByVal);
+        setOpAndDefaultFlags(InById);
+        children.setChild2(Edge());
+        m_opInfo = identifierNumber;
+        m_opInfo2 = OpInfoWrapper();
     }
     
     JSValue asJSValue()
@@ -1010,6 +1047,7 @@ public:
         case PutSetterById:
         case PutGetterSetterById:
         case DeleteById:
+        case InById:
         case GetDynamicVar:
         case PutDynamicVar:
         case ResolveScopeForHoistingFuncDeclInEval:
@@ -1083,12 +1121,12 @@ public:
     PromotedLocationDescriptor promotedLocationDescriptor();
     
     // This corrects the arithmetic node flags, so that irrelevant bits are
-    // ignored. In particular, anything other than ArithMul does not need
+    // ignored. In particular, anything other than ArithMul or ValueMul does not need
     // to know if it can speculate on negative zero.
     NodeFlags arithNodeFlags()
     {
         NodeFlags result = m_flags & NodeArithFlagsMask;
-        if (op() == ArithMul || op() == ArithDiv || op() == ArithMod || op() == ArithNegate || op() == ArithPow || op() == ArithRound || op() == ArithFloor || op() == ArithCeil || op() == ArithTrunc || op() == DoubleAsInt32)
+        if (op() == ArithMul || op() == ArithDiv || op() == ValueDiv || op() == ArithMod || op() == ArithNegate || op() == ArithPow || op() == ArithRound || op() == ArithFloor || op() == ArithCeil || op() == ArithTrunc || op() == DoubleAsInt32 || op() == ValueNegate || op() == ValueMul || op() == ValueDiv)
             return result;
         return result & ~NodeBytecodeNeedsNegZero;
     }
@@ -1103,9 +1141,14 @@ public:
         return m_flags & NodeMayHaveDoubleResult;
     }
     
-    bool mayHaveNonNumberResult()
+    bool mayHaveNonNumericResult()
     {
-        return m_flags & NodeMayHaveNonNumberResult;
+        return m_flags & NodeMayHaveNonNumericResult;
+    }
+
+    bool mayHaveBigIntResult()
+    {
+        return m_flags & NodeMayHaveBigIntResult;
     }
 
     bool hasNewArrayBufferData()
@@ -1170,7 +1213,15 @@ public:
     {
         ASSERT(hasIndexingType());
         if (op() == NewArrayBuffer || op() == PhantomNewArrayBuffer)
-            return static_cast<IndexingType>(newArrayBufferData().indexingType);
+            return static_cast<IndexingType>(newArrayBufferData().indexingMode) & IndexingTypeMask;
+        return static_cast<IndexingType>(m_opInfo.as<uint32_t>());
+    }
+
+    IndexingType indexingMode()
+    {
+        ASSERT(hasIndexingType());
+        if (op() == NewArrayBuffer || op() == PhantomNewArrayBuffer)
+            return static_cast<IndexingType>(newArrayBufferData().indexingMode);
         return static_cast<IndexingType>(m_opInfo.as<uint32_t>());
     }
     
@@ -1307,6 +1358,11 @@ public:
         return !!result();
     }
     
+    bool hasInt32Result()
+    {
+        return result() == NodeResultInt32;
+    }
+
     bool hasInt52Result()
     {
         return result() == NodeResultInt52;
@@ -1316,7 +1372,27 @@ public:
     {
         return result() == NodeResultNumber;
     }
+
+    bool hasNumberOrAnyIntResult()
+    {
+        return hasNumberResult() || hasInt32Result() || hasInt52Result();
+    }
     
+    bool hasNumericResult()
+    {
+        switch (op()) {
+        case ValueSub:
+        case ValueMul:
+        case ValueBitAnd:
+        case ValueBitOr:
+        case ValueBitXor:
+        case ValueNegate:
+            return true;
+        default:
+            return false;
+        }
+    }
+
     bool hasDoubleResult()
     {
         return result() == NodeResultDouble;
@@ -1614,6 +1690,9 @@ public:
         case StringReplaceRegExp:
         case ToNumber:
         case ToObject:
+        case ValueBitAnd:
+        case ValueBitOr:
+        case ValueBitXor:
         case CallObjectConstructor:
         case LoadKeyFromMapBucket:
         case LoadValueFromMapBucket:
@@ -1632,6 +1711,8 @@ public:
         case GetDynamicVar:
         case ExtractValueFromWeakMapGet:
         case ToThis:
+        case DataViewGetInt:
+        case DataViewGetFloat:
             return true;
         default:
             return false;
@@ -1853,6 +1934,17 @@ public:
         return *m_opInfo.as<MultiPutByOffsetData*>();
     }
     
+    bool hasMatchStructureData()
+    {
+        return op() == MatchStructure;
+    }
+    
+    MatchStructureData& matchStructureData()
+    {
+        ASSERT(hasMatchStructureData());
+        return *m_opInfo.as<MatchStructureData*>();
+    }
+    
     bool hasObjectMaterializationData()
     {
         switch (op()) {
@@ -1967,7 +2059,7 @@ public:
         case GetIndexedPropertyStorage:
         case GetArrayLength:
         case GetVectorLength:
-        case In:
+        case InByVal:
         case PutByValDirect:
         case PutByVal:
         case PutByValAlias:
@@ -2103,6 +2195,12 @@ public:
     {
         ASSERT(op() == InitializeEntrypointArguments);
         return m_opInfo.as<unsigned>();
+    }
+
+    DataViewData dataViewData()
+    {
+        ASSERT(op() == DataViewGetInt || op() == DataViewGetFloat || op() == DataViewSet);
+        return bitwise_cast<DataViewData>(m_opInfo.as<uint64_t>());
     }
 
     bool shouldGenerate()
@@ -2731,6 +2829,50 @@ public:
         ASSERT(op() == ThrowStaticError);
         return m_opInfo.as<uint32_t>();
     }
+    
+    bool hasCallLinkStatus()
+    {
+        return op() == FilterCallLinkStatus;
+    }
+    
+    CallLinkStatus* callLinkStatus()
+    {
+        ASSERT(hasCallLinkStatus());
+        return m_opInfo.as<CallLinkStatus*>();
+    }
+    
+    bool hasGetByIdStatus()
+    {
+        return op() == FilterGetByIdStatus;
+    }
+    
+    GetByIdStatus* getByIdStatus()
+    {
+        ASSERT(hasGetByIdStatus());
+        return m_opInfo.as<GetByIdStatus*>();
+    }
+    
+    bool hasInByIdStatus()
+    {
+        return op() == FilterInByIdStatus;
+    }
+    
+    InByIdStatus* inByIdStatus()
+    {
+        ASSERT(hasInByIdStatus());
+        return m_opInfo.as<InByIdStatus*>();
+    }
+    
+    bool hasPutByIdStatus()
+    {
+        return op() == FilterPutByIdStatus;
+    }
+    
+    PutByIdStatus* putByIdStatus()
+    {
+        ASSERT(hasPutByIdStatus());
+        return m_opInfo.as<PutByIdStatus*>();
+    }
 
     void dumpChildren(PrintStream& out)
     {
@@ -2757,7 +2899,7 @@ private:
 
     unsigned m_index { std::numeric_limits<unsigned>::max() };
     unsigned m_op : 10; // real type is NodeType
-    unsigned m_flags : 20;
+    unsigned m_flags : 21;
     // The virtual register number (spill location) associated with this .
     VirtualRegister m_virtualRegister;
     // The number of uses of the result of this operation (+1 for 'must generate' nodes, which have side-effects).
@@ -2845,7 +2987,7 @@ private:
             return static_cast<T>(u.constPointer);
         }
         template <typename T>
-        ALWAYS_INLINE auto as() const -> typename std::enable_if<(std::is_integral<T>::value || std::is_enum<T>::value) && sizeof(T) == 4, T>::type
+        ALWAYS_INLINE auto as() const -> typename std::enable_if<(std::is_integral<T>::value || std::is_enum<T>::value) && sizeof(T) <= 4, T>::type
         {
             return static_cast<T>(u.int32);
         }

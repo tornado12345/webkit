@@ -37,7 +37,6 @@
 #include "EventListener.h"
 #include "EventTarget.h"
 #include "Frame.h"
-#include "InspectorOverlay.h"
 #include "InspectorPageAgent.h"
 #include "InstrumentingAgents.h"
 #include "Page.h"
@@ -57,11 +56,10 @@ namespace WebCore {
 
 using namespace Inspector;
 
-PageDebuggerAgent::PageDebuggerAgent(PageAgentContext& context, InspectorPageAgent* pageAgent, InspectorOverlay* overlay)
+PageDebuggerAgent::PageDebuggerAgent(PageAgentContext& context, InspectorPageAgent* pageAgent)
     : WebDebuggerAgent(context)
     , m_page(context.inspectedPage)
     , m_pageAgent(pageAgent)
-    , m_overlay(overlay)
 {
 }
 
@@ -83,7 +81,7 @@ String PageDebuggerAgent::sourceMapURLForScript(const Script& script)
     static NeverDestroyed<String> sourceMapHTTPHeaderDeprecated(MAKE_STATIC_STRING_IMPL("X-SourceMap"));
 
     if (!script.url.isEmpty()) {
-        CachedResource* resource = m_pageAgent->cachedResource(&m_page.mainFrame(), URL(ParsedURLString, script.url));
+        CachedResource* resource = m_pageAgent->cachedResource(&m_page.mainFrame(), URL({ }, script.url));
         if (resource) {
             String sourceMapHeader = resource->response().httpHeaderField(sourceMapHTTPHeader);
             if (!sourceMapHeader.isEmpty())
@@ -130,14 +128,9 @@ InjectedScript PageDebuggerAgent::injectedScriptForEval(ErrorString& errorString
 
     InjectedScript injectedScript = injectedScriptManager().injectedScriptForId(*executionContextId);
     if (injectedScript.hasNoValue())
-        errorString = ASCIILiteral("Execution context with given id not found.");
+        errorString = "Execution context with given id not found."_s;
 
     return injectedScript;
-}
-
-void PageDebuggerAgent::setOverlayMessage(ErrorString&, const String* message)
-{
-    m_overlay->setPausedInDebuggerMessage(message);
 }
 
 void PageDebuggerAgent::didClearMainFrameWindowObject()
@@ -164,14 +157,20 @@ void PageDebuggerAgent::mainFrameNavigated()
     setSuppressAllPauses(false);
 }
 
-void PageDebuggerAgent::didAddEventListener(EventTarget& target, const AtomicString& eventType)
+void PageDebuggerAgent::didAddEventListener(EventTarget& target, const AtomicString& eventType, EventListener& listener, bool capture)
 {
     if (!breakpointsActive())
         return;
 
     auto& eventListeners = target.eventListeners(eventType);
-    const RefPtr<RegisteredEventListener>& listener = eventListeners.last();
-    if (m_registeredEventListeners.contains(listener.get())) {
+    auto position = eventListeners.findMatching([&](auto& registeredListener) {
+        return &registeredListener->callback() == &listener && registeredListener->useCapture() == capture;
+    });
+    if (position == notFound)
+        return;
+
+    auto& registeredListener = eventListeners.at(position);
+    if (m_registeredEventListeners.contains(registeredListener.get())) {
         ASSERT_NOT_REACHED();
         return;
     }
@@ -181,9 +180,9 @@ void PageDebuggerAgent::didAddEventListener(EventTarget& target, const AtomicStr
         return;
 
     int identifier = m_nextEventListenerIdentifier++;
-    m_registeredEventListeners.set(listener.get(), identifier);
+    m_registeredEventListeners.set(registeredListener.get(), identifier);
 
-    didScheduleAsyncCall(scriptState, InspectorDebuggerAgent::AsyncCallType::EventListener, identifier, listener->isOnce());
+    didScheduleAsyncCall(scriptState, InspectorDebuggerAgent::AsyncCallType::EventListener, identifier, registeredListener->isOnce());
 }
 
 void PageDebuggerAgent::willRemoveEventListener(EventTarget& target, const AtomicString& eventType, EventListener& listener, bool capture)

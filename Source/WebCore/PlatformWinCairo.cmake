@@ -24,6 +24,8 @@ list(APPEND WebCore_SOURCES
     platform/graphics/win/MediaPlayerPrivateMediaFoundation.cpp
     platform/graphics/win/SimpleFontDataCairoWin.cpp
 
+    platform/network/win/CurlSSLHandleWin.cpp
+
     platform/text/win/LocaleWin.cpp
 
     platform/win/DelayLoadedModulesEnumerator.cpp
@@ -34,9 +36,7 @@ list(APPEND WebCore_SOURCES
 )
 
 list(APPEND WebCore_LIBRARIES
-    ${CURL_LIBRARY}
     ${DirectX_LIBRARIES}
-    CFLite
     comctl32
     crypt32
     iphlpapi
@@ -50,12 +50,11 @@ list(APPEND WebCore_LIBRARIES
 
 list(APPEND WebCoreTestSupport_LIBRARIES
     ${CAIRO_LIBRARIES}
-    CFLite
     shlwapi
 )
 
 list(APPEND WebCore_FORWARDING_HEADERS_DIRECTORIES
+    platform/mediacapabilities
     platform/graphics/cairo
-
     platform/network/curl
 )

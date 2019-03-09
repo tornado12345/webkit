@@ -130,7 +130,7 @@ void TextureMapperLayer::paintSelf(const TextureMapperPaintOptions& options)
     transform.multiply(m_layerTransforms.combined);
 
     if (m_state.solidColor.isValid() && !m_state.contentsRect.isEmpty() && m_state.solidColor.isVisible()) {
-        options.textureMapper.drawSolidColor(m_state.contentsRect, transform, blendWithOpacity(m_state.solidColor, options.opacity));
+        options.textureMapper.drawSolidColor(m_state.contentsRect, transform, blendWithOpacity(m_state.solidColor, options.opacity), true);
         if (m_state.showDebugBorders)
             options.textureMapper.drawBorder(m_state.debugBorderColor, m_state.debugBorderWidth, layerRect(), transform);
         return;
@@ -236,7 +236,7 @@ void TextureMapperLayer::paintSelfAndChildrenWithReplica(const TextureMapperPain
         TextureMapperPaintOptions replicaOptions(options);
         replicaOptions.transform
             .multiply(m_state.replicaLayer->m_layerTransforms.combined)
-            .multiply(m_layerTransforms.combined.inverse().value_or(TransformationMatrix()));
+            .multiply(m_layerTransforms.combined.inverse().valueOr(TransformationMatrix()));
         paintSelfAndChildren(replicaOptions);
     }
 
@@ -246,7 +246,7 @@ void TextureMapperLayer::paintSelfAndChildrenWithReplica(const TextureMapperPain
 TransformationMatrix TextureMapperLayer::replicaTransform()
 {
     return TransformationMatrix(m_state.replicaLayer->m_layerTransforms.combined)
-        .multiply(m_layerTransforms.combined.inverse().value_or(TransformationMatrix()));
+        .multiply(m_layerTransforms.combined.inverse().valueOr(TransformationMatrix()));
 }
 
 static void resolveOverlaps(Region& newRegion, Region& overlapRegion, Region& nonOverlapRegion)
@@ -495,8 +495,8 @@ void TextureMapperLayer::removeAllChildren()
 void TextureMapperLayer::setMaskLayer(TextureMapperLayer* maskLayer)
 {
     if (maskLayer) {
-        maskLayer->m_effectTarget = createWeakPtr();
-        m_state.maskLayer = maskLayer->createWeakPtr();
+        maskLayer->m_effectTarget = makeWeakPtr(*this);
+        m_state.maskLayer = makeWeakPtr(*maskLayer);
     } else
         m_state.maskLayer = nullptr;
 }
@@ -504,8 +504,8 @@ void TextureMapperLayer::setMaskLayer(TextureMapperLayer* maskLayer)
 void TextureMapperLayer::setReplicaLayer(TextureMapperLayer* replicaLayer)
 {
     if (replicaLayer) {
-        replicaLayer->m_effectTarget = createWeakPtr();
-        m_state.replicaLayer = replicaLayer->createWeakPtr();
+        replicaLayer->m_effectTarget = makeWeakPtr(*this);
+        m_state.replicaLayer = makeWeakPtr(*replicaLayer);
     } else
         m_state.replicaLayer = nullptr;
 }
@@ -595,16 +595,16 @@ void TextureMapperLayer::setFilters(const FilterOperations& filters)
     m_state.filters = filters;
 }
 
-void TextureMapperLayer::setDebugVisuals(bool showDebugBorders, const Color& debugBorderColor, float debugBorderWidth, bool showRepaintCounter)
+void TextureMapperLayer::setDebugVisuals(bool showDebugBorders, const Color& debugBorderColor, float debugBorderWidth)
 {
     m_state.showDebugBorders = showDebugBorders;
     m_state.debugBorderColor = debugBorderColor;
     m_state.debugBorderWidth = debugBorderWidth;
-    m_state.showRepaintCounter = showRepaintCounter;
 }
 
-void TextureMapperLayer::setRepaintCount(int repaintCount)
+void TextureMapperLayer::setRepaintCounter(bool showRepaintCounter, int repaintCount)
 {
+    m_state.showRepaintCounter = showRepaintCounter;
     m_state.repaintCount = repaintCount;
 }
 
@@ -647,9 +647,9 @@ bool TextureMapperLayer::syncAnimations(MonotonicTime time)
     TextureMapperAnimation::ApplicationResult applicationResults;
     m_animations.apply(applicationResults, time);
 
-    m_layerTransforms.localTransform = applicationResults.transform.value_or(m_state.transform);
-    m_currentOpacity = applicationResults.opacity.value_or(m_state.opacity);
-    m_currentFilters = applicationResults.filters.value_or(m_state.filters);
+    m_layerTransforms.localTransform = applicationResults.transform.valueOr(m_state.transform);
+    m_currentOpacity = applicationResults.opacity.valueOr(m_state.opacity);
+    m_currentFilters = applicationResults.filters.valueOr(m_state.filters);
 
     return applicationResults.hasRunningAnimations;
 }

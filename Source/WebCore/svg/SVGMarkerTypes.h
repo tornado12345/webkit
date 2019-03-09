@@ -55,9 +55,9 @@ struct SVGPropertyTraits<SVGMarkerUnitsType> {
         case SVGMarkerUnitsUnknown:
             return emptyString();
         case SVGMarkerUnitsUserSpaceOnUse:
-            return ASCIILiteral("userSpaceOnUse");
+            return "userSpaceOnUse"_s;
         case SVGMarkerUnitsStrokeWidth:
-            return ASCIILiteral("strokeWidth");
+            return "strokeWidth"_s;
         }
         
         ASSERT_NOT_REACHED();
@@ -103,7 +103,7 @@ struct SVGPropertyTraits<std::pair<SVGAngleValue, unsigned>> {
             angle = { };
         return std::pair<SVGAngleValue, unsigned>(angle, orientType);
     }
-    static std::optional<std::pair<SVGAngleValue, unsigned>> parse(const QualifiedName&, const String&) { ASSERT_NOT_REACHED(); return initialValue(); }
+    static Optional<std::pair<SVGAngleValue, unsigned>> parse(const QualifiedName&, const String&) { ASSERT_NOT_REACHED(); return initialValue(); }
     static String toString(const std::pair<SVGAngleValue, unsigned>&) { ASSERT_NOT_REACHED(); return emptyString(); }
 };
 

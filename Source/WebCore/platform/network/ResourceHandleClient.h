@@ -33,7 +33,7 @@
 #include <pal/spi/cf/CFNetworkSPI.h>
 #endif
 
-#if PLATFORM(IOS) || USE(CFURLCONNECTION)
+#if PLATFORM(IOS_FAMILY) || USE(CFURLCONNECTION)
 #include <wtf/RetainPtr.h>
 #endif
 
@@ -44,7 +44,6 @@ OBJC_CLASS NSCachedURLResponse;
 namespace WebCore {
 class AuthenticationChallenge;
 class Credential;
-class URL;
 class ProtectionSpace;
 class ResourceHandle;
 class ResourceError;
@@ -84,16 +83,16 @@ public:
 #endif
 
 #if USE(CFURLCONNECTION)
-    WEBCORE_EXPORT virtual void willCacheResponseAsync(ResourceHandle*, CFCachedURLResponseRef response, CompletionHandler<void(CFCachedURLResponseRef)>&& completionHandler) { completionHandler(response); }
+    virtual void willCacheResponseAsync(ResourceHandle*, CFCachedURLResponseRef response, CompletionHandler<void(CFCachedURLResponseRef)>&& completionHandler) { completionHandler(response); }
 #elif PLATFORM(COCOA)
-    WEBCORE_EXPORT virtual void willCacheResponseAsync(ResourceHandle*, NSCachedURLResponse *response, CompletionHandler<void(NSCachedURLResponse *)>&& completionHandler) { completionHandler(response); }
+    virtual void willCacheResponseAsync(ResourceHandle*, NSCachedURLResponse *response, CompletionHandler<void(NSCachedURLResponse *)>&& completionHandler) { completionHandler(response); }
 #endif
 
     virtual bool shouldUseCredentialStorage(ResourceHandle*) { return false; }
     virtual void didReceiveAuthenticationChallenge(ResourceHandle*, const AuthenticationChallenge&) { }
     virtual void receivedCancellation(ResourceHandle*, const AuthenticationChallenge&) { }
 
-#if PLATFORM(IOS) || USE(CFURLCONNECTION)
+#if PLATFORM(IOS_FAMILY) || USE(CFURLCONNECTION)
     virtual RetainPtr<CFDictionaryRef> connectionProperties(ResourceHandle*) { return nullptr; }
 #endif
 

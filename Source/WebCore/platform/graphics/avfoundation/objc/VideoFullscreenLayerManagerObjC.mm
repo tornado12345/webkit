@@ -89,7 +89,7 @@ void VideoFullscreenLayerManagerObjC::setVideoLayer(PlatformLayer *videoLayer, I
 void VideoFullscreenLayerManagerObjC::updateVideoFullscreenInlineImage(NativeImagePtr image)
 {
     if (m_videoInlineLayer)
-        [m_videoInlineLayer setContents:(id)image.get()];
+        [m_videoInlineLayer setContents:(__bridge id)image.get()];
 }
 
 void VideoFullscreenLayerManagerObjC::setVideoFullscreenLayer(PlatformLayer *videoFullscreenLayer, WTF::Function<void()>&& completionHandler, NativeImagePtr currentImage)
@@ -108,7 +108,7 @@ void VideoFullscreenLayerManagerObjC::setVideoFullscreenLayer(PlatformLayer *vid
         CAContext *oldContext = [m_videoLayer context];
 
         if (m_videoInlineLayer)
-            [m_videoInlineLayer setContents:(id)currentImage.get()];
+            [m_videoInlineLayer setContents:(__bridge id)currentImage.get()];
 
         if (m_videoFullscreenLayer) {
             [m_videoFullscreenLayer insertSublayer:m_videoLayer.get() atIndex:0];
@@ -130,7 +130,7 @@ void VideoFullscreenLayerManagerObjC::setVideoFullscreenLayer(PlatformLayer *vid
         }
     }
 
-    [CATransaction setCompletionBlock:BlockPtr<void ()>::fromCallable([completionHandler = WTFMove(completionHandler)] {
+    [CATransaction setCompletionBlock:makeBlockPtr([completionHandler = WTFMove(completionHandler)] {
         completionHandler();
     }).get()];
 
@@ -144,6 +144,7 @@ void VideoFullscreenLayerManagerObjC::setVideoFullscreenFrame(FloatRect videoFul
         return;
 
     [m_videoLayer setFrame:m_videoFullscreenFrame];
+    syncTextTrackBounds();
 }
 
 void VideoFullscreenLayerManagerObjC::didDestroyVideoLayer()
@@ -167,8 +168,7 @@ void VideoFullscreenLayerManagerObjC::syncTextTrackBounds()
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
 
-    CGRect textFrame = m_videoLayer ? m_videoInlineFrame : m_videoFullscreenFrame;
-    [m_textTrackRepresentationLayer setFrame:textFrame];
+    [m_textTrackRepresentationLayer setFrame:m_videoFullscreenFrame];
 
     [CATransaction commit];
 }

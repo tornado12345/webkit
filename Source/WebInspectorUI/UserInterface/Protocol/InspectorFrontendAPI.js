@@ -55,7 +55,7 @@ InspectorFrontendAPI = {
 
     setElementSelectionEnabled: function(enabled)
     {
-        WI.domTreeManager.inspectModeEnabled = enabled;
+        WI.domManager.inspectModeEnabled = enabled;
     },
 
     setDockingUnavailable: function(unavailable)
@@ -99,7 +99,11 @@ InspectorFrontendAPI = {
 
     showResources: function()
     {
-        WI.showResourcesTab();
+        if (WI.settings.experimentalEnableSourcesTab.value)
+            WI.showSourcesTab();
+        else
+            WI.showResourcesTab();
+
     },
 
     showTimelines: function()

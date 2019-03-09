@@ -28,6 +28,7 @@
 
 #include <wtf/HashMap.h>
 #include <wtf/Ref.h>
+#include <wtf/Seconds.h>
 #include <wtf/text/AtomicString.h>
 #include <wtf/text/AtomicStringHash.h>
 
@@ -43,10 +44,14 @@ enum class ConstantProperty {
     SafeAreaInsetBottom,
     SafeAreaInsetLeft,
     FullscreenInsetTop,
-    FullscreenAutoHideDelay,
+    FullscreenInsetRight,
+    FullscreenInsetBottom,
+    FullscreenInsetLeft,
+    FullscreenAutoHideDuration,
 };
 
 class ConstantPropertyMap {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     explicit ConstantPropertyMap(Document&);
 
@@ -54,8 +59,8 @@ public:
     const Values& values() const;
 
     void didChangeSafeAreaInsets();
-    void setFullscreenInsetTop(double);
-    void setFullscreenAutoHideDelay(double);
+    void didChangeFullscreenInsets();
+    void setFullscreenAutoHideDuration(Seconds);
 
 private:
     void buildValues();
@@ -64,8 +69,9 @@ private:
     void setValueForProperty(ConstantProperty, Ref<CSSVariableData>&&);
 
     void updateConstantsForSafeAreaInsets();
+    void updateConstantsForFullscreen();
 
-    std::optional<Values> m_values;
+    Optional<Values> m_values;
 
     Document& m_document;
 };

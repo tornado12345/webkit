@@ -28,7 +28,6 @@
 #include "JSString.h"
 #include "Lookup.h"
 #include "JSCInlines.h"
-#include "RegExpConstructor.h"
 #include "RegExpObjectInlines.h"
 
 namespace JSC {
@@ -113,16 +112,16 @@ bool RegExpObject::defineOwnProperty(JSObject* object, ExecState* exec, Property
     if (propertyName == vm.propertyNames->lastIndex) {
         RegExpObject* regExp = jsCast<RegExpObject*>(object);
         if (descriptor.configurablePresent() && descriptor.configurable())
-            return typeError(exec, scope, shouldThrow, ASCIILiteral(UnconfigurablePropertyChangeConfigurabilityError));
+            return typeError(exec, scope, shouldThrow, UnconfigurablePropertyChangeConfigurabilityError);
         if (descriptor.enumerablePresent() && descriptor.enumerable())
-            return typeError(exec, scope, shouldThrow, ASCIILiteral(UnconfigurablePropertyChangeEnumerabilityError));
+            return typeError(exec, scope, shouldThrow, UnconfigurablePropertyChangeEnumerabilityError);
         if (descriptor.isAccessorDescriptor())
-            return typeError(exec, scope, shouldThrow, ASCIILiteral(UnconfigurablePropertyChangeAccessMechanismError));
+            return typeError(exec, scope, shouldThrow, UnconfigurablePropertyChangeAccessMechanismError);
         if (!regExp->m_lastIndexIsWritable) {
             if (descriptor.writablePresent() && descriptor.writable())
-                return typeError(exec, scope, shouldThrow, ASCIILiteral(UnconfigurablePropertyChangeWritabilityError));
+                return typeError(exec, scope, shouldThrow, UnconfigurablePropertyChangeWritabilityError);
             if (descriptor.value() && !sameValue(exec, regExp->getLastIndex(), descriptor.value()))
-                return typeError(exec, scope, shouldThrow, ASCIILiteral(ReadonlyPropertyChangeError));
+                return typeError(exec, scope, shouldThrow, ReadonlyPropertyChangeError);
             return true;
         }
         if (descriptor.value()) {
@@ -134,8 +133,7 @@ bool RegExpObject::defineOwnProperty(JSObject* object, ExecState* exec, Property
         return true;
     }
 
-    scope.release();
-    return Base::defineOwnProperty(object, exec, propertyName, descriptor, shouldThrow);
+    RELEASE_AND_RETURN(scope, Base::defineOwnProperty(object, exec, propertyName, descriptor, shouldThrow));
 }
 
 static bool regExpObjectSetLastIndexStrict(ExecState* exec, EncodedJSValue thisValue, EncodedJSValue value)
@@ -190,25 +188,22 @@ JSValue RegExpObject::matchGlobal(ExecState* exec, JSGlobalObject* globalObject,
 
     String s = string->value(exec);
     RETURN_IF_EXCEPTION(scope, { });
-    RegExpConstructor* regExpConstructor = globalObject->regExpConstructor();
 
     ASSERT(!s.isNull());
     if (regExp->unicode()) {
         unsigned stringLength = s.length();
-        scope.release();
-        return collectMatches(
-            vm, exec, string, s, regExpConstructor, regExp,
+        RELEASE_AND_RETURN(scope, collectMatches(
+            vm, exec, string, s, globalObject, regExp,
             [&] (size_t end) -> size_t {
                 return advanceStringUnicode(s, stringLength, end);
-            });
+            }));
     }
 
-    scope.release();
-    return collectMatches(
-        vm, exec, string, s, regExpConstructor, regExp,
+    RELEASE_AND_RETURN(scope, collectMatches(
+        vm, exec, string, s, globalObject, regExp,
         [&] (size_t end) -> size_t {
             return end + 1;
-        });
+        }));
 }
 
 } // namespace JSC

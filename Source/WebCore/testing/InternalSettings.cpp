@@ -93,6 +93,7 @@ InternalSettings::Backup::Backup(Settings& settings)
     , m_inlineMediaPlaybackRequiresPlaysInlineAttribute(settings.inlineMediaPlaybackRequiresPlaysInlineAttribute())
     , m_deferredCSSParserEnabled(settings.deferredCSSParserEnabled())
     , m_inputEventsEnabled(settings.inputEventsEnabled())
+    , m_incompleteImageBorderEnabled(settings.incompleteImageBorderEnabled())
 #if ENABLE(ACCESSIBILITY_EVENTS)
     , m_accessibilityEventsEnabled(settings.accessibilityEventsEnabled())
 #endif
@@ -110,8 +111,8 @@ InternalSettings::Backup::Backup(Settings& settings)
 #if ENABLE(WEBGL2)
     , m_webGL2Enabled(RuntimeEnabledFeatures::sharedFeatures().webGL2Enabled())
 #endif
-#if ENABLE(WEBGPU)
-    , m_webGPUEnabled(RuntimeEnabledFeatures::sharedFeatures().webGPUEnabled())
+#if ENABLE(WEBMETAL)
+    , m_webMetalEnabled(RuntimeEnabledFeatures::sharedFeatures().webMetalEnabled())
 #endif
     , m_webVREnabled(RuntimeEnabledFeatures::sharedFeatures().webVREnabled())
 #if ENABLE(MEDIA_STREAM)
@@ -122,6 +123,7 @@ InternalSettings::Backup::Backup(Settings& settings)
     , m_shouldManageAudioSessionCategory(DeprecatedGlobalSettings::shouldManageAudioSessionCategory())
 #endif
     , m_customPasteboardDataEnabled(RuntimeEnabledFeatures::sharedFeatures().customPasteboardDataEnabled())
+    , m_promptForStorageAccessAPIEnabled(RuntimeEnabledFeatures::sharedFeatures().storageAccessPromptsEnabled())
 {
 }
 
@@ -203,6 +205,7 @@ void InternalSettings::Backup::restoreTo(Settings& settings)
     RenderTheme::singleton().setShouldMockBoldSystemFontForAccessibility(m_shouldMockBoldSystemFontForAccessibility);
     FontCache::singleton().setShouldMockBoldSystemFontForAccessibility(m_shouldMockBoldSystemFontForAccessibility);
     settings.setFrameFlattening(m_frameFlattening);
+    settings.setIncompleteImageBorderEnabled(m_incompleteImageBorderEnabled);
 #if ENABLE(ACCESSIBILITY_EVENTS)
     settings.setAccessibilityEventsEnabled(m_accessibilityEventsEnabled);
 #endif
@@ -213,8 +216,8 @@ void InternalSettings::Backup::restoreTo(Settings& settings)
 #if ENABLE(WEBGL2)
     RuntimeEnabledFeatures::sharedFeatures().setWebGL2Enabled(m_webGL2Enabled);
 #endif
-#if ENABLE(WEBGPU)
-    RuntimeEnabledFeatures::sharedFeatures().setWebGPUEnabled(m_webGPUEnabled);
+#if ENABLE(WEBMETAL)
+    RuntimeEnabledFeatures::sharedFeatures().setWebMetalEnabled(m_webMetalEnabled);
 #endif
     RuntimeEnabledFeatures::sharedFeatures().setWebVREnabled(m_webVREnabled);
 #if ENABLE(MEDIA_STREAM)
@@ -225,6 +228,8 @@ void InternalSettings::Backup::restoreTo(Settings& settings)
 #if USE(AUDIO_SESSION)
     DeprecatedGlobalSettings::setShouldManageAudioSessionCategory(m_shouldManageAudioSessionCategory);
 #endif
+
+    RuntimeEnabledFeatures::sharedFeatures().setStorageAccessPromptsEnabled(m_promptForStorageAccessAPIEnabled);
 }
 
 class InternalSettingsWrapper : public Supplement<Page> {
@@ -281,6 +286,7 @@ void InternalSettings::resetToConsistentState()
     m_page->setPageScaleFactor(1, { 0, 0 });
     m_page->mainFrame().setPageAndTextZoomFactors(1, 1);
     m_page->setCanStartMedia(true);
+    m_page->setUseDarkAppearance(false);
 
     settings().setForcePendingWebGLPolicy(false);
 #if ENABLE(WIRELESS_PLAYBACK_TARGET)
@@ -456,7 +462,7 @@ ExceptionOr<void> InternalSettings::setMediaCaptureRequiresSecureConnection(bool
     if (!m_page)
         return Exception { InvalidAccessError };
 #if ENABLE(MEDIA_STREAM)
-    DeprecatedGlobalSettings::setMediaCaptureRequiresSecureConnection(requires);
+    m_page->settings().setMediaCaptureRequiresSecureConnection(requires);
 #else
     UNUSED_PARAM(requires);
 #endif
@@ -519,6 +525,14 @@ ExceptionOr<bool> InternalSettings::shouldDisplayTrackKind(const String& kind)
     UNUSED_PARAM(kind);
     return false;
 #endif
+}
+
+ExceptionOr<void> InternalSettings::setUseDarkAppearance(bool useDarkAppearance)
+{
+    if (!m_page)
+        return Exception { InvalidAccessError };
+    m_page->setUseDarkAppearance(useDarkAppearance);
+    return { };
 }
 
 ExceptionOr<void> InternalSettings::setStorageBlockingPolicy(const String& mode)
@@ -753,10 +767,10 @@ void InternalSettings::setWebGL2Enabled(bool enabled)
 #endif
 }
 
-void InternalSettings::setWebGPUEnabled(bool enabled)
+void InternalSettings::setWebMetalEnabled(bool enabled)
 {
-#if ENABLE(WEBGPU)
-    RuntimeEnabledFeatures::sharedFeatures().setWebGPUEnabled(enabled);
+#if ENABLE(WEBMETAL)
+    RuntimeEnabledFeatures::sharedFeatures().setWebMetalEnabled(enabled);
 #else
     UNUSED_PARAM(enabled);
 #endif
@@ -776,15 +790,20 @@ void InternalSettings::setScreenCaptureEnabled(bool enabled)
 #endif
 }
 
+void InternalSettings::setStorageAccessPromptsEnabled(bool enabled)
+{
+    RuntimeEnabledFeatures::sharedFeatures().setStorageAccessPromptsEnabled(enabled);
+}
+    
 ExceptionOr<String> InternalSettings::userInterfaceDirectionPolicy()
 {
     if (!m_page)
         return Exception { InvalidAccessError };
     switch (settings().userInterfaceDirectionPolicy()) {
     case UserInterfaceDirectionPolicy::Content:
-        return String { ASCIILiteral { "Content" } };
+        return "Content"_str;
     case UserInterfaceDirectionPolicy::System:
-        return String { ASCIILiteral { "View" } };
+        return "View"_str;
     }
     ASSERT_NOT_REACHED();
     return Exception { InvalidAccessError };
@@ -810,10 +829,10 @@ ExceptionOr<String> InternalSettings::systemLayoutDirection()
     if (!m_page)
         return Exception { InvalidAccessError };
     switch (settings().systemLayoutDirection()) {
-    case LTR:
-        return String { ASCIILiteral { "LTR" } };
-    case RTL:
-        return String { ASCIILiteral { "RTL" } };
+    case TextDirection::LTR:
+        return "LTR"_str;
+    case TextDirection::RTL:
+        return "RTL"_str;
     }
     ASSERT_NOT_REACHED();
     return Exception { InvalidAccessError };
@@ -824,11 +843,11 @@ ExceptionOr<void> InternalSettings::setSystemLayoutDirection(const String& direc
     if (!m_page)
         return Exception { InvalidAccessError };
     if (equalLettersIgnoringASCIICase(direction, "ltr")) {
-        settings().setSystemLayoutDirection(LTR);
+        settings().setSystemLayoutDirection(TextDirection::LTR);
         return { };
     }
     if (equalLettersIgnoringASCIICase(direction, "rtl")) {
-        settings().setSystemLayoutDirection(RTL);
+        settings().setSystemLayoutDirection(TextDirection::RTL);
         return { };
     }
     return Exception { InvalidAccessError };
@@ -894,6 +913,14 @@ ExceptionOr<void> InternalSettings::setAccessibilityEventsEnabled(bool enabled)
     return { };
 }
 
+ExceptionOr<void> InternalSettings::setIncompleteImageBorderEnabled(bool enabled)
+{
+    if (!m_page)
+        return Exception { InvalidAccessError };
+    settings().setIncompleteImageBorderEnabled(enabled);
+    return { };
+}
+
 static InternalSettings::ForcedAccessibilityValue settingsToInternalSettingsValue(Settings::ForcedAccessibilityValue value)
 {
     switch (value) {
@@ -954,9 +981,9 @@ void InternalSettings::setForcedPrefersReducedMotionAccessibilityValue(InternalS
     settings().setForcedPrefersReducedMotionAccessibilityValue(internalSettingsToSettingsValue(value));
 }
 
-bool InternalSettings::cssAnimationsAndCSSTransitionsBackedByWebAnimationsEnabled()
+bool InternalSettings::webAnimationsCSSIntegrationEnabled()
 {
-    return RuntimeEnabledFeatures::sharedFeatures().cssAnimationsAndCSSTransitionsBackedByWebAnimationsEnabled();
+    return RuntimeEnabledFeatures::sharedFeatures().webAnimationsCSSIntegrationEnabled();
 }
 
 // If you add to this class, make sure that you update the Backup class for test reproducability!

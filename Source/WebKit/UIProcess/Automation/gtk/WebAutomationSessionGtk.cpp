@@ -34,17 +34,16 @@
 namespace WebKit {
 using namespace WebCore;
 
-static unsigned modifiersToEventState(WebEvent::Modifiers modifiers)
+static unsigned modifiersToEventState(OptionSet<WebEvent::Modifier> modifiers)
 {
     unsigned state = 0;
-
-    if (modifiers & WebEvent::ControlKey)
+    if (modifiers.contains(WebEvent::Modifier::ControlKey))
         state |= GDK_CONTROL_MASK;
-    if (modifiers & WebEvent::ShiftKey)
+    if (modifiers.contains(WebEvent::Modifier::ShiftKey))
         state |= GDK_SHIFT_MASK;
-    if (modifiers & WebEvent::AltKey)
+    if (modifiers.contains(WebEvent::Modifier::AltKey))
         state |= GDK_META_MASK;
-    if (modifiers & WebEvent::CapsLockKey)
+    if (modifiers.contains(WebEvent::Modifier::CapsLockKey))
         state |= GDK_LOCK_MASK;
     return state;
 }
@@ -102,7 +101,7 @@ static void doMotionEvent(GtkWidget* widget, const WebCore::IntPoint& location, 
     gtk_main_do_event(event.get());
 }
 
-void WebAutomationSession::platformSimulateMouseInteraction(WebPageProxy& page, MouseInteraction interaction, WebMouseEvent::Button button, const WebCore::IntPoint& locationInView, WebEvent::Modifiers keyModifiers)
+void WebAutomationSession::platformSimulateMouseInteraction(WebPageProxy& page, MouseInteraction interaction, WebMouseEvent::Button button, const WebCore::IntPoint& locationInView, OptionSet<WebEvent::Modifier> keyModifiers)
 {
     unsigned gdkButton = mouseButtonToGdkButton(button);
     auto modifier = stateModifierForGdkButton(gdkButton);
@@ -294,15 +293,17 @@ static unsigned modifiersForKeyCode(unsigned keyCode)
     return 0;
 }
 
-void WebAutomationSession::platformSimulateKeyboardInteraction(WebPageProxy& page, KeyboardInteraction interaction, std::optional<VirtualKey> virtualKey, std::optional<CharKey> charKey)
+void WebAutomationSession::platformSimulateKeyboardInteraction(WebPageProxy& page, KeyboardInteraction interaction, WTF::Variant<VirtualKey, CharKey>&& key)
 {
-    ASSERT(virtualKey.has_value() || charKey.has_value());
-
     unsigned keyCode;
-    if (virtualKey.has_value())
-        keyCode = keyCodeForVirtualKey(virtualKey.value());
-    else
-        keyCode = gdk_unicode_to_keyval(g_utf8_get_char(&charKey.value()));
+    WTF::switchOn(key,
+        [&] (VirtualKey virtualKey) {
+            keyCode = keyCodeForVirtualKey(virtualKey);
+        },
+        [&] (CharKey charKey) {
+            keyCode = gdk_unicode_to_keyval(g_utf8_get_char(&charKey));
+        }
+    );
     unsigned modifiers = modifiersForKeyCode(keyCode);
 
     switch (interaction) {

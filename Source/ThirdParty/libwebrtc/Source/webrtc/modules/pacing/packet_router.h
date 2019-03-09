@@ -11,16 +11,17 @@
 #ifndef MODULES_PACING_PACKET_ROUTER_H_
 #define MODULES_PACING_PACKET_ROUTER_H_
 
+#include <stddef.h>
+#include <stdint.h>
 #include <list>
 #include <vector>
 
-#include "common_types.h"  // NOLINT(build/include)
+#include "api/transport/network_types.h"
 #include "modules/pacing/paced_sender.h"
 #include "modules/remote_bitrate_estimator/include/remote_bitrate_estimator.h"
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "rtc_base/constructormagic.h"
 #include "rtc_base/criticalsection.h"
-#include "rtc_base/race_checker.h"
 #include "rtc_base/thread_annotations.h"
 
 namespace webrtc {
@@ -91,10 +92,11 @@ class PacketRouter : public PacedSender::PacketSender,
   void UnsetActiveRembModule() RTC_EXCLUSIVE_LOCKS_REQUIRED(modules_crit_);
   void DetermineActiveRembModule() RTC_EXCLUSIVE_LOCKS_REQUIRED(modules_crit_);
 
-  rtc::RaceChecker pacer_race_;
   rtc::CriticalSection modules_crit_;
   // Rtp and Rtcp modules of the rtp senders.
   std::list<RtpRtcp*> rtp_send_modules_ RTC_GUARDED_BY(modules_crit_);
+  // The last module used to send media.
+  RtpRtcp* last_send_module_ RTC_GUARDED_BY(modules_crit_);
   // Rtcp modules of the rtp receivers.
   std::vector<RtcpFeedbackSenderInterface*> rtcp_feedback_senders_
       RTC_GUARDED_BY(modules_crit_);

@@ -26,16 +26,24 @@
 #include "config.h"
 #include "DownloadProxyMap.h"
 
-#include "ChildProcessProxy.h"
+#include "AuxiliaryProcessProxy.h"
 #include "DownloadProxy.h"
 #include "DownloadProxyMessages.h"
 #include "MessageReceiverMap.h"
+#include "ProcessAssertion.h"
 #include <wtf/StdLibExtras.h>
+
+#if PLATFORM(COCOA)
+#include <wtf/cocoa/Entitlements.h>
+#endif
 
 namespace WebKit {
 
-DownloadProxyMap::DownloadProxyMap(ChildProcessProxy* process)
-    : m_process(process)
+DownloadProxyMap::DownloadProxyMap(NetworkProcessProxy& process)
+    : m_process(&process)
+#if PLATFORM(COCOA)
+    , m_shouldTakeAssertion(WTF::processHasEntitlement("com.apple.multitasking.systemappassertions"))
+#endif
 {
 }
 
@@ -46,12 +54,17 @@ DownloadProxyMap::~DownloadProxyMap()
 
 DownloadProxy* DownloadProxyMap::createDownloadProxy(WebProcessPool& processPool, const WebCore::ResourceRequest& resourceRequest)
 {
-    RefPtr<DownloadProxy> downloadProxy = DownloadProxy::create(*this, processPool, resourceRequest);
-    m_downloads.set(downloadProxy->downloadID(), downloadProxy);
+    auto downloadProxy = DownloadProxy::create(*this, processPool, resourceRequest);
+    m_downloads.set(downloadProxy->downloadID(), downloadProxy.copyRef());
 
-    m_process->addMessageReceiver(Messages::DownloadProxy::messageReceiverName(), downloadProxy->downloadID().downloadID(), *downloadProxy);
+    if (m_downloads.size() == 1 && m_shouldTakeAssertion) {
+        ASSERT(!m_downloadAssertion);
+        m_downloadAssertion = std::make_unique<ProcessAssertion>(getCurrentProcessID(), "WebKit downloads"_s, AssertionState::UnboundedNetworking);
+    }
 
-    return downloadProxy.get();
+    m_process->addMessageReceiver(Messages::DownloadProxy::messageReceiverName(), downloadProxy->downloadID().downloadID(), downloadProxy.get());
+
+    return downloadProxy.ptr();
 }
 
 void DownloadProxyMap::downloadFinished(DownloadProxy* downloadProxy)
@@ -63,6 +76,11 @@ void DownloadProxyMap::downloadFinished(DownloadProxy* downloadProxy)
     m_process->removeMessageReceiver(Messages::DownloadProxy::messageReceiverName(), downloadID.downloadID());
     downloadProxy->invalidate();
     m_downloads.remove(downloadID);
+
+    if (m_downloads.isEmpty() && m_shouldTakeAssertion) {
+        ASSERT(m_downloadAssertion);
+        m_downloadAssertion = nullptr;
+    }
 }
 
 void DownloadProxyMap::processDidClose()
@@ -75,6 +93,7 @@ void DownloadProxyMap::processDidClose()
     }
 
     m_downloads.clear();
+    m_downloadAssertion = nullptr;
     m_process = nullptr;
 }
 

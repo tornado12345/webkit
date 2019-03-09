@@ -32,18 +32,39 @@
 #include "FrameView.h"
 #include "InspectorInstrumentation.h"
 #include "LayoutDisallowedScope.h"
-#include "LayoutState.h"
 #include "Logging.h"
 #include "RenderElement.h"
+#include "RenderLayoutState.h"
 #include "RenderView.h"
+#include "RuntimeEnabledFeatures.h"
 #include "ScriptDisallowedScope.h"
 #include "Settings.h"
+
+#if ENABLE(LAYOUT_FORMATTING_CONTEXT)
+#include "FormattingState.h"
+#include "LayoutContainer.h"
+#include "LayoutState.h"
+#include "LayoutTreeBuilder.h"
+#endif
 
 #include <wtf/SetForScope.h>
 #include <wtf/SystemTracing.h>
 #include <wtf/text/TextStream.h>
 
 namespace WebCore {
+
+#if ENABLE(LAYOUT_FORMATTING_CONTEXT)
+static void layoutUsingFormattingContext(const RenderView& renderView)
+{
+    if (!RuntimeEnabledFeatures::sharedFeatures().layoutFormattingContextEnabled())
+        return;
+    auto initialContainingBlock = Layout::TreeBuilder::createLayoutTree(renderView);
+    auto layoutState = std::make_unique<Layout::LayoutState>(*initialContainingBlock);
+    layoutState->setInQuirksMode(renderView.document().inQuirksMode());
+    layoutState->updateLayout();
+    layoutState->verifyAndOutputMismatchingLayoutTree(renderView);
+} 
+#endif
 
 static bool isObjectAncestorContainerOf(RenderElement& ancestor, RenderElement& descendant)
 {
@@ -153,7 +174,7 @@ void FrameViewLayoutContext::layout()
     if (m_firstLayout && !frame().ownerElement())
         LOG(Layout, "FrameView %p elapsed time before first layout: %.3fs", this, document()->timeSinceDocumentCreation().value());
 #endif
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
     if (view().updateFixedPositionLayoutRect() && subtreeLayoutRoot())
         convertSubtreeLayoutToFullLayout();
 #endif
@@ -189,6 +210,9 @@ void FrameViewLayoutContext::layout()
         RenderTreeNeedsLayoutChecker checker(*layoutRoot);
 #endif
         layoutRoot->layout();
+#if ENABLE(LAYOUT_FORMATTING_CONTEXT)
+        layoutUsingFormattingContext(*renderView());
+#endif
         ++m_layoutCount;
 #if ENABLE(TEXT_AUTOSIZING)
         applyTextSizingIfNeeded(*layoutRoot.get());
@@ -289,7 +313,7 @@ bool FrameViewLayoutContext::needsLayout() const
         || (m_disableSetNeedsLayoutCount && m_setNeedsLayoutWasDeferred);
 }
 
-void FrameViewLayoutContext::setNeedsLayout()
+void FrameViewLayoutContext::setNeedsLayoutAfterViewConfigurationChange()
 {
     if (m_disableSetNeedsLayoutCount) {
         m_setNeedsLayoutWasDeferred = true;
@@ -299,6 +323,7 @@ void FrameViewLayoutContext::setNeedsLayout()
     if (auto* renderView = this->renderView()) {
         ASSERT(!renderView->inHitTesting());
         renderView->setNeedsLayout();
+        scheduleLayout();
     }
 }
 
@@ -560,7 +585,7 @@ bool FrameViewLayoutContext::layoutDeltaMatches(const LayoutSize& delta)
 }
 #endif
 
-LayoutState* FrameViewLayoutContext::layoutState() const
+RenderLayoutState* FrameViewLayoutContext::layoutState() const
 {
     if (m_layoutStateStack.isEmpty())
         return nullptr;
@@ -572,14 +597,14 @@ void FrameViewLayoutContext::pushLayoutState(RenderElement& root)
     ASSERT(!m_paintOffsetCacheDisableCount);
     ASSERT(!layoutState());
 
-    m_layoutStateStack.append(std::make_unique<LayoutState>(root));
+    m_layoutStateStack.append(std::make_unique<RenderLayoutState>(root));
 }
 
 bool FrameViewLayoutContext::pushLayoutStateForPaginationIfNeeded(RenderBlockFlow& layoutRoot)
 {
     if (layoutState())
         return false;
-    m_layoutStateStack.append(std::make_unique<LayoutState>(layoutRoot, LayoutState::IsPaginated::Yes));
+    m_layoutStateStack.append(std::make_unique<RenderLayoutState>(layoutRoot, RenderLayoutState::IsPaginated::Yes));
     return true;
 }
     
@@ -589,7 +614,7 @@ bool FrameViewLayoutContext::pushLayoutState(RenderBox& renderer, const LayoutSi
     auto* layoutState = this->layoutState();
     if (!layoutState || !needsFullRepaint() || layoutState->isPaginated() || renderer.enclosingFragmentedFlow()
         || layoutState->lineGrid() || (renderer.style().lineGrid() != RenderStyle::initialLineGrid() && renderer.isRenderBlockFlow())) {
-        m_layoutStateStack.append(std::make_unique<LayoutState>(m_layoutStateStack, renderer, offset, pageHeight, pageHeightChanged));
+        m_layoutStateStack.append(std::make_unique<RenderLayoutState>(m_layoutStateStack, renderer, offset, pageHeight, pageHeightChanged));
         return true;
     }
     return false;

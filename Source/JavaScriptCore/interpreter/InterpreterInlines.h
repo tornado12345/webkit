@@ -26,11 +26,14 @@
 
 #pragma once
 
+#include "CallFrameClosure.h"
+#include "Exception.h"
 #include "Instruction.h"
 #include "Interpreter.h"
 #include "JSCPtrTag.h"
 #include "LLIntData.h"
 #include "UnlinkedCodeBlock.h"
+#include <wtf/UnalignedAccess.h>
 
 namespace JSC {
 
@@ -49,7 +52,7 @@ inline OpcodeID Interpreter::getOpcodeID(Opcode opcode)
     // in LowLevelInterpreter.cpp).
     auto codePtr = MacroAssemblerCodePtr<BytecodePtrTag>::createFromExecutableAddress(opcode);
     int32_t* opcodeIDAddress = codePtr.dataLocation<int32_t*>() - 1;
-    OpcodeID opcodeID = static_cast<OpcodeID>(*opcodeIDAddress);
+    OpcodeID opcodeID = static_cast<OpcodeID>(WTF::unalignedLoad<int32_t>(opcodeIDAddress));
     ASSERT(opcodeID < NUMBER_OF_BYTECODE_IDS);
     return opcodeID;
 #else
@@ -61,14 +64,27 @@ inline OpcodeID Interpreter::getOpcodeID(Opcode opcode)
 #endif
 }
 
-inline OpcodeID Interpreter::getOpcodeID(const Instruction& instruction)
+ALWAYS_INLINE JSValue Interpreter::execute(CallFrameClosure& closure)
 {
-    return getOpcodeID(instruction.u.opcode);
-}
+    VM& vm = *closure.vm;
+    auto throwScope = DECLARE_THROW_SCOPE(vm);
 
-inline OpcodeID Interpreter::getOpcodeID(const UnlinkedInstruction& instruction)
-{
-    return instruction.u.opcode;
+    ASSERT(!vm.isCollectorBusyOnCurrentThread());
+    ASSERT(vm.currentThreadIsHoldingAPILock());
+
+    StackStats::CheckPoint stackCheckPoint;
+
+    VMTraps::Mask mask(VMTraps::NeedTermination, VMTraps::NeedWatchdogCheck);
+    if (UNLIKELY(vm.needTrapHandling(mask))) {
+        vm.handleTraps(closure.oldCallFrame, mask);
+        RETURN_IF_EXCEPTION(throwScope, throwScope.exception());
+    }
+
+    // Execute the code:
+    throwScope.release();
+    JSValue result = closure.functionExecutable->generatedJITCodeForCall()->execute(&vm, closure.protoCallFrame);
+
+    return checkedReturn(result);
 }
 
 } // namespace JSC

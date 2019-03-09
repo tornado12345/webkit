@@ -9,12 +9,13 @@
  */
 
 #include "modules/audio_device/mac/audio_device_mac.h"
+#include "absl/memory/memory.h"
 #include "modules/audio_device/audio_device_config.h"
-#include "modules/audio_device/mac/portaudio/pa_ringbuffer.h"
+#include "modules/third_party/portaudio/pa_ringbuffer.h"
 #include "rtc_base/arraysize.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/platform_thread.h"
-#include "system_wrappers/include/event_wrapper.h"
+#include "rtc_base/system/arch.h"
 
 #include <ApplicationServices/ApplicationServices.h>
 #include <libkern/OSAtomic.h>  // OSAtomicCompareAndSwap()
@@ -113,8 +114,6 @@ void AudioDeviceMac::logCAMsg(const rtc::LoggingSeverity sev,
 
 AudioDeviceMac::AudioDeviceMac()
     : _ptrAudioBuffer(NULL),
-      _stopEventRec(*EventWrapper::Create()),
-      _stopEvent(*EventWrapper::Create()),
       _mixerManager(),
       _inputDeviceIndex(0),
       _outputDeviceIndex(0),
@@ -150,9 +149,6 @@ AudioDeviceMac::AudioDeviceMac()
       _renderBufSizeSamples(0),
       prev_key_state_() {
   RTC_LOG(LS_INFO) << __FUNCTION__ << " created";
-
-  RTC_DCHECK(&_stopEvent != NULL);
-  RTC_DCHECK(&_stopEventRec != NULL);
 
   memset(_renderConvertData, 0, sizeof(_renderConvertData));
   memset(&_outStreamFormat, 0, sizeof(AudioStreamBasicDescription));
@@ -202,8 +198,6 @@ AudioDeviceMac::~AudioDeviceMac() {
     RTC_LOG(LS_ERROR) << "semaphore_destroy() error: " << kernErr;
   }
 
-  delete &_stopEvent;
-  delete &_stopEventRec;
 }
 
 // ============================================================================
@@ -1336,7 +1330,7 @@ int32_t AudioDeviceMac::StopRecording() {
       _recording = false;
       _doStopRec = true;  // Signal to io proc to stop audio device
       _critSect.Leave();  // Cannot be under lock, risk of deadlock
-      if (kEventTimeout == _stopEventRec.Wait(2000)) {
+      if (!_stopEventRec.Wait(2000)) {
         rtc::CritScope critScoped(&_critSect);
         RTC_LOG(LS_WARNING) << "Timed out stopping the capture IOProc."
                             << "We may have failed to detect a device removal.";
@@ -1364,7 +1358,7 @@ int32_t AudioDeviceMac::StopRecording() {
       _recording = false;
       _doStop = true;     // Signal to io proc to stop audio device
       _critSect.Leave();  // Cannot be under lock, risk of deadlock
-      if (kEventTimeout == _stopEvent.Wait(2000)) {
+      if (!_stopEvent.Wait(2000)) {
         rtc::CritScope critScoped(&_critSect);
         RTC_LOG(LS_WARNING) << "Timed out stopping the shared IOProc."
                             << "We may have failed to detect a device removal.";
@@ -1472,7 +1466,7 @@ int32_t AudioDeviceMac::StopPlayout() {
     _playing = false;
     _doStop = true;     // Signal to io proc to stop audio device
     _critSect.Leave();  // Cannot be under lock, risk of deadlock
-    if (kEventTimeout == _stopEvent.Wait(2000)) {
+    if (!_stopEvent.Wait(2000)) {
       rtc::CritScope critScoped(&_critSect);
       RTC_LOG(LS_WARNING) << "Timed out stopping the render IOProc."
                           << "We may have failed to detect a device removal.";
@@ -1564,8 +1558,8 @@ int32_t AudioDeviceMac::GetNumberDevices(const AudioObjectPropertyScope scope,
     return 0;
   }
 
-  AudioDeviceID* deviceIds = (AudioDeviceID*)malloc(size);
   UInt32 numberDevices = size / sizeof(AudioDeviceID);
+  const auto deviceIds = absl::make_unique<AudioDeviceID[]>(numberDevices);
   AudioBufferList* bufferList = NULL;
   UInt32 numberScopedDevices = 0;
 
@@ -1596,8 +1590,9 @@ int32_t AudioDeviceMac::GetNumberDevices(const AudioObjectPropertyScope scope,
   // Then list the rest of the devices
   bool listOK = true;
 
-  WEBRTC_CA_LOG_ERR(AudioObjectGetPropertyData(
-      kAudioObjectSystemObject, &propertyAddress, 0, NULL, &size, deviceIds));
+  WEBRTC_CA_LOG_ERR(AudioObjectGetPropertyData(kAudioObjectSystemObject,
+                                               &propertyAddress, 0, NULL, &size,
+                                               deviceIds.get()));
   if (err != noErr) {
     listOK = false;
   } else {
@@ -1641,23 +1636,11 @@ int32_t AudioDeviceMac::GetNumberDevices(const AudioObjectPropertyScope scope,
   }
 
   if (!listOK) {
-    if (deviceIds) {
-      free(deviceIds);
-      deviceIds = NULL;
-    }
-
     if (bufferList) {
       free(bufferList);
       bufferList = NULL;
     }
-
     return -1;
-  }
-
-  // Happy ending
-  if (deviceIds) {
-    free(deviceIds);
-    deviceIds = NULL;
   }
 
   return numberScopedDevices;

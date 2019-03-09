@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 Andy VanWagoner (thetalecrafter@gmail.com)
+ * Copyright (C) 2018 Andy VanWagoner (andy@vanwagoner.family)
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -87,13 +87,12 @@ EncodedJSValue JSC_HOST_CALL IntlPluralRulesPrototypeFuncSelect(ExecState* state
     IntlPluralRules* pluralRules = jsDynamicCast<IntlPluralRules*>(vm, state->thisValue());
 
     if (!pluralRules)
-        return JSValue::encode(throwTypeError(state, scope, ASCIILiteral("Intl.PluralRules.prototype.select called on value that's not an object initialized as a PluralRules")));
+        return JSValue::encode(throwTypeError(state, scope, "Intl.PluralRules.prototype.select called on value that's not an object initialized as a PluralRules"_s));
 
     double value = state->argument(0).toNumber(state);
     RETURN_IF_EXCEPTION(scope, encodedJSValue());
 
-    scope.release();
-    return JSValue::encode(pluralRules->select(*state, value));
+    RELEASE_AND_RETURN(scope, JSValue::encode(pluralRules->select(*state, value)));
 }
 
 EncodedJSValue JSC_HOST_CALL IntlPluralRulesPrototypeFuncResolvedOptions(ExecState* state)
@@ -106,10 +105,9 @@ EncodedJSValue JSC_HOST_CALL IntlPluralRulesPrototypeFuncResolvedOptions(ExecSta
     IntlPluralRules* pluralRules = jsDynamicCast<IntlPluralRules*>(vm, state->thisValue());
 
     if (!pluralRules)
-        return JSValue::encode(throwTypeError(state, scope, ASCIILiteral("Intl.PluralRules.prototype.resolvedOptions called on value that's not an object initialized as a PluralRules")));
+        return JSValue::encode(throwTypeError(state, scope, "Intl.PluralRules.prototype.resolvedOptions called on value that's not an object initialized as a PluralRules"_s));
 
-    scope.release();
-    return JSValue::encode(pluralRules->resolvedOptions(*state));
+    RELEASE_AND_RETURN(scope, JSValue::encode(pluralRules->resolvedOptions(*state)));
 }
 
 } // namespace JSC

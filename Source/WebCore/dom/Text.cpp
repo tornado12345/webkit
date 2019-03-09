@@ -73,7 +73,7 @@ ExceptionOr<Ref<Text>> Text::splitText(unsigned offset)
             return insertResult.releaseException();
     }
 
-    document().textNodeSplit(this);
+    document().textNodeSplit(*this);
 
     if (renderer())
         renderer()->setTextWithOffset(data(), 0, oldData.length());
@@ -153,7 +153,7 @@ RefPtr<Text> Text::replaceWholeText(const String& newText)
 
 String Text::nodeName() const
 {
-    return ASCIILiteral("#text");
+    return "#text"_s;
 }
 
 Node::NodeType Text::nodeType() const

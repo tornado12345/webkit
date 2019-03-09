@@ -41,27 +41,29 @@
 
 namespace WebCore {
 
-enum SendCallbackPolicy {
+enum class SendCallbackPolicy : uint8_t {
     SendCallbacks,
     DoNotSendCallbacks
 };
 
-enum ContentSniffingPolicy {
+// FIXME: These options are named poorly. We only implement force disabling content sniffing, not enabling it,
+// and even that only on some platforms.
+enum class ContentSniffingPolicy : uint8_t {
     SniffContent,
     DoNotSniffContent
 };
 
-enum DataBufferingPolicy {
+enum class DataBufferingPolicy : uint8_t {
     BufferData,
     DoNotBufferData
 };
 
-enum SecurityCheckPolicy {
+enum class SecurityCheckPolicy : uint8_t {
     SkipSecurityCheck,
     DoSecurityCheck
 };
 
-enum CertificateInfoPolicy {
+enum class CertificateInfoPolicy : uint8_t {
     IncludeCertificateInfo,
     DoNotIncludeCertificateInfo
 };
@@ -81,41 +83,48 @@ enum class CachingPolicy : uint8_t {
     DisallowCaching
 };
 
-enum class ClientCredentialPolicy {
+enum class ClientCredentialPolicy : uint8_t {
     CannotAskClientForCredentials,
     MayAskClientForCredentials
 };
 
-enum class SameOriginDataURLFlag {
+enum class SameOriginDataURLFlag : uint8_t {
     Set,
     Unset
 };
 
-enum class InitiatorContext {
+enum class InitiatorContext : uint8_t {
     Document,
     Worker,
 };
 
-enum class ServiceWorkersMode {
+enum class ServiceWorkersMode : uint8_t {
     All,
     None,
     Only // An error will happen if service worker is not handling the fetch. Used to bypass preflight safely.
 };
 
-enum class ApplicationCacheMode {
+enum class ApplicationCacheMode : uint8_t {
     Use,
     Bypass
 };
 
-enum class ContentEncodingSniffingPolicy {
+// FIXME: These options are named poorly. We only implement force disabling content encoding sniffing, not enabling it,
+// and even that only on some platforms.
+enum class ContentEncodingSniffingPolicy : uint8_t {
     Sniff,
     DoNotSniff,
 };
 
-enum class PreflightPolicy {
+enum class PreflightPolicy : uint8_t {
     Consider,
     Force,
     Prevent
+};
+
+enum class LoadedFromOpaqueSource : uint8_t {
+    Yes,
+    No
 };
 
 struct ResourceLoaderOptions : public FetchOptions {
@@ -139,13 +148,20 @@ struct ResourceLoaderOptions : public FetchOptions {
         this->mode = mode;
     }
 
-    SendCallbackPolicy sendLoadCallbacks { DoNotSendCallbacks };
-    ContentSniffingPolicy sniffContent { DoNotSniffContent };
+#if ENABLE(SERVICE_WORKER)
+    Optional<ServiceWorkerRegistrationIdentifier> serviceWorkerRegistrationIdentifier;
+#endif
+    HashSet<HTTPHeaderName, WTF::IntHash<HTTPHeaderName>, WTF::StrongEnumHashTraits<HTTPHeaderName>> httpHeadersToKeep;
+    Optional<ContentSecurityPolicyResponseHeaders> cspResponseHeaders;
+    unsigned maxRedirectCount { 20 };
+
+    SendCallbackPolicy sendLoadCallbacks { SendCallbackPolicy::DoNotSendCallbacks };
+    ContentSniffingPolicy sniffContent { ContentSniffingPolicy::DoNotSniffContent };
     ContentEncodingSniffingPolicy sniffContentEncoding { ContentEncodingSniffingPolicy::Sniff };
-    DataBufferingPolicy dataBufferingPolicy { BufferData };
+    DataBufferingPolicy dataBufferingPolicy { DataBufferingPolicy::BufferData };
     StoredCredentialsPolicy storedCredentialsPolicy { StoredCredentialsPolicy::DoNotUse };
-    SecurityCheckPolicy securityCheck { DoSecurityCheck };
-    CertificateInfoPolicy certificateInfoPolicy { DoNotIncludeCertificateInfo };
+    SecurityCheckPolicy securityCheck { SecurityCheckPolicy::DoSecurityCheck };
+    CertificateInfoPolicy certificateInfoPolicy { CertificateInfoPolicy::DoNotIncludeCertificateInfo };
     ContentSecurityPolicyImposition contentSecurityPolicyImposition { ContentSecurityPolicyImposition::DoPolicyCheck };
     DefersLoadingPolicy defersLoadingPolicy { DefersLoadingPolicy::AllowDefersLoading };
     CachingPolicy cachingPolicy { CachingPolicy::AllowCaching };
@@ -153,18 +169,9 @@ struct ResourceLoaderOptions : public FetchOptions {
     InitiatorContext initiatorContext { InitiatorContext::Document };
     ServiceWorkersMode serviceWorkersMode { ServiceWorkersMode::All };
     ApplicationCacheMode applicationCacheMode { ApplicationCacheMode::Use };
-#if ENABLE(SERVICE_WORKER)
-    std::optional<ServiceWorkerRegistrationIdentifier> serviceWorkerRegistrationIdentifier;
-#endif
-    HashSet<HTTPHeaderName, WTF::IntHash<HTTPHeaderName>, WTF::StrongEnumHashTraits<HTTPHeaderName>> httpHeadersToKeep;
-
     ClientCredentialPolicy clientCredentialPolicy { ClientCredentialPolicy::CannotAskClientForCredentials };
-    unsigned maxRedirectCount { 20 };
-
-    Vector<String> derivedCachedDataTypesToRetrieve;
-
     PreflightPolicy preflightPolicy { PreflightPolicy::Consider };
-    std::optional<ContentSecurityPolicyResponseHeaders> cspResponseHeaders;
+    LoadedFromOpaqueSource loadedFromOpaqueSource { LoadedFromOpaqueSource::No };
 };
 
 } // namespace WebCore

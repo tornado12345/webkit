@@ -41,12 +41,8 @@
 #include <wtf/RandomNumber.h>
 #include <wtf/StdLibExtras.h>
 
-#if PLATFORM(IOS)
-#include "Chrome.h"
-#include "ChromeClient.h"
-#include "Frame.h"
-#include "WKContentObservation.h"
-#include "WKContentObservationInternal.h"
+#if PLATFORM(IOS_FAMILY)
+#include "ContentChangeObserver.h"
 #endif
 
 namespace WebCore {
@@ -113,7 +109,7 @@ private:
 DOMTimerFireState* DOMTimerFireState::current = nullptr;
 
 struct NestedTimersMap {
-    typedef HashMap<int, DOMTimer*>::const_iterator const_iterator;
+    typedef HashMap<int, Ref<DOMTimer>>::const_iterator const_iterator;
 
     static NestedTimersMap* instanceForContext(ScriptExecutionContext& context)
     {
@@ -139,10 +135,10 @@ struct NestedTimersMap {
         nestedTimers.clear();
     }
 
-    void add(int timeoutId, DOMTimer* timer)
+    void add(int timeoutId, Ref<DOMTimer>&& timer)
     {
         if (isTrackingNestedTimers)
-            nestedTimers.add(timeoutId, timer);
+            nestedTimers.add(timeoutId, WTFMove(timer));
     }
 
     void remove(int timeoutId)
@@ -162,7 +158,7 @@ private:
     }
 
     static bool isTrackingNestedTimers;
-    HashMap<int /* timeoutId */, DOMTimer*> nestedTimers;
+    HashMap<int /* timeoutId */, Ref<DOMTimer>> nestedTimers;
 };
 
 bool NestedTimersMap::isTrackingNestedTimers = false;
@@ -219,23 +215,16 @@ int DOMTimer::install(ScriptExecutionContext& context, std::unique_ptr<Scheduled
     // This reference will be released automatically when a one-shot timer fires, when the context
     // is destroyed, or if explicitly cancelled by removeById. 
     DOMTimer* timer = new DOMTimer(context, WTFMove(action), timeout, singleShot);
-#if PLATFORM(IOS)
-    if (is<Document>(context)) {
-        bool didDeferTimeout = context.activeDOMObjectsAreSuspended();
-        if (!didDeferTimeout && timeout <= 100_ms && singleShot) {
-            WKSetObservedContentChange(WKContentIndeterminateChange);
-            WebThreadAddObservedContentModifier(timer); // Will only take affect if not already visibility change.
-        }
-    }
-#endif
-
     timer->suspendIfNeeded();
     InspectorInstrumentation::didInstallTimer(context, timer->m_timeoutId, timeout, singleShot);
 
     // Keep track of nested timer installs.
     if (NestedTimersMap* nestedTimers = NestedTimersMap::instanceForContext(context))
-        nestedTimers->add(timer->m_timeoutId, timer);
-
+        nestedTimers->add(timer->m_timeoutId, *timer);
+#if PLATFORM(IOS_FAMILY)
+    if (is<Document>(context))
+        downcast<Document>(context).contentChangeObserver().didInstallDOMTimer(*timer, timeout, singleShot);
+#endif
     return timer->m_timeoutId;
 }
 
@@ -246,6 +235,14 @@ void DOMTimer::removeById(ScriptExecutionContext& context, int timeoutId)
     // respectively
     if (timeoutId <= 0)
         return;
+
+#if PLATFORM(IOS_FAMILY)
+    if (is<Document>(context)) {
+        auto& document = downcast<Document>(context);
+        if (auto* timer = document.findTimeout(timeoutId))
+            document.contentChangeObserver().didRemoveDOMTimer(*timer);
+    }
+#endif
 
     if (NestedTimersMap* nestedTimers = NestedTimersMap::instanceForContext(context))
         nestedTimers->remove(timeoutId);
@@ -321,7 +318,7 @@ void DOMTimer::fired()
     // Only the first execution of a multi-shot timer should get an affirmative user gesture indicator.
     m_userGestureTokenToForward = nullptr;
 
-    InspectorInstrumentationCookie cookie = InspectorInstrumentation::willFireTimer(context, m_timeoutId);
+    InspectorInstrumentationCookie cookie = InspectorInstrumentation::willFireTimer(context, m_timeoutId, !repeatInterval());
 
     // Simple case for non-one-shot timers.
     if (isActive()) {
@@ -340,48 +337,22 @@ void DOMTimer::fired()
 
     context.removeTimeout(m_timeoutId);
 
-#if PLATFORM(IOS)
-    bool shouldReportLackOfChanges;
-    bool shouldBeginObservingChanges;
-    if (is<Document>(context)) {
-        shouldReportLackOfChanges = WebThreadCountOfObservedContentModifiers() == 1;
-        shouldBeginObservingChanges = WebThreadContainsObservedContentModifier(this);
-    } else {
-        shouldReportLackOfChanges = false;
-        shouldBeginObservingChanges = false;
-    }
-
-    if (shouldBeginObservingChanges) {
-        WKBeginObservingContentChanges(false);
-        WebThreadRemoveObservedContentModifier(this);
-    }
-#endif
-
     // Keep track nested timer installs.
     NestedTimersMap* nestedTimers = NestedTimersMap::instanceForContext(context);
     if (nestedTimers)
         nestedTimers->startTracking();
 
-    m_action->execute(context);
-
-#if PLATFORM(IOS)
-    if (shouldBeginObservingChanges) {
-        WKStopObservingContentChanges();
-
-        if (WKObservedContentChange() == WKContentVisibilityChange || shouldReportLackOfChanges) {
-            Document& document = downcast<Document>(context);
-            if (Page* page = document.page())
-                page->chrome().client().observedContentChange(*document.frame());
-        }
-    }
+#if PLATFORM(IOS_FAMILY)
+    ContentChangeObserver::DOMTimerScope observingScope(is<Document>(context) ? &downcast<Document>(context) : nullptr, *this);
 #endif
+    m_action->execute(context);
 
     InspectorInstrumentation::didFireTimer(cookie);
 
     // Check if we should throttle nested single-shot timers.
     if (nestedTimers) {
-        for (auto& keyValue : *nestedTimers) {
-            auto* timer = keyValue.value;
+        for (auto& idAndTimer : *nestedTimers) {
+            auto& timer = idAndTimer.value;
             if (timer->isActive() && !timer->repeatInterval())
                 timer->updateThrottlingStateIfNecessary(fireState);
         }
@@ -434,11 +405,11 @@ Seconds DOMTimer::intervalClampedToMinimum() const
     return interval;
 }
 
-std::optional<MonotonicTime> DOMTimer::alignedFireTime(MonotonicTime fireTime) const
+Optional<MonotonicTime> DOMTimer::alignedFireTime(MonotonicTime fireTime) const
 {
     Seconds alignmentInterval = scriptExecutionContext()->domTimerAlignmentInterval(m_nestingLevel >= maxTimerNestingLevel);
     if (!alignmentInterval)
-        return std::nullopt;
+        return WTF::nullopt;
     
     static const double randomizedProportion = randomNumber();
 

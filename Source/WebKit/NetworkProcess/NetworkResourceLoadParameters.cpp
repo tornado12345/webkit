@@ -26,20 +26,17 @@
 #include "config.h"
 #include "NetworkResourceLoadParameters.h"
 
-#include "ArgumentCoders.h"
-#include "DataReference.h"
 #include "WebCoreArgumentCoders.h"
-#include <WebCore/SecurityOriginData.h>
-
-using namespace WebCore;
 
 namespace WebKit {
+using namespace WebCore;
 
 void NetworkResourceLoadParameters::encode(IPC::Encoder& encoder) const
 {
     encoder << identifier;
     encoder << webPageID;
     encoder << webFrameID;
+    encoder << parentPID;
     encoder << sessionID;
     encoder << request;
 
@@ -50,7 +47,7 @@ void NetworkResourceLoadParameters::encode(IPC::Encoder& encoder) const
         const Vector<FormDataElement>& elements = request.httpBody()->elements();
         size_t fileCount = 0;
         for (size_t i = 0, count = elements.size(); i < count; ++i) {
-            if (elements[i].m_type == FormDataElement::Type::EncodedFile)
+            if (WTF::holds_alternative<FormDataElement::EncodedFileData>(elements[i].data))
                 ++fileCount;
         }
 
@@ -59,8 +56,8 @@ void NetworkResourceLoadParameters::encode(IPC::Encoder& encoder) const
         size_t extensionIndex = 0;
         for (size_t i = 0, count = elements.size(); i < count; ++i) {
             const FormDataElement& element = elements[i];
-            if (element.m_type == FormDataElement::Type::EncodedFile) {
-                const String& path = element.m_shouldGenerateFile ? element.m_generatedFilename : element.m_filename;
+            if (auto* fileData = WTF::get_if<FormDataElement::EncodedFileData>(element.data)) {
+                const String& path = fileData->shouldGenerateFile ? fileData->generatedFilename : fileData->filename;
                 SandboxExtension::createHandle(path, SandboxExtension::Type::ReadOnly, requestBodySandboxExtensions[extensionIndex++]);
             }
         }
@@ -78,13 +75,10 @@ void NetworkResourceLoadParameters::encode(IPC::Encoder& encoder) const
     encoder.encodeEnum(storedCredentialsPolicy);
     encoder.encodeEnum(clientCredentialPolicy);
     encoder.encodeEnum(shouldPreconnectOnly);
-    encoder << shouldFollowRedirects;
     encoder << shouldClearReferrerOnHTTPSToHTTPRedirect;
-    encoder << defersLoading;
     encoder << needsCertificateInfo;
     encoder << isMainFrameNavigation;
     encoder << maximumBufferingTime;
-    encoder << derivedCachedDataTypesToRetrieve;
 
     encoder << static_cast<bool>(sourceOrigin);
     if (sourceOrigin)
@@ -97,9 +91,10 @@ void NetworkResourceLoadParameters::encode(IPC::Encoder& encoder) const
 
     encoder.encodeEnum(preflightPolicy);
 
-    encoder << shouldEnableFromOriginResponseHeader;
-    if (shouldEnableFromOriginResponseHeader)
-        encoder << frameAncestorOrigins;
+    encoder << shouldEnableCrossOriginResourcePolicy;
+
+    encoder << frameAncestorOrigins;
+    encoder << isHTTPSUpgradeEnabled;
 
 #if ENABLE(CONTENT_EXTENSIONS)
     encoder << mainDocumentURL;
@@ -118,6 +113,9 @@ bool NetworkResourceLoadParameters::decode(IPC::Decoder& decoder, NetworkResourc
     if (!decoder.decode(result.webFrameID))
         return false;
 
+    if (!decoder.decode(result.parentPID))
+        return false;
+
     if (!decoder.decode(result.sessionID))
         return false;
 
@@ -134,17 +132,18 @@ bool NetworkResourceLoadParameters::decode(IPC::Decoder& decoder, NetworkResourc
             return false;
         result.request.setHTTPBody(WTFMove(formData));
 
-        SandboxExtension::HandleArray requestBodySandboxExtensionHandles;
-        if (!decoder.decode(requestBodySandboxExtensionHandles))
+        Optional<SandboxExtension::HandleArray> requestBodySandboxExtensionHandles;
+        decoder >> requestBodySandboxExtensionHandles;
+        if (!requestBodySandboxExtensionHandles)
             return false;
-        for (size_t i = 0; i < requestBodySandboxExtensionHandles.size(); ++i) {
-            if (auto extension = SandboxExtension::create(WTFMove(requestBodySandboxExtensionHandles[i])))
+        for (size_t i = 0; i < requestBodySandboxExtensionHandles->size(); ++i) {
+            if (auto extension = SandboxExtension::create(WTFMove(requestBodySandboxExtensionHandles->at(i))))
                 result.requestBodySandboxExtensions.append(WTFMove(extension));
         }
     }
 
     if (result.request.url().isLocalFile()) {
-        std::optional<SandboxExtension::Handle> resourceSandboxExtensionHandle;
+        Optional<SandboxExtension::Handle> resourceSandboxExtensionHandle;
         decoder >> resourceSandboxExtensionHandle;
         if (!resourceSandboxExtensionHandle)
             return false;
@@ -161,19 +160,13 @@ bool NetworkResourceLoadParameters::decode(IPC::Decoder& decoder, NetworkResourc
         return false;
     if (!decoder.decodeEnum(result.shouldPreconnectOnly))
         return false;
-    if (!decoder.decode(result.shouldFollowRedirects))
-        return false;
     if (!decoder.decode(result.shouldClearReferrerOnHTTPSToHTTPRedirect))
-        return false;
-    if (!decoder.decode(result.defersLoading))
         return false;
     if (!decoder.decode(result.needsCertificateInfo))
         return false;
     if (!decoder.decode(result.isMainFrameNavigation))
         return false;
     if (!decoder.decode(result.maximumBufferingTime))
-        return false;
-    if (!decoder.decode(result.derivedCachedDataTypesToRetrieve))
         return false;
 
     bool hasSourceOrigin;
@@ -185,7 +178,7 @@ bool NetworkResourceLoadParameters::decode(IPC::Decoder& decoder, NetworkResourc
             return false;
     }
 
-    std::optional<FetchOptions> options;
+    Optional<FetchOptions> options;
     decoder >> options;
     if (!options)
         return false;
@@ -196,7 +189,7 @@ bool NetworkResourceLoadParameters::decode(IPC::Decoder& decoder, NetworkResourc
     if (!decoder.decode(result.originalRequestHeaders))
         return false;
 
-    std::optional<bool> shouldRestrictHTTPResponseAccess;
+    Optional<bool> shouldRestrictHTTPResponseAccess;
     decoder >> shouldRestrictHTTPResponseAccess;
     if (!shouldRestrictHTTPResponseAccess)
         return false;
@@ -205,21 +198,26 @@ bool NetworkResourceLoadParameters::decode(IPC::Decoder& decoder, NetworkResourc
     if (!decoder.decodeEnum(result.preflightPolicy))
         return false;
 
-    std::optional<bool> shouldEnableFromOriginResponseHeader;
-    decoder >> shouldEnableFromOriginResponseHeader;
-    if (!shouldEnableFromOriginResponseHeader)
+    Optional<bool> shouldEnableCrossOriginResourcePolicy;
+    decoder >> shouldEnableCrossOriginResourcePolicy;
+    if (!shouldEnableCrossOriginResourcePolicy)
         return false;
-    result.shouldEnableFromOriginResponseHeader = *shouldEnableFromOriginResponseHeader;
-    if (result.shouldEnableFromOriginResponseHeader) {
-        if (!decoder.decode(result.frameAncestorOrigins))
-            return false;
-    }
+    result.shouldEnableCrossOriginResourcePolicy = *shouldEnableCrossOriginResourcePolicy;
+
+    if (!decoder.decode(result.frameAncestorOrigins))
+        return false;
+
+    Optional<bool> isHTTPSUpgradeEnabled;
+    decoder >> isHTTPSUpgradeEnabled;
+    if (!isHTTPSUpgradeEnabled)
+        return false;
+    result.isHTTPSUpgradeEnabled = *isHTTPSUpgradeEnabled;
     
 #if ENABLE(CONTENT_EXTENSIONS)
     if (!decoder.decode(result.mainDocumentURL))
         return false;
 
-    std::optional<std::optional<UserContentControllerIdentifier>> userContentControllerIdentifier;
+    Optional<Optional<UserContentControllerIdentifier>> userContentControllerIdentifier;
     decoder >> userContentControllerIdentifier;
     if (!userContentControllerIdentifier)
         return false;

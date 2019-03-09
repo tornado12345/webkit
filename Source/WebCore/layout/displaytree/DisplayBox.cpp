@@ -28,6 +28,7 @@
 
 #if ENABLE(LAYOUT_FORMATTING_CONTEXT)
 
+#include "RenderStyle.h"
 #include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
@@ -35,7 +36,46 @@ namespace Display {
 
 WTF_MAKE_ISO_ALLOCATED_IMPL(Box);
 
-Box::Box()
+Box::Rect::Rect(LayoutUnit top, LayoutUnit left, LayoutUnit width, LayoutUnit height)
+    : m_rect(left, top, width, height)
+{
+#if !ASSERT_DISABLED
+    m_hasValidTop = true;
+    m_hasValidLeft = true;
+    m_hasValidWidth = true;
+    m_hasValidHeight = true;
+#endif
+}
+
+Box::Box(const RenderStyle& style)
+    : m_style(style)
+{
+}
+
+Box::Box(const Box& other)
+    : m_style(other.m_style)
+    , m_topLeft(other.m_topLeft)
+    , m_contentWidth(other.m_contentWidth)
+    , m_contentHeight(other.m_contentHeight)
+    , m_horizontalMargin(other.m_horizontalMargin)
+    , m_verticalMargin(other.m_verticalMargin)
+    , m_horizontalComputedMargin(other.m_horizontalComputedMargin)
+    , m_hasClearance(other.m_hasClearance)
+    , m_border(other.m_border)
+    , m_padding(other.m_padding)
+#if !ASSERT_DISABLED
+    , m_hasValidTop(other.m_hasValidTop)
+    , m_hasValidLeft(other.m_hasValidLeft)
+    , m_hasValidHorizontalMargin(other.m_hasValidHorizontalMargin)
+    , m_hasValidVerticalMargin(other.m_hasValidVerticalMargin)
+    , m_hasValidVerticalNonCollapsedMargin(other.m_hasValidVerticalNonCollapsedMargin)
+    , m_hasValidHorizontalComputedMargin(other.m_hasValidHorizontalComputedMargin)
+    , m_hasValidBorder(other.m_hasValidBorder)
+    , m_hasValidPadding(other.m_hasValidPadding)
+    , m_hasValidContentHeight(other.m_hasValidContentHeight)
+    , m_hasValidContentWidth(other.m_hasValidContentWidth)
+    , m_hasEstimatedMarginBefore(other.m_hasEstimatedMarginBefore)
+#endif
 {
 }
 
@@ -43,41 +83,62 @@ Box::~Box()
 {
 }
 
-LayoutRect Box::marginBox() const
+Box::Style::Style(const RenderStyle& style)
+    : boxSizing(style.boxSizing())
 {
-    auto marginBox = rect();
-    auto topLeftMargin = LayoutSize(m_marginLeft, m_marginTop);
-    marginBox.inflate(topLeftMargin);
+}
 
-    auto bottomRightMargin = LayoutSize(m_marginRight, m_marginBottom);
-    marginBox.expand(bottomRightMargin);
+Box::Rect Box::marginBox() const
+{
+    auto borderBox = this->borderBox();
+
+    Rect marginBox;
+    marginBox.setTop(borderBox.top() - marginBefore());
+    marginBox.setLeft(borderBox.left() - marginStart());
+    marginBox.setHeight(borderBox.height() + marginBefore() + marginAfter());
+    marginBox.setWidth(borderBox.width() + marginStart() + marginEnd());
     return marginBox;
 }
 
-LayoutRect Box::borderBox() const
+Box::Rect Box::nonCollapsedMarginBox() const
 {
-    return LayoutRect(LayoutPoint(0, 0), size());
+    auto borderBox = this->borderBox();
+
+    Rect marginBox;
+    marginBox.setTop(borderBox.top() - nonCollapsedMarginBefore());
+    marginBox.setLeft(borderBox.left() - marginStart());
+    marginBox.setHeight(borderBox.height() + nonCollapsedMarginBefore() + nonCollapsedMarginAfter());
+    marginBox.setWidth(borderBox.width() + marginStart() + marginEnd());
+    return marginBox;
 }
 
-LayoutRect Box::paddingBox() const
+Box::Rect Box::borderBox() const
 {
-    auto paddingBox = borderBox();
-    auto topLeftBorder = LayoutSize(m_borderLeft, m_borderTop);
-    paddingBox.inflate(-topLeftBorder);
+    Rect borderBox;
+    borderBox.setTopLeft({ });
+    borderBox.setSize({ width(), height() });
+    return borderBox;
+}
 
-    auto bottomRightBorder = LayoutSize(m_borderRight, m_borderBottom);
-    paddingBox.expand(-bottomRightBorder);
+Box::Rect Box::paddingBox() const
+{
+    auto borderBox = this->borderBox();
+
+    Rect paddingBox;
+    paddingBox.setTop(borderBox.top() + borderTop());
+    paddingBox.setLeft(borderBox.left() + borderLeft());
+    paddingBox.setHeight(borderBox.bottom() - borderTop() - borderBottom());
+    paddingBox.setWidth(borderBox.width() - borderLeft() - borderRight());
     return paddingBox;
 }
 
-LayoutRect Box::contentBox() const
+Box::Rect Box::contentBox() const
 {
-    auto contentBox = paddingBox();
-    auto topLeftPadding = LayoutSize(m_paddingLeft, m_paddingTop);
-    contentBox.inflate(-topLeftPadding);
-    
-    auto bottomRightPadding = LayoutSize(m_paddingRight, m_paddingBottom);
-    contentBox.expand(-bottomRightPadding);
+    Rect contentBox;
+    contentBox.setTop(contentBoxTop());
+    contentBox.setLeft(contentBoxLeft());
+    contentBox.setWidth(contentBoxWidth());
+    contentBox.setHeight(contentBoxHeight());
     return contentBox;
 }
 

@@ -28,11 +28,9 @@
 
 #import "WKFoundation.h"
 
-#if WK_API_ENABLED
-
 #import "APIDiagnosticLoggingClient.h"
-#import "WeakObjCPtr.h"
 #import <WebCore/DiagnosticLoggingResultType.h>
+#import <wtf/WeakObjCPtr.h>
 
 @class WKWebView;
 @protocol _WKDiagnosticLoggingDelegate;
@@ -40,6 +38,7 @@
 namespace WebKit {
 
 class DiagnosticLoggingClient final : public API::DiagnosticLoggingClient {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     explicit DiagnosticLoggingClient(WKWebView *);
 
@@ -65,8 +64,6 @@ private:
 };
 
 } // WebKit
-
-#endif // WK_API_ENABLED
 
 #endif // DiagnosticLoggingClient_h
 

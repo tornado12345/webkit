@@ -295,11 +295,6 @@ WI.TimelineView = class TimelineView extends WI.ContentView
 
     // Protected
 
-    userSelectedRecordFromOverview(timelineRecord)
-    {
-        // Implemented by sub-classes if needed.
-    }
-
     filterDidChange()
     {
         // Implemented by sub-classes if needed.
@@ -340,5 +335,8 @@ WI.TimelineView = class TimelineView extends WI.ContentView
 };
 
 WI.TimelineView.Event = {
-    RecordWasFiltered: "record-was-filtered"
+    RecordWasFiltered: "timeline-view-record-was-filtered",
+    RecordWasSelected: "timeline-view-record-was-selected",
+    ScannerShow: "timeline-view-scanner-show",
+    ScannerHide: "timeline-view-scanner-hide",
 };

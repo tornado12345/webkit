@@ -29,7 +29,6 @@
 #include "AnimationUtilities.h"
 #include "HashTools.h"
 #include <wtf/Assertions.h>
-#include <wtf/DecimalNumber.h>
 #include <wtf/HexNumber.h>
 #include <wtf/MathExtras.h>
 #include <wtf/text/StringBuilder.h>
@@ -117,6 +116,7 @@ static double calcHue(double temp1, double temp2, double hueVal)
 // further explanation available at http://en.wikipedia.org/wiki/HSL_color_space
 
 // Hue is in the range of 0 to 6.0, the remainder are in the range 0 to 1.0
+// FIXME: Use HSLToSRGB().
 RGBA32 makeRGBAFromHSLA(double hue, double saturation, double lightness, double alpha)
 {
     const double scaleFactor = nextafter(256.0, 0.0);
@@ -377,10 +377,7 @@ String Color::cssText() const
     builder.appendNumber(static_cast<unsigned char>(blue()));
     if (colorHasAlpha) {
         builder.appendLiteral(", ");
-
-        NumberToStringBuffer buffer;
-        bool shouldTruncateTrailingZeros = true;
-        builder.append(numberToFixedPrecisionString(alpha() / 255.0f, 6, buffer, shouldTruncateTrailingZeros));
+        builder.appendNumber(alpha() / 255.0f);
     }
         
     builder.append(')');
@@ -391,8 +388,8 @@ String Color::nameForRenderTreeAsText() const
 {
     // FIXME: Handle ExtendedColors.
     if (alpha() < 0xFF)
-        return String::format("#%02X%02X%02X%02X", red(), green(), blue(), alpha());
-    return String::format("#%02X%02X%02X", red(), green(), blue());
+        return makeString('#', hex(red(), 2), hex(green(), 2), hex(blue(), 2), hex(alpha(), 2));
+    return makeString('#', hex(red(), 2), hex(green(), 2), hex(blue(), 2));
 }
 
 Color Color::light() const
@@ -499,6 +496,9 @@ Color Color::blendWithWhite() const
         if (r >= 0 && g >= 0 && b >= 0)
             break;
     }
+
+    if (isSemantic())
+        newColor.setIsSemantic();
     return newColor;
 }
 
@@ -513,8 +513,12 @@ Color Color::colorWithAlpha(float alpha) const
     if (isExtended())
         return Color { m_colorData.extendedColor->red(), m_colorData.extendedColor->green(), m_colorData.extendedColor->blue(), alpha, m_colorData.extendedColor->colorSpace() };
 
-    int newAlpha = alpha * 255;
-    return Color { red(), green(), blue(), newAlpha };
+    int newAlpha = alpha * 255; // Why doesn't this use colorFloatToRGBAByte() like colorWithOverrideAlpha()?
+
+    Color result = { red(), green(), blue(), newAlpha };
+    if (isSemantic())
+        result.setIsSemantic();
+    return result;
 }
 
 void Color::getRGBA(float& r, float& g, float& b, float& a) const
@@ -533,6 +537,7 @@ void Color::getRGBA(double& r, double& g, double& b, double& a) const
     a = alpha() / 255.0;
 }
 
+// FIXME: Use sRGBToHSL().
 void Color::getHSL(double& hue, double& saturation, double& lightness) const
 {
     // http://en.wikipedia.org/wiki/HSL_color_space. This is a direct copy of

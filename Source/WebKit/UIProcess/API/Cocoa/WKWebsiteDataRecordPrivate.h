@@ -25,8 +25,6 @@
 
 #import <WebKit/WKWebsiteDataRecord.h>
 
-#if WK_API_ENABLED
-
 NS_ASSUME_NONNULL_BEGIN
 
 @class _WKWebsiteDataSize;
@@ -46,8 +44,8 @@ WK_EXTERN NSString * const _WKWebsiteDataTypePlugInData WK_API_AVAILABLE(macosx(
 
 @property (nullable, nonatomic, readonly) _WKWebsiteDataSize *_dataSize;
 
+- (NSArray<NSString *> *)_originsStrings WK_API_AVAILABLE(macosx(10.14), ios(12.0));
+
 @end
 
 NS_ASSUME_NONNULL_END
-
-#endif

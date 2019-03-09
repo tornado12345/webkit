@@ -28,10 +28,13 @@
 #include "JSDOMExceptionHandling.h"
 #include "JSDOMOperation.h"
 #include "JSDOMWrapperCache.h"
+#include "ScriptExecutionContext.h"
 #include <JavaScriptCore/FunctionPrototype.h>
+#include <JavaScriptCore/HeapSnapshotBuilder.h>
 #include <JavaScriptCore/JSCInlines.h>
 #include <wtf/GetPtr.h>
 #include <wtf/PointerPreparations.h>
+#include <wtf/URL.h>
 
 
 namespace WebCore {
@@ -82,7 +85,7 @@ template<> JSValue JSTestNamedGetterWithIdentifierConstructor::prototypeForStruc
 template<> void JSTestNamedGetterWithIdentifierConstructor::initializeProperties(VM& vm, JSDOMGlobalObject& globalObject)
 {
     putDirect(vm, vm.propertyNames->prototype, JSTestNamedGetterWithIdentifier::prototype(vm, globalObject), JSC::PropertyAttribute::DontDelete | JSC::PropertyAttribute::ReadOnly | JSC::PropertyAttribute::DontEnum);
-    putDirect(vm, vm.propertyNames->name, jsNontrivialString(&vm, String(ASCIILiteral("TestNamedGetterWithIdentifier"))), JSC::PropertyAttribute::ReadOnly | JSC::PropertyAttribute::DontEnum);
+    putDirect(vm, vm.propertyNames->name, jsNontrivialString(&vm, String("TestNamedGetterWithIdentifier"_s)), JSC::PropertyAttribute::ReadOnly | JSC::PropertyAttribute::DontEnum);
     putDirect(vm, vm.propertyNames->length, jsNumber(0), JSC::PropertyAttribute::ReadOnly | JSC::PropertyAttribute::DontEnum);
 }
 
@@ -144,11 +147,11 @@ bool JSTestNamedGetterWithIdentifier::getOwnPropertySlot(JSObject* object, ExecS
     auto* thisObject = jsCast<JSTestNamedGetterWithIdentifier*>(object);
     ASSERT_GC_OBJECT_INHERITS(thisObject, info());
     using GetterIDLType = IDLDOMString;
-    auto getterFunctor = [] (auto& thisObject, auto propertyName) -> std::optional<typename GetterIDLType::ImplementationType> {
+    auto getterFunctor = [] (auto& thisObject, auto propertyName) -> Optional<typename GetterIDLType::ImplementationType> {
         auto result = thisObject.wrapped().getterName(propertyNameToAtomicString(propertyName));
         if (!GetterIDLType::isNullValue(result))
             return typename GetterIDLType::ImplementationType { GetterIDLType::extractValueFromNullable(result) };
-        return std::nullopt;
+        return WTF::nullopt;
     };
     if (auto namedProperty = accessVisibleNamedProperty<OverrideBuiltins::No>(*state, *thisObject, propertyName, getterFunctor)) {
         auto value = toJS<IDLDOMString>(*state, WTFMove(namedProperty.value()));
@@ -164,11 +167,11 @@ bool JSTestNamedGetterWithIdentifier::getOwnPropertySlotByIndex(JSObject* object
     ASSERT_GC_OBJECT_INHERITS(thisObject, info());
     auto propertyName = Identifier::from(state, index);
     using GetterIDLType = IDLDOMString;
-    auto getterFunctor = [] (auto& thisObject, auto propertyName) -> std::optional<typename GetterIDLType::ImplementationType> {
+    auto getterFunctor = [] (auto& thisObject, auto propertyName) -> Optional<typename GetterIDLType::ImplementationType> {
         auto result = thisObject.wrapped().getterName(propertyNameToAtomicString(propertyName));
         if (!GetterIDLType::isNullValue(result))
             return typename GetterIDLType::ImplementationType { GetterIDLType::extractValueFromNullable(result) };
-        return std::nullopt;
+        return WTF::nullopt;
     };
     if (auto namedProperty = accessVisibleNamedProperty<OverrideBuiltins::No>(*state, *thisObject, propertyName, getterFunctor)) {
         auto value = toJS<IDLDOMString>(*state, WTFMove(namedProperty.value()));
@@ -232,10 +235,20 @@ EncodedJSValue JSC_HOST_CALL jsTestNamedGetterWithIdentifierPrototypeFunctionGet
     return IDLOperation<JSTestNamedGetterWithIdentifier>::call<jsTestNamedGetterWithIdentifierPrototypeFunctionGetterNameBody>(*state, "getterName");
 }
 
-bool JSTestNamedGetterWithIdentifierOwner::isReachableFromOpaqueRoots(JSC::Handle<JSC::Unknown> handle, void*, SlotVisitor& visitor)
+void JSTestNamedGetterWithIdentifier::heapSnapshot(JSCell* cell, HeapSnapshotBuilder& builder)
+{
+    auto* thisObject = jsCast<JSTestNamedGetterWithIdentifier*>(cell);
+    builder.setWrappedObjectForCell(cell, &thisObject->wrapped());
+    if (thisObject->scriptExecutionContext())
+        builder.setLabelForCell(cell, "url " + thisObject->scriptExecutionContext()->url().string());
+    Base::heapSnapshot(cell, builder);
+}
+
+bool JSTestNamedGetterWithIdentifierOwner::isReachableFromOpaqueRoots(JSC::Handle<JSC::Unknown> handle, void*, SlotVisitor& visitor, const char** reason)
 {
     UNUSED_PARAM(handle);
     UNUSED_PARAM(visitor);
+    UNUSED_PARAM(reason);
     return false;
 }
 

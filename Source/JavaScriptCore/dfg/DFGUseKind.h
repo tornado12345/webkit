@@ -70,11 +70,13 @@ enum UseKind {
     SetObjectUse,
     WeakMapObjectUse,
     WeakSetObjectUse,
+    DataViewObjectUse,
     StringObjectUse,
     StringOrStringObjectUse,
     NotStringVarUse,
     NotSymbolUse,
     NotCellUse,
+    KnownOtherUse,
     OtherUse,
     MiscUse,
 
@@ -117,9 +119,8 @@ inline SpeculatedType typeFilterFor(UseKind useKind)
     case KnownBooleanUse:
         return SpecBoolean;
     case CellUse:
-        return SpecCellCheck;
     case KnownCellUse:
-        return SpecCell;
+        return SpecCellCheck;
     case CellOrOtherUse:
         return SpecCellCheck | SpecOther;
     case ObjectUse:
@@ -159,6 +160,8 @@ inline SpeculatedType typeFilterFor(UseKind useKind)
         return SpecWeakMapObject;
     case WeakSetObjectUse:
         return SpecWeakSetObject;
+    case DataViewObjectUse:
+        return SpecDataViewObject;
     case StringObjectUse:
         return SpecStringObject;
     case StringOrStringObjectUse:
@@ -169,6 +172,7 @@ inline SpeculatedType typeFilterFor(UseKind useKind)
         return ~SpecSymbol;
     case NotCellUse:
         return ~SpecCellCheck;
+    case KnownOtherUse:
     case OtherUse:
         return SpecOther;
     case MiscUse:
@@ -188,6 +192,7 @@ inline bool shouldNotHaveTypeCheck(UseKind kind)
     case KnownStringUse:
     case KnownPrimitiveUse:
     case KnownBooleanUse:
+    case KnownOtherUse:
     case Int52RepUse:
     case DoubleRepUse:
         return true;
@@ -256,19 +261,7 @@ inline bool isCell(UseKind kind)
     case SetObjectUse:
     case WeakMapObjectUse:
     case WeakSetObjectUse:
-        return true;
-    default:
-        return false;
-    }
-}
-
-// Returns true if it uses structure in a way that could be clobbered by
-// things that change the structure.
-inline bool usesStructure(UseKind kind)
-{
-    switch (kind) {
-    case StringObjectUse:
-    case StringOrStringObjectUse:
+    case DataViewObjectUse:
         return true;
     default:
         return false;
@@ -278,11 +271,6 @@ inline bool usesStructure(UseKind kind)
 // Returns true if we've already guaranteed the type 
 inline bool alreadyChecked(UseKind kind, SpeculatedType type)
 {
-    // If the check involves the structure then we need to know more than just the type to be sure
-    // that the check is done.
-    if (usesStructure(kind))
-        return false;
-    
     return !(type & ~typeFilterFor(kind));
 }
 
@@ -297,6 +285,34 @@ inline UseKind useKindForResult(NodeFlags result)
     default:
         return UntypedUse;
     }
+}
+
+inline bool checkMayCrashIfInputIsEmpty(UseKind kind)
+{
+#if USE(JSVALUE64)
+    switch (kind) {
+    case UntypedUse:
+    case Int32Use:
+    case KnownInt32Use:
+    case AnyIntUse:
+    case NumberUse:
+    case BooleanUse:
+    case KnownBooleanUse:
+    case CellUse:
+    case KnownCellUse:
+    case CellOrOtherUse:
+    case KnownOtherUse:
+    case OtherUse:
+    case MiscUse:
+    case NotCellUse:
+        return false;
+    default:
+        return true;
+    }
+#else
+    UNUSED_PARAM(kind);
+    return true;
+#endif
 }
 
 } } // namespace JSC::DFG

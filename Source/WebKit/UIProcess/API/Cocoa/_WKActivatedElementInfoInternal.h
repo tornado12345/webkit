@@ -23,12 +23,10 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 #import "InteractionInformationAtPosition.h"
 #endif
 #import "_WKActivatedElementInfo.h"
-
-#if WK_API_ENABLED
 
 namespace WebKit {
     class ShareableBitmap;
@@ -36,7 +34,7 @@ namespace WebKit {
 
 @interface _WKActivatedElementInfo ()
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 + (instancetype)activatedElementInfoWithInteractionInformationAtPosition:(const WebKit::InteractionInformationAtPosition&)information;
 - (instancetype)_initWithInteractionInformationAtPosition:(const WebKit::InteractionInformationAtPosition&)information;
 #endif
@@ -46,5 +44,3 @@ namespace WebKit {
 @property (nonatomic, readonly) CGPoint _interactionLocation;
 
 @end
-
-#endif // WK_API_ENABLED

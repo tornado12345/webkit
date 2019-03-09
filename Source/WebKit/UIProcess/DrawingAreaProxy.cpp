@@ -35,24 +35,25 @@
 #include <wtf/MachSendRight.h>
 #endif
 
+namespace WebKit {
 using namespace WebCore;
 
-namespace WebKit {
-
-DrawingAreaProxy::DrawingAreaProxy(DrawingAreaType type, WebPageProxy& webPageProxy)
+DrawingAreaProxy::DrawingAreaProxy(DrawingAreaType type, WebPageProxy& webPageProxy, WebProcessProxy& process)
     : m_type(type)
+    , m_identifier(DrawingAreaIdentifier::generate())
     , m_webPageProxy(webPageProxy)
+    , m_process(makeRef(process))
     , m_size(webPageProxy.viewSize())
 #if PLATFORM(MAC)
     , m_viewExposedRectChangedTimer(RunLoop::main(), this, &DrawingAreaProxy::viewExposedRectChangedTimerFired)
 #endif
 {
-    m_webPageProxy.process().addMessageReceiver(Messages::DrawingAreaProxy::messageReceiverName(), m_webPageProxy.pageID(), *this);
+    process.addMessageReceiver(Messages::DrawingAreaProxy::messageReceiverName(), m_identifier.toUInt64(), *this);
 }
 
 DrawingAreaProxy::~DrawingAreaProxy()
 {
-    m_webPageProxy.process().removeMessageReceiver(Messages::DrawingAreaProxy::messageReceiverName(), m_webPageProxy.pageID());
+    process().removeMessageReceiver(Messages::DrawingAreaProxy::messageReceiverName(), m_identifier.toUInt64());
 }
 
 bool DrawingAreaProxy::setSize(const IntSize& size, const IntSize& scrollDelta)
@@ -73,8 +74,18 @@ MachSendRight DrawingAreaProxy::createFence()
 }
 #endif
 
+IPC::Connection* DrawingAreaProxy::messageSenderConnection() const
+{
+    return process().connection();
+}
+
+bool DrawingAreaProxy::sendMessage(std::unique_ptr<IPC::Encoder> encoder, OptionSet<IPC::SendOption> sendOptions)
+{
+    return process().sendMessage(WTFMove(encoder), sendOptions);
+}
+
 #if PLATFORM(MAC)
-void DrawingAreaProxy::setViewExposedRect(std::optional<WebCore::FloatRect> viewExposedRect)
+void DrawingAreaProxy::setViewExposedRect(Optional<WebCore::FloatRect> viewExposedRect)
 {
     if (!m_webPageProxy.isValid())
         return;
@@ -93,7 +104,7 @@ void DrawingAreaProxy::viewExposedRectChangedTimerFired()
     if (m_viewExposedRect == m_lastSentViewExposedRect)
         return;
 
-    m_webPageProxy.process().send(Messages::DrawingArea::SetViewExposedRect(m_viewExposedRect), m_webPageProxy.pageID());
+    send(Messages::DrawingArea::SetViewExposedRect(m_viewExposedRect));
     m_lastSentViewExposedRect = m_viewExposedRect;
 }
 #endif // PLATFORM(MAC)

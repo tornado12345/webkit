@@ -28,8 +28,6 @@
 
 #import "APINavigation.h"
 
-#if WK_API_ENABLED
-
 @implementation WKNavigation {
     API::ObjectStorage<API::Navigation> _navigation;
 }
@@ -43,7 +41,7 @@
 
 - (NSURLRequest *)_request
 {
-    return _navigation->originalRequest().nsURLRequest(WebCore::DoNotUpdateHTTPBody);
+    return _navigation->originalRequest().nsURLRequest(WebCore::HTTPBodyUpdatePolicy::DoNotUpdateHTTPBody);
 }
 
 #pragma mark WKObject protocol implementation
@@ -54,5 +52,3 @@
 }
 
 @end
-
-#endif

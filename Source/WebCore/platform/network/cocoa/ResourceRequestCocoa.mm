@@ -28,13 +28,13 @@
 
 #if PLATFORM(COCOA)
 
-#import "FileSystem.h"
 #import "FormDataStreamMac.h"
 #import "HTTPHeaderNames.h"
 #import "ResourceRequestCFNet.h"
 #import "RuntimeApplicationChecks.h"
 #import <Foundation/Foundation.h>
 #import <pal/spi/cf/CFNetworkSPI.h>
+#import <wtf/FileSystem.h>
 #import <wtf/text/CString.h>
 
 namespace WebCore {
@@ -54,24 +54,24 @@ static inline ResourceRequestCachePolicy fromPlatformRequestCachePolicy(NSURLReq
 {
     switch (policy) {
     case NSURLRequestUseProtocolCachePolicy:
-        return UseProtocolCachePolicy;
+        return ResourceRequestCachePolicy::UseProtocolCachePolicy;
     case NSURLRequestReturnCacheDataElseLoad:
-        return ReturnCacheDataElseLoad;
+        return ResourceRequestCachePolicy::ReturnCacheDataElseLoad;
     case NSURLRequestReturnCacheDataDontLoad:
-        return ReturnCacheDataDontLoad;
+        return ResourceRequestCachePolicy::ReturnCacheDataDontLoad;
     default:
-        return ReloadIgnoringCacheData;
+        return ResourceRequestCachePolicy::ReloadIgnoringCacheData;
     }
 }
 
 static inline NSURLRequestCachePolicy toPlatformRequestCachePolicy(ResourceRequestCachePolicy policy)
 {
     switch (policy) {
-    case UseProtocolCachePolicy:
+    case ResourceRequestCachePolicy::UseProtocolCachePolicy:
         return NSURLRequestUseProtocolCachePolicy;
-    case ReturnCacheDataElseLoad:
+    case ResourceRequestCachePolicy::ReturnCacheDataElseLoad:
         return NSURLRequestReturnCacheDataElseLoad;
-    case ReturnCacheDataDontLoad:
+    case ResourceRequestCachePolicy::ReturnCacheDataDontLoad:
         return NSURLRequestReturnCacheDataDontLoad;
     default:
         return NSURLRequestReloadIgnoringLocalCacheData;
@@ -82,12 +82,12 @@ void ResourceRequest::doUpdateResourceRequest()
 {
     m_url = [m_nsRequest.get() URL];
 
-    if (!m_cachePolicy)
+    if (m_cachePolicy == ResourceRequestCachePolicy::UseProtocolCachePolicy)
         m_cachePolicy = fromPlatformRequestCachePolicy([m_nsRequest.get() cachePolicy]);
     m_timeoutInterval = [m_nsRequest.get() timeoutInterval];
     m_firstPartyForCookies = [m_nsRequest.get() mainDocumentURL];
 
-#if (PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 101400) || (PLATFORM(IOS) && __IPHONE_OS_VERSION_MIN_REQUIRED >= 120000)
+#if (PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 101400) || (PLATFORM(IOS_FAMILY) && __IPHONE_OS_VERSION_MIN_REQUIRED >= 120000)
     URL siteForCookies { [m_nsRequest.get() _propertyForKey:@"_kCFHTTPCookiePolicyPropertySiteForCookies"] };
     m_sameSiteDisposition = siteForCookies.isNull() ? SameSiteDisposition::Unspecified : (registrableDomainsAreEqual(siteForCookies, m_url) ? SameSiteDisposition::SameSite : SameSiteDisposition::CrossSite);
 
@@ -136,7 +136,7 @@ void ResourceRequest::doUpdateResourceHTTPBody()
     }
 }
 
-#if (PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 101400) || (PLATFORM(IOS) && __IPHONE_OS_VERSION_MIN_REQUIRED >= 120000)
+#if (PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 101400) || (PLATFORM(IOS_FAMILY) && __IPHONE_OS_VERSION_MIN_REQUIRED >= 120000)
 static NSURL *siteForCookies(ResourceRequest::SameSiteDisposition disposition, NSURL *url)
 {
     switch (disposition) {
@@ -184,7 +184,7 @@ void ResourceRequest::doUpdatePlatformRequest()
         [nsRequest setHTTPMethod:httpMethod()];
     [nsRequest setHTTPShouldHandleCookies:allowCookies()];
 
-#if (PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 101400) || (PLATFORM(IOS) && __IPHONE_OS_VERSION_MIN_REQUIRED >= 120000)
+#if (PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 101400) || (PLATFORM(IOS_FAMILY) && __IPHONE_OS_VERSION_MIN_REQUIRED >= 120000)
     [nsRequest _setProperty:siteForCookies(m_sameSiteDisposition, nsRequest.URL) forKey:@"_kCFHTTPCookiePolicyPropertySiteForCookies"];
     [nsRequest _setProperty:[NSNumber numberWithBool:m_isTopSite] forKey:@"_kCFHTTPCookiePolicyPropertyIsTopLevelNavigation"];
 #endif
@@ -243,7 +243,7 @@ void ResourceRequest::doUpdatePlatformHTTPBody()
 
     if (NSInputStream *bodyStream = [nsRequest HTTPBodyStream]) {
         // For streams, provide a Content-Length to avoid using chunked encoding, and to get accurate total length in callbacks.
-        NSString *lengthString = [bodyStream propertyForKey:(NSString *)formDataStreamLengthPropertyName()];
+        NSString *lengthString = [bodyStream propertyForKey:(__bridge NSString *)formDataStreamLengthPropertyName()];
         if (lengthString) {
             [nsRequest setValue:lengthString forHTTPHeaderField:@"Content-Length"];
             // Since resource request is already marked updated, we need to keep it up to date too.

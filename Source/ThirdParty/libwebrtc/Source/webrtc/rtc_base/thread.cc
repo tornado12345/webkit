@@ -18,19 +18,54 @@
 #error "Either WEBRTC_WIN or WEBRTC_POSIX needs to be defined."
 #endif
 
+#if defined(WEBRTC_WIN)
+// Disable warning that we don't care about:
+// warning C4722: destructor never returns, potential memory leak
+#pragma warning(disable : 4722)
+#endif
+
+#include <stdio.h>
+#include <utility>
+
 #include "rtc_base/checks.h"
+#include "rtc_base/criticalsection.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/nullsocketserver.h"
-#include "rtc_base/platform_thread.h"
-#include "rtc_base/stringutils.h"
 #include "rtc_base/timeutils.h"
 #include "rtc_base/trace_event.h"
+
+#if defined(WEBRTC_MAC)
+#include "rtc_base/system/cocoa_threading.h"
+
+/*
+ * These are forward-declarations for methods that are part of the
+ * ObjC runtime. They are declared in the private header objc-internal.h.
+ * These calls are what clang inserts when using @autoreleasepool in ObjC,
+ * but here they are used directly in order to keep this file C++.
+ * https://clang.llvm.org/docs/AutomaticReferenceCounting.html#runtime-support
+ */
+extern "C" {
+void* objc_autoreleasePoolPush(void);
+void objc_autoreleasePoolPop(void* pool);
+}
+
+namespace {
+class ScopedAutoReleasePool {
+ public:
+  ScopedAutoReleasePool() : pool_(objc_autoreleasePoolPush()) {}
+  ~ScopedAutoReleasePool() { objc_autoreleasePoolPop(pool_); }
+
+ private:
+  void* const pool_;
+};
+}  // namespace
+#endif
 
 namespace rtc {
 
 ThreadManager* ThreadManager::Instance() {
-  RTC_DEFINE_STATIC_LOCAL(ThreadManager, thread_manager, ());
-  return &thread_manager;
+  static ThreadManager* const thread_manager = new ThreadManager();
+  return thread_manager;
 }
 
 ThreadManager::~ThreadManager() {
@@ -55,14 +90,15 @@ Thread* Thread::Current() {
 }
 
 #if defined(WEBRTC_POSIX)
-#if !defined(WEBRTC_MAC)
 ThreadManager::ThreadManager() : main_thread_ref_(CurrentThreadRef()) {
+#if defined(WEBRTC_MAC)
+  InitCocoaMultiThreading();
+#endif
   pthread_key_create(&key_, nullptr);
 }
-#endif
 
-Thread *ThreadManager::CurrentThread() {
-  return static_cast<Thread *>(pthread_getspecific(key_));
+Thread* ThreadManager::CurrentThread() {
+  return static_cast<Thread*>(pthread_getspecific(key_));
 }
 
 void ThreadManager::SetCurrentThread(Thread* thread) {
@@ -77,20 +113,19 @@ void ThreadManager::SetCurrentThread(Thread* thread) {
 
 #if defined(WEBRTC_WIN)
 ThreadManager::ThreadManager()
-    : key_(TlsAlloc()), main_thread_ref_(CurrentThreadRef()) {
+    : key_(TlsAlloc()), main_thread_ref_(CurrentThreadRef()) {}
+
+Thread* ThreadManager::CurrentThread() {
+  return static_cast<Thread*>(TlsGetValue(key_));
 }
 
-Thread *ThreadManager::CurrentThread() {
-  return static_cast<Thread *>(TlsGetValue(key_));
-}
-
-void ThreadManager::SetCurrentThread(Thread *thread) {
+void ThreadManager::SetCurrentThread(Thread* thread) {
   RTC_DCHECK(!CurrentThread() || !thread);
   TlsSetValue(key_, thread);
 }
 #endif
 
-Thread *ThreadManager::WrapCurrentThread() {
+Thread* ThreadManager::WrapCurrentThread() {
   Thread* result = CurrentThread();
   if (nullptr == result) {
     result = new Thread(SocketServer::CreateDefault());
@@ -112,9 +147,8 @@ bool ThreadManager::IsMainThread() {
 }
 
 Thread::ScopedDisallowBlockingCalls::ScopedDisallowBlockingCalls()
-  : thread_(Thread::Current()),
-    previous_state_(thread_->SetAllowBlockingCalls(false)) {
-}
+    : thread_(Thread::Current()),
+      previous_state_(thread_->SetAllowBlockingCalls(false)) {}
 
 Thread::ScopedDisallowBlockingCalls::~ScopedDisallowBlockingCalls() {
   RTC_DCHECK(thread_->IsCurrent());
@@ -124,15 +158,25 @@ Thread::ScopedDisallowBlockingCalls::~ScopedDisallowBlockingCalls() {
 // DEPRECATED.
 Thread::Thread() : Thread(SocketServer::CreateDefault()) {}
 
-Thread::Thread(SocketServer* ss) : MessageQueue(ss, false) {
-  SetName("Thread", this);  // default name
-  DoInit();
-}
+Thread::Thread(SocketServer* ss) : Thread(ss, /*do_init=*/true) {}
 
 Thread::Thread(std::unique_ptr<SocketServer> ss)
+    : Thread(std::move(ss), /*do_init=*/true) {}
+
+Thread::Thread(SocketServer* ss, bool do_init)
+    : MessageQueue(ss, /*do_init=*/false) {
+  SetName("Thread", this);  // default name
+  if (do_init) {
+    DoInit();
+  }
+}
+
+Thread::Thread(std::unique_ptr<SocketServer> ss, bool do_init)
     : MessageQueue(std::move(ss), false) {
   SetName("Thread", this);  // default name
-  DoInit();
+  if (do_init) {
+    DoInit();
+  }
 }
 
 Thread::~Thread() {
@@ -179,8 +223,10 @@ bool Thread::SetName(const std::string& name, const void* obj) {
 
   name_ = name;
   if (obj) {
-    char buf[16];
-    sprintfn(buf, sizeof(buf), " 0x%p", obj);
+    // The %p specifier typically produce at most 16 hex digits, possibly with a
+    // 0x prefix. But format is implementation defined, so add some margin.
+    char buf[30];
+    snprintf(buf, sizeof(buf), " 0x%p", obj);
     name_ += buf;
   }
   return true;
@@ -286,7 +332,6 @@ void Thread::AssertBlockingIsAllowedOnCurrentThread() {
 }
 
 // static
-#if !defined(WEBRTC_MAC)
 #if defined(WEBRTC_WIN)
 DWORD WINAPI Thread::PreRun(LPVOID pv) {
 #else
@@ -295,6 +340,9 @@ void* Thread::PreRun(void* pv) {
   ThreadInit* init = static_cast<ThreadInit*>(pv);
   ThreadManager::Instance()->SetCurrentThread(init->thread);
   rtc::SetCurrentThreadName(init->thread->name_.c_str());
+#if defined(WEBRTC_MAC)
+  ScopedAutoReleasePool pool;
+#endif
   if (init->runnable) {
     init->runnable->Run(init->thread);
   } else {
@@ -308,7 +356,6 @@ void* Thread::PreRun(void* pv) {
   return nullptr;
 #endif
 }
-#endif
 
 void Thread::Run() {
   ProcessMessages(kForever);
@@ -347,7 +394,7 @@ void Thread::Send(const Location& posted_from,
   AssertBlockingIsAllowedOnCurrentThread();
 
   AutoThread thread;
-  Thread *current_thread = Thread::Current();
+  Thread* current_thread = Thread::Current();
   RTC_DCHECK(current_thread != nullptr);  // AutoThread ensures this
 
   bool ready = false;
@@ -408,7 +455,7 @@ void Thread::ReceiveSendsFromThread(const Thread* source) {
   while (PopSendMessageFromThread(source, &smsg)) {
     crit_.Leave();
 
-    smsg.msg.phandler->OnMessage(&smsg.msg);
+    Dispatch(&smsg.msg);
 
     crit_.Enter();
     *smsg.ready = true;
@@ -437,6 +484,11 @@ void Thread::InvokeInternal(const Location& posted_from,
   Send(posted_from, handler);
 }
 
+bool Thread::IsProcessingMessagesForTesting() {
+  return (owned_ || IsCurrent()) &&
+         MessageQueue::IsProcessingMessagesForTesting();
+}
+
 void Thread::Clear(MessageHandler* phandler,
                    uint32_t id,
                    MessageList* removed) {
@@ -463,12 +515,9 @@ void Thread::Clear(MessageHandler* phandler,
     ++iter;
   }
 
-  MessageQueue::Clear(phandler, id, removed);
+  ClearInternal(phandler, id, removed);
 }
 
-#if !defined(WEBRTC_MAC)
-// Note that these methods have a separate implementation for mac and ios
-// defined in webrtc/rtc_base/thread_darwin.mm.
 bool Thread::ProcessMessages(int cmsLoop) {
   // Using ProcessMessages with a custom clock for testing and a time greater
   // than 0 doesn't work, since it's not guaranteed to advance the custom
@@ -479,6 +528,9 @@ bool Thread::ProcessMessages(int cmsLoop) {
   int cmsNext = cmsLoop;
 
   while (true) {
+#if defined(WEBRTC_MAC)
+    ScopedAutoReleasePool pool;
+#endif
     Message msg;
     if (!Get(&msg, cmsNext))
       return !IsQuitting();
@@ -491,7 +543,6 @@ bool Thread::ProcessMessages(int cmsLoop) {
     }
   }
 }
-#endif
 
 bool Thread::WrapCurrentWithThreadManager(ThreadManager* thread_manager,
                                           bool need_synchronize_access) {
@@ -524,7 +575,9 @@ bool Thread::IsRunning() {
 #endif
 }
 
-AutoThread::AutoThread() : Thread(SocketServer::CreateDefault()) {
+AutoThread::AutoThread()
+    : Thread(SocketServer::CreateDefault(), /*do_init=*/false) {
+  DoInit();
   if (!ThreadManager::Instance()->CurrentThread()) {
     ThreadManager::Instance()->SetCurrentThread(this);
   }
@@ -539,7 +592,8 @@ AutoThread::~AutoThread() {
 }
 
 AutoSocketServerThread::AutoSocketServerThread(SocketServer* ss)
-    : Thread(ss) {
+    : Thread(ss, /*do_init=*/false) {
+  DoInit();
   old_thread_ = ThreadManager::Instance()->CurrentThread();
   // Temporarily set the current thread to nullptr so that we can keep checks
   // around that catch unintentional pointer overwrites.
