@@ -26,7 +26,7 @@
 #include "config.h"
 #include "ScrollingStateFrameScrollingNode.h"
 
-#if ENABLE(ASYNC_SCROLLING) || USE(COORDINATED_GRAPHICS)
+#if ENABLE(ASYNC_SCROLLING)
 
 #include "ScrollingStateTree.h"
 #include <wtf/text/TextStream.h>
@@ -47,18 +47,17 @@ ScrollingStateFrameScrollingNode::ScrollingStateFrameScrollingNode(ScrollingStat
 ScrollingStateFrameScrollingNode::ScrollingStateFrameScrollingNode(const ScrollingStateFrameScrollingNode& stateNode, ScrollingStateTree& adoptiveTree)
     : ScrollingStateScrollingNode(stateNode, adoptiveTree)
     , m_eventTrackingRegions(stateNode.eventTrackingRegions())
-    , m_requestedScrollPosition(stateNode.requestedScrollPosition())
     , m_layoutViewport(stateNode.layoutViewport())
     , m_minLayoutViewportOrigin(stateNode.minLayoutViewportOrigin())
     , m_maxLayoutViewportOrigin(stateNode.maxLayoutViewportOrigin())
+    , m_overrideVisualViewportSize(stateNode.overrideVisualViewportSize())
     , m_frameScaleFactor(stateNode.frameScaleFactor())
     , m_topContentInset(stateNode.topContentInset())
     , m_headerHeight(stateNode.headerHeight())
     , m_footerHeight(stateNode.footerHeight())
-    , m_synchronousScrollingReasons(stateNode.synchronousScrollingReasons())
     , m_behaviorForFixed(stateNode.scrollBehaviorForFixedElements())
-    , m_requestedScrollPositionRepresentsProgrammaticScroll(stateNode.requestedScrollPositionRepresentsProgrammaticScroll())
     , m_fixedElementsLayoutRelativeToFrame(stateNode.fixedElementsLayoutRelativeToFrame())
+    , m_visualViewportIsSmallerThanLayoutViewport(stateNode.visualViewportIsSmallerThanLayoutViewport())
     , m_asyncFrameOrOverflowScrollingEnabled(stateNode.asyncFrameOrOverflowScrollingEnabled())
 {
     if (hasChangedProperty(RootContentsLayer))
@@ -87,11 +86,10 @@ Ref<ScrollingStateNode> ScrollingStateFrameScrollingNode::clone(ScrollingStateTr
     return adoptRef(*new ScrollingStateFrameScrollingNode(*this, adoptiveTree));
 }
 
-void ScrollingStateFrameScrollingNode::setAllPropertiesChanged()
+void ScrollingStateFrameScrollingNode::setPropertyChangedBitsAfterReattach()
 {
     setPropertyChangedBit(FrameScaleFactor);
     setPropertyChangedBit(EventTrackingRegion);
-    setPropertyChangedBit(ReasonsForSynchronousScrolling);
     setPropertyChangedBit(RootContentsLayer);
     setPropertyChangedBit(ScrolledContentsLayer);
     setPropertyChangedBit(CounterScrollingLayer);
@@ -104,12 +102,14 @@ void ScrollingStateFrameScrollingNode::setAllPropertiesChanged()
     setPropertyChangedBit(BehaviorForFixedElements);
     setPropertyChangedBit(TopContentInset);
     setPropertyChangedBit(FixedElementsLayoutRelativeToFrame);
+    setPropertyChangedBit(VisualViewportIsSmallerThanLayoutViewport);
     setPropertyChangedBit(AsyncFrameOrOverflowScrollingEnabled);
     setPropertyChangedBit(LayoutViewport);
     setPropertyChangedBit(MinLayoutViewportOrigin);
     setPropertyChangedBit(MaxLayoutViewportOrigin);
+    setPropertyChangedBit(OverrideVisualViewportSize);
 
-    ScrollingStateScrollingNode::setAllPropertiesChanged();
+    ScrollingStateScrollingNode::setPropertyChangedBitsAfterReattach();
 }
 
 void ScrollingStateFrameScrollingNode::setFrameScaleFactor(float scaleFactor)
@@ -129,15 +129,6 @@ void ScrollingStateFrameScrollingNode::setEventTrackingRegions(const EventTracki
 
     m_eventTrackingRegions = eventTrackingRegions;
     setPropertyChanged(EventTrackingRegion);
-}
-
-void ScrollingStateFrameScrollingNode::setSynchronousScrollingReasons(SynchronousScrollingReasons reasons)
-{
-    if (m_synchronousScrollingReasons == reasons)
-        return;
-
-    m_synchronousScrollingReasons = reasons;
-    setPropertyChanged(ReasonsForSynchronousScrolling);
 }
 
 void ScrollingStateFrameScrollingNode::setScrollBehaviorForFixedElements(ScrollBehaviorForFixedElements behaviorForFixed)
@@ -174,6 +165,15 @@ void ScrollingStateFrameScrollingNode::setMaxLayoutViewportOrigin(const FloatPoi
 
     m_maxLayoutViewportOrigin = p;
     setPropertyChanged(MaxLayoutViewportOrigin);
+}
+
+void ScrollingStateFrameScrollingNode::setOverrideVisualViewportSize(Optional<FloatSize> viewportSize)
+{
+    if (viewportSize == m_overrideVisualViewportSize)
+        return;
+
+    m_overrideVisualViewportSize = viewportSize;
+    setPropertyChanged(OverrideVisualViewportSize);
 }
 
 void ScrollingStateFrameScrollingNode::setHeaderHeight(int headerHeight)
@@ -257,6 +257,15 @@ void ScrollingStateFrameScrollingNode::setFooterLayer(const LayerRepresentation&
     setPropertyChanged(FooterLayer);
 }
 
+void ScrollingStateFrameScrollingNode::setVisualViewportIsSmallerThanLayoutViewport(bool visualViewportIsSmallerThanLayoutViewport)
+{
+    if (visualViewportIsSmallerThanLayoutViewport == m_visualViewportIsSmallerThanLayoutViewport)
+        return;
+    
+    m_visualViewportIsSmallerThanLayoutViewport = visualViewportIsSmallerThanLayoutViewport;
+    setPropertyChanged(VisualViewportIsSmallerThanLayoutViewport);
+}
+
 void ScrollingStateFrameScrollingNode::setFixedElementsLayoutRelativeToFrame(bool fixedElementsLayoutRelativeToFrame)
 {
     if (fixedElementsLayoutRelativeToFrame == m_fixedElementsLayoutRelativeToFrame)
@@ -303,6 +312,9 @@ void ScrollingStateFrameScrollingNode::dumpProperties(TextStream& ts, ScrollingS
     ts.dumpProperty("min layout viewport origin", m_minLayoutViewportOrigin);
     ts.dumpProperty("max layout viewport origin", m_maxLayoutViewportOrigin);
     
+    if (m_overrideVisualViewportSize)
+        ts.dumpProperty("override visual viewport size", m_overrideVisualViewportSize.value());
+
     if (m_behaviorForFixed == StickToViewportBounds)
         ts.dumpProperty("behavior for fixed", m_behaviorForFixed);
 
@@ -315,26 +327,25 @@ void ScrollingStateFrameScrollingNode::dumpProperties(TextStream& ts, ScrollingS
         }
     }
 
-    if (!m_eventTrackingRegions.eventSpecificSynchronousDispatchRegions.isEmpty()) {
-        for (const auto& synchronousEventRegion : m_eventTrackingRegions.eventSpecificSynchronousDispatchRegions) {
+    auto& synchronousDispatchRegionMap = m_eventTrackingRegions.eventSpecificSynchronousDispatchRegions;
+    if (!synchronousDispatchRegionMap.isEmpty()) {
+        auto eventRegionNames = copyToVector(synchronousDispatchRegionMap.keys());
+        std::sort(eventRegionNames.begin(), eventRegionNames.end(), WTF::codePointCompareLessThan);
+        for (const auto& name : eventRegionNames) {
+            const auto& region = synchronousDispatchRegionMap.get(name);
             TextStream::GroupScope scope(ts);
-            ts << "synchronous event dispatch region for event " << synchronousEventRegion.key;
-            for (auto rect : synchronousEventRegion.value.rects()) {
+            ts << "synchronous event dispatch region for event " << name;
+            for (auto rect : region.rects()) {
                 ts << "\n";
                 ts << indent << rect;
             }
         }
     }
 
-    if (m_synchronousScrollingReasons)
-        ts.dumpProperty("Scrolling on main thread because:", ScrollingCoordinator::synchronousScrollingReasonsAsText(m_synchronousScrollingReasons));
-    
     ts.dumpProperty("behavior for fixed", m_behaviorForFixed);
 
-    if (m_requestedScrollPosition != FloatPoint())
-        ts.dumpProperty("requested scroll position", m_requestedScrollPosition);
-    if (m_requestedScrollPositionRepresentsProgrammaticScroll)
-        ts.dumpProperty("requested scroll position represents programmatic scroll", m_requestedScrollPositionRepresentsProgrammaticScroll);
+    if (m_visualViewportIsSmallerThanLayoutViewport)
+        ts.dumpProperty("visual viewport smaller than layout viewport", m_visualViewportIsSmallerThanLayoutViewport);
 
     if (m_fixedElementsLayoutRelativeToFrame)
         ts.dumpProperty("fixed elements lay out relative to frame", m_fixedElementsLayoutRelativeToFrame);
@@ -342,4 +353,4 @@ void ScrollingStateFrameScrollingNode::dumpProperties(TextStream& ts, ScrollingS
 
 } // namespace WebCore
 
-#endif // ENABLE(ASYNC_SCROLLING) || USE(COORDINATED_GRAPHICS)
+#endif // ENABLE(ASYNC_SCROLLING)

@@ -23,14 +23,14 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#pragma once
-
-#include <WebKit/_WKWebsiteDataStoreDelegate.h>
+#import <WebKit/_WKWebsiteDataStoreDelegate.h>
 
 @interface TestWebsiteDataStoreDelegate: NSObject <_WKWebsiteDataStoreDelegate> {
 @private
     BOOL _shouldAllowRaisingQuota;
+    BOOL _shouldAllowAnySSLCertificate;
 }
 - (instancetype)init;
 - (void)setAllowRaisingQuota:(BOOL)shouldAllowRaisingQuota;
+- (void)setAllowAnySSLCertificate:(BOOL)shouldAllowAnySSLCertificate;
 @end

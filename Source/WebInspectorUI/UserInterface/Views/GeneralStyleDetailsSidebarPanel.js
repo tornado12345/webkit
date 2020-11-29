@@ -30,7 +30,10 @@ WI.GeneralStyleDetailsSidebarPanel = class GeneralStyleDetailsSidebarPanel exten
         super(identifier, displayName);
 
         this.element.classList.add("css-style");
+
+        console.assert(panelConstructor.prototype instanceof WI.StyleDetailsPanel);
         this._panel = new panelConstructor(this);
+        this._panel.addEventListener(WI.StyleDetailsPanel.Event.NodeChanged, this._handleNodeChanged, this);
 
         this._classListContainerToggledSetting = new WI.Setting("class-list-container-toggled", false);
         this._forcedPseudoClassCheckboxes = {};
@@ -40,44 +43,45 @@ WI.GeneralStyleDetailsSidebarPanel = class GeneralStyleDetailsSidebarPanel exten
 
     get panel() { return this._panel; }
 
+    get minimumWidth()
+    {
+        let minimumWidth = Math.max(super.minimumWidth, this._panel.minimumWidth || 0);
+
+        if (this.exclusive) {
+            let pseudoClassMinimumWidth = 0;
+            for (let child of this._forcedPseudoClassContainer.children)
+                pseudoClassMinimumWidth += child.offsetWidth;
+            minimumWidth = Math.max(minimumWidth, pseudoClassMinimumWidth);
+        }
+
+        return minimumWidth;
+    }
+
     supportsDOMNode(nodeToInspect)
     {
         return nodeToInspect.nodeType() === Node.ELEMENT_NODE;
     }
 
-    visibilityDidChange()
+    hidden()
     {
-        super.visibilityDidChange();
+        super.hidden();
+
+        if (this._panel)
+            this._panel.hidden();
+    }
+
+    shown()
+    {
+        super.shown();
 
         if (!this._panel)
             return;
 
-        if (!this.visible) {
-            this._panel.hidden();
-            return;
-        }
+        console.assert(this.visible, `Shown panel ${this._identifier} must be visible.`);
 
         this._updateNoForcedPseudoClassesScrollOffset();
-
         this._panel.shown();
         this._panel.markAsNeedsRefresh(this.domNode);
-    }
-
-    computedStyleDetailsPanelShowProperty(property)
-    {
-        this.parentSidebar.selectedSidebarPanel = "style-rules";
-
-        let styleRulesPanel = null;
-        for (let sidebarPanel of this.parentSidebar.sidebarPanels) {
-            if (!(sidebarPanel instanceof WI.RulesStyleDetailsSidebarPanel))
-                continue;
-
-            styleRulesPanel = sidebarPanel;
-            break;
-        }
-
-        console.assert(styleRulesPanel, "Styles panel is missing.");
-        styleRulesPanel.panel.scrollToSectionAndHighlightProperty(property);
     }
 
     // StyleDetailsPanel delegate
@@ -97,7 +101,7 @@ WI.GeneralStyleDetailsSidebarPanel = class GeneralStyleDetailsSidebarPanel exten
     layout()
     {
         let domNode = this.domNode;
-        if (!domNode)
+        if (!domNode || domNode.destroyed)
             return;
 
         this.contentView.element.scrollTop = this._initialScrollOffset;
@@ -165,6 +169,21 @@ WI.GeneralStyleDetailsSidebarPanel = class GeneralStyleDetailsSidebarPanel exten
 
         this._showPanel(this._panel);
 
+        if (InspectorBackend.hasCommand("DOM.resolveNode")) {
+            this._classListContainer = this.element.createChild("div", "class-list-container");
+            this._classListContainer.hidden = true;
+
+            this._addClassContainer = this._classListContainer.createChild("div", "new-class");
+            this._addClassContainer.title = WI.UIString("Add a Class");
+            this._addClassContainer.addEventListener("click", this._addClassContainerClicked.bind(this));
+
+            this._addClassInput = this._addClassContainer.createChild("input", "class-name-input");
+            this._addClassInput.spellcheck = false;
+            this._addClassInput.setAttribute("placeholder", WI.UIString("Add New Class"));
+            this._addClassInput.addEventListener("keypress", this._addClassInputKeyPressed.bind(this));
+            this._addClassInput.addEventListener("blur", this._addClassInputBlur.bind(this));
+        }
+
         let optionsContainer = this.element.createChild("div", "options-container");
 
         let newRuleButton = optionsContainer.createChild("img", "new-rule");
@@ -177,29 +196,19 @@ WI.GeneralStyleDetailsSidebarPanel = class GeneralStyleDetailsSidebarPanel exten
         this._filterBar.inputField.addEventListener("keydown", this._handleFilterBarInputFieldKeyDown.bind(this));
         optionsContainer.appendChild(this._filterBar.element);
 
-        this._classToggleButton = optionsContainer.createChild("button", "toggle-class-toggle");
-        this._classToggleButton.textContent = WI.UIString("Classes");
-        this._classToggleButton.title = WI.UIString("Toggle Classes");
-        this._classToggleButton.addEventListener("click", this._classToggleButtonClicked.bind(this));
+        if (this._classListContainer) {
+            this._classToggleButton = optionsContainer.createChild("button", "toggle-class-toggle");
+            this._classToggleButton.textContent = WI.UIString("Classes");
+            this._classToggleButton.title = WI.UIString("Toggle Classes");
+            this._classToggleButton.addEventListener("click", this._classToggleButtonClicked.bind(this));
 
-        this._classListContainer = this.element.createChild("div", "class-list-container");
-        this._classListContainer.hidden = true;
-
-        this._addClassContainer = this._classListContainer.createChild("div", "new-class");
-        this._addClassContainer.title = WI.UIString("Add a Class");
-        this._addClassContainer.addEventListener("click", this._addClassContainerClicked.bind(this));
-
-        this._addClassInput = this._addClassContainer.createChild("input", "class-name-input");
-        this._addClassInput.spellcheck = false;
-        this._addClassInput.setAttribute("placeholder", WI.UIString("Add New Class"));
-        this._addClassInput.addEventListener("keypress", this._addClassInputKeyPressed.bind(this));
-        this._addClassInput.addEventListener("blur", this._addClassInputBlur.bind(this));
+            if (this._classListContainerToggledSetting.value)
+                this._classToggleButtonClicked();
+        }
 
         WI.cssManager.addEventListener(WI.CSSManager.Event.StyleSheetAdded, this._styleSheetAddedOrRemoved, this);
         WI.cssManager.addEventListener(WI.CSSManager.Event.StyleSheetRemoved, this._styleSheetAddedOrRemoved, this);
 
-        if (this._classListContainerToggledSetting.value)
-            this._classToggleButtonClicked();
     }
 
     sizeDidChange()
@@ -236,30 +245,22 @@ WI.GeneralStyleDetailsSidebarPanel = class GeneralStyleDetailsSidebarPanel exten
         if (this._filterBar)
             this.contentView.element.classList.toggle(WI.GeneralStyleDetailsSidebarPanel.FilterInProgressClassName, hasFilter && this._filterBar.hasActiveFilters());
 
-        this.contentView.element.classList.toggle("supports-new-rule", typeof this._panel.newRuleButtonClicked === "function");
         this._panel.shown();
+    }
+
+    _handleNodeChanged(event)
+    {
+        this.contentView.element.classList.toggle("supports-new-rule", this._panel.supportsNewRule);
     }
 
     _handleForcedPseudoClassCheckboxKeydown(pseudoClass, event)
     {
-        if (event.key !== "Tab")
+        if (event.key !== "Tab" || event.shiftKey)
             return;
 
-        let pseudoClasses = WI.CSSManager.ForceablePseudoClasses;
-        let index = pseudoClasses.indexOf(pseudoClass);
-        if (event.shiftKey) {
-            if (index > 0) {
-                this._forcedPseudoClassCheckboxes[pseudoClasses[index - 1]].focus();
-                event.preventDefault();
-            } else {
-                this._filterBar.inputField.focus();
-                event.preventDefault();
-            }
-        } else {
-            if (index < pseudoClasses.length - 1) {
-                this._forcedPseudoClassCheckboxes[pseudoClasses[index + 1]].focus();
-                event.preventDefault();
-            } else if (this._panel.focusFirstSection) {
+        if (WI.CSSManager.ForceablePseudoClasses.lastValue === pseudoClass) {
+            // Last checkbox is currently focused.
+            if (this._panel.focusFirstSection) {
                 this._panel.focusFirstSection();
                 event.preventDefault();
             }
@@ -340,13 +341,19 @@ WI.GeneralStyleDetailsSidebarPanel = class GeneralStyleDetailsSidebarPanel exten
         if (event.keyCode !== WI.KeyboardShortcut.Key.Enter.keyCode)
             return;
 
-        this._addClassInput.blur();
+        this._addClassFromInput();
     }
 
     _addClassInputBlur(event)
     {
-        this.domNode.toggleClass(this._addClassInput.value, true);
+        this._addClassFromInput();
+
         this._addClassContainer.classList.remove("active");
+    }
+
+    _addClassFromInput()
+    {
+        this.domNode.toggleClass(this._addClassInput.value, true);
         this._addClassInput.value = null;
     }
 
@@ -431,16 +438,11 @@ WI.GeneralStyleDetailsSidebarPanel = class GeneralStyleDetailsSidebarPanel exten
 
     _handleFilterBarInputFieldKeyDown(event)
     {
-        if (event.key !== "Tab")
+        if (event.key !== "Tab" || !event.shiftKey)
             return;
 
-        if (event.shiftKey) {
-            if (this._panel.focusLastSection) {
-                this._panel.focusLastSection();
-                event.preventDefault();
-            }
-        } else {
-            this._forcedPseudoClassCheckboxes[WI.CSSManager.ForceablePseudoClasses[0]].focus();
+        if (this._panel.focusLastSection) {
+            this._panel.focusLastSection();
             event.preventDefault();
         }
     }
@@ -459,4 +461,4 @@ WI.GeneralStyleDetailsSidebarPanel.NoFilterMatchInSectionClassName = "filter-sec
 WI.GeneralStyleDetailsSidebarPanel.NoFilterMatchInPropertyClassName = "filter-property-non-matching";
 
 WI.GeneralStyleDetailsSidebarPanel.ToggledClassesSymbol = Symbol("css-style-details-sidebar-panel-toggled-classes-symbol");
-WI.GeneralStyleDetailsSidebarPanel.ToggledClassesDragType = "text/classname";
+WI.GeneralStyleDetailsSidebarPanel.ToggledClassesDragType = "web-inspector/css-class";

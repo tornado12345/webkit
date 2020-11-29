@@ -25,14 +25,12 @@
 #pragma once
 
 #include "Cookie.h"
+#include "CookieJar.h"
 #include "SQLiteDatabase.h"
 #include "SQLiteStatement.h"
 #include <wtf/HashMap.h>
 #include <wtf/Noncopyable.h>
-#include <wtf/Optional.h>
-#include <wtf/Vector.h>
 #include <wtf/text/StringHash.h>
-#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
@@ -44,6 +42,7 @@ enum class CookieAcceptPolicy {
 };
 
 class CookieJarDB {
+    WTF_MAKE_FAST_ALLOCATED;
     WTF_MAKE_NONCOPYABLE(CookieJarDB);
 
 public:
@@ -58,12 +57,15 @@ public:
     void setAcceptPolicy(CookieAcceptPolicy policy) { m_acceptPolicy = policy; }
     CookieAcceptPolicy acceptPolicy() const { return m_acceptPolicy; }
 
+    HashSet<String> allDomains();
     Optional<Vector<Cookie>> searchCookies(const URL& firstParty, const URL& requestUrl, const Optional<bool>& httpOnly, const Optional<bool>& secure, const Optional<bool>& session);
-    bool setCookie(const URL& firstParty, const URL&, const String& cookie, Source);
+    Vector<Cookie> getAllCookies();
+    bool setCookie(const URL& firstParty, const URL&, const String& cookie, Source, Optional<Seconds> cappedLifetime = WTF::nullopt);
     bool setCookie(const Cookie&);
 
     bool deleteCookie(const String& url, const String& name);
     bool deleteCookies(const String& url);
+    bool deleteCookiesForHostname(const String& hostname, IncludeHttpOnlyCookies);
     bool deleteAllCookies();
 
     WEBCORE_EXPORT CookieJarDB(const String& databasePath);

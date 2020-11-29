@@ -35,8 +35,23 @@
 
 namespace WebKit {
 
+void WebPaymentCoordinatorProxy::platformCanMakePayments(CompletionHandler<void(bool)>&& completionHandler)
+{
+    if (!PAL::isPassKitFrameworkAvailable())
+        return completionHandler(false);
+
+    m_canMakePaymentsQueue->dispatch([theClass = retainPtr(PAL::getPKPaymentAuthorizationViewControllerClass()), completionHandler = WTFMove(completionHandler)]() mutable {
+        RunLoop::main().dispatch([canMakePayments = [theClass canMakePayments], completionHandler = WTFMove(completionHandler)]() mutable {
+            completionHandler(canMakePayments);
+        });
+    });
+}
+
 void WebPaymentCoordinatorProxy::platformShowPaymentUI(const URL& originatingURL, const Vector<URL>& linkIconURLStrings, const WebCore::ApplePaySessionPaymentRequest& request, CompletionHandler<void(bool)>&& completionHandler)
 {
+    if (!PAL::isPassKitFrameworkAvailable())
+        return completionHandler(false);
+
     auto paymentRequest = platformPaymentRequest(originatingURL, linkIconURLStrings, request);
 
     auto showPaymentUIRequestSeed = m_showPaymentUIRequestSeed;
@@ -64,13 +79,12 @@ void WebPaymentCoordinatorProxy::platformShowPaymentUI(const URL& originatingURL
 
         ASSERT(viewController);
 
-        paymentCoordinatorProxy->m_authorizationPresenter = std::make_unique<PaymentAuthorizationViewController>(*paymentCoordinatorProxy, paymentRequest.get(), viewController);
+        paymentCoordinatorProxy->m_authorizationPresenter = makeUnique<PaymentAuthorizationViewController>(*paymentCoordinatorProxy, paymentRequest.get(), viewController);
 
         ASSERT(!paymentCoordinatorProxy->m_sheetWindow);
         paymentCoordinatorProxy->m_sheetWindow = [NSWindow windowWithContentViewController:viewController];
 
         paymentCoordinatorProxy->m_sheetWindowWillCloseObserver = [[NSNotificationCenter defaultCenter] addObserverForName:NSWindowWillCloseNotification object:paymentCoordinatorProxy->m_sheetWindow.get() queue:nil usingBlock:[paymentCoordinatorProxy](NSNotification *) {
-            paymentCoordinatorProxy->hidePaymentUI();
             paymentCoordinatorProxy->didReachFinalState();
         }];
 
@@ -80,7 +94,7 @@ void WebPaymentCoordinatorProxy::platformShowPaymentUI(const URL& originatingURL
     }).get()];
 }
 
-void WebPaymentCoordinatorProxy::hidePaymentUI()
+void WebPaymentCoordinatorProxy::platformHidePaymentUI()
 {
     if (m_state == State::Activating) {
         ++m_showPaymentUIRequestSeed;
@@ -97,8 +111,9 @@ void WebPaymentCoordinatorProxy::hidePaymentUI()
     m_sheetWindowWillCloseObserver = nullptr;
 
     [[m_sheetWindow sheetParent] endSheet:m_sheetWindow.get()];
-    m_authorizationPresenter->dismiss();
-    m_authorizationPresenter = nullptr;
+
+    if (m_authorizationPresenter)
+        m_authorizationPresenter->dismiss();
 
     m_sheetWindow = nullptr;
 }

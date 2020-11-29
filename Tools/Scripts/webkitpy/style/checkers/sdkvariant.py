@@ -33,7 +33,6 @@ SDK_VARIANT_FILES = [
     "Tools/ImageDiff/cg/Configurations/SDKVariant.xcconfig",
     "Tools/WebEditingTester/Configurations/SDKVariant.xcconfig",
     "Tools/MiniBrowser/Configurations/SDKVariant.xcconfig",
-    "Tools/WebKitLauncher/Configurations/SDKVariant.xcconfig",
     "Tools/lldb/lldbWebKitTester/Configurations/SDKVariant.xcconfig",
     "Tools/DumpRenderTree/mac/Configurations/SDKVariant.xcconfig",
     "Tools/ContentExtensionTester/Configurations/SDKVariant.xcconfig",
@@ -49,6 +48,7 @@ SDK_VARIANT_FILES = [
     "Source/WebCore/Configurations/SDKVariant.xcconfig",
     "Source/WebCore/PAL/Configurations/SDKVariant.xcconfig",
     "Source/ThirdParty/ANGLE/Configurations/SDKVariant.xcconfig",
+    "Source/ThirdParty/gtest/xcode/Config/SDKVariant.xcconfig",
     "Source/ThirdParty/libwebrtc/Configurations/SDKVariant.xcconfig",
 ]
 

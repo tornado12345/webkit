@@ -32,21 +32,20 @@ WTF_EXTERN_C_END
 #if USE(APPLE_INTERNAL_SDK)
 
 #import <UIKit/NSParagraphStyle_Private.h>
+#import <UIKit/NSTextAlternatives.h>
 #import <UIKit/NSTextAttachment_Private.h>
 #import <UIKit/NSTextList.h>
 #import <UIKit/UIApplicationSceneConstants.h>
 #import <UIKit/UIApplication_Private.h>
 #import <UIKit/UIColor_Private.h>
+#import <UIKit/UIFocusRingStyle.h>
 #import <UIKit/UIFont_Private.h>
 #import <UIKit/UIInterface_Private.h>
 #import <UIKit/UIScreen_Private.h>
 #import <UIKit/UIViewController_Private.h>
-
-#if ENABLE(DATA_INTERACTION)
 #import <UIKit/NSItemProvider+UIKitAdditions.h>
 #import <UIKit/NSItemProvider+UIKitAdditions_Private.h>
 #import <UIKit/NSURL+UIItemProvider.h>
-#endif
 
 @interface UIApplication ()
 + (UIApplicationSceneClassicMode)_classicMode;
@@ -54,9 +53,6 @@ WTF_EXTERN_C_END
 - (CGFloat)_iOSMacScale;
 @end
 
-#if __has_include(<UIKit/UIFocusRingStyle.h>)
-#import <UIKit/UIFocusRingStyle.h>
-#endif
 
 #else // USE(APPLE_INTERNAL_SDK)
 
@@ -65,8 +61,6 @@ WTF_EXTERN_C_END
 #if ENABLE(DRAG_SUPPORT)
 #import <UIKit/NSItemProvider+UIKitAdditions.h>
 #endif
-
-NS_ASSUME_NONNULL_BEGIN
 
 typedef NS_ENUM(NSInteger, UIApplicationSceneClassicMode) {
     UIApplicationSceneClassicModeOriginalPad = 4,
@@ -100,6 +94,10 @@ typedef enum {
 - (NSString *)markerForItemNumber:(NSInteger)itemNum;
 @end
 
+@interface NSTextAlternatives : NSObject
+@property (readonly) NSArray<NSString *> *alternativeStrings;
+@end
+
 @interface UIApplication ()
 - (BOOL)_isClassic;
 + (UIApplicationSceneClassicMode)_classicMode;
@@ -109,6 +107,7 @@ typedef enum {
 @interface UIColor ()
 
 + (UIColor *)systemBlueColor;
++ (UIColor *)systemBrownColor;
 + (UIColor *)systemGrayColor;
 + (UIColor *)systemGreenColor;
 + (UIColor *)systemOrangeColor;
@@ -116,6 +115,7 @@ typedef enum {
 + (UIColor *)systemPurpleColor;
 + (UIColor *)systemRedColor;
 + (UIColor *)systemYellowColor;
++ (UIColor *)systemTealColor;
 
 + (UIColor *)_disambiguated_due_to_CIImage_colorWithCGColor:(CGColorRef)cgColor;
 
@@ -139,25 +139,25 @@ typedef enum {
 + (UIViewController *)viewControllerForView:(UIView *)view;
 @end
 
-NS_ASSUME_NONNULL_END
-
-#if __IPHONE_OS_VERSION_MIN_REQUIRED >= 110000
 @interface NSURL ()
-@property (nonatomic, copy, nullable, setter=_setTitle:) NSString *_title;
+@property (nonatomic, copy, setter=_setTitle:) NSString *_title;
 @end
-#endif
+
+@interface UIFocusRingStyle : NSObject
++ (CGFloat)cornerRadius;
++ (CGFloat)maxAlpha;
++ (CGFloat)alphaThreshold;
+@end
 
 #endif // USE(APPLE_INTERNAL_SDK)
 
-#if ENABLE(FULL_KEYBOARD_ACCESS)
 @interface UIColor (IPI)
 + (UIColor *)keyboardFocusIndicatorColor;
 @end
 
-@interface UIFocusRingStyle (Staging_47831886)
-+ (CGFloat)cornerRadius;
-+ (CGFloat)maxAlpha;
-+ (CGFloat)alphaThreshold;
+#if HAVE(OS_DARK_MODE_SUPPORT)
+@interface UIColor (UIColorInternal)
++ (UIColor *)tableCellDefaultSelectionTintColor;
 @end
 #endif
 

@@ -28,14 +28,14 @@
     top: 0;
     left: 0;
     right: 0;
-    bottom: 0;
+    bottom: var(--network-statistics-height);
     /* left or right set by NetworkTableView on display / resize */
     z-index: 10;
     background-color: white;
 }
 
 .network-detail .navigation-bar {
-    position: -webkit-sticky;
+    position: sticky;
     top: 0;
     z-index: 1;
 }
@@ -73,6 +73,10 @@
     left: 0;
     right: 0;
     bottom: 0;
+}
+
+.network-table.showing-detail .network-detail {
+    border-inline-start: 1px solid var(--border-color);
 }
 
 @media (prefers-color-scheme: dark) {

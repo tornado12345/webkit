@@ -1,3 +1,1184 @@
+2020-10-27  Jer Noble  <jer.noble@apple.com>
+
+        [Mac] Audio and Video element creation up to 300x slower than other browsers
+        https://bugs.webkit.org/show_bug.cgi?id=218206
+        <rdar://problem/62451019>
+
+        Reviewed by Eric Carlson.
+
+        * Media/AudioElementCreation.html: Added.
+        * Media/VideoElementCreation.html: Added.
+
+2020-10-27  Caio Lima  <ticaiolima@gmail.com>
+
+        Make WebAssembly tests on JetStream 2 be feature detactable
+        https://bugs.webkit.org/show_bug.cgi?id=218198
+
+        Reviewed by Saam Barati.
+
+        This patch is disabling JetStream 2's WASM tests when it's not
+        possible to find WebAssembly constructor on global object. This allows
+        us to run JetStream 2 on devices without WASM support, like 32-bits
+        ports of WebKit.
+
+        * JetStream2/JetStreamDriver.js:
+
+2020-10-13  Keith Rollin  <krollin@apple.com>
+
+        Remove leftover MACOSX_DEPLOYMENT_TARGET_macosx support
+        https://bugs.webkit.org/show_bug.cgi?id=217649
+        <rdar://problem/70236877>
+
+        Reviewed by Darin Adler.
+
+        Bug 42796 introduced MACOSX_DEPLOYMENT_TARGET_<PLATFORM> as "support
+        for compiling WebKit against iOS SDKs". Support for the iOS part of
+        this feature was later removed in several changes, including Bug
+        139212, Bug 139463 and Bug 144762. However, vestiges have remained for
+        five or six years in the form of MACOSX_DEPLOYMENT_TARGET_macosx. The
+        inclusion of the platform in MACOSX_DEPLOYMENT_TARGET is no longer
+        needed and can be removed.
+
+        This changes brings most projects in conformance with other projects
+        that don't support including the platform in MACOSX_DEPLOYMENT_TARGET,
+        including WebEditingTester, gtest, WebKitTestRunner, MiniBrowser, and
+        TestWebKitAPI.
+
+        Along the way, remove a couple of left-over references to macOS 10.16,
+        and a couple of places where [sdk=macosx*] was still being used.
+
+        With this change, initialization of MACOSX_DEPLOYMENT_TARGET should be
+        consistent across all projects, with two exceptions: WebKitLauncher
+        (which hardcodes it to 10.12) and libwebrtc's copy of googletest
+        (which hardcodes it to 10.4). The reasons for these hard-coded values
+        is not apparent, so leave them be.
+
+        * DecoderTest/Configurations/DebugRelease.xcconfig:
+        * MediaTime/Configurations/DebugRelease.xcconfig:
+
+2020-10-12  Luming Yin  <luming_yin@apple.com>
+
+        [macOS] Workaround for MAC_OS_X_VERSION_MAJOR incorrectly including minor version when building 
+        with Xcode 12 on macOS Big Sur SUs
+        https://bugs.webkit.org/show_bug.cgi?id=217602
+        rdar://70194453
+
+        Reviewed by Darin Adler.
+
+        The previous workaround turns out to be ineffective because we can't set the value of 
+        TARGET_MAC_OS_X_VERSION_MAJOR based on a previous value of itself. Introduce a new 
+        variable TARGET_MAC_OS_X_VERSION_MAJOR to determine whether we need to explicitly 
+        adjust MAC_OS_X_VERSION_MAJOR to 110000.
+
+        * DecoderTest/Configurations/DebugRelease.xcconfig:
+        * MediaTime/Configurations/DebugRelease.xcconfig:
+
+2020-10-12  Luming Yin  <luming_yin@apple.com>
+
+        [macOS] Workaround for MAC_OS_X_VERSION_MAJOR incorrectly including minor version when building 
+        with Xcode 12 on macOS Big Sur SUs
+        https://bugs.webkit.org/show_bug.cgi?id=217602
+        rdar://70194453
+
+        Reviewed by Darin Adler.
+
+        Due to a bug in Xcode (rdar://70185899), Xcode 12.0 and Xcode 12.1 Beta incorrectly includes the 
+        minor release number in MAC_OS_X_VERSION_MAJOR, which causes Debug and Release builds of WebKit 
+        to be misconfigured when building on macOS Big Sur SUs, leading to webpages failing to load.
+
+        To work around the Xcode bug, when the MAC_OS_X_VERSION_MAJOR includes the minor version number, 
+        drop the minor version number by explicitly setting TARGET_MAC_OS_X_VERSION_MAJOR to 110000.
+
+        Note: This change should be reverted after <rdar://70185899> is resolved.
+
+        * DecoderTest/Configurations/DebugRelease.xcconfig:
+        * MediaTime/Configurations/DebugRelease.xcconfig:
+
+2020-10-11  Darin Adler  <darin@apple.com>
+
+        [macOS] Harden more build configurations against macOS versions 11 and higher as well as inclusion of patch versions
+        https://bugs.webkit.org/show_bug.cgi?id=217595
+
+        Reviewed by Alexey Proskuryakov.
+
+        * MediaTime/Configurations/Base.xcconfig: Updated to same idiom used elsewhere.
+
+2020-07-30  Jer Noble  <jer.noble@apple.com>
+
+        [Cocoa] Make DecoderTest run against .mp4 files; add rate-limiting.
+        https://bugs.webkit.org/show_bug.cgi?id=214807
+
+        Reviewed by Darin Adler.
+
+        Look up the UTI type of the specified file, and create the appropriate SourceBufferParser
+        by passing in the ContentType (converted from UTI). Also, add a --rate-limit flag which
+        causes the decompression session to run at the same FPS as the underlying media.
+
+        * DecoderTest/DecoderTest.xcodeproj/project.pbxproj:
+        * DecoderTest/DecoderTest/main.mm:
+        (main):
+
+2020-07-24  Jer Noble  <jer.noble@apple.com>
+
+        [Cocoa] Add PerformanceTest tool for measuring raw speed of a video decoder
+        https://bugs.webkit.org/show_bug.cgi?id=214723
+
+        Reviewed by Darin Adler.
+
+        * DecoderTest/Configurations/Base.xcconfig: Added.
+        * DecoderTest/Configurations/DebugRelease.xcconfig: Added.
+        * DecoderTest/Configurations/DecoderTest.xcconfig: Added.
+        * DecoderTest/DecoderTest.xcodeproj/project.pbxproj: Added.
+        * DecoderTest/DecoderTest/main.mm: Added.
+        (Function<void):
+        (main):
+        * DecoderTest/Makefile: Added.
+        * Makefile.shared: Added.
+
+2020-07-22  Conrad Shultz  <conrad_shultz@apple.com>
+
+        Update macOS Version macros
+        https://bugs.webkit.org/show_bug.cgi?id=214653
+
+        Reviewed by Tim Horton.
+
+        * MediaTime/Configurations/Base.xcconfig:
+        * MediaTime/Configurations/DebugRelease.xcconfig:
+
+2020-07-06  Philippe Normand  <pnormand@igalia.com>
+
+        MallocBench: Remove unused private field
+        https://bugs.webkit.org/show_bug.cgi?id=213989
+
+        Reviewed by Alex Christensen.
+
+        The m_argc private field is never used. Remove it.
+        
+        * MallocBench/MallocBench/CommandLine.cpp:
+        * MallocBench/MallocBench/CommandLine.h:
+
+2020-07-01  Saam Barati  <sbarati@apple.com>
+
+        Make it so JetStream2 can run with the d8 shell
+        https://bugs.webkit.org/show_bug.cgi?id=213856
+
+        Reviewed by Keith Miller.
+
+        We use d8's Realm API to create separate global objects for
+        each test to run in.
+
+        * JetStream2/JetStreamDriver.js:
+        (Driver.prototype.runCode.globalObject.loadString):
+        (Driver.prototype.runCode):
+        (prototype.async run):
+        * JetStream2/cli.js:
+        * JetStream2/index.html:
+
+2020-06-29  Tadeu Zagallo  <tzagallo@apple.com>
+
+        New API benchmark
+        https://bugs.webkit.org/show_bug.cgi?id=213750
+
+        Reviewed by Saam Barati.
+
+        APIBench is a new benchmark suite to measure the performance of the JavaScriptCore API. It has 4 benchmarks:
+        - RichardsJS: This is imported from Octane and used as a reference so we know how fast the pure JS implementation runs.
+        - RichardsSwift: a Swift port of the benchmark, also used as reference for how fast the pure Swift implementation is.
+        - RichardsMostlyJS: As the name suggests, mostly the same the as the JS benchmark, but here the WorkerTask
+          is implemented in Swift. The API is used to write to the packet being processed and talking to the scheduler.
+        - RichardsMostlySwift: inverse of the above. Mostly the same code from the Swift benchark, but here the WorkerTask is
+          implemented in JavaScript. The API is used to run the JS version of the task and marshaling the Packet by using JSExport.
+
+        The benchmark can be built and run using the api-bench script, as following:
+
+        PerformanceTests/APIBench/api-bench WebKitBuild/Release
+
+        By default, it will build each of the benchmarks and run 5 iterations.
+        The score is calculated as 5000 / geomean([avg of RichardsMostlySwift, avg of RichardsMostlyJS]).
+        The script prints the average for the references and tests and the final score:
+
+        Results for /Volumes/Data/wk2/OpenSource/WebKitBuild/Release (5 iterations)
+        ================================================================================
+
+        References:
+        ----------------------------------------
+        RichardsJS: 14ms
+        RichardsSwift: 29ms
+
+        Tests:
+        ----------------------------------------
+        RichardsMostlyJS: 218ms
+        RichardsMostlySwift: 315ms
+
+        Score: 19.0804
+
+        * APIBench/RichardsJS/RichardsJS.js: Added.
+        (runRichards):
+        (Scheduler):
+        (Scheduler.prototype.addIdleTask):
+        (Scheduler.prototype.addWorkerTask):
+        (Scheduler.prototype.addHandlerTask):
+        (Scheduler.prototype.addDeviceTask):
+        (Scheduler.prototype.addRunningTask):
+        (Scheduler.prototype.addTask):
+        (Scheduler.prototype.schedule):
+        (Scheduler.prototype.release):
+        (Scheduler.prototype.holdCurrent):
+        (Scheduler.prototype.suspendCurrent):
+        (Scheduler.prototype.queue):
+        (TaskControlBlock):
+        (TaskControlBlock.prototype.setRunning):
+        (TaskControlBlock.prototype.markAsNotHeld):
+        (TaskControlBlock.prototype.markAsHeld):
+        (TaskControlBlock.prototype.isHeldOrSuspended):
+        (TaskControlBlock.prototype.markAsSuspended):
+        (TaskControlBlock.prototype.markAsRunnable):
+        (TaskControlBlock.prototype.run):
+        (TaskControlBlock.prototype.checkPriorityAdd):
+        (TaskControlBlock.prototype.toString):
+        (IdleTask):
+        (IdleTask.prototype.run):
+        (IdleTask.prototype.toString):
+        (DeviceTask):
+        (DeviceTask.prototype.run):
+        (DeviceTask.prototype.toString):
+        (WorkerTask):
+        (WorkerTask.prototype.run):
+        (WorkerTask.prototype.toString):
+        (HandlerTask):
+        (HandlerTask.prototype.run):
+        (HandlerTask.prototype.toString):
+        (Packet):
+        (Packet.prototype.addTo):
+        (Packet.prototype.toString):
+        * APIBench/RichardsMostlyJS/RichardsMostlyJS.xcodeproj/project.pbxproj: Added.
+        * APIBench/RichardsMostlyJS/RichardsMostlyJS.xcodeproj/xcshareddata/xcschemes/RichardsMostlyJS.xcscheme: Added.
+        * APIBench/RichardsMostlyJS/RichardsMostlyJS/main.swift: Added.
+        (run(_:)):
+        (toString):
+        (WorkerTask.toString):
+        (WorkerTask.run(_:)):
+        * APIBench/RichardsMostlyJS/RichardsMostlyJS/richards.js: Added.
+        (runRichards):
+        (Scheduler):
+        (Scheduler.prototype.addIdleTask):
+        (Scheduler.prototype.addWorkerTask):
+        (Scheduler.prototype.addHandlerTask):
+        (Scheduler.prototype.addDeviceTask):
+        (Scheduler.prototype.addRunningTask):
+        (Scheduler.prototype.addTask):
+        (Scheduler.prototype.schedule):
+        (Scheduler.prototype.release):
+        (Scheduler.prototype.holdCurrent):
+        (Scheduler.prototype.suspendCurrent):
+        (Scheduler.prototype.queue):
+        (TaskControlBlock):
+        (TaskControlBlock.prototype.setRunning):
+        (TaskControlBlock.prototype.markAsNotHeld):
+        (TaskControlBlock.prototype.markAsHeld):
+        (TaskControlBlock.prototype.isHeldOrSuspended):
+        (TaskControlBlock.prototype.markAsSuspended):
+        (TaskControlBlock.prototype.markAsRunnable):
+        (TaskControlBlock.prototype.run):
+        (TaskControlBlock.prototype.checkPriorityAdd):
+        (TaskControlBlock.prototype.toString):
+        (IdleTask):
+        (IdleTask.prototype.run):
+        (IdleTask.prototype.toString):
+        (DeviceTask):
+        (DeviceTask.prototype.run):
+        (DeviceTask.prototype.toString):
+        (HandlerTask):
+        (HandlerTask.prototype.run):
+        (HandlerTask.prototype.toString):
+        (Packet):
+        (Packet.prototype.addTo):
+        (Packet.prototype.toString):
+        * APIBench/RichardsMostlySwift/RichardsMostlySwift.xcodeproj/project.pbxproj: Added.
+        * APIBench/RichardsMostlySwift/RichardsMostlySwift.xcodeproj/xcshareddata/xcschemes/RichardsMostlySwift.xcscheme: Added.
+        * APIBench/RichardsMostlySwift/RichardsMostlySwift/DeviceTask.swift: Added.
+        (DeviceTask.create(_:device:priority:)):
+        (DeviceTask.run(_:)):
+        * APIBench/RichardsMostlySwift/RichardsMostlySwift/HandlerTask.swift: Added.
+        (HandlerTask.device):
+        (HandlerTask.create(_:device:priority:queue:)):
+        (HandlerTask.run(_:)):
+        * APIBench/RichardsMostlySwift/RichardsMostlySwift/IdleTask.swift: Added.
+        (IdleTask.create(_:priority:)):
+        (IdleTask.run(_:)):
+        * APIBench/RichardsMostlySwift/RichardsMostlySwift/Packet.swift: Added.
+        (Packet.addTo(_:)):
+        * APIBench/RichardsMostlySwift/RichardsMostlySwift/Scheduler.swift: Added.
+        (waitCurrent):
+        (handle(_:)):
+        (Scheduler.schedule):
+        (Scheduler.add(_:)):
+        (Scheduler.release_(_:)):
+        (holdCurrent):
+        (queue(_:)):
+        (queueImpl(_:packet:)):
+        * APIBench/RichardsMostlySwift/RichardsMostlySwift/Task.swift: Added.
+        (Task.run(_:)):
+        (Task.release_):
+        (Task.hold):
+        (Task.wait):
+        (Task.resume):
+        (Task.takePacket):
+        (Task.checkPriorityAdd(_:packet:)):
+        * APIBench/RichardsMostlySwift/RichardsMostlySwift/WorkerTask.swift: Added.
+        (WorkerTask.create(_:priority:queue:)):
+        (WorkerTask.run(_:)):
+        * APIBench/RichardsMostlySwift/RichardsMostlySwift/main.swift: Added.
+        * APIBench/RichardsMostlySwift/RichardsMostlySwift/richards.js: Added.
+        (return.prototype.run):
+        * APIBench/RichardsMostlySwift/RichardsMostlySwift/richards.swift: Added.
+        (runRichards):
+        * APIBench/RichardsSwift/RichardsSwift.xcodeproj/project.pbxproj: Added.
+        * APIBench/RichardsSwift/RichardsSwift.xcodeproj/xcshareddata/xcschemes/RichardsSwift.xcscheme: Added.
+        * APIBench/RichardsSwift/RichardsSwift/DeviceTask.swift: Added.
+        (DeviceTask.create(_:device:priority:)):
+        (DeviceTask.run(_:)):
+        * APIBench/RichardsSwift/RichardsSwift/HandlerTask.swift: Added.
+        (HandlerTask.device):
+        (HandlerTask.create(_:device:priority:queue:)):
+        (HandlerTask.run(_:)):
+        * APIBench/RichardsSwift/RichardsSwift/IdleTask.swift: Added.
+        (IdleTask.create(_:priority:)):
+        (IdleTask.run(_:)):
+        * APIBench/RichardsSwift/RichardsSwift/Packet.swift: Added.
+        (Packet.addTo(_:)):
+        * APIBench/RichardsSwift/RichardsSwift/Scheduler.swift: Added.
+        (Scheduler.schedule):
+        (Scheduler.add(_:)):
+        (Scheduler.release(_:)):
+        (holdCurrent):
+        (waitCurrent):
+        (queue(_:)):
+        (handle(_:)):
+        (queueImpl(_:packet:)):
+        * APIBench/RichardsSwift/RichardsSwift/Task.swift: Added.
+        (Task.run(_:)):
+        (Task.release):
+        (Task.hold):
+        (Task.wait):
+        (Task.resume):
+        (Task.takePacket):
+        (Task.checkPriorityAdd(_:packet:)):
+        * APIBench/RichardsSwift/RichardsSwift/WorkerTask.swift: Added.
+        (WorkerTask.create(_:priority:queue:)):
+        (WorkerTask.run(_:)):
+        * APIBench/RichardsSwift/RichardsSwift/main.swift: Added.
+        * APIBench/RichardsSwift/RichardsSwift/richards.swift: Added.
+        (runRichards):
+        * APIBench/api-bench: Added.
+
+2020-05-09  Don Olmstead  <don.olmstead@sony.com>
+
+        [CMake] Use WEBKIT_EXECUTABLE in MallocBench
+        https://bugs.webkit.org/show_bug.cgi?id=211665
+
+        Reviewed by Yusuke Suzuki.
+
+        Cleanup MallocBench definitions using WEBKIT_EXECUTABLE. Notify developers
+        that MallocBench is unavailable only if bmalloc is being used but the platform
+        does not have the functionality required.
+
+        * CMakeLists.txt:
+        * MallocBench/MallocBench/CMakeLists.txt:
+
+2020-05-08  Darin Adler  <darin@apple.com>
+
+        Remove no-longer-used PerformanceTests/StitchMarker
+        https://bugs.webkit.org/show_bug.cgi?id=211639
+
+        Reviewed by Ryosuke Niwa.
+
+        Having this test around can be confusing since it contains old versions
+        of many WebKit source files, which will show up when searching the source
+        tree. And since we're not using it, we don't need to keep a copy of it
+        in the tip of tree in the repository.
+
+        * StitchMarker: Removed.
+
+2020-04-24  Jon Lee  <jonlee@apple.com>
+
+        MotionMark: add link to bug in about page
+
+        Unreviewed.
+
+        * MotionMark/about.html:
+
+2020-04-24  Jon Lee  <jonlee@apple.com>
+
+        MotionMark: ensure that timestamps are valid during warm up phase of tests
+        https://bugs.webkit.org/show_bug.cgi?id=210640
+
+        Reviewed by Said Abou-Hallawa.
+
+        Ensure that Benchmark._benchmarkStartTimestamp is set during warm up phase.
+        Otherwise it is NaN, which makes the Benchmark.timestamp invalid, which is
+        used by tests like Multiply to drive the animation. When the warm up phase
+        completes, the start timestamp is reset.
+
+        Update minor version of benchmark with this bug fix, and include
+        version changelog in the about page.
+
+        For testing, add a parameter that allows for adjusting the length of the
+        warm up phase. It remains at its current default, 100 ms.
+
+        * MotionMark/about.html: Add section of version changelog. Includes links
+        to webkit.org blog posts.
+        * MotionMark/developer.html: Add parameter for setting warmup length.
+        Remove the Kalman filter parameters, since they should always be fixed.
+        * MotionMark/resources/runner/motionmark.css: Include styles to show
+        version log.
+        * MotionMark/resources/runner/motionmark.js: Factor out default options to
+        a property on window.benchmarkController. Include the default warmup length
+        of 100 ms.
+        (window.benchmarkController.startBenchmark): Refactor to use benchmarkDefaultParameters.
+        * MotionMark/resources/debug-runner/motionmark.js: Ditto.
+        * MotionMark/resources/strings.js: Update version number.
+        * MotionMark/tests/resources/main.js:
+        (_animateLoop): Set _benchmarkTimestamp during the warmup phase. Check the
+        warmup length. The _benchmarkTimestamp variable remains reset when the test
+        begins.
+
+2020-04-07  Saam Barati  <sbarati@apple.com>
+
+        RAMification should have a way of gathering vmmaps for each test at the end of each run
+        https://bugs.webkit.org/show_bug.cgi?id=210060
+
+        Reviewed by Yusuke Suzuki.
+
+        When I was debugging a memory issue, I needed to gather vmmaps for each
+        RAMification subtest. This patch is checking in the code I wrote to be able
+        to do this. It works by:
+        - Passing in an argument to RAMification saying we want vmmaps at the end of
+        each subtest run.
+        - RAMification invokes jsc with an environment variable that tells the shell
+        to wait for one character of input from stdin before exiting.
+        - The jsc shell also disables the bmalloc scavenger while waiting for input so the
+        vmmap we take from the python runner script represents the "footprint" score
+        of the benchmark. If the scavenger ran, it would end up releasing too much
+        memory for the vmmap to be useful.
+        - The python script runs a vmmap, and then communicates to the jsc process
+        when the vmmap finishes running.
+
+        * JetStream2/RAMification.py:
+        (parseArgs):
+        (BaseRunner.__init__):
+        (BaseRunner.getResults):
+        (LocalRunner.runOneTest):
+        (main):
+        (main.runTestList):
+
+2020-04-06  Saam Barati  <sbarati@apple.com>
+
+        Implement 1GB of executable memory on arm64
+        https://bugs.webkit.org/show_bug.cgi?id=208490
+        <rdar://problem/60797127>
+
+        Reviewed by Keith Miller.
+
+        * JetStream2/JetStreamDriver.js:
+        (Driver.prototype.dumpJSONResultsIfNeeded):
+        (DefaultBenchmark.prototype.updateUIAfterRun):
+        (DefaultBenchmark):
+        (WSLBenchmark.prototype.updateUIAfterRun):
+        (WSLBenchmark):
+        (WasmBenchmark.prototype.updateUIAfterRun):
+        (WasmBenchmark):
+        (Driver.async fetchResources.statusElement.innerHTML.a.href.string_appeared_here):
+        (Driver.prototype.async fetchResources):
+
+2020-03-26  Saam Barati  <sbarati@apple.com>
+
+        Make it so RAMification can be run with python 3 and 2 and that it recognizes the new JavaScriptCore.framework directory structure
+        https://bugs.webkit.org/show_bug.cgi?id=209636
+
+        Reviewed by Yusuke Suzuki.
+
+        - JavaScriptCore builds now put the jsc shell under JavaScriptCore.framework/Helpers/jsc,
+          not JavaScriptCore.framework/Resources/jsc
+        - It's also helpful to be able to run RAMification with python3.7 and 2.7,
+          since there are some contexts where 3.7 is all we have.
+
+        * JetStream2/RAMification.py:
+        (frameworkPathFromExecutablePath):
+        (BaseRunner.processLine):
+        (LocalRunner.runOneTest):
+        (main.runTestList):
+        (main):
+
+2020-03-15  Yusuke Suzuki  <ysuzuki@apple.com>
+
+        Should not use variable-length-array (VLA)
+        https://bugs.webkit.org/show_bug.cgi?id=209043
+
+        Reviewed by Mark Lam.
+
+        * MediaTime/Configurations/Base.xcconfig:
+
+2020-02-17  Don Olmstead  <don.olmstead@sony.com>
+
+        [CMake] Use builtin targets
+        https://bugs.webkit.org/show_bug.cgi?id=205166
+
+        Reviewed by Darin Adler.
+
+        * MallocBench/MallocBench/CMakeLists.txt:
+
+2020-01-28  Sihui Liu  <sihui_liu@apple.com>
+
+        IndexedDB: speed up index records deletion
+        https://bugs.webkit.org/show_bug.cgi?id=206196
+
+        Reviewed by Brady Eidson.
+
+        * IndexedDB/basic/index-cursor-delete-2.html: Added.
+
+2020-01-08  Sihui Liu  <sihui_liu@apple.com>
+
+        REGRESSION (r242911?): High Sierra Release WK2 Perf bot timing out while running IndexedDB/large-number-of-inserts.html
+        https://bugs.webkit.org/show_bug.cgi?id=195952
+        <rdar://problem/49137688>
+
+        Re-enable the test after recent IDB performance improvement.
+
+        Reviewed by Alexey Proskuryakov.
+
+        * Skipped:
+
+2020-01-07  Carlos Garcia Campos  <cgarcia@igalia.com>
+
+        [GTK][WPE] Add API to set purpose and hints of active editable element to input methods
+        https://bugs.webkit.org/show_bug.cgi?id=205605
+
+        Reviewed by Žan Doberšek.
+
+        Split ENABLE_IOS_AUTOCORRECT_AND_AUTOCAPITALIZE and remove the IOS prefix.
+
+        * StitchMarker/wtf/FeatureDefines.h:
+
+2020-01-06  Mark Lam  <mark.lam@apple.com>
+
+        Convert ASSERT_DISABLED to ASSERT_ENABLED, and fix some tests of NDEBUG that should actually test for ASSERT_ENABLED.
+        https://bugs.webkit.org/show_bug.cgi?id=205776
+
+        Reviewed by Saam Barati.
+
+        * JetStream2/wasm/HashSet.cpp:
+        * StitchMarker/wtf/Assertions.h:
+        * StitchMarker/wtf/DateMath.cpp:
+        (WTF::initializeDates):
+        * StitchMarker/wtf/HashTable.h:
+        * StitchMarker/wtf/Hasher.h:
+        (WTF::StringHasher::addCharacters):
+        * StitchMarker/wtf/NeverDestroyed.h:
+        (WTF::LazyNeverDestroyed::construct):
+        * StitchMarker/wtf/StackBounds.h:
+        (WTF::StackBounds::checkConsistency const):
+        * StitchMarker/wtf/ValueCheck.h:
+        * StitchMarker/wtf/Vector.h:
+        (WTF::minCapacity>::checkConsistency):
+        * StitchMarker/wtf/text/AtomicStringImpl.cpp:
+        * StitchMarker/wtf/text/AtomicStringImpl.h:
+        * StitchMarker/wtf/text/StringCommon.h:
+        (WTF::hasPrefixWithLettersIgnoringASCIICaseCommon):
+        * StitchMarker/wtf/text/StringImpl.h:
+        * StitchMarker/wtf/text/SymbolImpl.h:
+        * StitchMarker/wtf/text/UniquedStringImpl.h:
+
+2020-01-05  Dean Jackson  <dino@apple.com>
+
+        Rename GraphicsContext3D to GraphicsContextGL
+        https://bugs.webkit.org/show_bug.cgi?id=205778
+        <rdar://problem/58327597>
+
+        Reviewed by Sam Weinig.
+
+        Rename all the GraphicsContext3D things to GraphicsContextGL
+        (includes Extensions3D and GRAPHICS_CONTEXT_3D).
+
+        GraphicsContext3DBase now becomes GraphicsContextGL.
+        GraphicsContext3D is now GraphicsContextGLOpenGL (since it represents
+        the OpenGL implementation of the API).
+
+        * StitchMarker/wtf/FeatureDefines.h:
+        * StitchMarker/wtf/Platform.h:
+
+2019-12-16  Antti Koivisto  <antti@apple.com>
+
+        Add StyleBench subtest for dynamic media query performance
+        https://bugs.webkit.org/show_bug.cgi?id=205263
+
+        Reviewed by Zalan Bujtas.
+
+        Add a subtest that contains a small number of rules inside min/max-width media queries.
+        The test is executed by resizing the test frame to various widths.
+
+        * StyleBench/index.html:
+        * StyleBench/resources/style-bench.js:
+        (Random.prototype.chance):
+        (defaultConfiguration):
+        (mediaQueryConfiguration):
+        (predefinedConfigurations):
+        * StyleBench/resources/tests.js:
+        (makeSteps):
+
+2019-10-26  Chris Lord  <clord@igalia.com>
+
+        Put OffscreenCanvas behind a build flag
+        https://bugs.webkit.org/show_bug.cgi?id=203146
+
+        Reviewed by Ryosuke Niwa.
+
+        * StitchMarker/wtf/FeatureDefines.h:
+
+2019-10-21  Carlos Alberto Lopez Perez  <clopez@igalia.com>
+
+        [GTK] Perf test SVG/UnderTheSeeBenchmark.html timeouts.
+        https://bugs.webkit.org/show_bug.cgi?id=203229
+
+        Unreviewed gardening.
+
+        * Skipped: Mark 2 new tests timing out in the GTK perf bot.
+
+2019-10-17  Saam Barati  <sbarati@apple.com>
+
+        Have a CLI version of JetStream 2 to run on watchOS
+        https://bugs.webkit.org/show_bug.cgi?id=202998
+        <rdar://problem/56208554>
+
+        Reviewed by Tadeu Zagallo.
+
+        This patch adds a CLI version of JS2 to run on watchOS. We run most subtests
+        from the browser version of JS2, but skip a few tests that are particularly
+        long running, like WSL and some of WTB. We also don't run the Wasm tests
+        as we don't JIT on watchOS. Each test runs for fewer iterations in the watch
+        version. 15 is the default iteration count. This benchmark runs in 7 minutes on
+        a Series 4 watch.
+
+        * JetStream2/JetStreamDriver.js:
+        (getIterationCount):
+        (getWorstCaseCount):
+        (Driver.prototype.async.start):
+        (Driver.prototype.resultsJSON):
+        (Driver.prototype.dumpJSONResultsIfNeeded):
+        (Driver.prototype.async.reportScoreToRunBenchmarkRunner):
+        (DefaultBenchmark):
+        * JetStream2/RexBench/UniPoker/benchmark.js:
+        (Benchmark.prototype.validate):
+        (Benchmark):
+        * JetStream2/watch-cli.js: Added.
+
+2019-10-17  Adrian Perez de Castro  <aperez@igalia.com>
+
+        [Linux] Avoid usage of <sys/sysctl.h> in MallocBench
+        https://bugs.webkit.org/show_bug.cgi?id=203109
+
+        Reviewed by Carlos Alberto Lopez Perez.
+
+        * MallocBench/MallocBench/CPUCount.cpp: Only include <sys/sysctl.h> if
+        the sysctl() function will be used.
+
+2019-10-17  Carlos Alberto Lopez Perez  <clopez@igalia.com>
+
+        [GTK] Perf test IndexedDB/basic/index-cursor-delete.html timeouts
+        https://bugs.webkit.org/show_bug.cgi?id=203083
+
+        Unreviewed gardening.
+
+        * Skipped: Skip a test that is timing out on the GTK perf bot.
+
+2019-09-24  Caio Lima  <ticaiolima@gmail.com>
+
+        [BigInt] Add ValueBitRShift into DFG
+        https://bugs.webkit.org/show_bug.cgi?id=192663
+
+        Reviewed by Robin Morisset.
+
+        * BigIntBench/big-int-simple-rshift.js: Added.
+        (bigInt):
+
+2019-09-09  Jon Lee  <jonlee@apple.com>
+
+        Upload triangles tests for 3D suite in MotionMark
+        https://bugs.webkit.org/show_bug.cgi?id=201606
+
+        Reviewed by Simon Fraser.
+
+        * MotionMark/resources/debug-runner/motionmark.css:
+        * MotionMark/resources/debug-runner/tests.js:
+        * MotionMark/tests/3d/resources/webgl.js:
+        * MotionMark/tests/3d/resources/webgpu.js: Added.
+        * MotionMark/tests/3d/triangles-webgl.html: Renamed from Websites/browserbench.org/MotionMark1.1/tests/3d/webgl.html.
+        * MotionMark/tests/3d/triangles-webgpu.html: Copied from PerformanceTests/MotionMark/tests/3d/webgl.html.
+
+2019-08-29  Keith Rollin  <krollin@apple.com>
+
+        Update .xcconfig symbols to reflect the current set of past and future product versions.
+        https://bugs.webkit.org/show_bug.cgi?id=200720
+        <rdar://problem/54305032>
+
+        Reviewed by Alex Christensen.
+
+        Remove version symbols related to old OS's we no longer support,
+        ensure that version symbols are defined for OS's we do support.
+
+        * MediaTime/Configurations/Base.xcconfig:
+        * MediaTime/Configurations/DebugRelease.xcconfig:
+
+2019-08-21  Sihui Liu  <sihui_liu@apple.com>
+
+        Add some IDB performance tests
+        https://bugs.webkit.org/show_bug.cgi?id=200906
+
+        Reviewed by Geoffrey Garen.
+
+        Add test coverage for IDB performance, and organize IDB tests into two categories.
+
+        * IndexedDB/basic/index-count-key.html: Added.
+        * IndexedDB/basic/index-count.html: Added.
+        * IndexedDB/basic/index-cursor-advance.html: Added.
+        * IndexedDB/basic/index-cursor-continue.html: Added.
+        * IndexedDB/basic/index-cursor-continuePrimaryKey.html: Added.
+        * IndexedDB/basic/index-cursor-delete.html: Added.
+        * IndexedDB/basic/index-cursor-update.html: Added.
+        * IndexedDB/basic/index-get.html: Added.
+        * IndexedDB/basic/index-multientry.html: Renamed from PerformanceTests/IndexedDB/index-multientry.html.
+        * IndexedDB/basic/objectstore-add.html: Added.
+        * IndexedDB/basic/objectstore-clear.html: Added.
+        * IndexedDB/basic/objectstore-count.html: Added.
+        * IndexedDB/basic/objectstore-cursor-advance.html: Added.
+        * IndexedDB/basic/objectstore-cursor-continue.html: Added.
+        * IndexedDB/basic/objectstore-cursor-delete.html: Added.
+        * IndexedDB/basic/objectstore-cursor-update.html: Added.
+        * IndexedDB/basic/objectstore-cursor.html: Renamed from PerformanceTests/IndexedDB/objectstore-cursor.html.
+        * IndexedDB/basic/objectstore-delete.html: Renamed from PerformanceTests/IndexedDB/index-get.html.
+        * IndexedDB/basic/objectstore-get.html: Added.
+        * IndexedDB/basic/objectstore-put.html: Renamed from PerformanceTests/IndexedDB/objectstore-get.html.
+        * IndexedDB/stress/large-array-keys.html: Renamed from PerformanceTests/IndexedDB/large-array-keys.html.
+        * IndexedDB/stress/large-binary-keys.html: Renamed from PerformanceTests/IndexedDB/large-binary-keys.html.
+        * IndexedDB/stress/large-number-of-inserts-responsiveness.html: Renamed from PerformanceTests/IndexedDB/large-number-of-inserts-responsiveness.html.
+        * IndexedDB/stress/large-number-of-inserts.html: Renamed from PerformanceTests/IndexedDB/large-number-of-inserts.html.
+        * IndexedDB/stress/large-string-keys.html: Renamed from PerformanceTests/IndexedDB/large-string-keys.html.
+        * Skipped:
+
+2019-08-19  Sihui Liu  <sihui_liu@apple.com>
+
+        Remove IDB-specific quota
+        https://bugs.webkit.org/show_bug.cgi?id=196545
+        <rdar://problem/54201783>
+
+        Reviewed by Youenn Fablet.
+
+        * IndexedDB/large-binary-keys.html:
+        * IndexedDB/large-string-keys.html:
+
+2019-08-14  Keith Rollin  <krollin@apple.com>
+
+        Remove support for macOS < 10.13
+        https://bugs.webkit.org/show_bug.cgi?id=200694
+        <rdar://problem/54278851>
+
+        Reviewed by Youenn Fablet.
+
+        Update conditionals that reference __MAC_OS_X_VERSION_MIN_REQUIRED and
+        __MAC_OS_X_VERSION_MAX_ALLOWED, assuming that they both have values >=
+        101300. This means that expressions like
+        "__MAC_OS_X_VERSION_MIN_REQUIRED < 101300" are always False and
+        "__MAC_OS_X_VERSION_MIN_REQUIRED >= 101300" are always True.
+
+        * StitchMarker/wtf/Platform.h:
+        * StitchMarker/wtf/dependencies/bmalloc/BPlatform.h:
+        * StitchMarker/wtf/text/icu/TextBreakIteratorICU.h:
+        (WTF::TextBreakIteratorICU::TextBreakIteratorICU):
+        (WTF::caretRules): Deleted.
+
+2019-08-06  Michael Saboff  <msaboff@apple.com>
+
+        Make JSC memory benchmark available on OpenSource
+        https://bugs.webkit.org/show_bug.cgi?id=195012
+
+        Reviewed by Saam Barati.
+
+        This patch upstreams the RAMification memory benchmark to open source.
+
+        The prior RAMification.py driver script in the Internal directory has been moved here
+        with the device execution code seperated out to a new Internal driver script.
+        As a result, command line argument parsing as well as acting on the resulting argument
+        values has changed.  The remote device Runner creates an ArgumentParser object that is
+        passed through main().  In main(), if we have an ArgumentParser, we use it otherwise we
+        create one for benchmarking locally.  The arguments object returned from argument
+        parsing is now passed to the Runner constructor so it can extract the settings appropriate
+        for that particular runner.
+
+        Added some sane argument default values for the JSC command patch and the JetStream2
+        source directory.
+
+        Updated the Lua tests to eliminate the testing harness and its overhead, matching what was
+        done in the Internal tree.
+
+        * JetStream2/LuaJSFight/hello_world.js:
+        (Benchmark.prototype.runIteration): Deleted.
+        (Benchmark): Deleted.
+        * JetStream2/LuaJSFight/list_search.js:
+        (run): Deleted.
+        (Benchmark.prototype.runIteration): Deleted.
+        (Benchmark): Deleted.
+        * JetStream2/LuaJSFight/lists.js:
+        (): Deleted.
+        (Benchmark.prototype.runIteration): Deleted.
+        (Benchmark): Deleted.
+        * JetStream2/LuaJSFight/richards.js: Added.
+        (runRichards):
+        (Scheduler):
+        (Scheduler.prototype.addIdleTask):
+        (Scheduler.prototype.addWorkerTask):
+        (Scheduler.prototype.addHandlerTask):
+        (Scheduler.prototype.addDeviceTask):
+        (Scheduler.prototype.addRunningTask):
+        (Scheduler.prototype.addTask):
+        (Scheduler.prototype.schedule):
+        (Scheduler.prototype.release):
+        (Scheduler.prototype.holdCurrent):
+        (Scheduler.prototype.suspendCurrent):
+        (Scheduler.prototype.queue):
+        (TaskControlBlock):
+        (TaskControlBlock.prototype.setRunning):
+        (TaskControlBlock.prototype.markAsNotHeld):
+        (TaskControlBlock.prototype.markAsHeld):
+        (TaskControlBlock.prototype.isHeldOrSuspended):
+        (TaskControlBlock.prototype.markAsSuspended):
+        (TaskControlBlock.prototype.markAsRunnable):
+        (TaskControlBlock.prototype.run):
+        (TaskControlBlock.prototype.checkPriorityAdd):
+        (TaskControlBlock.prototype.toString):
+        (IdleTask):
+        (IdleTask.prototype.run):
+        (IdleTask.prototype.toString):
+        (DeviceTask):
+        (DeviceTask.prototype.run):
+        (DeviceTask.prototype.toString):
+        (WorkerTask):
+        (WorkerTask.prototype.run):
+        (WorkerTask.prototype.toString):
+        (HandlerTask):
+        (HandlerTask.prototype.run):
+        (HandlerTask.prototype.toString):
+        (Packet):
+        (Packet.prototype.addTo):
+        (Packet.prototype.toString):
+        * JetStream2/LuaJSFight/string_lists.js:
+        (): Deleted.
+        (Benchmark.prototype.runIteration): Deleted.
+        (Benchmark): Deleted.
+        * JetStream2/RAMification.py: Added.
+        (mean):
+        (geomean):
+        (frameworkPathFromExecutablePath):
+        (parseArgs):
+        (parseArgs.optStrToBool):
+        (BaseRunner):
+        (BaseRunner.__init__):
+        (BaseRunner.setup):
+        (BaseRunner.setEnv):
+        (BaseRunner.unsetEnv):
+        (BaseRunner.resetForTest):
+        (BaseRunner.processLine):
+        (BaseRunner.setReturnCode):
+        (BaseRunner.getResults):
+        (LocalRunner):
+        (LocalRunner.__init__):
+        (LocalRunner.runOneTest):
+        (main):
+        (main.runTestList):
+        * JetStream2/__init__.py: Added.
+
+2019-07-23  Keith Rollin  <krollin@apple.com>
+
+        Remove rest of NavigatorContentUtils support
+        https://bugs.webkit.org/show_bug.cgi?id=200052
+        <rdar://problem/53467357>
+
+        Reviewed by Alex Christensen.
+
+        Bug 196070 removes most of the support for the never-used
+        NavigatorContentUtils facility. However, there were still a couple of
+        left-over references after that change. This patch sweeps those up.
+
+        * StitchMarker/wtf/FeatureDefines.h:
+
+2019-07-12  Caio Lima  <ticaiolima@gmail.com>
+
+        [BigInt] Add ValueBitLShift into DFG
+        https://bugs.webkit.org/show_bug.cgi?id=192664
+
+        Reviewed by Saam Barati.
+
+        * BigIntBench/big-int-simple-lshift.js: Added.
+
+2019-06-28  Konstantin Tokarev  <annulen@yandex.ru>
+
+        Remove traces of ENABLE_ICONDATABASE remaining after its removal in 219733
+        https://bugs.webkit.org/show_bug.cgi?id=199317
+
+        Reviewed by Michael Catanzaro.
+
+        While IconDatabase and all code using it was removed,
+        ENABLE_ICONDATABASE still exists as build option and C++ macro.
+
+        * StitchMarker/wtf/FeatureDefines.h:
+
+2019-06-27  Beth Dakin  <bdakin@apple.com>
+
+        Upstream use of MACCATALYST
+        https://bugs.webkit.org/show_bug.cgi?id=199245
+        rdar://problem/51687723
+
+        Reviewed by Tim Horton.
+
+        * MediaTime/Configurations/SDKVariant.xcconfig:
+
+2019-06-20  Carlos Garcia Campos  <cgarcia@igalia.com>
+
+        [GTK] Remove support for GTK2 plugins
+        https://bugs.webkit.org/show_bug.cgi?id=199065
+
+        Reviewed by Sergio Villar Senin.
+
+        * StitchMarker/wtf/Platform.h:
+
+2019-05-08  Caio Lima  <ticaiolima@gmail.com>
+
+        [BigInt] Add ValueMod into DFG
+        https://bugs.webkit.org/show_bug.cgi?id=186174
+
+        Reviewed by Saam Barati.
+
+        * BigIntBench/big-int-simple-mod.js: Added.
+
+2019-05-06  Saam Barati  <sbarati@apple.com>
+
+        JS2 should print scores for different categories
+        https://bugs.webkit.org/show_bug.cgi?id=197605
+
+        Reviewed by Yusuke Suzuki.
+
+        * JetStream2/JetStreamDriver.js:
+        (displayCategoryScores):
+        (isInBrowser.document.onkeydown):
+        (Driver.prototype.async.start):
+        (Driver.prototype.async.reportScoreToRunBenchmarkRunner):
+
+2019-04-16  Jon Lee  <jonlee@apple.com>
+
+        [MotionMark] The text "kkkj" is causing Firefox console warning: `unreachable code after return statement`
+        https://bugs.webkit.org/show_bug.cgi?id=196814
+
+        Reviewed by Wenson Hsieh.
+
+        * MotionMark/resources/extensions.js:
+        (subtract.subtract.sampleY):
+
+2019-04-15  Myles C. Maxfield  <mmaxfield@apple.com>
+
+        [Cocoa] FontPlatformData objects aren't cached at all when using font-family:system-ui
+        https://bugs.webkit.org/show_bug.cgi?id=196846
+        <rdar://problem/49499971>
+
+        Reviewed by Simon Fraser and Darin Adler.
+
+        * Layout/system-ui-rebuild-emoji.html: Added.
+
+2019-04-03  Myles C. Maxfield  <mmaxfield@apple.com>
+
+        -apple-trailing-word is needed for browser detection
+        https://bugs.webkit.org/show_bug.cgi?id=196575
+
+        Unreviewed.
+
+        * MotionMark/resources/debug-runner/motionmark.css:
+        (#intro .start-benchmark p):
+
+2019-03-27  Ryan Haddad  <ryanhaddad@apple.com>
+
+        REGRESSION (r242911?): High Sierra Release WK2 Perf bot timing out while running IndexedDB/large-number-of-inserts.html
+        https://bugs.webkit.org/show_bug.cgi?id=195952
+
+        Unreviewed test gardening.
+
+        * Skipped: Skip the affected test so the bot will finish the run.
+
+2019-03-27  Saam Barati  <sbarati@apple.com>
+
+        JetStream 2 should not report time values as scores
+        https://bugs.webkit.org/show_bug.cgi?id=196334
+
+        Reviewed by Yusuke Suzuki.
+
+        * JetStream2/JetStreamDriver.js:
+        (toTimeValue):
+        (Driver.prototype.async.reportScoreToRunBenchmarkRunner):
+
+2019-03-27  Saam barati  <sbarati@apple.com>
+
+        Unreviewed. Fix individual benchmark description urls to go to in-depth.html instead of about.html
+
+        * JetStream2/JetStreamDriver.js:
+        (Driver.prototype.prepareToRun.text.div.id.string_appeared_here.h3):
+
+2019-03-25  Saam barati  <sbarati@apple.com>
+
+        Update the blurb describing JetStream2 and fix a broken link in the in-depth page.
+
+        Rubber-stamped by Filip Pizlo.
+
+        * JetStream2/in-depth.html:
+        * JetStream2/index.html:
+
+2019-03-18  Saam Barati  <sbarati@apple.com>
+
+        Add a plan file for JetStream 2
+        https://bugs.webkit.org/show_bug.cgi?id=190734
+
+        Reviewed by Mark Lam.
+
+        Make the delay when starting via run-benchmark longer to allow
+        the page's animation to finish.
+
+        * JetStream2/JetStreamDriver.js:
+        (Driver.prototype.async.initialize):
+
+2019-03-15  Jon Davis  <jond@apple.com>
+
+        Fixed a bug preventing the overall sore to be displayed on JetStream2
+        https://bugs.webkit.org/show_bug.cgi?id=195817
+
+        Rubber-stamped by Saam Barati.
+
+        * JetStream2/JetStreamDriver.js:
+        (Driver.prototype.async.start):
+
+2019-03-14  Jon Davis  <jond@apple.com>
+
+        Implement a new design for JetStream2
+        https://bugs.webkit.org/show_bug.cgi?id=195492
+
+        Reviewed by Saam Barati.
+
+        * JetStream2/JetStream.css:
+        (html):
+        (body):
+        (::selection):
+        (main):
+        (.logo):
+        (.logo .logo-image):
+        (#jetstreams):
+        (#jetstreams svg):
+        (.summary):
+        (.summary + .summary):
+        (.summary:empty):
+        (article, .summary):
+        (h1):
+        (h2, h3, h4, h5, h6):
+        (h4, h5, h6):
+        (p):
+        (h5, h6):
+        (h6):
+        (a:link,):
+        (a:hover,):
+        (#status):
+        (#status label,):
+        (a.button):
+        (#status.loading):
+        (#status.error):
+        (.error h2, .error p):
+        (.error h2):
+        (#result-summary):
+        (#result-summary label):
+        (#result-summary .score):
+        (#result-summary .score .interval):
+        (#results):
+        (.benchmark):
+        (.benchmark h3, .benchmark h4, .benchmark .result, .benchmark label):
+        (.benchmark-running h4, .benchmark-running .result, .benchmark-running label):
+        (.benchmark-done h3, .benchmark-done h4, .benchmark-done .result, .benchmark-done label):
+        (.benchmark h3):
+        (.benchmark-running h3):
+        (.benchmark-done h3):
+        (.benchmark h3 a,):
+        (.benchmark-done h3 a:hover):
+        (.benchmark h4):
+        (.benchmark-done h4):
+        (.benchmark p,):
+        (.benchmark .result):
+        (.benchmark-done .result):
+        (.benchmark label):
+        (.benchmark-done label):
+        (@keyframes fadein):
+        (to):
+        (@keyframes scaledown):
+        (@keyframes shine):
+        (100%):
+        (@keyframes swingin):
+        (@media (max-width: 415px)):
+        (#logo): Deleted.
+        (p.summary): Deleted.
+        (p.summary + p.summary): Deleted.
+        (p.summary:empty): Deleted.
+        (p:first-of-type): Deleted.
+        (#status a:link): Deleted.
+        (.interval): Deleted.
+        (a:link, a:visited): Deleted.
+        (a:link:hover): Deleted.
+        (table): Deleted.
+        (td, th): Deleted.
+        (th): Deleted.
+        (tr:first-child > th:nth-child(even)): Deleted.
+        (tr:nth-child(even):not(:first-child, .benchmark-running)): Deleted.
+        (.result): Deleted.
+        (.benchmark-running): Deleted.
+        (:not(.benchmark-running) .result): Deleted.
+        (.benchmark-running .result): Deleted.
+        (.benchmark-name): Deleted.
+        (.result.category,): Deleted.
+        (.benchmark-name:not(.category):not(.geometric-mean)): Deleted.
+        (.geometric-mean): Deleted.
+        (.benchmark-name:not(:first-child)): Deleted.
+        (.benchmark-name a:link,): Deleted.
+        (.highlighted-result): Deleted.
+        * JetStream2/JetStream2Logo.svg: Added.
+        * JetStream2/JetStreamDriver.js:
+        (updateUI):
+        (Driver.prototype.async.start):
+        (Driver.prototype.prepareToRun.text.div.id.string_appeared_here.h3):
+        (Driver.prototype.prepareToRun.text.span):
+        (Driver.prototype.prepareToRun.a.h3.h4):
+        (Driver.prototype.prepareToRun.text.div):
+        (Driver.prototype.async.initialize):
+        (Driver.prototype.async.fetchResources.prototype.statusElement.onclick):
+        (prototype.fetchResources):
+        (prototype.updateUIBeforeRun):
+        (prototype.updateUIAfterRun):
+        (Driver.prototype.async.fetchResources.statusElement.innerHTML.a.href.string_appeared_here):
+        (Driver.prototype.async.fetchResources):
+        (Driver.prototype.prepareToRun.text.tr.id.string_appeared_here.FIXME.link.to.benchmark.explanation.td): Deleted.
+        * JetStream2/clouds.svg: Added.
+        * JetStream2/in-depth.html:
+        * JetStream2/index.html:
+        * JetStream2/jetstreams.svg: Added.
+
+2019-03-11  Caio Lima  <ticaiolima@gmail.com>
+
+        [ESNext][BigInt] Implement "~" unary operation
+        https://bugs.webkit.org/show_bug.cgi?id=182216
+
+        Reviewed by Keith Miller.
+
+        * BigIntBench/big-int-simple-bit-not.js: Added.
+
 2019-03-04  Saam Barati  <sbarati@apple.com>
 
         Add a detailed summary page for JetStream 2
@@ -32,7 +1213,7 @@
 
         Reviewed by Ryosuke Niwa.
 
-        r240358 sets default IDB quota as 50 MB for single test, we need to increase that for big tests. 
+        r240358 sets default IDB quota as 50 MB for single test, we need to increase that for big tests.
 
         * IndexedDB/large-binary-keys.html:
         * IndexedDB/large-string-keys.html:
@@ -367,7 +1548,7 @@
         - Web Tooling Benchmark
         - WasmBench
         - RexBench
-        
+
         JetStream 2 also adds some new benchmarks:
         - Two tests emphasizing web worker performance.
         - One test emphasizing Promise, async iteration, and DataView performance.

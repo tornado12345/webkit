@@ -34,9 +34,10 @@
 namespace WebCore {
 namespace DisplayList {
 
-Replayer::Replayer(GraphicsContext& context, const DisplayList& displayList)
+Replayer::Replayer(GraphicsContext& context, const DisplayList& displayList, Delegate* delegate)
     : m_displayList(displayList)
     , m_context(context)
+    , m_delegate(delegate)
 {
 }
 
@@ -49,7 +50,7 @@ std::unique_ptr<DisplayList> Replayer::replay(const FloatRect& initialClip, bool
 
     std::unique_ptr<DisplayList> replayList;
     if (UNLIKELY(trackReplayList))
-        replayList = std::make_unique<DisplayList>();
+        replayList = makeUnique<DisplayList>();
 
     size_t numItems = m_displayList.itemCount();
     for (size_t i = 0; i < numItems; ++i) {
@@ -64,7 +65,8 @@ std::unique_ptr<DisplayList> Replayer::replay(const FloatRect& initialClip, bool
         }
 
         LOG_WITH_STREAM(DisplayLists, stream << "applying " << i << " " << item);
-        item.apply(m_context);
+        if (!m_delegate || !m_delegate->apply(item, m_context))
+            item.apply(m_context);
 
         if (UNLIKELY(trackReplayList))
             replayList->appendItem(const_cast<Item&>(item));

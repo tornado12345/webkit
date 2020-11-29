@@ -35,7 +35,7 @@ namespace WTF {
 // G_PRIORITY_HIGH = -100
 // We don't use those macros here to avoid having to include glib header only
 // for this. But we should take into account that GLib uses G_PRIORITY_DEFAULT
-// for timeout sourcea and G_PRIORITY_DEFAULT_IDLE for idle sources.
+// for timeout sources and G_PRIORITY_DEFAULT_IDLE for idle sources.
 // Changes in these priorities can have a huge impact in performance, and in
 // the correctness too, so be careful when changing them.
 enum RunLoopSourcePriority {
@@ -47,9 +47,6 @@ enum RunLoopSourcePriority {
 
     // Garbage collector timers.
     JavascriptTimer = 200,
-
-    // callOnMainThread.
-    MainThreadDispatcherTimer = 100,
 
     // Memory pressure monitor.
     MemoryPressureHandlerTimer = -100,
@@ -64,10 +61,10 @@ enum RunLoopSourcePriority {
     CompositingThreadUpdateTimer = 110,
 
     // Layer flush.
-    LayerFlushTimer = -100,
+    LayerFlushTimer = 110,
 
     // DisplayRefreshMonitor timer, should have the same value as the LayerFlushTimer.
-    DisplayRefreshMonitorTimer = -100,
+    DisplayRefreshMonitorTimer = 110,
 
     // Rendering timer in the main thread when accelerated compositing is not used.
     NonAcceleratedDrawingTimer = 100,
@@ -82,29 +79,27 @@ enum RunLoopSourcePriority {
     DiskCacheWrite = 200,
 };
 
-#elif PLATFORM(WPE)
+#else
 
 enum RunLoopSourcePriority {
-    RunLoopDispatcher = -70,
-    RunLoopTimer = -70,
+    RunLoopDispatcher = 0,
+    RunLoopTimer = 0,
 
-    MainThreadDispatcherTimer = -60,
+    MemoryPressureHandlerTimer = -10,
 
-    MemoryPressureHandlerTimer = -80,
+    JavascriptTimer = 10,
+    MainThreadSharedTimer = 10,
 
-    JavascriptTimer = -60,
-    MainThreadSharedTimer = -60,
+    LayerFlushTimer = 0,
+    DisplayRefreshMonitorTimer = 0,
 
-    LayerFlushTimer = -70,
-    DisplayRefreshMonitorTimer = -70,
+    CompositingThreadUpdateTimer = 0,
 
-    CompositingThreadUpdateTimer = -70,
+    ReleaseUnusedResourcesTimer = 0,
 
-    ReleaseUnusedResourcesTimer = -70,
-
-    AsyncIONetwork = -70,
-    DiskCacheRead = -70,
-    DiskCacheWrite = -60
+    AsyncIONetwork = 10,
+    DiskCacheRead = 10,
+    DiskCacheWrite = 20
 };
 
 #endif

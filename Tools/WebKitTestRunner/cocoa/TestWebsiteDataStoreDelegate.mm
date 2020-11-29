@@ -33,13 +33,32 @@
     return self;
 }
 
-- (void)requestStorageSpace:(NSURL *)mainFrameURL frameOrigin:(NSURL *)frameURL quota:(NSUInteger)quota currentSize:(NSUInteger)currentSize spaceRequired:(NSUInteger)spaceRequired decisionHandler:(void (^)(unsigned long long quota))decisionHandler
+- (void)requestStorageSpace:(NSURL *)mainFrameURL frameOrigin:(NSURL *)frameURL quota:(NSUInteger)quota currentSize:(NSUInteger)currentSize spaceRequired:(NSUInteger)spaceRequired decisionHandler:(void (^)(unsigned long long))decisionHandler
 {
-    decisionHandler(_shouldAllowRaisingQuota ? 2 * quota : quota);
+    decisionHandler(_shouldAllowRaisingQuota ? quota + currentSize + spaceRequired : quota);
 }
 
 - (void)setAllowRaisingQuota:(BOOL)shouldAllowRaisingQuota
 {
     _shouldAllowRaisingQuota = shouldAllowRaisingQuota;
 }
+
+- (void)didReceiveAuthenticationChallenge:(NSURLAuthenticationChallenge *)challenge completionHandler:(void (^)(NSURLSessionAuthChallengeDisposition disposition, NSURLCredential * _Nullable credential))completionHandler
+{
+    NSString *method = challenge.protectionSpace.authenticationMethod;
+    if ([method isEqualToString:NSURLAuthenticationMethodServerTrust]) {
+        if (_shouldAllowAnySSLCertificate)
+            completionHandler(NSURLSessionAuthChallengeUseCredential, [NSURLCredential credentialForTrust: challenge.protectionSpace.serverTrust]);
+        else
+            completionHandler(NSURLSessionAuthChallengeCancelAuthenticationChallenge, nil);
+        return;
+    }
+    completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, nil);
+}
+
+- (void)setAllowAnySSLCertificate:(BOOL)shouldAllowAnySSLCertificate
+{
+    _shouldAllowAnySSLCertificate = shouldAllowAnySSLCertificate;
+}
+
 @end

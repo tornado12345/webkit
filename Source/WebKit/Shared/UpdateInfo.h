@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2011-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,8 +23,9 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef UpdateInfo_h
-#define UpdateInfo_h
+#pragma once
+
+#if USE(COORDINATED_GRAPHICS) || USE(TEXTURE_MAPPER)
 
 #include "ShareableBitmap.h"
 #include <WebCore/IntRect.h>
@@ -43,9 +44,11 @@ class UpdateInfo {
 
 public:
     UpdateInfo() { }
+    UpdateInfo(UpdateInfo&&) = default;
+    UpdateInfo& operator=(UpdateInfo&&) = default;
 
     void encode(IPC::Encoder&) const;
-    static bool decode(IPC::Decoder&, UpdateInfo&);
+    static WARN_UNUSED_RETURN bool decode(IPC::Decoder&, UpdateInfo&);
 
     // The size of the web view.
     WebCore::IntSize viewSize;
@@ -73,4 +76,4 @@ public:
 
 } // namespace WebKit
 
-#endif // UpdateInfo_h
+#endif

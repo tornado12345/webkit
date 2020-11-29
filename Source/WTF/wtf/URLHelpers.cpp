@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005, 2007, 2014 Apple Inc. All rights reserved.
+ * Copyright (C) 2005-2019 Apple Inc. All rights reserved.
  * Copyright (C) 2018 Igalia S.L.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -33,27 +33,36 @@
 #include "URLParser.h"
 #include <mutex>
 #include <unicode/uidna.h>
-#include <unicode/unorm.h>
 #include <unicode/uscript.h>
+#include <wtf/Optional.h>
+#include <wtf/text/WTFString.h>
 
 namespace WTF {
 namespace URLHelpers {
 
 // Needs to be big enough to hold an IDN-encoded name.
 // For host names bigger than this, we won't do IDN encoding, which is almost certainly OK.
-const unsigned hostNameBufferLength = 2048;
-const unsigned urlBytesBufferLength = 2048;
+constexpr unsigned hostNameBufferLength = 2048;
+constexpr unsigned urlBytesBufferLength = 2048;
 
-static uint32_t IDNScriptWhiteList[(USCRIPT_CODE_LIMIT + 31) / 32];
+// This needs to be higher than the UScriptCode for any of the scripts on the IDN allowed list.
+// At one point we used USCRIPT_CODE_LIMIT from ICU, but there are two reasons not to use it.
+// 1) ICU considers it deprecated, so by setting U_HIDE_DEPRECATED we can't see it.
+// 2) No good reason to limit ourselves to scripts that existed in the ICU headers when
+//    WebKit was compiled.
+// This is only really important for platforms that load an external IDN allowed script list.
+// Not important for the compiled-in one.
+constexpr auto scriptCodeLimit = static_cast<UScriptCode>(256);
+
+static uint32_t allowedIDNScriptBits[(scriptCodeLimit + 31) / 32];
 
 #if !PLATFORM(COCOA)
 
-// Cocoa has an implementation that uses a whitelist in /Library or ~/Library,
-// if it exists.
-void loadIDNScriptWhiteList()
+// Cocoa has an implementation that reads this from a file in /Library or ~/Library.
+void loadIDNAllowedScriptList()
 {
     static std::once_flag flag;
-    std::call_once(flag, initializeDefaultIDNScriptWhiteList);
+    std::call_once(flag, initializeDefaultIDNAllowedScriptList);
 }
 
 #endif // !PLATFORM(COCOA)
@@ -103,7 +112,7 @@ static bool isLookalikeCharacter(const Optional<UChar32>& previousCodePoint, UCh
     // any non-printable character, any character considered as whitespace,
     // any ignorable character, and emoji characters related to locks.
     
-    // We also considered the characters in Mozilla's blacklist <http://kb.mozillazine.org/Network.IDN.blacklist_chars>.
+    // We also considered the characters in Mozilla's list of characters <http://kb.mozillazine.org/Network.IDN.blacklist_chars>.
 
     // Some of the characters here will never appear once ICU has encoded.
     // For example, ICU transforms most spaces into an ASCII space and most
@@ -119,6 +128,7 @@ static bool isLookalikeCharacter(const Optional<UChar32>& previousCodePoint, UCh
     case 0x00BE: /* VULGAR FRACTION THREE QUARTERS */
     case 0x00ED: /* LATIN SMALL LETTER I WITH ACUTE */
     /* 0x0131 LATIN SMALL LETTER DOTLESS I is intentionally not considered a lookalike character because it is visually distinguishable from i and it has legitimate use in the Turkish language. */
+    case 0x01C0: /* LATIN LETTER DENTAL CLICK */
     case 0x01C3: /* LATIN LETTER RETROFLEX CLICK */
     case 0x0251: /* LATIN SMALL LETTER ALPHA */
     case 0x0261: /* LATIN SMALL LETTER SCRIPT G */
@@ -254,52 +264,61 @@ static bool isLookalikeCharacter(const Optional<UChar32>& previousCodePoint, UCh
     }
 }
 
-void whiteListIDNScript(const char* scriptName)
+static void addScriptToIDNAllowedScriptList(int32_t script)
 {
-    int32_t script = u_getPropertyValueEnum(UCHAR_SCRIPT, scriptName);
-    if (script >= 0 && script < USCRIPT_CODE_LIMIT) {
+    if (script >= 0 && script < scriptCodeLimit) {
         size_t index = script / 32;
         uint32_t mask = 1 << (script % 32);
-        IDNScriptWhiteList[index] |= mask;
+        allowedIDNScriptBits[index] |= mask;
     }
 }
 
-void initializeDefaultIDNScriptWhiteList()
+static void addScriptToIDNAllowedScriptList(UScriptCode script)
 {
-    const char* defaultIDNScriptWhiteList[20] = {
-        "Common",
-        "Inherited",
-        "Arabic",
-        "Armenian",
-        "Bopomofo",
-        "Canadian_Aboriginal",
-        "Devanagari",
-        "Deseret",
-        "Gujarati",
-        "Gurmukhi",
-        "Hangul",
-        "Han",
-        "Hebrew",
-        "Hiragana",
-        "Katakana_Or_Hiragana",
-        "Katakana",
-        "Latin",
-        "Tamil",
-        "Thai",
-        "Yi",
-    };
-    for (const char* scriptName : defaultIDNScriptWhiteList)
-        whiteListIDNScript(scriptName);
+    addScriptToIDNAllowedScriptList(static_cast<int32_t>(script));
 }
 
-static bool allCharactersInIDNScriptWhiteList(const UChar* buffer, int32_t length)
+void addScriptToIDNAllowedScriptList(const char* scriptName)
 {
-    loadIDNScriptWhiteList();
+    addScriptToIDNAllowedScriptList(u_getPropertyValueEnum(UCHAR_SCRIPT, scriptName));
+}
+
+void initializeDefaultIDNAllowedScriptList()
+{
+    constexpr UScriptCode scripts[] = {
+        USCRIPT_COMMON,
+        USCRIPT_INHERITED,
+        USCRIPT_ARABIC,
+        USCRIPT_ARMENIAN,
+        USCRIPT_BOPOMOFO,
+        USCRIPT_CANADIAN_ABORIGINAL,
+        USCRIPT_DEVANAGARI,
+        USCRIPT_DESERET,
+        USCRIPT_GUJARATI,
+        USCRIPT_GURMUKHI,
+        USCRIPT_HANGUL,
+        USCRIPT_HAN,
+        USCRIPT_HEBREW,
+        USCRIPT_HIRAGANA,
+        USCRIPT_KATAKANA_OR_HIRAGANA,
+        USCRIPT_KATAKANA,
+        USCRIPT_LATIN,
+        USCRIPT_TAMIL,
+        USCRIPT_THAI,
+        USCRIPT_YI,
+    };
+    for (auto script : scripts)
+        addScriptToIDNAllowedScriptList(script);
+}
+
+static bool allCharactersInAllowedIDNScriptList(const UChar* buffer, int32_t length)
+{
+    loadIDNAllowedScriptList();
     int32_t i = 0;
     Optional<UChar32> previousCodePoint;
     while (i < length) {
         UChar32 c;
-        U16_NEXT(buffer, i, length, c)
+        U16_NEXT(buffer, i, length, c);
         UErrorCode error = U_ZERO_ERROR;
         UScriptCode script = uscript_getScript(c, &error);
         if (error != U_ZERO_ERROR) {
@@ -310,12 +329,12 @@ static bool allCharactersInIDNScriptWhiteList(const UChar* buffer, int32_t lengt
             LOG_ERROR("got negative number for script code from ICU: %d", script);
             return false;
         }
-        if (script >= USCRIPT_CODE_LIMIT)
+        if (script >= scriptCodeLimit)
             return false;
 
         size_t index = script / 32;
         uint32_t mask = 1 << (script % 32);
-        if (!(IDNScriptWhiteList[index] & mask))
+        if (!(allowedIDNScriptBits[index] & mask))
             return false;
         
         if (isLookalikeCharacter(previousCodePoint, c))
@@ -325,7 +344,8 @@ static bool allCharactersInIDNScriptWhiteList(const UChar* buffer, int32_t lengt
     return true;
 }
 
-static bool isSecondLevelDomainNameAllowedByTLDRules(const UChar* buffer, int32_t length, const WTF::Function<bool(UChar)>& characterIsAllowed)
+template<typename Func>
+static inline bool isSecondLevelDomainNameAllowedByTLDRules(const UChar* buffer, int32_t length, Func characterIsAllowed)
 {
     ASSERT(length > 0);
 
@@ -523,7 +543,7 @@ static bool allCharactersAllowedByTLDRules(const UChar* buffer, int32_t length)
 }
 
 // Return value of null means no mapping is necessary.
-Optional<String> mapHostName(const String& hostName, const Optional<URLDecodeFunction>& decodeFunction)
+Optional<String> mapHostName(const String& hostName, URLDecodeFunction decodeFunction)
 {
     if (hostName.length() > hostNameBufferLength)
         return String();
@@ -545,13 +565,14 @@ Optional<String> mapHostName(const String& hostName, const Optional<URLDecodeFun
     UErrorCode uerror = U_ZERO_ERROR;
     UIDNAInfo processingDetails = UIDNA_INFO_INITIALIZER;
     int32_t numCharactersConverted = (decodeFunction ? uidna_nameToASCII : uidna_nameToUnicode)(&URLParser::internationalDomainNameTranscoder(), sourceBuffer.data(), length, destinationBuffer, hostNameBufferLength, &processingDetails, &uerror);
-    if (length && (U_FAILURE(uerror) || processingDetails.errors))
+    int allowedErrors = decodeFunction ? 0 : UIDNA_ERROR_EMPTY_LABEL | UIDNA_ERROR_LEADING_HYPHEN | UIDNA_ERROR_TRAILING_HYPHEN | UIDNA_ERROR_HYPHEN_3_4;
+    if (length && (U_FAILURE(uerror) || processingDetails.errors & ~allowedErrors))
         return nullopt;
     
     if (numCharactersConverted == static_cast<int32_t>(length) && !memcmp(sourceBuffer.data(), destinationBuffer, length * sizeof(UChar)))
         return String();
 
-    if (!decodeFunction && !allCharactersInIDNScriptWhiteList(destinationBuffer, numCharactersConverted) && !allCharactersAllowedByTLDRules(destinationBuffer, numCharactersConverted))
+    if (!decodeFunction && !allCharactersInAllowedIDNScriptList(destinationBuffer, numCharactersConverted) && !allCharactersAllowedByTLDRules(destinationBuffer, numCharactersConverted))
         return String();
 
     return String(destinationBuffer, numCharactersConverted);
@@ -559,7 +580,7 @@ Optional<String> mapHostName(const String& hostName, const Optional<URLDecodeFun
 
 using MappingRangesVector = Optional<Vector<std::tuple<unsigned, unsigned, String>>>;
 
-static void collectRangesThatNeedMapping(const String& string, unsigned location, unsigned length, MappingRangesVector& array, const Optional<URLDecodeFunction>& decodeFunction)
+static void collectRangesThatNeedMapping(const String& string, unsigned location, unsigned length, MappingRangesVector& array, URLDecodeFunction decodeFunction)
 {
     // Generally, we want to optimize for the case where there is one host name that does not need mapping.
     // Therefore, we use null to indicate no mapping here and an empty array to indicate error.
@@ -577,7 +598,7 @@ static void collectRangesThatNeedMapping(const String& string, unsigned location
         array->constructAndAppend(location, length, *host);
 }
 
-static void applyHostNameFunctionToMailToURLString(const String& string, const Optional<URLDecodeFunction>& decodeFunction, MappingRangesVector& array)
+static void applyHostNameFunctionToMailToURLString(const String& string, URLDecodeFunction decodeFunction, MappingRangesVector& array)
 {
     // In a mailto: URL, host names come after a '@' character and end with a '>' or ',' or '?' character.
     // Skip quoted strings so that characters in them don't confuse us.
@@ -649,7 +670,7 @@ static void applyHostNameFunctionToMailToURLString(const String& string, const O
     }
 }
 
-static void applyHostNameFunctionToURLString(const String& string, const Optional<URLDecodeFunction>& decodeFunction, MappingRangesVector& array)
+static void applyHostNameFunctionToURLString(const String& string, URLDecodeFunction decodeFunction, MappingRangesVector& array)
 {
     // Find hostnames. Too bad we can't use any real URL-parsing code to do this,
     // but we have to do it before doing all the %-escaping, and this is the only
@@ -661,7 +682,7 @@ static void applyHostNameFunctionToURLString(const String& string, const Optiona
         applyHostNameFunctionToMailToURLString(string, decodeFunction, array);
         return;
     }
-    
+
     // Find the host name in a hierarchical URL.
     // It comes after a "://" sequence, with scheme characters preceding.
     // If ends with the end of the string or a ":", "/", or a "?".
@@ -672,43 +693,27 @@ static void applyHostNameFunctionToURLString(const String& string, const Optiona
         return;
 
     unsigned authorityStart = separatorIndex + strlen(separator);
-    
-    // Check that all characters before the :// are valid scheme characters.
-    auto invalidSchemeCharacter = string.substringSharingImpl(0, separatorIndex).find([](UChar ch) {
-        static const char* allowedCharacters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-.";
-        static size_t length = strlen(allowedCharacters);
-        for (size_t i = 0; i < length; ++i) {
-            if (allowedCharacters[i] == ch)
-                return false;
-        }
-        return true;
-    });
 
-    if (invalidSchemeCharacter != notFound)
+    // Check that all characters before the :// are valid scheme characters.
+    if (StringView { string }.left(separatorIndex).contains([](UChar character) {
+        return !(isASCIIAlphanumeric(character) || character == '+' || character == '-' || character == '.');
+    }))
         return;
-    
-    unsigned stringLength = string.length();
-    
+
     // Find terminating character.
-    auto hostNameTerminator = string.find([](UChar ch) {
-        static const char* terminatingCharacters = ":/?#";
-        static size_t length = strlen(terminatingCharacters);
-        for (size_t i = 0; i < length; ++i) {
-            if (terminatingCharacters[i] == ch)
-                return true;
-        }
-        return false;
+    auto hostNameTerminator = string.find([](UChar character) {
+        return character == ':' || character == '/' || character == '?' || character == '#';
     }, authorityStart);
-    unsigned hostNameEnd = hostNameTerminator == notFound ? stringLength : hostNameTerminator;
-    
+    unsigned hostNameEnd = hostNameTerminator == notFound ? string.length() : hostNameTerminator;
+
     // Find "@" for the start of the host name.
-    auto userInfoTerminator = string.substringSharingImpl(0, hostNameEnd).find('@', authorityStart);
+    auto userInfoTerminator = StringView { string }.left(hostNameEnd).find('@', authorityStart);
     unsigned hostNameStart = userInfoTerminator == notFound ? authorityStart : userInfoTerminator + 1;
-    
+
     collectRangesThatNeedMapping(string, hostNameStart, hostNameEnd - hostNameStart, array, decodeFunction);
 }
 
-String mapHostNames(const String& string, const Optional<URLDecodeFunction>& decodeFunction)
+String mapHostNames(const String& string, URLDecodeFunction decodeFunction)
 {
     // Generally, we want to optimize for the case where there is one host name that does not need mapping.
     
@@ -727,82 +732,62 @@ String mapHostNames(const String& string, const Optional<URLDecodeFunction>& dec
     // Do the mapping.
     String result = string;
     while (!hostNameRanges->isEmpty()) {
-        unsigned location, length;
-        String mappedHostName;
-        std::tie(location, length, mappedHostName) = hostNameRanges->takeLast();
+        auto [location, length, mappedHostName] = hostNameRanges->takeLast();
         result = result.replace(location, length, mappedHostName);
     }
     return result;
 }
 
-static String createStringWithEscapedUnsafeCharacters(const String& sourceBuffer)
+static String escapeUnsafeCharacters(const String& sourceBuffer)
 {
-    Vector<UChar, urlBytesBufferLength> outBuffer;
-
-    const size_t length = sourceBuffer.length();
+    unsigned length = sourceBuffer.length();
 
     Optional<UChar32> previousCodePoint;
-    size_t i = 0;
-    while (i < length) {
-        UChar32 c = sourceBuffer.characterStartingAt(i);
 
+    unsigned i;
+    for (i = 0; i < length; ) {
+        UChar32 c = sourceBuffer.characterStartingAt(i);
+        if (isLookalikeCharacter(previousCodePoint, sourceBuffer.characterStartingAt(i)))
+            break;
+        previousCodePoint = c;
+        i += U16_LENGTH(c);
+    }
+
+    if (i == length)
+        return sourceBuffer;
+
+    Vector<UChar, urlBytesBufferLength> outBuffer;
+
+    outBuffer.grow(i);
+    if (sourceBuffer.is8Bit())
+        StringImpl::copyCharacters(outBuffer.data(), sourceBuffer.characters8(), i);
+    else
+        StringImpl::copyCharacters(outBuffer.data(), sourceBuffer.characters16(), i);
+
+    for (; i < length; ) {
+        UChar32 c = sourceBuffer.characterStartingAt(i);
+        unsigned characterLength = U16_LENGTH(c);
         if (isLookalikeCharacter(previousCodePoint, c)) {
             uint8_t utf8Buffer[4];
             size_t offset = 0;
             UBool failure = false;
-            U8_APPEND(utf8Buffer, offset, 4, c, failure)
-            ASSERT(!failure);
-            
+            U8_APPEND(utf8Buffer, offset, 4, c, failure);
+            ASSERT_UNUSED(failure, !failure);
+
             for (size_t j = 0; j < offset; ++j) {
                 outBuffer.append('%');
                 outBuffer.append(upperNibbleToASCIIHexDigit(utf8Buffer[j]));
                 outBuffer.append(lowerNibbleToASCIIHexDigit(utf8Buffer[j]));
             }
         } else {
-            UChar utf16Buffer[2];
-            size_t offset = 0;
-            UBool failure = false;
-            U16_APPEND(utf16Buffer, offset, 2, c, failure)
-            ASSERT(!failure);
-            for (size_t j = 0; j < offset; ++j)
-                outBuffer.append(utf16Buffer[j]);
+            for (unsigned j = 0; j < characterLength; ++j)
+                outBuffer.append(sourceBuffer[i + j]);
         }
         previousCodePoint = c;
-        i += U16_LENGTH(c);
+        i += characterLength;
     }
+
     return String::adopt(WTFMove(outBuffer));
-}
-
-static String toNormalizationFormC(const String& string)
-{
-    Vector<UChar> sourceBuffer = string.charactersWithNullTermination();
-    ASSERT(sourceBuffer.last() == '\0');
-    sourceBuffer.removeLast();
-
-    UErrorCode uerror = U_ZERO_ERROR;
-    const UNormalizer2* normalizer = unorm2_getNFCInstance(&uerror);
-    if (U_FAILURE(uerror))
-        return { };
-
-    UNormalizationCheckResult checkResult = unorm2_quickCheck(normalizer, sourceBuffer.data(), sourceBuffer.size(), &uerror);
-    if (U_FAILURE(uerror))
-        return { };
-
-    // No need to normalize if already normalized.
-    if (checkResult == UNORM_YES)
-        return string;
-
-    Vector<UChar, urlBytesBufferLength> normalizedCharacters(sourceBuffer.size());
-    auto normalizedLength = unorm2_normalize(normalizer, sourceBuffer.data(), sourceBuffer.size(), normalizedCharacters.data(), normalizedCharacters.size(), &uerror);
-    if (uerror == U_BUFFER_OVERFLOW_ERROR) {
-        uerror = U_ZERO_ERROR;
-        normalizedCharacters.resize(normalizedLength);
-        normalizedLength = unorm2_normalize(normalizer, sourceBuffer.data(), sourceBuffer.size(), normalizedCharacters.data(), normalizedLength, &uerror);
-    }
-    if (U_FAILURE(uerror))
-        return { };
-
-    return String(normalizedCharacters.data(), normalizedLength);
 }
 
 String userVisibleURL(const CString& url)
@@ -884,13 +869,12 @@ String userVisibleURL(const CString& url)
 
     if (mayNeedHostNameDecoding) {
         // FIXME: Is it good to ignore the failure of mapHostNames and keep result intact?
-        auto mappedResult = mapHostNames(result, nullopt);
+        auto mappedResult = mapHostNames(result, nullptr);
         if (!!mappedResult)
             result = mappedResult;
     }
 
-    auto normalized = toNormalizationFormC(result);
-    return createStringWithEscapedUnsafeCharacters(normalized);
+    return escapeUnsafeCharacters(normalizedNFC(result));
 }
 
 } // namespace URLHelpers

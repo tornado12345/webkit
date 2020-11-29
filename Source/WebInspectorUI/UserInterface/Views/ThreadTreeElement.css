@@ -24,7 +24,7 @@
  */
 
 .tree-outline > .item.thread .icon {
-    content: url(../Images/Thread.svg);
+    content: url(../Images/IdentifierIcons.svg#Thread-light);
     width: 15px;
     height: 15px;
 }
@@ -42,7 +42,7 @@
     fill: hsla(0, 0%, var(--foreground-lightness), 0.7);
 }
 
-.tree-outline:focus > .item.thread.selected .status-button.resume {
+body:not(.window-inactive, .window-docked-inactive) .tree-outline:focus-within > .item.thread.selected .status-button.resume {
     fill: var(--selected-foreground-color);
 }
 
@@ -52,38 +52,26 @@
 }
 
 .tree-outline > .item.thread + ol > .item.truncated-call-frames {
+    -webkit-margin-start: 31px;
+    -webkit-margin-end: 6px;
+    -webkit-padding-start: 0;
     color: var(--text-color-gray-medium);
     border-top: dashed 0.5px var(--border-color);
     cursor: default;
-
-    --truncated-call-frames-margin-start: 31px;
-    --truncated-call-frames-margin-end: 6px;
-    --truncated-call-frames-padding-start: 0;
-}
-
-body[dir=ltr] .tree-outline > .item.thread + ol > .item.truncated-call-frames {
-    margin-right: var(--truncated-call-frames-margin-end);
-    margin-left: var(--truncated-call-frames-margin-start);
-    padding-left: var(--truncated-call-frames-padding-start);
-}
-
-body[dir=rtl] .tree-outline > .item.thread + ol > .item.truncated-call-frames {
-    margin-right: var(--truncated-call-frames-margin-start);
-    margin-left: var(--truncated-call-frames-margin-end);
-    padding-right: var(--truncated-call-frames-padding-start);
 }
 
 .tree-outline > .item.thread + ol > .item.truncated-call-frames .icon {
-    content: url(../Images/Function.svg);
+    -webkit-margin-start: 0;
+    content: url(../Images/TypeIcons.svg#Function-light);
     opacity: 0.6;
-
-    --truncated-call-frames-icon-margin-start: 0;
 }
 
-body[dir=ltr] .tree-outline > .item.thread + ol > .item.truncated-call-frames .icon {
-    margin-left: var(--truncated-call-frames-icon-margin-start);
-}
+@media (prefers-color-scheme: dark) {
+    .tree-outline > .item.thread .icon {
+        content: url(../Images/IdentifierIcons.svg#Thread-dark);
+    }
 
-body[dir=rtl] .tree-outline > .item.thread + ol > .item.truncated-call-frames .icon {
-    margin-right: var(--truncated-call-frames-icon-margin-start);
+    .tree-outline > .item.thread + ol > .item.truncated-call-frames .icon {
+        content: url(../Images/TypeIcons.svg#Function-dark);
+    }    
 }

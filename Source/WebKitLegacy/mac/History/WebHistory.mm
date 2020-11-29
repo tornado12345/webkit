@@ -119,11 +119,10 @@ private:
 
 + (void)initialize
 {
-    [[NSUserDefaults standardUserDefaults] registerDefaults:
-        [NSDictionary dictionaryWithObjectsAndKeys:
-            @"1000", @"WebKitHistoryItemLimit",
-            @"7", @"WebKitHistoryAgeInDaysLimit",
-            nil]];    
+    [[NSUserDefaults standardUserDefaults] registerDefaults:@{
+        @"WebKitHistoryItemLimit": @"1000",
+        @"WebKitHistoryAgeInDaysLimit": @"7",
+    }];
 }
 
 - (id)init
@@ -133,7 +132,7 @@ private:
         return nil;
     
     _entriesByURL = [[NSMutableDictionary alloc] init];
-    _entriesByDate = std::make_unique<DateToEntriesMap>();
+    _entriesByDate = makeUnique<DateToEntriesMap>();
 
     return self;
 }
@@ -254,7 +253,7 @@ static inline WebHistoryDateKey dateKey(NSTimeInterval date)
 
     [_entriesByURL removeObjectForKey:URLString];
     
-#if ASSERT_DISABLED
+#if !ASSERT_ENABLED
     [self removeItemFromDateCaches:entry];
 #else
     BOOL itemWasInDateCaches = [self removeItemFromDateCaches:entry];
@@ -727,12 +726,11 @@ ALLOW_DEPRECATED_DECLARATIONS_END
 
 - (void)_sendNotification:(NSString *)name entries:(NSArray *)entries
 {
-    NSDictionary *userInfo = [NSDictionary dictionaryWithObjectsAndKeys:entries, WebHistoryItemsKey, nil];
+    NSDictionary *userInfo = @{ WebHistoryItemsKey: entries };
 #if PLATFORM(IOS_FAMILY)
     WebThreadPostNotification(name, self, userInfo);
 #else    
-    [[NSNotificationCenter defaultCenter]
-        postNotificationName:name object:self userInfo:userInfo];
+    [[NSNotificationCenter defaultCenter] postNotificationName:name object:self userInfo:userInfo];
 #endif
 }
 

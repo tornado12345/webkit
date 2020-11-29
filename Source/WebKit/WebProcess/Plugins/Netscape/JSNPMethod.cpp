@@ -33,7 +33,7 @@
 #include <JavaScriptCore/FunctionPrototype.h>
 #include <JavaScriptCore/IsoSubspacePerVM.h>
 #include <JavaScriptCore/JSDestructibleObjectHeapCellType.h>
-#include <JavaScriptCore/JSGlobalObject.h>
+#include <JavaScriptCore/JSGlobalObjectInlines.h>
 #include <JavaScriptCore/JSObject.h>
 #include <WebCore/JSHTMLElement.h>
 #include <WebCore/JSPluginElementFunctions.h>
@@ -46,7 +46,7 @@ STATIC_ASSERT_IS_TRIVIALLY_DESTRUCTIBLE(JSNPMethod);
 
 const ClassInfo JSNPMethod::s_info = { "NPMethod", &InternalFunction::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(JSNPMethod) };
 
-static EncodedJSValue JSC_HOST_CALL callMethod(ExecState*);
+static JSC_DECLARE_HOST_FUNCTION(callMethod);
 
 JSNPMethod::JSNPMethod(JSGlobalObject* globalObject, Structure* structure, NPIdentifier npIdentifier)
     : InternalFunction(globalObject->vm(), structure, callMethod, nullptr)
@@ -56,41 +56,41 @@ JSNPMethod::JSNPMethod(JSGlobalObject* globalObject, Structure* structure, NPIde
 
 void JSNPMethod::finishCreation(VM& vm, const String& name)
 {
-    Base::finishCreation(vm, name);
+    Base::finishCreation(vm, 0, name);
     ASSERT(inherits(vm, info()));
 }
 
 IsoSubspace* JSNPMethod::subspaceForImpl(VM& vm)
 {
-    static NeverDestroyed<IsoSubspacePerVM> perVM([] (VM& vm) { return ISO_SUBSPACE_PARAMETERS(vm.destructibleObjectHeapCellType.get(), JSNPMethod); });
+    static NeverDestroyed<IsoSubspacePerVM> perVM([] (VM& vm) { return ISO_SUBSPACE_PARAMETERS(vm.cellHeapCellType.get(), JSNPMethod); });
     return &perVM.get().forVM(vm);
 }
 
-static EncodedJSValue JSC_HOST_CALL callMethod(ExecState* exec)
+JSC_DEFINE_HOST_FUNCTION(callMethod, (JSGlobalObject* globalObject, CallFrame* callFrame))
 {
-    VM& vm = exec->vm();
+    VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
 
-    JSNPMethod* jsNPMethod = jsCast<JSNPMethod*>(exec->jsCallee());
+    JSNPMethod* jsNPMethod = jsCast<JSNPMethod*>(callFrame->jsCallee());
 
-    JSValue thisValue = exec->thisValue();
+    JSValue thisValue = callFrame->thisValue();
 
     // Check if we're calling a method on the plug-in script object.
     if (thisValue.inherits<JSHTMLElement>(vm)) {
         JSHTMLElement* element = jsCast<JSHTMLElement*>(asObject(thisValue));
 
         // Try to get the script object from the element
-        if (JSObject* scriptObject = pluginScriptObject(exec, element))
+        if (JSObject* scriptObject = pluginScriptObject(globalObject, element))
             thisValue = scriptObject;
     }
 
     if (thisValue.inherits<JSNPObject>(vm)) {
         JSNPObject* jsNPObject = jsCast<JSNPObject*>(asObject(thisValue));
 
-        return JSValue::encode(jsNPObject->callMethod(exec, jsNPMethod->npIdentifier()));
+        return JSValue::encode(jsNPObject->callMethod(globalObject, callFrame, jsNPMethod->npIdentifier()));
     }
 
-    return throwVMTypeError(exec, scope);
+    return throwVMTypeError(globalObject, scope);
 }
 
 } // namespace WebKit

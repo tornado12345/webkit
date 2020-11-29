@@ -25,7 +25,6 @@
 
 #pragma once
 
-#include "WebEvent.h"
 #include "WebFramePolicyListenerProxy.h"
 #include <WebCore/FrameLoaderTypes.h>
 #include <wtf/Forward.h>
@@ -47,6 +46,7 @@ namespace API {
 class Object;
 
 class PolicyClient {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     virtual ~PolicyClient() { }
 

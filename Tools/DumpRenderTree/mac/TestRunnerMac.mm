@@ -32,6 +32,7 @@
 
 #import "DefaultPolicyDelegate.h"
 #import "EditingDelegate.h"
+#import "JSBasics.h"
 #import "LayoutTestSpellChecker.h"
 #import "MockGeolocationProvider.h"
 #import "MockWebNotificationProvider.h"
@@ -41,7 +42,7 @@
 #import "WorkQueueItem.h"
 #import <Foundation/Foundation.h>
 #import <JavaScriptCore/JSStringRefCF.h>
-#import <WebCore/GeolocationPosition.h>
+#import <WebCore/GeolocationPositionData.h>
 #import <WebKit/DOMDocument.h>
 #import <WebKit/DOMElement.h>
 #import <WebKit/DOMHTMLInputElementPrivate.h>
@@ -119,7 +120,7 @@
 #endif
 
 @interface WebGeolocationPosition (Internal)
-- (id)initWithGeolocationPosition:(WebCore::GeolocationPosition&&)coreGeolocationPosition;
+- (id)initWithGeolocationPosition:(WebCore::GeolocationPositionData&&)coreGeolocationPosition;
 @end
 
 TestRunner::~TestRunner()
@@ -173,19 +174,16 @@ void TestRunner::clearApplicationCacheForOrigin(JSStringRef url)
     [origin release];
 }
 
-JSValueRef originsArrayToJS(JSContextRef context, NSArray *origins)
+static JSObjectRef originsArrayToJS(JSContextRef context, NSArray *origins)
 {
-    NSUInteger count = [origins count];
-
-    JSValueRef arrayResult = JSObjectMakeArray(context, 0, 0, 0);
-    JSObjectRef arrayObj = JSValueToObject(context, arrayResult, 0);
+    auto count = [origins count];
+    auto array = JSObjectMakeArray(context, 0, nullptr, nullptr);
     for (NSUInteger i = 0; i < count; i++) {
         NSString *origin = [[origins objectAtIndex:i] databaseIdentifier];
         auto originJS = adopt(JSStringCreateWithCFString((__bridge CFStringRef)origin));
-        JSObjectSetPropertyAtIndex(context, arrayObj, i, JSValueMakeString(context, originJS.get()), 0);
+        JSObjectSetPropertyAtIndex(context, array, i, JSValueMakeString(context, originJS.get()), 0);
     }
-
-    return arrayResult;
+    return array;
 }
 
 JSValueRef TestRunner::originsWithApplicationCache(JSContextRef context)
@@ -210,16 +208,6 @@ void TestRunner::setSpellCheckerLoggingEnabled(bool enabled)
     [LayoutTestSpellChecker checker].spellCheckerLoggingEnabled = enabled;
 #else
     UNUSED_PARAM(enabled);
-#endif
-}
-
-void TestRunner::setSpellCheckerResults(JSContextRef context, JSObjectRef results)
-{
-#if PLATFORM(MAC)
-    [[LayoutTestSpellChecker checker] setResultsFromJSObject:results inContext:context];
-#else
-    UNUSED_PARAM(results);
-    UNUSED_PARAM(context);
 #endif
 }
 
@@ -293,16 +281,22 @@ size_t TestRunner::webHistoryItemCount()
 
 void TestRunner::notifyDone()
 {
-    if (m_waitToDump && !topLoadingFrame && !DRT::WorkQueue::singleton().count())
-        dump();
-    m_waitToDump = false;
+    if (m_waitToDump) {
+        m_waitToDump = false;
+        if (!topLoadingFrame && !DRT::WorkQueue::singleton().count())
+            dump();
+    } else
+        fprintf(stderr, "TestRunner::notifyDone() called unexpectedly.");
 }
 
 void TestRunner::forceImmediateCompletion()
 {
-    if (m_waitToDump && !DRT::WorkQueue::singleton().count())
-        dump();
-    m_waitToDump = false;
+    if (m_waitToDump) {
+        m_waitToDump = false;
+        if (!DRT::WorkQueue::singleton().count())
+            dump();
+    } else
+        fprintf(stderr, "TestRunner::forceImmediateCompletion() called unexpectedly.");
 }
 
 static inline std::string stringFromJSString(JSStringRef jsString)
@@ -433,11 +427,6 @@ void TestRunner::setDatabaseQuota(unsigned long long quota)
     [origin release];
 }
 
-void TestRunner::setIDBPerOriginQuota(uint64_t quota)
-{
-    [[WebDatabaseManager sharedWebDatabaseManager] setIDBPerOriginQuota:quota];
-}
-
 void TestRunner::goBack()
 {
     [[mainFrame webView] goBack];
@@ -471,7 +460,7 @@ void TestRunner::setMockGeolocationPosition(double latitude, double longitude, d
         // Test the exposed API.
         position = [[WebGeolocationPosition alloc] initWithTimestamp:WallTime::now().secondsSinceEpoch().seconds() latitude:latitude longitude:longitude accuracy:accuracy];
     } else {
-        WebCore::GeolocationPosition geolocationPosition { WallTime::now().secondsSinceEpoch().seconds(), latitude, longitude, accuracy };
+        WebCore::GeolocationPositionData geolocationPosition { WallTime::now().secondsSinceEpoch().seconds(), latitude, longitude, accuracy };
         if (providesAltitude)
             geolocationPosition.altitude = altitude;
         if (providesAltitudeAccuracy)
@@ -524,11 +513,6 @@ void TestRunner::setPrivateBrowsingEnabled(bool privateBrowsingEnabled)
 void TestRunner::setXSSAuditorEnabled(bool enabled)
 {
     [[[mainFrame webView] preferences] setXSSAuditorEnabled:enabled];
-}
-
-void TestRunner::setSpatialNavigationEnabled(bool enabled)
-{
-    [[[mainFrame webView] preferences] setSpatialNavigationEnabled:enabled];
 }
 
 void TestRunner::setAllowUniversalAccessFromFileURLs(bool enabled)
@@ -585,23 +569,16 @@ void TestRunner::setPagePaused(bool paused)
 }
 #endif
 
-void TestRunner::setUseDashboardCompatibilityMode(bool flag)
-{
-#if !PLATFORM(IOS_FAMILY)
-    [[mainFrame webView] _setDashboardBehavior:WebDashboardBehaviorUseBackwardCompatibilityMode to:flag];
-#endif
-}
-
 void TestRunner::setUserStyleSheetEnabled(bool flag)
 {
-    [[WebPreferences standardPreferences] setUserStyleSheetEnabled:flag];
+    [[[mainFrame webView] preferences] setUserStyleSheetEnabled:flag];
 }
 
 void TestRunner::setUserStyleSheetLocation(JSStringRef path)
 {
     RetainPtr<CFStringRef> pathCF = adoptCF(JSStringCopyCFString(kCFAllocatorDefault, path));
     NSURL *url = [NSURL URLWithString:(__bridge NSString *)pathCF.get()];
-    [[WebPreferences standardPreferences] setUserStyleSheetLocation:url];
+    [[[mainFrame webView] preferences] setUserStyleSheetLocation:url];
 }
 
 void TestRunner::setValueForUser(JSContextRef context, JSValueRef nodeObject, JSStringRef value)
@@ -627,7 +604,7 @@ void TestRunner::overridePreference(JSStringRef key, JSStringRef value)
     RetainPtr<CFStringRef> valueCF = adoptCF(JSStringCopyCFString(kCFAllocatorDefault, value));
     NSString *valueNS = (__bridge NSString *)valueCF.get();
 
-    [[WebPreferences standardPreferences] _setPreferenceForTestWithValue:valueNS forKey:keyNS];
+    [[[mainFrame webView] preferences] _setStringPreferenceForTestingWithValue:valueNS forKey:keyNS];
 }
 
 void TestRunner::removeAllVisitedLinks()
@@ -689,15 +666,10 @@ bool TestRunner::findString(JSContextRef context, JSStringRef target, JSObjectRe
 {
     WebFindOptions options = 0;
 
-    auto lengthPropertyName = adopt(JSStringCreateWithUTF8CString("length"));
-    JSValueRef lengthValue = JSObjectGetProperty(context, optionsArray, lengthPropertyName.get(), 0);
-    if (!JSValueIsNumber(context, lengthValue))
-        return false;
+    auto length = WTR::arrayLength(context, optionsArray);
+    auto targetCFString = adoptCF(JSStringCopyCFString(kCFAllocatorDefault, target));
 
-    RetainPtr<CFStringRef> targetCFString = adoptCF(JSStringCopyCFString(kCFAllocatorDefault, target));
-
-    size_t length = static_cast<size_t>(JSValueToNumber(context, lengthValue, 0));
-    for (size_t i = 0; i < length; ++i) {
+    for (unsigned i = 0; i < length; ++i) {
         JSValueRef value = JSObjectGetPropertyAtIndex(context, optionsArray, i, 0);
         if (!JSValueIsString(context, value))
             continue;
@@ -723,7 +695,7 @@ bool TestRunner::findString(JSContextRef context, JSStringRef target, JSObjectRe
 
 void TestRunner::setCacheModel(int cacheModel)
 {
-    [[WebPreferences standardPreferences] setCacheModel:(WebCacheModel)cacheModel];
+    [[[mainFrame webView] preferences] setCacheModel:(WebCacheModel)cacheModel];
 }
 
 bool TestRunner::isCommandEnabled(JSStringRef name)
@@ -761,7 +733,7 @@ void TestRunner::waitForPolicyDelegate()
     [[mainFrame webView] setPolicyDelegate:policyDelegate];
 }
 
-void TestRunner::addOriginAccessWhitelistEntry(JSStringRef sourceOrigin, JSStringRef destinationProtocol, JSStringRef destinationHost, bool allowDestinationSubdomains)
+void TestRunner::addOriginAccessAllowListEntry(JSStringRef sourceOrigin, JSStringRef destinationProtocol, JSStringRef destinationHost, bool allowDestinationSubdomains)
 {
     RetainPtr<CFStringRef> sourceOriginCF = adoptCF(JSStringCopyCFString(kCFAllocatorDefault, sourceOrigin));
     NSString *sourceOriginNS = (__bridge NSString *)sourceOriginCF.get();
@@ -769,10 +741,10 @@ void TestRunner::addOriginAccessWhitelistEntry(JSStringRef sourceOrigin, JSStrin
     NSString *destinationProtocolNS = (__bridge NSString *)protocolCF.get();
     RetainPtr<CFStringRef> hostCF = adoptCF(JSStringCopyCFString(kCFAllocatorDefault, destinationHost));
     NSString *destinationHostNS = (__bridge NSString *)hostCF.get();
-    [WebView _addOriginAccessWhitelistEntryWithSourceOrigin:sourceOriginNS destinationProtocol:destinationProtocolNS destinationHost:destinationHostNS allowDestinationSubdomains:allowDestinationSubdomains];
+    [WebView _addOriginAccessAllowListEntryWithSourceOrigin:sourceOriginNS destinationProtocol:destinationProtocolNS destinationHost:destinationHostNS allowDestinationSubdomains:allowDestinationSubdomains];
 }
 
-void TestRunner::removeOriginAccessWhitelistEntry(JSStringRef sourceOrigin, JSStringRef destinationProtocol, JSStringRef destinationHost, bool allowDestinationSubdomains)
+void TestRunner::removeOriginAccessAllowListEntry(JSStringRef sourceOrigin, JSStringRef destinationProtocol, JSStringRef destinationHost, bool allowDestinationSubdomains)
 {
     RetainPtr<CFStringRef> sourceOriginCF = adoptCF(JSStringCopyCFString(kCFAllocatorDefault, sourceOrigin));
     NSString *sourceOriginNS = (__bridge NSString *)sourceOriginCF.get();
@@ -780,7 +752,7 @@ void TestRunner::removeOriginAccessWhitelistEntry(JSStringRef sourceOrigin, JSSt
     NSString *destinationProtocolNS = (__bridge NSString *)protocolCF.get();
     RetainPtr<CFStringRef> hostCF = adoptCF(JSStringCopyCFString(kCFAllocatorDefault, destinationHost));
     NSString *destinationHostNS = (__bridge NSString *)hostCF.get();
-    [WebView _removeOriginAccessWhitelistEntryWithSourceOrigin:sourceOriginNS destinationProtocol:destinationProtocolNS destinationHost:destinationHostNS allowDestinationSubdomains:allowDestinationSubdomains];
+    [WebView _removeOriginAccessAllowListEntryWithSourceOrigin:sourceOriginNS destinationProtocol:destinationProtocolNS destinationHost:destinationHostNS allowDestinationSubdomains:allowDestinationSubdomains];
 }
 
 void TestRunner::setScrollbarPolicy(JSStringRef orientation, JSStringRef policy)
@@ -792,14 +764,14 @@ void TestRunner::addUserScript(JSStringRef source, bool runAtStart, bool allFram
 {
     RetainPtr<CFStringRef> sourceCF = adoptCF(JSStringCopyCFString(kCFAllocatorDefault, source));
     NSString *sourceNS = (__bridge NSString *)sourceCF.get();
-    [WebView _addUserScriptToGroup:@"org.webkit.DumpRenderTree" world:[WebScriptWorld world] source:sourceNS url:nil whitelist:nil blacklist:nil injectionTime:(runAtStart ? WebInjectAtDocumentStart : WebInjectAtDocumentEnd) injectedFrames:(allFrames ? WebInjectInAllFrames : WebInjectInTopFrameOnly)];
+    [WebView _addUserScriptToGroup:@"org.webkit.DumpRenderTree" world:[WebScriptWorld world] source:sourceNS url:nil includeMatchPatternStrings:nil excludeMatchPatternStrings:nil injectionTime:(runAtStart ? WebInjectAtDocumentStart : WebInjectAtDocumentEnd) injectedFrames:(allFrames ? WebInjectInAllFrames : WebInjectInTopFrameOnly)];
 }
 
 void TestRunner::addUserStyleSheet(JSStringRef source, bool allFrames)
 {
     RetainPtr<CFStringRef> sourceCF = adoptCF(JSStringCopyCFString(kCFAllocatorDefault, source));
     NSString *sourceNS = (__bridge NSString *)sourceCF.get();
-    [WebView _addUserStyleSheetToGroup:@"org.webkit.DumpRenderTree" world:[WebScriptWorld world] source:sourceNS url:nil whitelist:nil blacklist:nil injectedFrames:(allFrames ? WebInjectInAllFrames : WebInjectInTopFrameOnly)];
+    [WebView _addUserStyleSheetToGroup:@"org.webkit.DumpRenderTree" world:[WebScriptWorld world] source:sourceNS url:nil includeMatchPatternStrings:nil excludeMatchPatternStrings:nil injectedFrames:(allFrames ? WebInjectInAllFrames : WebInjectInTopFrameOnly)];
 }
 
 void TestRunner::setDeveloperExtrasEnabled(bool enabled)
@@ -1266,16 +1238,16 @@ void TestRunner::simulateLegacyWebNotificationClick(JSStringRef jsTitle)
 {
 }
 
-static NSString * const WebArchivePboardType = @"Apple Web Archive pasteboard type";
 static NSString * const WebSubresourcesKey = @"WebSubresources";
 static NSString * const WebSubframeArchivesKey = @"WebResourceMIMEType like 'image*'";
 
 unsigned TestRunner::imageCountInGeneralPasteboard() const
 {
+    NSString *webArchivePboardType = @"Apple Web Archive pasteboard type";
 #if PLATFORM(MAC)
-    NSData *data = [[NSPasteboard generalPasteboard] dataForType:WebArchivePboardType];
+    NSData *data = [[NSPasteboard generalPasteboard] dataForType:webArchivePboardType];
 #elif PLATFORM(IOS_FAMILY)
-    NSData *data = [[UIPasteboard generalPasteboard] valueForPasteboardType:WebArchivePboardType];
+    NSData *data = [[UIPasteboard generalPasteboard] valueForPasteboardType:webArchivePboardType];
 #endif
     if (!data)
         return 0;

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006-2014 Apple Inc. All rights reserved.
+ * Copyright (C) 2006-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -172,22 +172,6 @@ void TestRunner::clearAllDatabases()
     databaseManager2->deleteAllIndexedDatabases();
 }
 
-void TestRunner::setIDBPerOriginQuota(uint64_t quota)
-{
-    COMPtr<IWebDatabaseManager> databaseManager;
-    COMPtr<IWebDatabaseManager> tmpDatabaseManager;
-    if (FAILED(WebKitCreateInstance(CLSID_WebDatabaseManager, 0, IID_IWebDatabaseManager, (void**)&tmpDatabaseManager)))
-        return;
-    if (FAILED(tmpDatabaseManager->sharedWebDatabaseManager(&databaseManager)))
-        return;
-
-    COMPtr<IWebDatabaseManager2> databaseManager2;
-    if (FAILED(databaseManager->QueryInterface(&databaseManager2)))
-        return;
-
-    databaseManager2->setIDBPerOriginQuota(quota);
-}
-
 void TestRunner::setStorageDatabaseIdleInterval(double)
 {
     // FIXME: Implement. Requires non-existant (on Windows) WebStorageManager
@@ -304,17 +288,23 @@ size_t TestRunner::webHistoryItemCount()
 void TestRunner::notifyDone()
 {
     // Same as on mac.  This can be shared.
-    if (m_waitToDump && !topLoadingFrame && !DRT::WorkQueue::singleton().count())
-        dump();
-    m_waitToDump = false;
+    if (m_waitToDump) {
+        m_waitToDump = false;
+        if (!topLoadingFrame && !DRT::WorkQueue::singleton().count())
+            dump();
+    } else
+        fprintf(stderr, "TestRunner::notifyDone() called unexpectedly.");
 }
 
 void TestRunner::forceImmediateCompletion()
 {
     // Same as on mac. This can be shared.
-    if (m_waitToDump && !DRT::WorkQueue::singleton().count())
-        dump();
-    m_waitToDump = false;
+    if (m_waitToDump) {
+        m_waitToDump = false;
+        if (!DRT::WorkQueue::singleton().count())
+            dump();
+    } else
+        fprintf(stderr, "TestRunner::forceImmediateCompletion() called unexpectedly.");
 }
 
 static wstring jsStringRefToWString(JSStringRef jsStr)
@@ -556,23 +546,6 @@ void TestRunner::setXSSAuditorEnabled(bool enabled)
     prefsPrivate->setXSSAuditorEnabled(enabled);
 }
 
-void TestRunner::setSpatialNavigationEnabled(bool enabled)
-{
-    COMPtr<IWebView> webView;
-    if (FAILED(frame->webView(&webView)))
-        return;
-
-    COMPtr<IWebPreferences> preferences;
-    if (FAILED(webView->preferences(&preferences)))
-        return;
-
-    COMPtr<IWebPreferencesPrivate6> prefsPrivate(Query, preferences);
-    if (!prefsPrivate)
-        return;
-
-    prefsPrivate->setSpatialNavigationEnabled(enabled);
-}
-
 void TestRunner::setAllowUniversalAccessFromFileURLs(bool enabled)
 {
     COMPtr<IWebView> webView;
@@ -684,11 +657,6 @@ void TestRunner::setTabKeyCyclesThroughElements(bool shouldCycle)
         return;
 
     viewPrivate->setTabKeyCyclesThroughElements(shouldCycle ? TRUE : FALSE);
-}
-
-void TestRunner::setUseDashboardCompatibilityMode(bool flag)
-{
-    // Not implemented on Windows.
 }
 
 void TestRunner::setUserStyleSheetEnabled(bool flag)
@@ -1087,22 +1055,22 @@ static _bstr_t bstrT(JSStringRef jsString)
     return _bstr_t(JSStringCopyBSTR(jsString), false);
 }
 
-void TestRunner::addOriginAccessWhitelistEntry(JSStringRef sourceOrigin, JSStringRef destinationProtocol, JSStringRef destinationHost, bool allowDestinationSubdomains)
+void TestRunner::addOriginAccessAllowListEntry(JSStringRef sourceOrigin, JSStringRef destinationProtocol, JSStringRef destinationHost, bool allowDestinationSubdomains)
 {
-    COMPtr<IWebViewPrivate2> webView;
+    COMPtr<IWebViewPrivate> webView;
     if (FAILED(WebKitCreateInstance(__uuidof(WebView), 0, __uuidof(webView), reinterpret_cast<void**>(&webView))))
         return;
 
-    webView->addOriginAccessWhitelistEntry(bstrT(sourceOrigin).GetBSTR(), bstrT(destinationProtocol).GetBSTR(), bstrT(destinationHost).GetBSTR(), allowDestinationSubdomains);
+    webView->addOriginAccessAllowListEntry(bstrT(sourceOrigin).GetBSTR(), bstrT(destinationProtocol).GetBSTR(), bstrT(destinationHost).GetBSTR(), allowDestinationSubdomains);
 }
 
-void TestRunner::removeOriginAccessWhitelistEntry(JSStringRef sourceOrigin, JSStringRef destinationProtocol, JSStringRef destinationHost, bool allowDestinationSubdomains)
+void TestRunner::removeOriginAccessAllowListEntry(JSStringRef sourceOrigin, JSStringRef destinationProtocol, JSStringRef destinationHost, bool allowDestinationSubdomains)
 {
-    COMPtr<IWebViewPrivate2> webView;
+    COMPtr<IWebViewPrivate> webView;
     if (FAILED(WebKitCreateInstance(__uuidof(WebView), 0, __uuidof(webView), reinterpret_cast<void**>(&webView))))
         return;
 
-    webView->removeOriginAccessWhitelistEntry(bstrT(sourceOrigin).GetBSTR(), bstrT(destinationProtocol).GetBSTR(), bstrT(destinationHost).GetBSTR(), allowDestinationSubdomains);
+    webView->removeOriginAccessAllowListEntry(bstrT(sourceOrigin).GetBSTR(), bstrT(destinationProtocol).GetBSTR(), bstrT(destinationHost).GetBSTR(), allowDestinationSubdomains);
 }
 
 void TestRunner::setScrollbarPolicy(JSStringRef orientation, JSStringRef policy)
@@ -1429,9 +1397,4 @@ unsigned TestRunner::imageCountInGeneralPasteboard() const
 void TestRunner::setSpellCheckerLoggingEnabled(bool enabled)
 {
     fprintf(testResult, "ERROR: TestRunner::setSpellCheckerLoggingEnabled() not implemented\n");
-}
-
-void TestRunner::setSpellCheckerResults(JSContextRef, JSObjectRef)
-{
-    fprintf(testResult, "ERROR: TestRunner::setSpellCheckerResults() not implemented\n");
 }

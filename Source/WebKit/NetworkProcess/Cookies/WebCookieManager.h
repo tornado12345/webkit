@@ -25,22 +25,23 @@
 
 #pragma once
 
-#include "CallbackID.h"
-#include "HTTPCookieAcceptPolicy.h"
 #include "MessageReceiver.h"
 #include "NetworkProcessSupplement.h"
-#include "OptionalCallbackID.h"
 #include <pal/SessionID.h>
 #include <stdint.h>
 #include <wtf/Forward.h>
 #include <wtf/Noncopyable.h>
+#include <wtf/WallTime.h>
 
 #if USE(SOUP)
 #include "SoupCookiePersistentStorageType.h"
 #endif
 
+OBJC_CLASS NSHTTPCookieStorage;
+
 namespace WebCore {
 struct Cookie;
+enum class HTTPCookieAcceptPolicy : uint8_t;
 }
 
 namespace WebKit {
@@ -48,6 +49,7 @@ namespace WebKit {
 class NetworkProcess;
 
 class WebCookieManager : public NetworkProcessSupplement, public IPC::MessageReceiver {
+    WTF_MAKE_FAST_ALLOCATED;
     WTF_MAKE_NONCOPYABLE(WebCookieManager);
 public:
     WebCookieManager(NetworkProcess&);
@@ -55,7 +57,7 @@ public:
 
     static const char* supplementName();
 
-    void setHTTPCookieAcceptPolicy(HTTPCookieAcceptPolicy, OptionalCallbackID);
+    void setHTTPCookieAcceptPolicy(WebCore::HTTPCookieAcceptPolicy, CompletionHandler<void()>&&);
 
 #if USE(SOUP)
     void setCookiePersistentStorage(PAL::SessionID, const String& storagePath, SoupCookiePersistentStorageType);
@@ -67,26 +69,29 @@ private:
     // IPC::MessageReceiver
     void didReceiveMessage(IPC::Connection&, IPC::Decoder&) override;
 
-    void getHostnamesWithCookies(PAL::SessionID, CallbackID);
+    void getHostnamesWithCookies(PAL::SessionID, CompletionHandler<void(Vector<String>&&)>&&);
 
-    void deleteCookie(PAL::SessionID, const WebCore::Cookie&, CallbackID);
-    void deleteCookiesForHostname(PAL::SessionID, const String&);
+    void deleteCookie(PAL::SessionID, const WebCore::Cookie&, CompletionHandler<void()>&&);
+    void deleteCookiesForHostnames(PAL::SessionID, const Vector<String>&);
     void deleteAllCookies(PAL::SessionID);
-    void deleteAllCookiesModifiedSince(PAL::SessionID, WallTime, CallbackID);
+    void deleteAllCookiesModifiedSince(PAL::SessionID, WallTime, CompletionHandler<void()>&&);
 
-    void setCookie(PAL::SessionID, const Vector<WebCore::Cookie>&, CallbackID);
-    void setCookies(PAL::SessionID, const Vector<WebCore::Cookie>&, const URL&, const URL& mainDocumentURL, CallbackID);
-    void getAllCookies(PAL::SessionID, CallbackID);
-    void getCookies(PAL::SessionID, const URL&, CallbackID);
+    void setCookie(PAL::SessionID, const Vector<WebCore::Cookie>&, CompletionHandler<void()>&&);
+    void setCookies(PAL::SessionID, const Vector<WebCore::Cookie>&, const URL&, const URL& mainDocumentURL, CompletionHandler<void()>&&);
+    void getAllCookies(PAL::SessionID, CompletionHandler<void(Vector<WebCore::Cookie>&&)>&&);
+    void getCookies(PAL::SessionID, const URL&, CompletionHandler<void(Vector<WebCore::Cookie>&&)>&&);
 
-    void platformSetHTTPCookieAcceptPolicy(HTTPCookieAcceptPolicy);
-    void getHTTPCookieAcceptPolicy(CallbackID);
-    HTTPCookieAcceptPolicy platformGetHTTPCookieAcceptPolicy();
+    void platformSetHTTPCookieAcceptPolicy(WebCore::HTTPCookieAcceptPolicy, CompletionHandler<void()>&&);
+    void getHTTPCookieAcceptPolicy(PAL::SessionID, CompletionHandler<void(WebCore::HTTPCookieAcceptPolicy)>&&);
 
     void startObservingCookieChanges(PAL::SessionID);
     void stopObservingCookieChanges(PAL::SessionID);
 
     NetworkProcess& m_process;
 };
+
+#if PLATFORM(COCOA)
+void saveCookies(NSHTTPCookieStorage *, CompletionHandler<void()>&&);
+#endif
 
 } // namespace WebKit

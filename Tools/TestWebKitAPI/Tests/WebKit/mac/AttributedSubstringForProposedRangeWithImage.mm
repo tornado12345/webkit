@@ -23,11 +23,11 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
-#include "PlatformUtilities.h"
-#include "PlatformWebView.h"
-#include <WebKit/WKContextPrivate.h>
-#include <WebKit/WKRetainPtr.h>
+#import "config.h"
+#import "PlatformUtilities.h"
+#import "PlatformWebView.h"
+#import <WebKit/WKContextPrivate.h>
+#import <WebKit/WKRetainPtr.h>
 
 @interface WKView ()
 - (void)attributedSubstringForProposedRange:(NSRange)nsRange completionHandler:(void(^)(NSAttributedString *attrString, NSRange actualRange))completionHandlerPtr;
@@ -57,8 +57,8 @@ static void invalidMessageFunction(WKStringRef messageName)
 
 TEST(WebKit, AttributedSubstringForProposedRangeWithImage)
 {
-    WKRetainPtr<WKContextRef> context(AdoptWK, Util::createContextWithInjectedBundle());
-    WKRetainPtr<WKPageGroupRef> pageGroup(AdoptWK, WKPageGroupCreateWithIdentifier(Util::toWK("AttributedSubstringForProposedRangeWithImagePageGroup").get()));
+    WKRetainPtr<WKContextRef> context = adoptWK(Util::createContextWithInjectedBundle());
+    WKRetainPtr<WKPageGroupRef> pageGroup = adoptWK(WKPageGroupCreateWithIdentifier(Util::toWK("AttributedSubstringForProposedRangeWithImagePageGroup").get()));
     PlatformWebView webView(context.get(), pageGroup.get());
 
     WKPageNavigationClientV0 loaderClient;
@@ -70,7 +70,7 @@ TEST(WebKit, AttributedSubstringForProposedRangeWithImage)
 
     WKContextSetInvalidMessageFunction(invalidMessageFunction);
 
-    WKRetainPtr<WKURLRef> url(AdoptWK, Util::createURLForResource("chinese-character-with-image", "html"));
+    WKRetainPtr<WKURLRef> url = adoptWK(Util::createURLForResource("chinese-character-with-image", "html"));
     WKPageLoadURL(webView.page(), url.get());
     Util::run(&didFinishLoad);
 

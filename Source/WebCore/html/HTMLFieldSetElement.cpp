@@ -152,9 +152,9 @@ bool HTMLFieldSetElement::supportsFocus() const
     return HTMLElement::supportsFocus();
 }
 
-const AtomicString& HTMLFieldSetElement::formControlType() const
+const AtomString& HTMLFieldSetElement::formControlType() const
 {
-    static NeverDestroyed<const AtomicString> fieldset("fieldset", AtomicString::ConstructFromLiteral);
+    static MainThreadNeverDestroyed<const AtomString> fieldset("fieldset", AtomString::ConstructFromLiteral);
     return fieldset;
 }
 

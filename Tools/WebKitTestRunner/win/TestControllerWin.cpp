@@ -84,6 +84,10 @@ static RunLoopResult runRunLoopUntil(bool& condition, HANDLE object, double time
         // There are messages in the queue. Process them.
         MSG msg;
         while (::PeekMessageW(&msg, 0, 0, 0, PM_REMOVE)) {
+            // WM_MOUSELEAVE is dispatched because the mouse cursor is not on the WebKitTestRunner's window.
+            // Ignore WM_MOUSELEAVE because it discontinues mouse dragging events.
+            if (msg.message == WM_MOUSELEAVE)
+                continue;
             ::TranslateMessage(&msg);
             ::DispatchMessageW(&msg);
         }
@@ -126,7 +130,7 @@ void TestController::platformDestroy()
 
 static WKRetainPtr<WKStringRef> toWK(const char* string)
 {
-    return WKRetainPtr<WKStringRef>(AdoptWK, WKStringCreateWithUTF8CString(string));
+    return adoptWK(WKStringCreateWithUTF8CString(string));
 }
 
 void TestController::platformInitializeContext()
@@ -197,6 +201,11 @@ void TestController::runModal(PlatformWebView*)
     notImplemented();
 }
 
+void TestController::abortModal()
+{
+    notImplemented();
+}
+
 WKContextRef TestController::platformContext()
 {
     return m_context.get();
@@ -218,9 +227,14 @@ void TestController::platformResetPreferencesToConsistentValues()
     notImplemented();
 }
 
-void TestController::updatePlatformSpecificTestOptionsForTest(TestOptions&, const std::string&) const
+bool TestController::platformResetStateToConsistentValues(const TestOptions&)
 {
-    notImplemented();
+    return true;
+}
+
+TestFeatures TestController::platformSpecificFeatureDefaultsForTest(const TestCommand&) const
+{
+    return { };
 }
 
 } // namespace WTR

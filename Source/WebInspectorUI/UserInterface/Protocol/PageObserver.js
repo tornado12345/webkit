@@ -23,7 +23,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-WI.PageObserver = class PageObserver
+WI.PageObserver = class PageObserver extends InspectorBackend.Dispatcher
 {
     // Events defined by the "Page" domain.
 
@@ -70,20 +70,5 @@ WI.PageObserver = class PageObserver
     frameClearedScheduledNavigation(frameId)
     {
         // Not handled yet.
-    }
-
-    javascriptDialogOpening(message)
-    {
-        // COMPATIBILITY (iOS 10): Page.javascriptDialogOpening was removed after iOS 10.
-    }
-
-    javascriptDialogClosed()
-    {
-        // COMPATIBILITY (iOS 10): Page.javascriptDialogClosed was removed after iOS 10.
-    }
-
-    scriptsEnabled(enabled)
-    {
-        // COMPATIBILITY (iOS 10): Page.scriptsEnabled was removed after iOS 10.
     }
 };

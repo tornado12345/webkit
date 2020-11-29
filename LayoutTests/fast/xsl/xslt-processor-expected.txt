@@ -8,7 +8,7 @@
 <xsl:apply-templates/><xsl:text>
 </xsl:text></xsl:template>
 
-<xsl:template>
+<xsl:template name="foobar">
 		<xsl:value-of select="."/>
 </xsl:template>
 
@@ -20,14 +20,14 @@
         <html xmlns="http://www.w3.org/1999/xhtml">
             <head>
                 <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
-            </head>  
+            </head>
             <body>
-              CHARACTERS IN XSLT: ééééééééééé <br /> <xsl:apply-templates/>
+              CHARACTERS IN XSLT: ééééééééééé<br /> <xsl:apply-templates/>
             </body>
         </html>
   </xsl:template>
 
-<xsl:template>
+<xsl:template name="foobar">
 		<xsl:value-of select="."/>
 </xsl:template>
 
@@ -37,7 +37,7 @@
 
 1.1 Import two different stylesheets:
 <html xmlns="http://www.w3.org/1999/xhtml"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8" /></head><body>
-              CHARACTERS IN XSLT: ééééééééééé <br /><br />SOURCE XML: &lt;&lt;&lt;&amp;тест&amp;&gt;&gt;&gt;</body></html>
+              CHARACTERS IN XSLT: ééééééééééé<br /><br />SOURCE XML: &lt;&lt;&lt;&amp;тест&amp;&gt;&gt;&gt;</body></html>
 1.2 Import same stylesheet twice:
 <?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml">
 <head><title></title></head>

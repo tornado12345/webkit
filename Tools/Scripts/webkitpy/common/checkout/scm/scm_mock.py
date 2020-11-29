@@ -87,6 +87,9 @@ class MockSCM(object):
     def native_revision(self, path):
         return self.svn_revision(path)
 
+    def native_branch(self, path):
+        return 'trunk'
+
     def timestamp_of_revision(self, path, revision):
         return '2013-02-01 08:48:05 +0000'
 
@@ -94,7 +97,7 @@ class MockSCM(object):
         return '2013-02-01 08:48:05 +0000'
 
     def create_patch(self, git_commit, changed_files=None):
-        return "Patch1"
+        return b"Patch1"
 
     def commit_ids_from_commitish_arguments(self, args):
         return ["Commitish1", "Commitish2"]
@@ -124,7 +127,7 @@ class MockSCM(object):
         return path + '-diff'
 
     def diff_for_revision(self, revision):
-        return "DiffForRevision%s\nhttp://bugs.webkit.org/show_bug.cgi?id=12345" % revision
+        return "DiffForRevision%s\nhttps://bugs.webkit.org/show_bug.cgi?id=12345" % revision
 
     def show_head(self, path):
         return path

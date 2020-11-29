@@ -28,13 +28,18 @@
 
 #include <WebCore/SharedBuffer.h>
 
-WTF_EXPORT RefPtr<WebCore::SharedBuffer> loadResourceIntoBuffer(const char* name)
+RefPtr<WebCore::SharedBuffer> loadResourceIntoBuffer(const char* name)
 {
     return 0;
 }
 
 namespace WebKit {
-void WebProcess::platformInitializeWebProcess(WebProcessCreationParameters&&)
+
+void WebProcess::platformInitializeWebProcess(WebProcessCreationParameters&)
+{
+}
+
+void WebProcess::platformSetWebsiteDataStoreParameters(WebProcessDataStoreParameters&&)
 {
 }
 

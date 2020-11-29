@@ -32,13 +32,24 @@ namespace TestWebKitAPI {
 
 StringView stringViewFromLiteral(const char* characters)
 {
-    return StringView(reinterpret_cast<const LChar*>(characters), strlen(characters));
+    return StringView(characters);
 }
 
-StringView stringViewFromUTF8(String &ref, const char* characters)
+StringView stringViewFromUTF8(String& ref, const char* characters)
 {
     ref = String::fromUTF8(characters);
     return ref;
+}
+
+TEST(WTF, StringViewStartsWithEmptyVsNull)
+{
+    StringView nullView;
+    StringView emptyView = StringView::empty();
+    String stringWithCharacters("hello");
+    StringView viewWithCharacters(stringWithCharacters);
+
+    EXPECT_TRUE(viewWithCharacters.startsWith(nullView));
+    EXPECT_TRUE(viewWithCharacters.startsWith(emptyView));
 }
 
 TEST(WTF, StringViewEmptyVsNull)
@@ -885,7 +896,6 @@ TEST(WTF, StringViewEndsWithIgnoringASCIICaseWithLatin1Characters)
 
 TEST(WTF, StringView8Bit)
 {
-    StringView nullView;
     EXPECT_TRUE(StringView().is8Bit());
     EXPECT_TRUE(StringView::empty().is8Bit());
 
@@ -969,6 +979,15 @@ TEST(WTF, StringViewStripLeadingAndTrailingMatchedCharacters)
 
     StringView nullView;
     EXPECT_TRUE(nullView.stripLeadingAndTrailingMatchedCharacters(isA) == nullView);
+}
+
+TEST(WTF, StringViewIsAllASCII)
+{
+    EXPECT_TRUE(StringView(String("Hello")).isAllASCII());
+    EXPECT_TRUE(StringView(String("Cocoa")).isAllASCII());
+    EXPECT_FALSE(StringView(String("📱")).isAllASCII());
+    EXPECT_FALSE(StringView(String("\u0080")).isAllASCII());
+    EXPECT_TRUE(StringView(String(bitwise_cast<const UChar*>(u"Hello"))).isAllASCII());
 }
 
 } // namespace TestWebKitAPI

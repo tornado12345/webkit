@@ -28,9 +28,11 @@
 #import "WKContentRuleListStoreInternal.h"
 
 #import "APIContentRuleListStore.h"
+#import "NetworkCacheFileSystem.h"
 #import "WKErrorInternal.h"
 #import <wtf/BlockPtr.h>
 #import <wtf/CompletionHandler.h>
+#import <wtf/cocoa/VectorCocoa.h>
 
 static WKErrorCode toWKErrorCode(const std::error_code& error)
 {
@@ -92,10 +94,7 @@ static WKErrorCode toWKErrorCode(const std::error_code& error)
 - (void)getAvailableContentRuleListIdentifiers:(void (^)(NSArray<NSString *>*))completionHandler
 {
     _contentRuleListStore->getAvailableContentRuleListIdentifiers([completionHandler = makeBlockPtr(completionHandler)](Vector<String> identifiers) {
-        NSMutableArray<NSString *> *nsIdentifiers = [NSMutableArray arrayWithCapacity:identifiers.size()];
-        for (const auto& identifier : identifiers)
-            [nsIdentifiers addObject:identifier];
-        completionHandler(nsIdentifiers);
+        completionHandler(createNSArray(identifiers).get());
     });
 }
 

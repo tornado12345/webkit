@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2015 The ANGLE Project Authors. All rights reserved.
+// Copyright 2015 The ANGLE Project Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -10,6 +10,7 @@
 #define LIBANGLE_RENDERER_GL_GLX_DISPLAYGLX_H_
 
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "common/Optional.h"
@@ -20,20 +21,9 @@ namespace rx
 {
 
 class FunctionsGLX;
+class WorkerContext;
 
-// State-tracking data for the swap control to allow DisplayGLX to remember per
-// drawable information for swap control.
-struct SwapControlData
-{
-    SwapControlData();
-
-    // Set by the drawable
-    int targetSwapInterval;
-
-    // DisplayGLX-side state-tracking
-    int maxSwapInterval;
-    int currentSwapInterval;
-};
+struct SwapControlData;
 
 class DisplayGLX : public DisplayGL
 {
@@ -61,6 +51,16 @@ class DisplayGLX : public DisplayGL
                                      NativePixmapType nativePixmap,
                                      const egl::AttributeMap &attribs) override;
 
+    egl::Error validatePixmap(egl::Config *config,
+                              EGLNativePixmapType pixmap,
+                              const egl::AttributeMap &attributes) const override;
+
+    ContextImpl *createContext(const gl::State &state,
+                               gl::ErrorSet *errorSet,
+                               const egl::Config *configuration,
+                               const gl::Context *shareContext,
+                               const egl::AttributeMap &attribs) override;
+
     egl::ConfigSet generateConfigs() override;
 
     bool testDeviceLost() override;
@@ -68,12 +68,14 @@ class DisplayGLX : public DisplayGL
 
     bool isValidNativeWindow(EGLNativeWindowType window) const override;
 
-    egl::Error getDevice(DeviceImpl **device) override;
+    DeviceImpl *createDevice() override;
 
     std::string getVendorString() const override;
 
-    egl::Error waitClient(const gl::Context *context) const override;
-    egl::Error waitNative(const gl::Context *context, EGLint engine) const override;
+    egl::Error waitClient(const gl::Context *context) override;
+    egl::Error waitNative(const gl::Context *context, EGLint engine) override;
+
+    gl::Version getMaxSupportedESVersion() const override;
 
     // Synchronizes with the X server, if the display has been opened by ANGLE.
     // Calling this is required at the end of every functions that does buffered
@@ -89,9 +91,13 @@ class DisplayGLX : public DisplayGL
 
     bool isValidWindowVisualId(unsigned long visualId) const;
 
-  private:
-    const FunctionsGL *getFunctionsGL() const override;
+    WorkerContext *createWorkerContext(std::string *infoLog);
 
+    void initializeFrontendFeatures(angle::FrontendFeatures *features) const override;
+
+    void populateFeatureList(angle::FeatureList *features) override;
+
+  private:
     egl::Error initializeContext(glx::FBConfig config,
                                  const egl::AttributeMap &eglAttributes,
                                  glx::Context *context);
@@ -105,17 +111,23 @@ class DisplayGLX : public DisplayGL
     egl::Error createContextAttribs(glx::FBConfig,
                                     const Optional<gl::Version> &version,
                                     int profileMask,
-                                    glx::Context *context) const;
+                                    glx::Context *context);
 
-    FunctionsGL *mFunctionsGL;
+    std::shared_ptr<RendererGL> mRenderer;
 
     std::map<int, glx::FBConfig> configIdToGLXConfig;
 
     EGLint mRequestedVisual;
     glx::FBConfig mContextConfig;
+    std::vector<int> mAttribs;
+    XVisualInfo *mVisuals;
     glx::Context mContext;
+    glx::Context mSharedContext;
+    std::unordered_map<std::thread::id, glx::Context> mCurrentContexts;
     // A pbuffer the context is current on during ANGLE initialization
     glx::Pbuffer mDummyPbuffer;
+
+    std::vector<glx::Pbuffer> mWorkerPbufferPool;
 
     bool mUsesNewXDisplay;
     bool mIsMesa;
@@ -144,6 +156,6 @@ class DisplayGLX : public DisplayGL
     egl::Display *mEGLDisplay;
 };
 
-}
+}  // namespace rx
 
-#endif // LIBANGLE_RENDERER_GL_GLX_DISPLAYGLX_H_
+#endif  // LIBANGLE_RENDERER_GL_GLX_DISPLAYGLX_H_

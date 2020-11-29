@@ -1,6 +1,6 @@
 # Copyright (C) 2009, Google Inc. All rights reserved.
 # Copyright (C) 2013 Nokia Corporation and/or its subsidiary(-ies).
-# Copyright (C) 2015, 2017 Apple Inc. All rights reserved.
+# Copyright (C) 2015-2019 Apple Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are
@@ -63,6 +63,7 @@ class DeprecatedPort(object):
     @staticmethod
     def port(port_name):
         ports = {
+            "ftw": FTWPort,
             "gtk-wk2": GtkWK2Port,
             "ios-device": IOSPort,
             # FIXME: https://bugs.webkit.org/show_bug.cgi?id=169302
@@ -85,7 +86,7 @@ class DeprecatedPort(object):
     def makeArgs(self):
         # FIXME: This shouldn't use a static Executive().
         args = '--makeargs="-j%s"' % Executive().cpu_count()
-        if os.environ.has_key('MAKEFLAGS'):
+        if 'MAKEFLAGS' in os.environ:
             args = '--makeargs="%s"' % os.environ['MAKEFLAGS']
         return args
 
@@ -129,13 +130,6 @@ class DeprecatedPort(object):
 
     def run_perl_unittests_command(self):
         return self.script_shell_command("test-webkitperl")
-
-    def run_bindings_tests_command(self):
-        return self.script_shell_command("run-bindings-tests")
-
-    def run_api_tests_command(self, build_style=None):
-        command = self.script_shell_command("run-api-tests")
-        return self._append_build_style_flag(command, build_style)
 
     def run_sort_xcode_project_file_command(self):
         return self.script_shell_command("sort-Xcode-project-file")
@@ -181,9 +175,6 @@ class MacWK2Port(DeprecatedPort):
 class WinPort(DeprecatedPort):
     port_flag_name = "win"
 
-    def run_bindings_tests_command(self):
-        return None
-
     def run_webkit_tests_command(self, build_style=None):
         command = super(WinPort, self).run_webkit_tests_command(build_style)
         command.append("--dump-render-tree")
@@ -201,6 +192,20 @@ class WinCairoPort(DeprecatedPort):
     def run_webkit_tests_command(self, build_style=None):
         command = super(WinCairoPort, self).run_webkit_tests_command(build_style)
         command.append("--wincairo")
+        return command
+
+
+class FTWPort(DeprecatedPort):
+    port_flag_name = "ftw"
+
+    def build_webkit_command(self, build_style=None):
+        command = super(FTWPort, self).build_webkit_command(build_style=build_style)
+        command.append('--ftw')
+        return command
+
+    def run_webkit_tests_command(self, build_style=None):
+        command = super(FTWPort, self).run_webkit_tests_command(build_style)
+        command.append("--ftw")
         return command
 
 
@@ -242,4 +247,16 @@ class JscOnlyPort(DeprecatedPort):
     def build_jsc_command(self, build_style=None):
         command = self.script_shell_command("build-jsc")
         command.append("--jsc-only")
+        return self._append_build_style_flag(command, build_style)
+
+    def run_javascriptcore_tests_command(self, build_style=None):
+        command = self.script_shell_command("run-javascriptcore-tests")
+        command.append("--no-fail-fast")
+        command.append("--no-testmasm")
+        command.append("--no-testair")
+        command.append("--no-testb3")
+        command.append("--no-testdfg")
+        command.append("--no-testapi")
+        if 'JSCTESTS_OPTIONS' in os.environ:
+            command += os.environ['JSCTESTS_OPTIONS'].split()
         return self._append_build_style_flag(command, build_style)

@@ -24,7 +24,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-
 #import "DOMDocumentFragmentInternal.h"
 #import "DOMExtensions.h"
 #import "DOMHTMLCollectionInternal.h"
@@ -45,6 +44,7 @@
 #import <WebCore/Range.h>
 #import <WebCore/RenderTextControl.h>
 #import <WebCore/Settings.h>
+#import <WebCore/SimpleRange.h>
 #import <WebCore/markup.h>
 
 #if PLATFORM(IOS_FAMILY)
@@ -63,37 +63,35 @@
 
 #if PLATFORM(IOS_FAMILY)
 
-using namespace WebCore;
-
 @implementation DOMHTMLElement (DOMHTMLElementExtensions)
 
 - (int)scrollXOffset
 {
-    RenderObject *renderer = core(self)->renderer();
+    auto* renderer = core(self)->renderer();
     if (!renderer)
         return 0;
 
-    if (!is<RenderBlockFlow>(*renderer))
+    if (!is<WebCore::RenderBlockFlow>(*renderer))
         renderer = renderer->containingBlock();
 
-    if (!is<RenderBox>(*renderer) || !renderer->hasOverflowClip())
+    if (!is<WebCore::RenderBox>(*renderer) || !renderer->hasOverflowClip())
         return 0;
 
-    return downcast<RenderBox>(*renderer).layer()->scrollOffset().x();
+    return downcast<WebCore::RenderBox>(*renderer).layer()->scrollOffset().x();
 }
 
 - (int)scrollYOffset
 {
-    RenderObject* renderer = core(self)->renderer();
+    auto* renderer = core(self)->renderer();
     if (!renderer)
         return 0;
 
-    if (!is<RenderBlockFlow>(*renderer))
+    if (!is<WebCore::RenderBlockFlow>(*renderer))
         renderer = renderer->containingBlock();
-    if (!is<RenderBox>(*renderer) || !renderer->hasOverflowClip())
+    if (!is<WebCore::RenderBox>(*renderer) || !renderer->hasOverflowClip())
         return 0;
 
-    return downcast<RenderBox>(*renderer).layer()->scrollOffset().y();
+    return downcast<WebCore::RenderBox>(*renderer).layer()->scrollOffset().y();
 }
 
 - (void)setScrollXOffset:(int)x scrollYOffset:(int)y
@@ -103,35 +101,35 @@ using namespace WebCore;
 
 - (void)setScrollXOffset:(int)x scrollYOffset:(int)y adjustForIOSCaret:(BOOL)adjustForIOSCaret
 {
-    RenderObject* renderer = core(self)->renderer();
+    auto* renderer = core(self)->renderer();
     if (!renderer)
         return;
 
-    if (!is<RenderBlockFlow>(*renderer))
+    if (!is<WebCore::RenderBlockFlow>(*renderer))
         renderer = renderer->containingBlock();
-    if (!renderer->hasOverflowClip() || !is<RenderBox>(*renderer))
+    if (!renderer->hasOverflowClip() || !is<WebCore::RenderBox>(*renderer))
         return;
 
-    RenderLayer* layer = downcast<RenderBox>(*renderer).layer();
+    auto* layer = downcast<WebCore::RenderBox>(*renderer).layer();
     if (adjustForIOSCaret)
         layer->setAdjustForIOSCaretWhenScrolling(true);
-    layer->scrollToOffset(ScrollOffset(x, y), ScrollClamping::Unclamped);
+    layer->scrollToOffset(WebCore::ScrollOffset(x, y), WebCore::ScrollType::Programmatic, WebCore::ScrollClamping::Unclamped);
     if (adjustForIOSCaret)
         layer->setAdjustForIOSCaretWhenScrolling(false);
 }
 
 - (void)absolutePosition:(int *)x :(int *)y :(int *)w :(int *)h
 {
-    RenderBox *renderer = core(self)->renderBox();
+    auto* renderer = core(self)->renderBox();
     if (renderer) {
         if (w)
             *w = renderer->width();
         if (h)
             *h = renderer->width();
         if (x && y) {
-            FloatPoint floatPoint(*x, *y);
+            WebCore::FloatPoint floatPoint(*x, *y);
             renderer->localToAbsolute(floatPoint);
-            IntPoint point = roundedIntPoint(floatPoint);
+            WebCore::IntPoint point = roundedIntPoint(floatPoint);
             *x = point.x();
             *y = point.y();
         }
@@ -155,7 +153,7 @@ using namespace WebCore;
 - (DOMDocumentFragment *)createDocumentFragmentWithText:(NSString *)text
 {
     // FIXME: Since this is not a contextual fragment, it won't handle whitespace properly.
-    return kit(createFragmentFromText(core(self)->createRange(), text).ptr());
+    return kit(createFragmentFromText(makeRangeSelectingNodeContents(*core(self)), text).ptr());
 }
 
 @end
@@ -224,18 +222,18 @@ using namespace WebCore;
 
 @end
 
-static WebAutocapitalizeType webAutocapitalizeType(AutocapitalizeType type)
+static WebAutocapitalizeType webAutocapitalizeType(WebCore::AutocapitalizeType type)
 {
     switch (type) {
-    case AutocapitalizeTypeDefault:
+    case WebCore::AutocapitalizeType::Default:
         return WebAutocapitalizeTypeDefault;
-    case AutocapitalizeTypeNone:
+    case WebCore::AutocapitalizeType::None:
         return WebAutocapitalizeTypeNone;
-    case AutocapitalizeTypeWords:
+    case WebCore::AutocapitalizeType::Words:
         return WebAutocapitalizeTypeWords;
-    case AutocapitalizeTypeSentences:
+    case WebCore::AutocapitalizeType::Sentences:
         return WebAutocapitalizeTypeSentences;
-    case AutocapitalizeTypeAllCharacters:
+    case WebCore::AutocapitalizeType::AllCharacters:
         return WebAutocapitalizeTypeAllCharacters;
     }
 }
@@ -265,13 +263,13 @@ static WebAutocapitalizeType webAutocapitalizeType(AutocapitalizeType type)
 - (void)setValueWithChangeEvent:(NSString *)newValue
 {
     WebCore::JSMainThreadNullState state;
-    core(self)->setValue(newValue, DispatchInputAndChangeEvent);
+    core(self)->setValue(newValue, WebCore::DispatchInputAndChangeEvent);
 }
 
 - (void)setValueAsNumberWithChangeEvent:(double)newValueAsNumber
 {
     WebCore::JSMainThreadNullState state;
-    core(self)->setValueAsNumber(newValueAsNumber, DispatchInputAndChangeEvent);
+    core(self)->setValueAsNumber(newValueAsNumber, WebCore::DispatchInputAndChangeEvent);
 }
 
 @end

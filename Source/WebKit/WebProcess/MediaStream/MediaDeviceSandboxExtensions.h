@@ -39,6 +39,8 @@ public:
     MediaDeviceSandboxExtensions()
     {
     }
+    MediaDeviceSandboxExtensions(MediaDeviceSandboxExtensions&&) = default;
+    MediaDeviceSandboxExtensions& operator=(MediaDeviceSandboxExtensions&&) = default;
 
     MediaDeviceSandboxExtensions(Vector<String> ids, SandboxExtension::HandleArray&& handles);
 
@@ -46,7 +48,7 @@ public:
     size_t size() const;
 
     void encode(IPC::Encoder&) const;
-    static bool decode(IPC::Decoder&, MediaDeviceSandboxExtensions&);
+    static WARN_UNUSED_RETURN bool decode(IPC::Decoder&, MediaDeviceSandboxExtensions&);
 
 private:
     Vector<String> m_ids;

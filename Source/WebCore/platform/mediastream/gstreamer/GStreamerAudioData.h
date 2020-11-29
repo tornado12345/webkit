@@ -21,7 +21,7 @@
 
 #pragma once
 
-#if ENABLE(MEDIA_STREAM) && USE(LIBWEBRTC) && USE(GSTREAMER)
+#if ENABLE(MEDIA_STREAM) && USE(GSTREAMER)
 
 #include "GRefPtrGStreamer.h"
 #include "PlatformAudioData.h"
@@ -29,7 +29,7 @@
 #include <gst/audio/audio.h>
 
 namespace WebCore {
-class GStreamerAudioData : public PlatformAudioData {
+class GStreamerAudioData final : public PlatformAudioData {
 public:
     GStreamerAudioData(GRefPtr<GstSample>&& sample, GstAudioInfo info)
         : m_sample(WTFMove(sample))
@@ -56,4 +56,4 @@ private:
 
 } // namespace WebCore
 
-#endif // ENABLE(MEDIA_STREAM) && USE(LIBWEBRTC) && USE(GSTREAMER)
+#endif // ENABLE(MEDIA_STREAM) && USE(GSTREAMER)

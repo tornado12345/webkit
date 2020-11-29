@@ -27,27 +27,39 @@
 #include "config.h"
 #include "WebProcess.h"
 
+#include "WebKitExtensionManager.h"
+#include "WebKitWebExtensionPrivate.h"
 #include "WebProcessCreationParameters.h"
+
+#if USE(GSTREAMER)
 #include <WebCore/GStreamerCommon.h>
+#endif
+
 #include <WebCore/MemoryCache.h>
 
 #if PLATFORM(WAYLAND)
 #include "WaylandCompositorDisplay.h"
 #endif
 
-#if PLATFORM(WPE)
+#if USE(WPE_RENDERER)
 #include <WebCore/PlatformDisplayLibWPE.h>
 #include <wpe/wpe.h>
 #endif
 
+#if PLATFORM(GTK) && !USE(GTK4)
+#include <WebCore/ScrollbarThemeGtk.h>
+#endif
+
 namespace WebKit {
+
+using namespace WebCore;
 
 void WebProcess::platformSetCacheModel(CacheModel cacheModel)
 {
     WebCore::MemoryCache::singleton().setDisabled(cacheModel == CacheModel::DocumentViewer);
 }
 
-void WebProcess::platformInitializeWebProcess(WebProcessCreationParameters&& parameters)
+void WebProcess::platformInitializeWebProcess(WebProcessCreationParameters& parameters)
 {
 #if PLATFORM(WPE)
     if (!parameters.isServiceWorkerProcess) {
@@ -59,16 +71,53 @@ void WebProcess::platformInitializeWebProcess(WebProcessCreationParameters&& par
         downcast<PlatformDisplayLibWPE>(PlatformDisplay::sharedDisplay()).initialize(parameters.hostClientFileDescriptor.releaseFileDescriptor());
     }
 #endif
+
 #if PLATFORM(WAYLAND)
-    m_waylandCompositorDisplay = WaylandCompositorDisplay::create(parameters.waylandCompositorDisplayName);
+    if (PlatformDisplay::sharedDisplay().type() == PlatformDisplay::Type::Wayland) {
+#if USE(WPE_RENDERER)
+        if (!parameters.isServiceWorkerProcess) {
+            auto hostClientFileDescriptor = parameters.hostClientFileDescriptor.releaseFileDescriptor();
+            if (hostClientFileDescriptor != -1) {
+                wpe_loader_init(parameters.implementationLibraryName.data());
+                m_wpeDisplay = WebCore::PlatformDisplayLibWPE::create();
+                if (!m_wpeDisplay->initialize(hostClientFileDescriptor))
+                    m_wpeDisplay = nullptr;
+            }
+        }
+#else
+        m_waylandCompositorDisplay = WaylandCompositorDisplay::create(parameters.waylandCompositorDisplayName);
 #endif
+    }
+#endif
+
 #if USE(GSTREAMER)
     WebCore::initializeGStreamer(WTFMove(parameters.gstreamerOptions));
 #endif
+
+#if PLATFORM(GTK) && !USE(GTK4)
+    setUseSystemAppearanceForScrollbars(parameters.useSystemAppearanceForScrollbars);
+#endif
+}
+
+void WebProcess::platformSetWebsiteDataStoreParameters(WebProcessDataStoreParameters&&)
+{
 }
 
 void WebProcess::platformTerminate()
 {
 }
+
+void WebProcess::sendMessageToWebExtension(UserMessage&& message)
+{
+    if (auto* extension = WebKitExtensionManager::singleton().extension())
+        webkitWebExtensionDidReceiveUserMessage(extension, WTFMove(message));
+}
+
+#if PLATFORM(GTK) && !USE(GTK4)
+void WebProcess::setUseSystemAppearanceForScrollbars(bool useSystemAppearanceForScrollbars)
+{
+    static_cast<ScrollbarThemeGtk&>(ScrollbarTheme::theme()).setUseSystemAppearance(useSystemAppearanceForScrollbars);
+}
+#endif
 
 } // namespace WebKit

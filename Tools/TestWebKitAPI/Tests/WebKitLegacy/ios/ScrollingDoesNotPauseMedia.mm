@@ -23,22 +23,28 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
+#import "config.h"
 
-#if PLATFORM(IOS_FAMILY)
+#if HAVE(UIWEBVIEW)
 
 #import "PlatformUtilities.h"
 #import <WebKit/DOMHTMLMediaElement.h>
 #import <WebKit/WebFramePrivate.h>
+#import <WebKitLegacy/WebPreferencesPrivate.h>
+#import <wtf/MainThread.h>
 #import <wtf/RetainPtr.h>
 
 @interface ScrollingDoesNotPauseMediaDelegate : NSObject <UIWebViewDelegate, DOMEventListener> {
 }
 @end
 
-static bool didFinishLoad;
-static bool gotMainFrame;
-static WebFrame* mainFrame;
+static bool didFinishLoad = false;
+static bool gotMainFrame = false;
+static RetainPtr<WebFrame> mainFrame;
+
+static bool readyToTest = false;
+static bool didReceivePause  = false;
+static bool didReceivePlaying = false;
 
 @implementation ScrollingDoesNotPauseMediaDelegate
 
@@ -55,12 +61,11 @@ IGNORE_WARNINGS_END
     gotMainFrame = true;
 }
 
-static bool didReceivePause;
-static bool didReceivePlaying;
-
 - (void)handleEvent:(DOMEvent *)event
 {
-    if ([event.type isEqualToString:@"pause"])
+    if ([event.type isEqualToString:@"canplaythrough"])
+        readyToTest = true;
+    else if ([event.type isEqualToString:@"pause"])
         didReceivePause = true;
     else if ([event.type isEqualToString:@"playing"])
         didReceivePlaying = true;
@@ -71,41 +76,55 @@ namespace TestWebKitAPI {
 
 TEST(WebKitLegacy, ScrollingDoesNotPauseMedia)
 {
+    RetainPtr<WebPreferences> preferences = [WebPreferences standardPreferences];
+    preferences.get().mediaDataLoadsAutomatically = YES;
+    preferences.get().mediaPlaybackAllowsInline = YES;
+    preferences.get().mediaPlaybackRequiresUserGesture = NO;
+
     RetainPtr<UIWindow> uiWindow = adoptNS([[UIWindow alloc] initWithFrame:NSMakeRect(0, 0, 800, 600)]);
     RetainPtr<UIWebView> uiWebView = adoptNS([[UIWebView alloc] initWithFrame:NSMakeRect(0, 0, 800, 600)]);
     [uiWindow addSubview:uiWebView.get()];
 
-    uiWebView.get().mediaPlaybackRequiresUserAction = NO;
-    uiWebView.get().allowsInlineMediaPlayback = YES;
-
     RetainPtr<ScrollingDoesNotPauseMediaDelegate> testController = adoptNS([ScrollingDoesNotPauseMediaDelegate new]);
     uiWebView.get().delegate = testController.get();
 
-    didFinishLoad = false;
-    gotMainFrame = false;
-    mainFrame = nil;
-
-    [uiWebView loadRequest:[NSURLRequest requestWithURL:[NSBundle.mainBundle URLForResource:@"video-with-audio" withExtension:@"html" subdirectory:@"TestWebKitAPI.resources"]]];
+    [uiWebView loadRequest:[NSURLRequest requestWithURL:[NSBundle.mainBundle URLForResource:@"one-video" withExtension:@"html" subdirectory:@"TestWebKitAPI.resources"]]];
 
     Util::run(&didFinishLoad);
     Util::run(&gotMainFrame);
 
-    DOMHTMLMediaElement* video = (DOMHTMLMediaElement*)[mainFrame.DOMDocument querySelector:@"video"];
-    ASSERT_TRUE([video isKindOfClass:[DOMHTMLMediaElement class]]);
+    callOnMainThread([&] () mutable {
+        [mainFrame setTimeoutsPaused:YES];
 
-    [video addEventListener:@"playing" listener:testController.get() useCapture:NO];
-    [video addEventListener:@"pause" listener:testController.get() useCapture:NO];
+        DOMHTMLMediaElement* video = (DOMHTMLMediaElement*)[[mainFrame DOMDocument] querySelector:@"video"];
+        ASSERT_TRUE([video isKindOfClass:[DOMHTMLMediaElement class]]);
 
-    [mainFrame setTimeoutsPaused:YES];
+        [video addEventListener:@"canplaythrough" listener:testController.get() useCapture:NO];
+        [video addEventListener:@"playing" listener:testController.get() useCapture:NO];
+        [video addEventListener:@"pause" listener:testController.get() useCapture:NO];
+        [video setSrc:@"video-with-audio.mp4"];
 
-    didReceivePlaying = false;
-    [video play];
+        [mainFrame setTimeoutsPaused:NO];
+    });
+
+    Util::run(&readyToTest);
+
+    callOnMainThread([&] () mutable {
+        DOMHTMLMediaElement* video = (DOMHTMLMediaElement*)[[mainFrame DOMDocument] querySelector:@"video"];
+        ASSERT_TRUE([video isKindOfClass:[DOMHTMLMediaElement class]]);
+
+        [video play];
+    });
+
     Util::run(&didReceivePlaying);
 
-    [mainFrame setTimeoutsPaused:NO];
+    callOnMainThread([&] () mutable {
+        DOMHTMLMediaElement* video = (DOMHTMLMediaElement*)[[mainFrame DOMDocument] querySelector:@"video"];
+        ASSERT_TRUE([video isKindOfClass:[DOMHTMLMediaElement class]]);
 
-    didReceivePause = false;
-    [video play];
+        [video pause];
+    });
+
     Util::run(&didReceivePause);
 }
 

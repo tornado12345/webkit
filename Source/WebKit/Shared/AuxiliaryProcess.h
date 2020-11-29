@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010-2018 Apple Inc. All rights reserved.
+ * Copyright (C) 2010-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -47,7 +47,13 @@ public:
     enum class ProcessType : uint8_t {
         WebContent,
         Network,
-        Plugin
+        Plugin,
+#if ENABLE(GPU_PROCESS)
+        GPU,
+#endif
+#if ENABLE(WEB_AUTHN)
+        WebAuthn
+#endif
     };
 
     void initialize(const AuxiliaryProcessInitializationParameters&);
@@ -57,11 +63,23 @@ public:
     void disableTermination();
     void enableTermination();
 
-    void addMessageReceiver(IPC::StringReference messageReceiverName, IPC::MessageReceiver&);
-    void addMessageReceiver(IPC::StringReference messageReceiverName, uint64_t destinationID, IPC::MessageReceiver&);
-    void removeMessageReceiver(IPC::StringReference messageReceiverName, uint64_t destinationID);
-    void removeMessageReceiver(IPC::StringReference messageReceiverName);
+    void addMessageReceiver(IPC::ReceiverName, IPC::MessageReceiver&);
+    void addMessageReceiver(IPC::ReceiverName, uint64_t destinationID, IPC::MessageReceiver&);
+    void removeMessageReceiver(IPC::ReceiverName, uint64_t destinationID);
+    void removeMessageReceiver(IPC::ReceiverName);
     void removeMessageReceiver(IPC::MessageReceiver&);
+    
+    template <typename T>
+    void addMessageReceiver(IPC::ReceiverName messageReceiverName, ObjectIdentifier<T> destinationID, IPC::MessageReceiver& receiver)
+    {
+        addMessageReceiver(messageReceiverName, destinationID.toUInt64(), receiver);
+    }
+    
+    template <typename T>
+    void removeMessageReceiver(IPC::ReceiverName messageReceiverName, ObjectIdentifier<T> destinationID)
+    {
+        removeMessageReceiver(messageReceiverName, destinationID.toUInt64());
+    }
 
     void setProcessSuppressionEnabled(bool);
 
@@ -77,6 +95,10 @@ public:
 
 #if PLATFORM(MAC)
     static bool isSystemWebKit();
+#endif
+    
+#if PLATFORM(COCOA)
+    bool parentProcessHasEntitlement(const char* entitlement);
 #endif
 
 protected:
@@ -105,10 +127,11 @@ protected:
 
     void didReceiveMessage(IPC::Connection&, IPC::Decoder&) override;
 
-    void registerURLSchemeServiceWorkersCanHandle(const String&) const;
 #if OS(LINUX)
     void didReceiveMemoryPressureEvent(bool isCritical);
 #endif
+
+    static Optional<std::pair<IPC::Connection::Identifier, IPC::Attachment>> createIPCConnectionPair();
 
 private:
     virtual bool shouldOverrideQuarantine() { return true; }
@@ -118,7 +141,7 @@ private:
     uint64_t messageSenderDestinationID() const override;
 
     // IPC::Connection::Client.
-    void didReceiveInvalidMessage(IPC::Connection&, IPC::StringReference messageReceiverName, IPC::StringReference messageName) final;
+    void didReceiveInvalidMessage(IPC::Connection&, IPC::MessageName) final;
     void didClose(IPC::Connection&) override;
 
     void shutDown();

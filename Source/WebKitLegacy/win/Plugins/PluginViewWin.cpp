@@ -310,7 +310,7 @@ PluginView::wndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     if (message == WM_USER + 1 &&
         m_plugin->quirks().contains(PluginQuirkThrottleWMUserPlusOneMessages)) {
         if (!m_messageThrottler)
-            m_messageThrottler = std::make_unique<PluginMessageThrottlerWin>(this);
+            m_messageThrottler = makeUnique<PluginMessageThrottlerWin>(this);
 
         m_messageThrottler->appendMessage(hWnd, message, wParam, lParam);
         return 0;
@@ -530,7 +530,7 @@ void PluginView::paintWindowedPluginIntoContext(GraphicsContext& context, const 
 #endif
 }
 
-void PluginView::paint(GraphicsContext& context, const IntRect& rect, Widget::SecurityOriginPaintPolicy)
+void PluginView::paint(GraphicsContext& context, const IntRect& rect, Widget::SecurityOriginPaintPolicy, EventRegionContext*)
 {
     if (!m_isStarted) {
         // Draw the "missing plugin" image

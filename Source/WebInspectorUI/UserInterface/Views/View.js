@@ -276,17 +276,26 @@ WI.View = class View extends WI.Object
         this._dirtyDescendantsCount = 0;
         let isInitialLayout = !this._didInitialLayout;
 
-        if (!this._didInitialLayout) {
+        if (isInitialLayout) {
             this.initialLayout();
             this._didInitialLayout = true;
         }
 
-        if (this._layoutReason === WI.View.LayoutReason.Resize)
+        if (this._layoutReason === WI.View.LayoutReason.Resize || isInitialLayout)
             this.sizeDidChange();
+
+        let savedLayoutReason = this._layoutReason;
+        if (isInitialLayout) {
+            // The initial layout should always be treated as dirty.
+            this._setLayoutReason();
+        }
 
         this.layout();
 
-        if (WI.settings.enableLayoutFlashing.value)
+        // Ensure that the initial layout override doesn't affects to subviews.
+        this._layoutReason = savedLayoutReason;
+
+        if (WI.settings.debugEnableLayoutFlashing.value)
             this._drawLayoutFlashingOutline(isInitialLayout);
 
         for (let view of this._subviews) {
@@ -301,9 +310,6 @@ WI.View = class View extends WI.Object
 
     _setLayoutReason(layoutReason)
     {
-        if (this._layoutReason === WI.View.LayoutReason.Resize)
-            return;
-
         this._layoutReason = layoutReason || WI.View.LayoutReason.Dirty;
     }
 
@@ -385,7 +391,7 @@ WI.View = class View extends WI.Object
             if (view.layoutPending)
                 view._layoutSubtree();
             else if (view._dirtyDescendantsCount) {
-                views = views.concat(view.subviews);
+                views.pushAll(view.subviews);
                 view._dirtyDescendantsCount = 0;
             }
         }

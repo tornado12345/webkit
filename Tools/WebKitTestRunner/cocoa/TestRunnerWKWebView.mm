@@ -28,12 +28,16 @@
 
 #import "WebKitTestRunnerDraggingInfo.h"
 #import <WebKit/WKUIDelegatePrivate.h>
+#import <WebKit/WKWebViewPrivateForTesting.h>
 #import <wtf/Assertions.h>
+#import <wtf/BlockPtr.h>
+#import <wtf/Optional.h>
 #import <wtf/RetainPtr.h>
 
 #if PLATFORM(IOS_FAMILY)
 #import "UIKitSPI.h"
 #import <WebKit/WKWebViewPrivate.h>
+
 @interface WKWebView ()
 
 // FIXME: move these to WKWebView_Private.h
@@ -45,40 +49,69 @@
 @end
 #endif
 
-@interface TestRunnerWKWebView () <WKUIDelegatePrivate> {
+struct CustomMenuActionInfo {
+    RetainPtr<NSString> name;
+    BOOL dismissesAutomatically { NO };
+    BlockPtr<void()> callback;
+};
+
+@interface TestRunnerWKWebView () <WKUIDelegatePrivate
+#if PLATFORM(IOS_FAMILY)
+    , UIGestureRecognizerDelegate
+#endif
+> {
     RetainPtr<NSNumber> m_stableStateOverride;
-    BOOL m_isInteractingWithFormControl;
+    BOOL _isInteractingWithFormControl;
+    BOOL _scrollingUpdatesDisabled;
+    Optional<CustomMenuActionInfo> _customMenuActionInfo;
+    RetainPtr<NSArray<NSString *>> _allowedMenuActions;
+#if PLATFORM(IOS_FAMILY)
+    RetainPtr<UITapGestureRecognizer> _windowTapGestureRecognizer;
+    BlockPtr<void()> _windowTapRecognizedCallback;
+#endif
 }
 
 @property (nonatomic, copy) void (^zoomToScaleCompletionHandler)(void);
 @property (nonatomic, copy) void (^retrieveSpeakSelectionContentCompletionHandler)(void);
 @property (nonatomic, getter=isShowingKeyboard, setter=setIsShowingKeyboard:) BOOL showingKeyboard;
 @property (nonatomic, getter=isShowingMenu, setter=setIsShowingMenu:) BOOL showingMenu;
+@property (nonatomic, getter=isDismissingMenu, setter=setIsDismissingMenu:) BOOL dismissingMenu;
+@property (nonatomic, getter=isShowingPopover, setter=setIsShowingPopover:) BOOL showingPopover;
+@property (nonatomic, getter=isShowingContextMenu, setter=setIsShowingContextMenu:) BOOL showingContextMenu;
 
 @end
 
 @implementation TestRunnerWKWebView
+
+@dynamic _stableStateOverride;
 
 #if PLATFORM(MAC)
 IGNORE_WARNINGS_BEGIN("deprecated-implementations")
 - (void)dragImage:(NSImage *)anImage at:(NSPoint)viewLocation offset:(NSSize)initialOffset event:(NSEvent *)event pasteboard:(NSPasteboard *)pboard source:(id)sourceObj slideBack:(BOOL)slideFlag
 IGNORE_WARNINGS_END
 {
-    RetainPtr<WebKitTestRunnerDraggingInfo> draggingInfo = adoptNS([[WebKitTestRunnerDraggingInfo alloc] initWithImage:anImage offset:initialOffset pasteboard:pboard source:sourceObj]);
+    auto draggingInfo = adoptNS([[WebKitTestRunnerDraggingInfo alloc] initWithImage:anImage offset:initialOffset pasteboard:pboard source:sourceObj]);
     [self draggingUpdated:draggingInfo.get()];
 }
 #endif
 
-#if PLATFORM(IOS_FAMILY)
 - (instancetype)initWithFrame:(CGRect)frame configuration:(WKWebViewConfiguration *)configuration
 {
     if (self = [super initWithFrame:frame configuration:configuration]) {
         NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
+#if PLATFORM(MAC)
+        [center addObserver:self selector:@selector(_didShowMenu) name:NSMenuDidBeginTrackingNotification object:nil];
+        [center addObserver:self selector:@selector(_didHideMenu) name:NSMenuDidEndTrackingNotification object:nil];
+#else
         [center addObserver:self selector:@selector(_invokeShowKeyboardCallbackIfNecessary) name:UIKeyboardDidShowNotification object:nil];
         [center addObserver:self selector:@selector(_invokeHideKeyboardCallbackIfNecessary) name:UIKeyboardDidHideNotification object:nil];
         [center addObserver:self selector:@selector(_didShowMenu) name:UIMenuControllerDidShowMenuNotification object:nil];
+        [center addObserver:self selector:@selector(_willHideMenu) name:UIMenuControllerWillHideMenuNotification object:nil];
         [center addObserver:self selector:@selector(_didHideMenu) name:UIMenuControllerDidHideMenuNotification object:nil];
+        [center addObserver:self selector:@selector(_willPresentPopover) name:@"UIPopoverControllerWillPresentPopoverNotification" object:nil];
+        [center addObserver:self selector:@selector(_didDismissPopover) name:@"UIPopoverControllerDidDismissPopoverNotification" object:nil];
         self.UIDelegate = self;
+#endif
     }
     return self;
 }
@@ -87,18 +120,10 @@ IGNORE_WARNINGS_END
 {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 
-    self.didStartFormControlInteractionCallback = nil;
-    self.didEndFormControlInteractionCallback = nil;
-    self.didShowForcePressPreviewCallback = nil;
-    self.didDismissForcePressPreviewCallback = nil;
-    self.willBeginZoomingCallback = nil;
-    self.didEndZoomingCallback = nil;
-    self.didShowKeyboardCallback = nil;
-    self.didHideKeyboardCallback = nil;
-    self.didShowMenuCallback = nil;
-    self.didHideMenuCallback = nil;
-    self.didEndScrollingCallback = nil;
-    self.rotationDidEndCallback = nil;
+    [self resetInteractionCallbacks];
+#if PLATFORM(IOS_FAMILY)
+    self.accessibilitySpeakSelectionContent = nil;
+#endif
 
     self.zoomToScaleCompletionHandler = nil;
     self.retrieveSpeakSelectionContentCompletionHandler = nil;
@@ -106,9 +131,73 @@ IGNORE_WARNINGS_END
     [super dealloc];
 }
 
+- (void)_didShowMenu
+{
+    if (self.showingMenu)
+        return;
+
+    self.showingMenu = YES;
+    if (self.didShowMenuCallback)
+        self.didShowMenuCallback();
+}
+
+- (void)_didHideMenu
+{
+#if PLATFORM(IOS_FAMILY)
+    self.dismissingMenu = NO;
+#endif
+
+    if (!self.showingMenu)
+        return;
+
+    self.showingMenu = NO;
+    if (self.didHideMenuCallback)
+        self.didHideMenuCallback();
+}
+
+- (void)dismissActiveMenu
+{
+#if PLATFORM(IOS_FAMILY)
+    [self resignFirstResponder];
+#else
+    auto menu = retainPtr(self._activeMenu);
+    [menu removeAllItems];
+    [menu update];
+    [menu cancelTracking];
+#endif
+}
+
+- (void)resetInteractionCallbacks
+{
+    self.didShowMenuCallback = nil;
+    self.didHideMenuCallback = nil;
+#if PLATFORM(IOS_FAMILY)
+    self.didStartFormControlInteractionCallback = nil;
+    self.didEndFormControlInteractionCallback = nil;
+    self.didShowContextMenuCallback = nil;
+    self.didDismissContextMenuCallback = nil;
+    self.willBeginZoomingCallback = nil;
+    self.didEndZoomingCallback = nil;
+    self.didShowKeyboardCallback = nil;
+    self.didHideKeyboardCallback = nil;
+    self.willPresentPopoverCallback = nil;
+    self.didDismissPopoverCallback = nil;
+    self.didEndScrollingCallback = nil;
+    self.rotationDidEndCallback = nil;
+    self.windowTapRecognizedCallback = nil;
+#endif // PLATFORM(IOS_FAMILY)
+}
+
+#if PLATFORM(IOS_FAMILY)
+
+- (void)_willHideMenu
+{
+    self.dismissingMenu = YES;
+}
+
 - (void)didStartFormControlInteraction
 {
-    m_isInteractingWithFormControl = YES;
+    _isInteractingWithFormControl = YES;
 
     if (self.didStartFormControlInteractionCallback)
         self.didStartFormControlInteractionCallback();
@@ -116,7 +205,7 @@ IGNORE_WARNINGS_END
 
 - (void)didEndFormControlInteraction
 {
-    m_isInteractingWithFormControl = NO;
+    _isInteractingWithFormControl = NO;
 
     if (self.didEndFormControlInteractionCallback)
         self.didEndFormControlInteractionCallback();
@@ -124,20 +213,126 @@ IGNORE_WARNINGS_END
 
 - (BOOL)isInteractingWithFormControl
 {
-    return m_isInteractingWithFormControl;
+    return _isInteractingWithFormControl;
 }
 
-- (void)_didShowForcePressPreview
+- (void)immediatelyDismissContextMenuIfNeeded
 {
-    if (self.didShowForcePressPreviewCallback)
-        self.didShowForcePressPreviewCallback();
+    if (!self.showingContextMenu)
+        return;
+
+    self.showingContextMenu = NO;
+
+#if PLATFORM(IOS)
+    for (id <UIInteraction> interaction in self.contentView.interactions) {
+        if ([interaction isKindOfClass:UIContextMenuInteraction.class])
+            [(UIContextMenuInteraction *)interaction dismissMenu];
+    }
+#endif
 }
 
-- (void)_didDismissForcePressPreview
+- (void)_didShowContextMenu
 {
-    if (self.didDismissForcePressPreviewCallback)
-        self.didDismissForcePressPreviewCallback();
+    if (self.showingContextMenu)
+        return;
+
+    self.showingContextMenu = YES;
+    if (self.didShowContextMenuCallback)
+        self.didShowContextMenuCallback();
 }
+
+- (void)_didDismissContextMenu
+{
+    if (!self.showingContextMenu)
+        return;
+
+    self.showingContextMenu = NO;
+    if (self.didDismissContextMenuCallback)
+        self.didDismissContextMenuCallback();
+}
+
+- (BOOL)becomeFirstResponder
+{
+    BOOL wasFirstResponder = self.isFirstResponder;
+    BOOL becameFirstResponder = [super becomeFirstResponder];
+    if (!wasFirstResponder && becameFirstResponder)
+        [self _addCustomItemToMenuControllerIfNecessary];
+    return becameFirstResponder;
+}
+
+- (void)_addCustomItemToMenuControllerIfNecessary
+{
+    if (!_customMenuActionInfo)
+        return;
+
+    auto item = adoptNS([[UIMenuItem alloc] initWithTitle:_customMenuActionInfo->name.get() action:@selector(performCustomAction:)]);
+    [item setDontDismiss:!_customMenuActionInfo->dismissesAutomatically];
+    UIMenuController *controller = UIMenuController.sharedMenuController;
+    controller.menuItems = @[ item.get() ];
+    [controller update];
+}
+
+- (void)installCustomMenuAction:(NSString *)name dismissesAutomatically:(BOOL)dismissesAutomatically callback:(dispatch_block_t)callback
+{
+    _customMenuActionInfo = {{ name, dismissesAutomatically, callback }};
+    [self _addCustomItemToMenuControllerIfNecessary];
+}
+
+- (void)setAllowedMenuActions:(NSArray<NSString *> *)actions
+{
+    _allowedMenuActions = actions;
+}
+
+- (void)resetCustomMenuAction
+{
+    _customMenuActionInfo.reset();
+    UIMenuController.sharedMenuController.menuItems = @[ ];
+}
+
+- (void)performCustomAction:(id)sender
+{
+    if (!_customMenuActionInfo)
+        return;
+
+    if (!_customMenuActionInfo->callback) {
+        ASSERT_NOT_REACHED();
+        return;
+    }
+
+    _customMenuActionInfo->callback();
+}
+
+- (BOOL)canPerformAction:(SEL)action withSender:(id)sender
+{
+    BOOL isCustomAction = action == @selector(performCustomAction:);
+    BOOL canPerformActionByDefault = [super canPerformAction:action withSender:sender];
+    if (isCustomAction)
+        canPerformActionByDefault = _customMenuActionInfo.hasValue();
+
+    if (canPerformActionByDefault && _allowedMenuActions && sender == UIMenuController.sharedMenuController) {
+        BOOL isAllowed = NO;
+        if (isCustomAction) {
+            for (NSString *allowedAction in _allowedMenuActions.get()) {
+                if ([[_customMenuActionInfo->name lowercaseString] isEqualToString:allowedAction.lowercaseString]) {
+                    isAllowed = YES;
+                    break;
+                }
+            }
+        } else {
+            for (NSString *allowedAction in _allowedMenuActions.get()) {
+                NSString *lowercaseSelectorName = [[allowedAction lowercaseString] stringByAppendingString:@":"];
+                if ([NSStringFromSelector(action).lowercaseString isEqualToString:lowercaseSelectorName]) {
+                    isAllowed = YES;
+                    break;
+                }
+            }
+        }
+        if (!isAllowed)
+            return NO;
+    }
+    return canPerformActionByDefault;
+}
+
 
 - (void)zoomToScale:(double)scale animated:(BOOL)animated completionHandler:(void (^)(void))completionHandler
 {
@@ -174,24 +369,24 @@ IGNORE_WARNINGS_END
         self.didHideKeyboardCallback();
 }
 
-- (void)_didShowMenu
+- (void)_willPresentPopover
 {
-    if (self.showingMenu)
+    if (self.showingPopover)
         return;
 
-    self.showingMenu = YES;
-    if (self.didShowMenuCallback)
-        self.didShowMenuCallback();
+    self.showingPopover = YES;
+    if (self.willPresentPopoverCallback)
+        self.willPresentPopoverCallback();
 }
 
-- (void)_didHideMenu
+- (void)_didDismissPopover
 {
-    if (!self.showingMenu)
+    if (!self.showingPopover)
         return;
 
-    self.showingMenu = NO;
-    if (self.didHideMenuCallback)
-        self.didHideMenuCallback();
+    self.showingPopover = NO;
+    if (self.didDismissPopoverCallback)
+        self.didDismissPopoverCallback();
 }
 
 - (void)scrollViewWillBeginZooming:(UIScrollView *)scrollView withView:(UIView *)view
@@ -234,10 +429,64 @@ IGNORE_WARNINGS_END
     [self _scheduleVisibleContentRectUpdate];
 }
 
+- (BOOL)_scrollingUpdatesDisabledForTesting
+{
+    return _scrollingUpdatesDisabled;
+}
+
+- (void)_setScrollingUpdatesDisabledForTesting:(BOOL)disabled
+{
+    _scrollingUpdatesDisabled = disabled;
+}
+
 - (void)_didEndRotation
 {
     if (self.rotationDidEndCallback)
         self.rotationDidEndCallback();
+}
+
+- (void)didRecognizeTapOnWindow
+{
+    ASSERT(self.windowTapRecognizedCallback);
+    if (self.windowTapRecognizedCallback)
+        self.windowTapRecognizedCallback();
+}
+
+- (void(^)())windowTapRecognizedCallback
+{
+    return _windowTapRecognizedCallback.get();
+}
+
+- (void)setWindowTapRecognizedCallback:(void(^)())windowTapRecognizedCallback
+{
+    _windowTapRecognizedCallback = windowTapRecognizedCallback;
+
+    if (windowTapRecognizedCallback && !_windowTapGestureRecognizer) {
+        ASSERT(self.window);
+        _windowTapGestureRecognizer = adoptNS([[UITapGestureRecognizer alloc] init]);
+        [_windowTapGestureRecognizer setDelegate:self];
+        [_windowTapGestureRecognizer addTarget:self action:@selector(didRecognizeTapOnWindow)];
+        [self.window addGestureRecognizer:_windowTapGestureRecognizer.get()];
+    } else if (!windowTapRecognizedCallback && _windowTapGestureRecognizer) {
+        [self.window removeGestureRecognizer:_windowTapGestureRecognizer.get()];
+        _windowTapGestureRecognizer = nil;
+    }
+}
+
+- (void)willMoveToWindow:(UIWindow *)window
+{
+    [super willMoveToWindow:window];
+
+    if (_windowTapGestureRecognizer)
+        [self.window removeGestureRecognizer:_windowTapGestureRecognizer.get()];
+}
+
+- (void)didMoveToWindow
+{
+    [super didMoveToWindow];
+
+    if (_windowTapGestureRecognizer)
+        [self.window addGestureRecognizer:_windowTapGestureRecognizer.get()];
 }
 
 - (void)_accessibilityDidGetSpeakSelectionContent:(NSString *)content
@@ -256,7 +505,9 @@ IGNORE_WARNINGS_END
 - (void)setOverrideSafeAreaInsets:(UIEdgeInsets)insets
 {
     _overrideSafeAreaInsets = insets;
-#if __IPHONE_OS_VERSION_MIN_REQUIRED >= 110000
+
+// FIXME: Likely we can remove this special case for watchOS and tvOS.
+#if !PLATFORM(WATCHOS) && !PLATFORM(APPLETV)
     [self _updateSafeAreaInsets];
 #endif
 }
@@ -264,6 +515,11 @@ IGNORE_WARNINGS_END
 - (UIEdgeInsets)_safeAreaInsetsForFrame:(CGRect)frame inSuperview:(UIView *)view
 {
     return _overrideSafeAreaInsets;
+}
+
+- (UIView *)contentView
+{
+    return [self valueForKeyPath:@"_currentContentView"];
 }
 
 #pragma mark - WKUIDelegatePrivate
@@ -278,6 +534,13 @@ IGNORE_WARNINGS_END
 - (void)_webView:(WKWebView *)webView didDismissFocusedElementViewController:(UIViewController *)controller
 {
     [self _invokeHideKeyboardCallbackIfNecessary];
+}
+
+#pragma mark - UIGestureRecognizerDelegate
+
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherGestureRecognizer
+{
+    return gestureRecognizer == _windowTapGestureRecognizer;
 }
 
 #endif // PLATFORM(IOS_FAMILY)

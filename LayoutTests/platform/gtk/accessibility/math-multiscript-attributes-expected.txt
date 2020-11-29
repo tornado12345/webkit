@@ -11,10 +11,10 @@ On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE
 AXRole: AXStatic
 AXParent: AXSection
 AXChildren: 0
-AXPosition: { 17.000000, -33.000000 }
-AXSize: { 14.000000, 106.000000 }
-AXTitle: 
-AXDescription: 
+AXPosition:  { 17.0000, -33.0000 }
+AXSize: { 14.0000, 106.000 }
+AXTitle:
+AXDescription:
 AXValue: X
 AXFocusable: 0
 AXFocused: 0
@@ -30,10 +30,10 @@ AXPlatformAttributes: tag:mi, toolkit:WebKitGtk
 AXRole: AXSubscript
 AXParent: AXSection
 AXChildren: 0
-AXPosition: { 30.000000, -14.000000 }
-AXSize: { 11.000000, 81.000000 }
-AXTitle: 
-AXDescription: 
+AXPosition:  { 30.0000, -14.0000 }
+AXSize: { 11.0000, 81.0000 }
+AXTitle:
+AXDescription:
 AXValue: D
 AXFocusable: 0
 AXFocused: 0
@@ -49,10 +49,10 @@ AXPlatformAttributes: multiscript-type:post, tag:mi, toolkit:WebKitGtk
 AXRole: AXSuperscript
 AXParent: AXSection
 AXChildren: 0
-AXPosition: { 30.000000, -26.000000 }
-AXSize: { 10.000000, 80.000000 }
-AXTitle: 
-AXDescription: 
+AXPosition:  { 30.0000, -26.0000 }
+AXSize: { 10.0000, 80.0000 }
+AXTitle:
+AXDescription:
 AXValue: C
 AXFocusable: 0
 AXFocused: 0
@@ -68,10 +68,10 @@ AXPlatformAttributes: multiscript-type:post, tag:mi, toolkit:WebKitGtk
 AXRole: AXSubscript
 AXParent: AXSection
 AXChildren: 0
-AXPosition: { 8.000000, -14.000000 }
-AXSize: { 10.000000, 81.000000 }
-AXTitle: 
-AXDescription: 
+AXPosition:  { 8.00000, -14.0000 }
+AXSize: { 10.0000, 81.0000 }
+AXTitle:
+AXDescription:
 AXValue: B
 AXFocusable: 0
 AXFocused: 0
@@ -87,10 +87,10 @@ AXPlatformAttributes: multiscript-type:pre, tag:mi, toolkit:WebKitGtk
 AXRole: AXSuperscript
 AXParent: AXSection
 AXChildren: 0
-AXPosition: { 8.000000, -26.000000 }
-AXSize: { 10.000000, 80.000000 }
-AXTitle: 
-AXDescription: 
+AXPosition:  { 8.00000, -26.0000 }
+AXSize: { 10.0000, 80.0000 }
+AXTitle:
+AXDescription:
 AXValue: A
 AXFocusable: 0
 AXFocused: 0

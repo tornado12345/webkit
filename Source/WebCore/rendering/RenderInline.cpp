@@ -51,10 +51,6 @@
 #include <wtf/IsoMallocInlines.h>
 #include <wtf/SetForScope.h>
 
-#if ENABLE(DASHBOARD_SUPPORT)
-#include "Frame.h"
-#endif
-
 namespace WebCore {
 
 WTF_MAKE_ISO_ALLOCATED_IMPL(RenderInline);
@@ -73,7 +69,7 @@ RenderInline::RenderInline(Document& document, RenderStyle&& style)
 
 void RenderInline::willBeDestroyed()
 {
-#if !ASSERT_DISABLED
+#if ASSERT_ENABLED
     // Make sure we do not retain "this" in the continuation outline table map of our containing blocks.
     if (parent() && style().visibility() == Visibility::Visible && hasOutline()) {
         bool containingBlockPaintsContinuationOutline = continuation() || isContinuation();
@@ -84,7 +80,7 @@ void RenderInline::willBeDestroyed()
             }
         }
     }
-#endif
+#endif // ASSERT_ENABLED
 
     if (!renderTreeBeingDestroyed()) {
         if (firstLineBox()) {
@@ -416,11 +412,15 @@ private:
 
 void RenderInline::absoluteQuads(Vector<FloatQuad>& quads, bool* wasFixed) const
 {
+    absoluteQuadsIgnoringContinuation({ }, quads, wasFixed);
+    if (continuation())
+        collectAbsoluteQuadsForContinuation(quads, wasFixed);
+}
+
+void RenderInline::absoluteQuadsIgnoringContinuation(const FloatRect&, Vector<FloatQuad>& quads, bool*) const
+{
     AbsoluteQuadsGeneratorContext context(this, quads);
     generateLineBoxRects(context);
-
-    if (RenderBoxModelObject* continuation = this->continuation())
-        continuation->absoluteQuads(quads, wasFixed);
 }
 
 #if PLATFORM(IOS_FAMILY)
@@ -452,7 +452,7 @@ static LayoutUnit computeMargin(const RenderInline* renderer, const Length& marg
     if (margin.isAuto())
         return 0;
     if (margin.isFixed())
-        return margin.value();
+        return LayoutUnit(margin.value());
     if (margin.isPercentOrCalculated())
         return minimumValueForLength(margin, std::max<LayoutUnit>(0, renderer->containingBlock()->availableLogicalWidth()));
     return 0;
@@ -560,7 +560,7 @@ bool RenderInline::hitTestCulledInline(const HitTestRequest& request, HitTestRes
         updateHitTestResult(result, tmpLocation.point());
         // We cannot use addNodeToListBasedTestResult to determine if we fully enclose the hit-test area
         // because it can only handle rectangular targets.
-        result.addNodeToListBasedTestResult(element(), request, locationInContainer);
+        result.addNodeToListBasedTestResult(nodeForHitTest(), request, locationInContainer);
         return regionResult.contains(tmpLocation.boundingBox());
     }
     return false;
@@ -840,7 +840,7 @@ LayoutRect RenderInline::clippedOverflowRectForRepaint(const RenderLayerModelObj
             repaintRect.move(downcast<RenderInline>(*inlineFlow).layer()->offsetForInFlowPosition());
     }
 
-    LayoutUnit outlineSize = style().outlineSize();
+    LayoutUnit outlineSize { style().outlineSize() };
     repaintRect.inflate(outlineSize);
 
     if (hitRepaintContainer || !containingBlock)
@@ -887,7 +887,7 @@ LayoutRect RenderInline::computeVisibleRectUsingPaintOffset(const LayoutRect& re
 Optional<LayoutRect> RenderInline::computeVisibleRectInContainer(const LayoutRect& rect, const RenderLayerModelObject* container, VisibleRectContext context) const
 {
     // Repaint offset cache is only valid for root-relative repainting
-    if (view().frameView().layoutContext().isPaintOffsetCacheEnabled() && !container && !context.m_options.contains(VisibleRectContextOption::UseEdgeInclusiveIntersection))
+    if (view().frameView().layoutContext().isPaintOffsetCacheEnabled() && !container && !context.options.contains(VisibleRectContextOption::UseEdgeInclusiveIntersection))
         return computeVisibleRectUsingPaintOffset(rect);
 
     if (container == this)
@@ -913,11 +913,11 @@ Optional<LayoutRect> RenderInline::computeVisibleRectInContainer(const LayoutRec
     // its controlClipRect will be wrong. For overflow clip we use the values cached by the layer.
     adjustedRect.setLocation(topLeft);
     if (localContainer->hasOverflowClip()) {
-        // FIXME: Respect the value of context.m_options.
-        SetForScope<OptionSet<VisibleRectContextOption>> change(context.m_options, context.m_options | VisibleRectContextOption::ApplyCompositedContainerScrolls);
+        // FIXME: Respect the value of context.options.
+        SetForScope<OptionSet<VisibleRectContextOption>> change(context.options, context.options | VisibleRectContextOption::ApplyCompositedContainerScrolls);
         bool isEmpty = !downcast<RenderBox>(*localContainer).applyCachedClipAndScrollPosition(adjustedRect, container, context);
         if (isEmpty) {
-            if (context.m_options.contains(VisibleRectContextOption::UseEdgeInclusiveIntersection))
+            if (context.options.contains(VisibleRectContextOption::UseEdgeInclusiveIntersection))
                 return WTF::nullopt;
             return adjustedRect;
         }
@@ -949,12 +949,12 @@ LayoutSize RenderInline::offsetFromContainer(RenderElement& container, const Lay
     return offset;
 }
 
-void RenderInline::mapLocalToContainer(const RenderLayerModelObject* repaintContainer, TransformState& transformState, MapCoordinatesFlags mode, bool* wasFixed) const
+void RenderInline::mapLocalToContainer(const RenderLayerModelObject* ancestorContainer, TransformState& transformState, MapCoordinatesFlags mode, bool* wasFixed) const
 {
-    if (repaintContainer == this)
+    if (ancestorContainer == this)
         return;
 
-    if (view().frameView().layoutContext().isPaintOffsetCacheEnabled() && !repaintContainer) {
+    if (view().frameView().layoutContext().isPaintOffsetCacheEnabled() && !ancestorContainer) {
         auto* layoutState = view().frameView().layoutContext().layoutState();
         LayoutSize offset = layoutState->paintOffset();
         if (style().hasInFlowPosition() && layer())
@@ -964,7 +964,7 @@ void RenderInline::mapLocalToContainer(const RenderLayerModelObject* repaintCont
     }
 
     bool containerSkipped;
-    RenderElement* container = this->container(repaintContainer, containerSkipped);
+    RenderElement* container = this->container(ancestorContainer, containerSkipped);
     if (!container)
         return;
 
@@ -987,14 +987,14 @@ void RenderInline::mapLocalToContainer(const RenderLayerModelObject* repaintCont
         transformState.move(containerOffset.width(), containerOffset.height(), preserve3D ? TransformState::AccumulateTransform : TransformState::FlattenTransform);
 
     if (containerSkipped) {
-        // There can't be a transform between repaintContainer and o, because transforms create containers, so it should be safe
-        // to just subtract the delta between the repaintContainer and o.
-        LayoutSize containerOffset = repaintContainer->offsetFromAncestorContainer(*container);
+        // There can't be a transform between ancestorContainer and o, because transforms create containers, so it should be safe
+        // to just subtract the delta between the ancestorContainer and o.
+        LayoutSize containerOffset = ancestorContainer->offsetFromAncestorContainer(*container);
         transformState.move(-containerOffset.width(), -containerOffset.height(), preserve3D ? TransformState::AccumulateTransform : TransformState::FlattenTransform);
         return;
     }
 
-    container->mapLocalToContainer(repaintContainer, transformState, mode, wasFixed);
+    container->mapLocalToContainer(ancestorContainer, transformState, mode, wasFixed);
 }
 
 const RenderObject* RenderInline::pushMappingToContainer(const RenderLayerModelObject* ancestorToStopAt, RenderGeometryMap& geometryMap) const
@@ -1008,8 +1008,8 @@ const RenderObject* RenderInline::pushMappingToContainer(const RenderLayerModelO
 
     LayoutSize adjustmentForSkippedAncestor;
     if (ancestorSkipped) {
-        // There can't be a transform between repaintContainer and o, because transforms create containers, so it should be safe
-        // to just subtract the delta between the ancestor and o.
+        // There can't be a transform between ancestorToStopAt and container, because transforms create containers, so it should be safe
+        // to just subtract the delta between the ancestor and container.
         adjustmentForSkippedAncestor = -ancestorToStopAt->offsetFromAncestorContainer(*container);
     }
 
@@ -1030,33 +1030,23 @@ const RenderObject* RenderInline::pushMappingToContainer(const RenderLayerModelO
     return ancestorSkipped ? ancestorToStopAt : container;
 }
 
-void RenderInline::updateDragState(bool dragOn)
-{
-    RenderBoxModelObject::updateDragState(dragOn);
-    if (RenderBoxModelObject* continuation = this->continuation())
-        continuation->updateDragState(dragOn);
-}
-
 void RenderInline::updateHitTestResult(HitTestResult& result, const LayoutPoint& point)
 {
     if (result.innerNode())
         return;
 
     LayoutPoint localPoint(point);
-    if (Element* element = this->element()) {
+    if (auto* node = nodeForHitTest()) {
         if (isContinuation()) {
-            // We're in the continuation of a split inline.  Adjust our local point to be in the coordinate space
-            // of the principal renderer's containing block.  This will end up being the innerNonSharedNode.
-            RenderBlock* firstBlock = element->renderer()->containingBlock();
-            
-            // Get our containing block.
-            RenderBox* block = containingBlock();
-            localPoint.moveBy(block->location() - firstBlock->locationOffset());
+            // We're in the continuation of a split inline. Adjust our local point to be in the coordinate space
+            // of the principal renderer's containing block. This will end up being the innerNonSharedNode.
+            auto* firstBlock = node->renderer()->containingBlock();
+            localPoint.moveBy(containingBlock()->location() - firstBlock->locationOffset());
         }
 
-        result.setInnerNode(element);
+        result.setInnerNode(node);
         if (!result.innerNonSharedNode())
-            result.setInnerNonSharedNode(element);
+            result.setInnerNonSharedNode(node);
         result.setLocalPoint(localPoint);
     }
 }
@@ -1104,7 +1094,7 @@ void RenderInline::deleteLines()
 
 std::unique_ptr<InlineFlowBox> RenderInline::createInlineFlowBox()
 {
-    return std::make_unique<InlineFlowBox>(*this);
+    return makeUnique<InlineFlowBox>(*this);
 }
 
 InlineFlowBox* RenderInline::createAndAppendInlineFlowBox()
@@ -1235,9 +1225,9 @@ void RenderInline::paintOutline(PaintInfo& paintInfo, const LayoutPoint& paintOf
     rects.append(LayoutRect());
     for (InlineFlowBox* curr = firstLineBox(); curr; curr = curr->nextLineBox()) {
         const RootInlineBox& rootBox = curr->root();
-        LayoutUnit top = std::max<LayoutUnit>(rootBox.lineTop(), curr->logicalTop());
-        LayoutUnit bottom = std::min<LayoutUnit>(rootBox.lineBottom(), curr->logicalBottom());
-        rects.append(LayoutRect(curr->x(), top, curr->logicalWidth(), bottom - top));
+        LayoutUnit top = std::max(rootBox.lineTop(), LayoutUnit(curr->logicalTop()));
+        LayoutUnit bottom = std::min(rootBox.lineBottom(), LayoutUnit(curr->logicalBottom()));
+        rects.append({ LayoutUnit(curr->x()), top, LayoutUnit(curr->logicalWidth()), bottom - top });
     }
     rects.append(LayoutRect());
 
@@ -1393,48 +1383,5 @@ void RenderInline::paintOutlineForLine(GraphicsContext& graphicsContext, const L
         drawLineForBoxSide(graphicsContext, FloatRect(topLeft, bottomRight), BSBottom, outlineColor, outlineStyle, adjacentWidth1, adjacentWidth2, antialias);
     }
 }
-
-#if ENABLE(DASHBOARD_SUPPORT)
-void RenderInline::addAnnotatedRegions(Vector<AnnotatedRegionValue>& regions)
-{
-    // Convert the style regions to absolute coordinates.
-    if (style().visibility() != Visibility::Visible)
-        return;
-
-    const Vector<StyleDashboardRegion>& styleRegions = style().dashboardRegions();
-    unsigned i, count = styleRegions.size();
-    for (i = 0; i < count; i++) {
-        StyleDashboardRegion styleRegion = styleRegions[i];
-
-        LayoutRect linesBoundingBox = this->linesBoundingBox();
-        LayoutUnit w = linesBoundingBox.width();
-        LayoutUnit h = linesBoundingBox.height();
-
-        AnnotatedRegionValue region;
-        region.label = styleRegion.label;
-        region.bounds = LayoutRect(linesBoundingBox.x() + styleRegion.offset.left().value(),
-                                linesBoundingBox.y() + styleRegion.offset.top().value(),
-                                w - styleRegion.offset.left().value() - styleRegion.offset.right().value(),
-                                h - styleRegion.offset.top().value() - styleRegion.offset.bottom().value());
-        region.type = styleRegion.type;
-
-        RenderObject* container = containingBlock();
-        if (!container)
-            container = this;
-
-        region.clip = container->computeAbsoluteRepaintRect(region.bounds);
-        if (region.clip.height() < 0) {
-            region.clip.setHeight(0);
-            region.clip.setWidth(0);
-        }
-
-        FloatPoint absPos = container->localToAbsolute();
-        region.bounds.setX(absPos.x() + region.bounds.x());
-        region.bounds.setY(absPos.y() + region.bounds.y());
-
-        regions.append(region);
-    }
-}
-#endif
 
 } // namespace WebCore

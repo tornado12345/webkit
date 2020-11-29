@@ -28,14 +28,13 @@
 #include "config.h"
 #include "PseudoElement.h"
 
-#include "CSSAnimationController.h"
 #include "ContentData.h"
 #include "DocumentTimeline.h"
 #include "InspectorInstrumentation.h"
+#include "KeyframeEffectStack.h"
 #include "RenderElement.h"
 #include "RenderImage.h"
 #include "RenderQuote.h"
-#include "RuntimeEnabledFeatures.h"
 #include "StyleResolver.h"
 #include <wtf/IsoMallocInlines.h>
 
@@ -91,16 +90,23 @@ void PseudoElement::clearHostElement()
     InspectorInstrumentation::pseudoElementDestroyed(document().page(), *this);
 
     if (auto* timeline = document().existingTimeline())
-        timeline->removeAnimationsForElement(*this);
-    if (auto* frame = document().frame())
-        frame->animation().cancelAnimations(*this);
-
+        timeline->elementWasRemoved(Styleable::fromElement(*this));
+    
     m_hostElement = nullptr;
 }
 
 bool PseudoElement::rendererIsNeeded(const RenderStyle& style)
 {
-    return pseudoElementRendererIsNeeded(&style);
+    return pseudoElementRendererIsNeeded(&style) || isTargetedByKeyframeEffectRequiringPseudoElement();
+}
+
+bool PseudoElement::isTargetedByKeyframeEffectRequiringPseudoElement()
+{
+    if (m_hostElement) {
+        if (auto* stack = m_hostElement->keyframeEffectStack(pseudoId()))
+            return stack->requiresPseudoElement();
+    }
+    return false;
 }
 
 } // namespace

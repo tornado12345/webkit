@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014, 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,8 +27,7 @@
 #import "config.h"
 #import "PlaybackSessionInterfaceAVKit.h"
 
-#if PLATFORM(IOS_FAMILY)
-#if HAVE(AVKIT)
+#if PLATFORM(COCOA) && HAVE(AVKIT)
 
 #import "Logging.h"
 #import "MediaSelectionOption.h"
@@ -38,6 +37,7 @@
 #import <AVFoundation/AVTime.h>
 #import <pal/spi/cocoa/AVKitSPI.h>
 #import <wtf/RetainPtr.h>
+#import <wtf/cocoa/VectorCocoa.h>
 #import <wtf/text/CString.h>
 #import <wtf/text/WTFString.h>
 
@@ -53,6 +53,7 @@ PlaybackSessionInterfaceAVKit::PlaybackSessionInterfaceAVKit(PlaybackSessionMode
     : m_playerController(adoptNS([[WebAVPlayerController alloc] init]))
     , m_playbackSessionModel(&model)
 {
+    ASSERT(isUIThread());
     model.addClient(*this);
     [m_playerController setPlaybackSessionInterface:this];
     [m_playerController setDelegate:&model];
@@ -71,10 +72,16 @@ PlaybackSessionInterfaceAVKit::PlaybackSessionInterfaceAVKit(PlaybackSessionMode
 
 PlaybackSessionInterfaceAVKit::~PlaybackSessionInterfaceAVKit()
 {
+    ASSERT(isUIThread());
     [m_playerController setPlaybackSessionInterface:nullptr];
     [m_playerController setExternalPlaybackActive:false];
 
     invalidate();
+}
+
+PlaybackSessionModel* PlaybackSessionInterfaceAVKit::playbackSessionModel() const
+{
+    return m_playbackSessionModel;
 }
 
 void PlaybackSessionInterfaceAVKit::durationChanged(double duration)
@@ -148,20 +155,18 @@ void PlaybackSessionInterfaceAVKit::canPlayFastReverseChanged(bool canPlayFastRe
     [m_playerController setCanScanBackward:canPlayFastReverse];
 }
 
-static RetainPtr<NSMutableArray> mediaSelectionOptions(const Vector<MediaSelectionOption>& options)
+static RetainPtr<NSArray> mediaSelectionOptions(const Vector<MediaSelectionOption>& options)
 {
-    RetainPtr<NSMutableArray> webOptions = adoptNS([[NSMutableArray alloc] initWithCapacity:options.size()]);
-    for (auto& option : options) {
-        RetainPtr<WebAVMediaSelectionOption> webOption = adoptNS([[WebAVMediaSelectionOption alloc] init]);
+    return createNSArray(options, [] (auto& option) {
+        auto webOption = adoptNS([[WebAVMediaSelectionOption alloc] init]);
         [webOption setLocalizedDisplayName:option.displayName];
-        [webOptions addObject:webOption.get()];
-    }
-    return webOptions;
+        return webOption;
+    });
 }
 
 void PlaybackSessionInterfaceAVKit::audioMediaSelectionOptionsChanged(const Vector<MediaSelectionOption>& options, uint64_t selectedIndex)
 {
-    RetainPtr<NSMutableArray> webOptions = mediaSelectionOptions(options);
+    auto webOptions = mediaSelectionOptions(options);
     [m_playerController setAudioMediaSelectionOptions:webOptions.get()];
     if (selectedIndex < [webOptions count])
         [m_playerController setCurrentAudioMediaSelectionOption:[webOptions objectAtIndex:static_cast<NSUInteger>(selectedIndex)]];
@@ -169,7 +174,7 @@ void PlaybackSessionInterfaceAVKit::audioMediaSelectionOptionsChanged(const Vect
 
 void PlaybackSessionInterfaceAVKit::legibleMediaSelectionOptionsChanged(const Vector<MediaSelectionOption>& options, uint64_t selectedIndex)
 {
-    RetainPtr<NSMutableArray> webOptions = mediaSelectionOptions(options);
+    auto webOptions = mediaSelectionOptions(options);
     [m_playerController setLegibleMediaSelectionOptions:webOptions.get()];
     if (selectedIndex < [webOptions count])
         [m_playerController setCurrentLegibleMediaSelectionOption:[webOptions objectAtIndex:static_cast<NSUInteger>(selectedIndex)]];
@@ -178,9 +183,9 @@ void PlaybackSessionInterfaceAVKit::legibleMediaSelectionOptionsChanged(const Ve
 void PlaybackSessionInterfaceAVKit::externalPlaybackChanged(bool enabled, PlaybackSessionModel::ExternalPlaybackTargetType targetType, const String& localizedDeviceName)
 {
     AVPlayerControllerExternalPlaybackType externalPlaybackType = AVPlayerControllerExternalPlaybackTypeNone;
-    if (targetType == PlaybackSessionModel::TargetTypeAirPlay)
+    if (enabled && targetType == PlaybackSessionModel::TargetTypeAirPlay)
         externalPlaybackType = AVPlayerControllerExternalPlaybackTypeAirPlay;
-    else if (targetType == PlaybackSessionModel::TargetTypeTVOut)
+    else if (enabled && targetType == PlaybackSessionModel::TargetTypeTVOut)
         externalPlaybackType = AVPlayerControllerExternalPlaybackTypeTVOut;
 
     WebAVPlayerController* playerController = m_playerController.get();
@@ -214,7 +219,13 @@ void PlaybackSessionInterfaceAVKit::invalidate()
     m_playbackSessionModel = nullptr;
 }
 
+void PlaybackSessionInterfaceAVKit::modelDestroyed()
+{
+    ASSERT(isUIThread());
+    invalidate();
+    ASSERT(!m_playbackSessionModel);
 }
 
-#endif // HAVE(AVKIT)
-#endif // PLATFORM(IOS_FAMILY)
+}
+
+#endif // PLATFORM(COCOA) && HAVE(AVKIT)

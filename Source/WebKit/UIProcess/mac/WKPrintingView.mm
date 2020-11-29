@@ -145,8 +145,8 @@ static BOOL isForcingPreviewUpdate;
         ASSERT(![infoDictionary objectForKey:WebKitOriginalBottomPrintingMarginKey]);
         originalTopMargin = [info topMargin];
         originalBottomMargin = [info bottomMargin];
-        [infoDictionary setObject:[NSNumber numberWithDouble:originalTopMargin] forKey:WebKitOriginalTopPrintingMarginKey];
-        [infoDictionary setObject:[NSNumber numberWithDouble:originalBottomMargin] forKey:WebKitOriginalBottomPrintingMarginKey];
+        [infoDictionary setObject:@(originalTopMargin) forKey:WebKitOriginalTopPrintingMarginKey];
+        [infoDictionary setObject:@(originalBottomMargin) forKey:WebKitOriginalBottomPrintingMarginKey];
     } else {
         ASSERT([originalTopMarginNumber isKindOfClass:[NSNumber class]]);
         ASSERT([[infoDictionary objectForKey:WebKitOriginalBottomPrintingMarginKey] isKindOfClass:[NSNumber class]]);
@@ -250,7 +250,7 @@ static void pageDidDrawToImage(const WebKit::ShareableBitmap::Handle& imageHandl
         return;
     }
 
-    std::lock_guard<Lock> lock(_printingCallbackMutex);
+    auto locker = holdLock(_printingCallbackMutex);
 
     ASSERT([self _hasPageRects]);
     ASSERT(_printedPagesData.isEmpty());
@@ -293,7 +293,7 @@ static void pageDidDrawToImage(const WebKit::ShareableBitmap::Handle& imageHandl
     _webFrame->page()->drawPagesToPDF(_webFrame.get(), printInfo, firstPage - 1, lastPage - firstPage + 1, WTFMove(callback));
 }
 
-static void pageDidComputePageRects(const Vector<WebCore::IntRect>& pageRects, double totalScaleFactorForPrinting, IPCCallbackContext* context)
+static void pageDidComputePageRects(const Vector<WebCore::IntRect>& pageRects, double totalScaleFactorForPrinting, const WebCore::FloatBoxExtent& computedPageMargin, IPCCallbackContext* context)
 {
     ASSERT(RunLoop::isMain());
 
@@ -323,6 +323,12 @@ static void pageDidComputePageRects(const Vector<WebCore::IntRect>& pageRects, d
             ceil(lastPrintingPageRect.maxY() * view->_totalScaleFactorForPrinting));
         LOG(Printing, "WKPrintingView setting frame size to x:%g y:%g width:%g height:%g", newFrameSize.origin.x, newFrameSize.origin.y, newFrameSize.size.width, newFrameSize.size.height);
         [view setFrame:newFrameSize];
+        // Set @page margin.
+        auto *printInfo = [view->_printOperation printInfo];
+        [printInfo setTopMargin:computedPageMargin.top()];
+        [printInfo setBottomMargin:computedPageMargin.bottom()];
+        [printInfo setLeftMargin:computedPageMargin.left()];
+        [printInfo setRightMargin:computedPageMargin.right()];
 
         if ([view _isPrintingPreview]) {
             // Show page count, and ask for an actual image to replace placeholder.
@@ -344,9 +350,9 @@ static void pageDidComputePageRects(const Vector<WebCore::IntRect>& pageRects, d
     ASSERT(!_expectedComputedPagesCallback);
 
     IPCCallbackContext* context = new IPCCallbackContext;
-    auto callback = WebKit::ComputedPagesCallback::create([context](const Vector<WebCore::IntRect>& pageRects, double totalScaleFactorForPrinting, WebKit::CallbackBase::Error) {
+    auto callback = WebKit::ComputedPagesCallback::create([context](const Vector<WebCore::IntRect>& pageRects, double totalScaleFactorForPrinting, const WebCore::FloatBoxExtent& computedPageMargin, WebKit::CallbackBase::Error) {
         std::unique_ptr<IPCCallbackContext> contextDeleter(context);
-        pageDidComputePageRects(pageRects, totalScaleFactorForPrinting, context);
+        pageDidComputePageRects(pageRects, totalScaleFactorForPrinting, computedPageMargin, context);
     });
     _expectedComputedPagesCallback = callback->callbackID().toInteger();
     context->view = self;
@@ -360,7 +366,7 @@ static void prepareDataForPrintingOnSecondaryThread(WKPrintingView *view)
 {
     ASSERT(RunLoop::isMain());
 
-    std::lock_guard<Lock> lock(view->_printingCallbackMutex);
+    auto locker = holdLock(view->_printingCallbackMutex);
 
     // We may have received page rects while a message to call this function traveled from secondary thread to main one.
     if ([view _hasPageRects]) {
@@ -385,7 +391,7 @@ static void prepareDataForPrintingOnSecondaryThread(WKPrintingView *view)
     if (!RunLoop::isMain())
         _isPrintingFromSecondaryThread = YES;
 
-    if (!_webFrame->page()) {
+    if (_webFrame->pageIsClosed()) {
         *range = NSMakeRange(1, NSIntegerMax);
         return YES;
     }
@@ -451,10 +457,7 @@ static NSString *linkDestinationName(PDFDocument *document, PDFDestination *dest
         return;
     }
 
-    NSGraphicsContext *nsGraphicsContext = [NSGraphicsContext currentContext];
-    ALLOW_DEPRECATED_DECLARATIONS_BEGIN
-    CGContextRef context = static_cast<CGContextRef>([nsGraphicsContext graphicsPort]);
-    ALLOW_DEPRECATED_DECLARATIONS_END
+    CGContextRef context = [[NSGraphicsContext currentContext] CGContext];
 
     CGContextSaveGState(context);
     CGContextTranslateCTM(context, point.x, point.y);
@@ -498,6 +501,9 @@ static NSString *linkDestinationName(PDFDocument *document, PDFDestination *dest
 - (void)_drawPreview:(NSRect)nsRect
 {
     ASSERT(RunLoop::isMain());
+    
+    if (!_webFrame || !_webFrame->page())
+        return;
 
     WebCore::IntRect scaledPrintingRect(nsRect);
     scaledPrintingRect.scale(1 / _totalScaleFactorForPrinting);
@@ -513,9 +519,6 @@ static NSString *linkDestinationName(PDFDocument *document, PDFDestination *dest
                 _latestExpectedPreviewCallback = existingCallback;
             } else {
                 // Preview isn't available yet, request it asynchronously.
-                if (!_webFrame->page())
-                    return;
-
                 // Return to printing mode if we're already back to screen (e.g. due to window resizing).
                 _webFrame->page()->beginPrinting(_webFrame.get(), WebKit::PrintInfo([_printOperation printInfo]));
 
@@ -540,11 +543,8 @@ static NSString *linkDestinationName(PDFDocument *document, PDFDestination *dest
     }
 
     RefPtr<WebKit::ShareableBitmap> bitmap = pagePreviewIterator->value;
-    ALLOW_DEPRECATED_DECLARATIONS_BEGIN
-    CGContextRef cgContext = static_cast<CGContextRef>([[NSGraphicsContext currentContext] graphicsPort]);
-    ALLOW_DEPRECATED_DECLARATIONS_END
 
-    WebCore::GraphicsContext context(cgContext);
+    WebCore::GraphicsContext context([[NSGraphicsContext currentContext] CGContext]);
     WebCore::GraphicsContextStateSaver stateSaver(context);
 
     bitmap->paint(context, _webFrame->page()->deviceScaleFactor(), WebCore::IntPoint(nsRect.origin), bitmap->bounds());
@@ -663,7 +663,7 @@ static NSString *linkDestinationName(PDFDocument *document, PDFDestination *dest
         LOG(Printing, "-[WKPrintingView %p rectForPage:%d] - data is not yet available", self, (int)page);
         if (!_webFrame->page()) {
             // We may have not told AppKit how many pages there are, so it will try to print until a null rect is returned.
-            return NSMakeRect(0, 0, 0, 0);
+            return NSZeroRect;
         }
         // We must be still calculating the page range.
         ASSERT(_expectedComputedPagesCallback);
@@ -674,7 +674,7 @@ static NSString *linkDestinationName(PDFDocument *document, PDFDestination *dest
     // Returning a null rect prevents selecting non-existent pages in preview dialog.
     if (static_cast<unsigned>(page) > _printingPageRects.size()) {
         ASSERT(!_webFrame->page());
-        return NSMakeRect(0, 0, 0, 0);
+        return NSZeroRect;
     }
 
     WebCore::IntRect rect = _printingPageRects[page - 1];

@@ -28,8 +28,11 @@
 #include "WKStringPrivate.h"
 
 #include "WKAPICast.h"
+#include "WebKitJITOperations.h"
 #include <JavaScriptCore/InitializeThreading.h>
 #include <JavaScriptCore/OpaqueJSString.h>
+#include <WebCore/WebCoreJITOperations.h>
+#include <wtf/unicode/UTF8Conversion.h>
 
 WKTypeID WKStringGetTypeID()
 {
@@ -64,7 +67,7 @@ size_t WKStringGetCharacters(WKStringRef stringRef, WKChar* buffer, size_t buffe
 
 size_t WKStringGetMaximumUTF8CStringSize(WKStringRef stringRef)
 {
-    return WebKit::toImpl(stringRef)->stringView().length() * 3 + 1;
+    return static_cast<size_t>(WebKit::toImpl(stringRef)->stringView().length()) * 3 + 1;
 }
 
 enum StrictType { NonStrict = false, Strict = true };
@@ -78,18 +81,17 @@ size_t WKStringGetUTF8CStringImpl(WKStringRef stringRef, char* buffer, size_t bu
     auto stringView = WebKit::toImpl(stringRef)->stringView();
 
     char* p = buffer;
-    WTF::Unicode::ConversionResult result;
 
     if (stringView.is8Bit()) {
         const LChar* characters = stringView.characters8();
-        result = WTF::Unicode::convertLatin1ToUTF8(&characters, characters + stringView.length(), &p, p + bufferSize - 1);
+        if (!WTF::Unicode::convertLatin1ToUTF8(&characters, characters + stringView.length(), &p, p + bufferSize - 1))
+            return 0;
     } else {
         const UChar* characters = stringView.characters16();
-        result = WTF::Unicode::convertUTF16ToUTF8(&characters, characters + stringView.length(), &p, p + bufferSize - 1, strict);
+        auto result = WTF::Unicode::convertUTF16ToUTF8(&characters, characters + stringView.length(), &p, p + bufferSize - 1, strict);
+        if (result != WTF::Unicode::ConversionOK && result != WTF::Unicode::TargetExhausted)
+            return 0;
     }
-
-    if (result != WTF::Unicode::conversionOK && result != WTF::Unicode::targetExhausted)
-        return 0;
 
     *p++ = '\0';
     return p - buffer;
@@ -133,6 +135,8 @@ WKStringRef WKStringCreateWithJSString(JSStringRef jsStringRef)
 
 JSStringRef WKStringCopyJSString(WKStringRef stringRef)
 {
-    JSC::initializeThreading();
+    JSC::initialize();
+    WebCore::populateJITOperations();
+    WebKit::populateJITOperations();
     return OpaqueJSString::tryCreate(WebKit::toImpl(stringRef)->string()).leakRef();
 }

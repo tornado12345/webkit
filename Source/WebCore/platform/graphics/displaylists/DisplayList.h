@@ -25,7 +25,8 @@
 
 #pragma once
 
-#include "DisplayListItems.h"
+#include "FloatRect.h"
+#include "GraphicsContext.h"
 #include <wtf/FastMalloc.h>
 #include <wtf/Noncopyable.h>
 #include <wtf/text/WTFString.h>
@@ -36,12 +37,102 @@ class TextStream;
 
 namespace WebCore {
 
-class FloatRect;
-class GraphicsContext;
-
 namespace DisplayList {
 
-class Item;
+enum class ItemType : uint8_t {
+    Save,
+    Restore,
+    Translate,
+    Rotate,
+    Scale,
+    ConcatenateCTM,
+    SetCTM,
+    SetInlineFillGradient,
+    SetInlineFillColor,
+    SetInlineStrokeColor,
+    SetStrokeThickness,
+    SetState,
+    SetLineCap,
+    SetLineDash,
+    SetLineJoin,
+    SetMiterLimit,
+    ClearShadow,
+    Clip,
+    ClipOut,
+    ClipOutToPath,
+    ClipPath,
+    ClipToDrawingCommands,
+    DrawGlyphs,
+    DrawImage,
+    DrawTiledImage,
+    DrawTiledScaledImage,
+    DrawImageBuffer,
+    DrawNativeImage,
+    DrawPattern,
+    DrawRect,
+    DrawLine,
+    DrawLinesForText,
+    DrawDotsForDocumentMarker,
+    DrawEllipse,
+    DrawPath,
+    DrawFocusRingPath,
+    DrawFocusRingRects,
+    FillRect,
+    FillRectWithColor,
+    FillRectWithGradient,
+    FillCompositedRect,
+    FillRoundedRect,
+    FillRectWithRoundedHole,
+#if ENABLE(INLINE_PATH_DATA)
+    FillInlinePath,
+#endif
+    FillPath,
+    FillEllipse,
+    PutImageData,
+    PaintFrameForMedia,
+    StrokeRect,
+#if ENABLE(INLINE_PATH_DATA)
+    StrokeInlinePath,
+#endif
+    StrokePath,
+    StrokeEllipse,
+    ClearRect,
+    BeginTransparencyLayer,
+    EndTransparencyLayer,
+#if USE(CG)
+    ApplyStrokePattern, // FIXME: should not be a recorded item.
+    ApplyFillPattern, // FIXME: should not be a recorded item.
+#endif
+    ApplyDeviceScaleFactor,
+};
+
+class Item : public RefCounted<Item> {
+public:
+    Item() = delete;
+
+    WEBCORE_EXPORT Item(ItemType);
+    WEBCORE_EXPORT virtual ~Item();
+
+    ItemType type() const
+    {
+        return m_type;
+    }
+
+    virtual void apply(GraphicsContext&) const = 0;
+
+    virtual bool isDrawingItem() const { return false; }
+
+#if !defined(NDEBUG) || !LOG_DISABLED
+    WTF::CString description() const;
+#endif
+    static size_t sizeInBytes(const Item&);
+
+    template<class Encoder> void encode(Encoder&) const;
+    template<class Decoder> static Optional<Ref<Item>> decode(Decoder&);
+
+private:
+    ItemType m_type;
+};
 
 enum AsTextFlag {
     None                            = 0,
@@ -69,8 +160,7 @@ public:
         return m_list[index].get();
     }
 
-    void clear();
-    void removeItemsFromIndex(size_t);
+    WEBCORE_EXPORT void clear();
 
     size_t itemCount() const { return m_list.size(); }
     size_t sizeInBytes() const;
@@ -79,8 +169,12 @@ public:
 
 #if !defined(NDEBUG) || !LOG_DISABLED
     WTF::CString description() const;
-    void dump() const;
+    WEBCORE_EXPORT void dump() const;
 #endif
+
+    template<class Encoder> void encode(Encoder&) const;
+    template<class Decoder> static Optional<DisplayList> decode(Decoder&);
+
 
 private:
     Item& append(Ref<Item>&& item)
@@ -102,11 +196,40 @@ private:
     Vector<Ref<Item>> m_list;
 };
 
+
+template<class Encoder>
+void DisplayList::encode(Encoder& encoder) const
+{
+    encoder << static_cast<uint64_t>(m_list.size());
+
+    for (auto& item : m_list)
+        encoder << item.get();
+}
+
+template<class Decoder>
+Optional<DisplayList> DisplayList::decode(Decoder& decoder)
+{
+    Optional<uint64_t> itemCount;
+    decoder >> itemCount;
+    if (!itemCount)
+        return WTF::nullopt;
+
+    DisplayList displayList;
+
+    for (uint64_t i = 0; i < *itemCount; i++) {
+        auto item = Item::decode(decoder);
+        // FIXME: Once we can decode all types, failing to decode an item should turn into a decode failure.
+        // For now, we just have to ignore it.
+        if (!item)
+            continue;
+        displayList.append(WTFMove(*item));
+    }
+
+    return displayList;
+}
+
 } // DisplayList
 
 WTF::TextStream& operator<<(WTF::TextStream&, const DisplayList::DisplayList&);
 
 } // WebCore
-
-using WebCore::DisplayList::DisplayList;
-

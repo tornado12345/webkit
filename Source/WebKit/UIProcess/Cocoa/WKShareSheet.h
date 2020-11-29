@@ -38,16 +38,16 @@ struct ShareDataWithParsedURL;
 
 - (instancetype)initWithView:(WKWebView *)view;
 
-- (void)presentWithParameters:(const WebCore::ShareDataWithParsedURL&)data completionHandler:(WTF::CompletionHandler<void(bool)>&&)completionHandler;
+- (void)presentWithParameters:(const WebCore::ShareDataWithParsedURL&)data inRect:(WTF::Optional<WebCore::FloatRect>)rect completionHandler:(WTF::CompletionHandler<void(bool)>&&)completionHandler;
 - (void)dismiss;
 
 @property (nonatomic, weak) id <WKShareSheetDelegate> delegate;
-
 @end
 
 @protocol WKShareSheetDelegate <NSObject>
 @optional
 - (void)shareSheetDidDismiss:(WKShareSheet *)shareSheet;
+- (void)shareSheet:(WKShareSheet *)shareSheet willShowActivityItems:(NSArray *)activityItems;
 @end
 
 #endif // PLATFORM(COCOA) && !PLATFORM(WATCHOS) && !PLATFORM(APPLETV)

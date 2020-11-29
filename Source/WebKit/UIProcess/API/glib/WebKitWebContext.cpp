@@ -21,48 +21,55 @@
 #include "WebKitWebContext.h"
 
 #include "APIAutomationClient.h"
-#include "APICustomProtocolManagerClient.h"
 #include "APIDownloadClient.h"
 #include "APIInjectedBundleClient.h"
 #include "APIPageConfiguration.h"
 #include "APIProcessPoolConfiguration.h"
 #include "APIString.h"
+#include "LegacyGlobalSettings.h"
+#include "NetworkProcessMessages.h"
 #include "TextChecker.h"
 #include "TextCheckerState.h"
 #include "WebAutomationSession.h"
 #include "WebCertificateInfo.h"
-#include "WebGeolocationManagerProxy.h"
 #include "WebKitAutomationSessionPrivate.h"
-#include "WebKitCustomProtocolManagerClient.h"
 #include "WebKitDownloadClient.h"
 #include "WebKitDownloadPrivate.h"
 #include "WebKitFaviconDatabasePrivate.h"
-#include "WebKitGeolocationProvider.h"
+#include "WebKitGeolocationManagerPrivate.h"
+#include "WebKitInitialize.h"
 #include "WebKitInjectedBundleClient.h"
-#include "WebKitNetworkProxySettingsPrivate.h"
 #include "WebKitNotificationProvider.h"
-#include "WebKitPluginPrivate.h"
 #include "WebKitPrivate.h"
+#include "WebKitProtocolHandler.h"
 #include "WebKitSecurityManagerPrivate.h"
 #include "WebKitSecurityOriginPrivate.h"
 #include "WebKitSettingsPrivate.h"
 #include "WebKitURISchemeRequestPrivate.h"
 #include "WebKitUserContentManagerPrivate.h"
+#include "WebKitUserMessagePrivate.h"
 #include "WebKitWebContextPrivate.h"
 #include "WebKitWebViewPrivate.h"
 #include "WebKitWebsiteDataManagerPrivate.h"
+#include "WebKitWebsitePoliciesPrivate.h"
 #include "WebNotificationManagerProxy.h"
+#include "WebProcessMessages.h"
+#include "WebURLSchemeHandler.h"
+#include "WebsiteDataStore.h"
 #include "WebsiteDataType.h"
 #include <JavaScriptCore/RemoteInspector.h>
 #include <glib/gi18n-lib.h>
 #include <libintl.h>
 #include <memory>
+#include <pal/HysteresisActivity.h>
 #include <wtf/FileSystem.h>
 #include <wtf/HashMap.h>
+#include <wtf/HashSet.h>
 #include <wtf/Language.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
+#include <wtf/URLParser.h>
 #include <wtf/glib/GRefPtr.h>
 #include <wtf/glib/GUniquePtr.h>
 #include <wtf/glib/WTFGType.h>
@@ -112,7 +119,13 @@ enum {
 #if PLATFORM(GTK)
     PROP_LOCAL_STORAGE_DIRECTORY,
 #endif
-    PROP_WEBSITE_DATA_MANAGER
+    PROP_WEBSITE_DATA_MANAGER,
+#if PLATFORM(GTK)
+    PROP_PSON_ENABLED,
+#if !USE(GTK4)
+    PROP_USE_SYSYEM_APPEARANCE_FOR_SCROLLBARS
+#endif
+#endif
 };
 
 enum {
@@ -120,17 +133,16 @@ enum {
     INITIALIZE_WEB_EXTENSIONS,
     INITIALIZE_NOTIFICATION_PERMISSIONS,
     AUTOMATION_STARTED,
+    USER_MESSAGE_RECEIVED,
 
     LAST_SIGNAL
 };
 
-class WebKitURISchemeHandler: public RefCounted<WebKitURISchemeHandler> {
+class WebKitURISchemeHandler final : public WebURLSchemeHandler {
 public:
-    WebKitURISchemeHandler(WebKitURISchemeRequestCallback callback, void* userData, GDestroyNotify destroyNotify)
-        : m_callback(callback)
-        , m_userData(userData)
-        , m_destroyNotify(destroyNotify)
+    static Ref<WebKitURISchemeHandler> create(WebKitWebContext* context, WebKitURISchemeRequestCallback callback, void* userData, GDestroyNotify destroyNotify)
     {
+        return adoptRef(*new WebKitURISchemeHandler(context, callback, userData, destroyNotify));
     }
 
     ~WebKitURISchemeHandler()
@@ -139,22 +151,46 @@ public:
             m_destroyNotify(m_userData);
     }
 
-    bool hasCallback()
-    {
-        return m_callback;
-    }
-
-    void performCallback(WebKitURISchemeRequest* request)
-    {
-        ASSERT(m_callback);
-
-        m_callback(request, m_userData);
-    }
-
 private:
+    WebKitURISchemeHandler(WebKitWebContext* context, WebKitURISchemeRequestCallback callback, void* userData, GDestroyNotify destroyNotify)
+        : m_context(context)
+        , m_callback(callback)
+        , m_userData(userData)
+        , m_destroyNotify(destroyNotify)
+    {
+    }
+
+    void platformStartTask(WebPageProxy& page, WebURLSchemeTask& task) final
+    {
+        if (!m_callback)
+            return;
+
+        GRefPtr<WebKitURISchemeRequest> request = adoptGRef(webkitURISchemeRequestCreate(m_context, page, task));
+        auto addResult = m_requests.add(task.identifier(), WTFMove(request));
+        ASSERT(addResult.isNewEntry);
+        m_callback(addResult.iterator->value.get(), m_userData);
+    }
+
+    void platformStopTask(WebPageProxy&, WebURLSchemeTask& task) final
+    {
+        auto it = m_requests.find(task.identifier());
+        if (it == m_requests.end())
+            return;
+
+        webkitURISchemeRequestCancel(it->value.get());
+        m_requests.remove(it);
+    }
+
+    void platformTaskCompleted(WebURLSchemeTask& task) final
+    {
+        m_requests.remove(task.identifier());
+    }
+
+    WebKitWebContext* m_context { nullptr };
     WebKitURISchemeRequestCallback m_callback { nullptr };
     void* m_userData { nullptr };
     GDestroyNotify m_destroyNotify { nullptr };
+    HashMap<uint64_t, GRefPtr<WebKitURISchemeRequest>> m_requests;
 };
 
 typedef HashMap<String, RefPtr<WebKitURISchemeHandler> > URISchemeHandlerMap;
@@ -163,26 +199,31 @@ typedef HashMap<uint64_t, GRefPtr<WebKitURISchemeRequest> > URISchemeRequestMap;
 class WebKitAutomationClient;
 
 struct _WebKitWebContextPrivate {
+    _WebKitWebContextPrivate()
+        : dnsPrefetchHystereris([this](PAL::HysteresisState state) { if (state == PAL::HysteresisState::Stopped) dnsPrefetchedHosts.clear(); })
+    {
+    }
+
     RefPtr<WebProcessPool> processPool;
     bool clientsDetached;
+#if PLATFORM(GTK)
+    bool psonEnabled;
+#if !USE(GTK4)
+    bool useSystemAppearanceForScrollbars;
+#endif
+#endif
 
     GRefPtr<WebKitFaviconDatabase> faviconDatabase;
     GRefPtr<WebKitSecurityManager> securityManager;
     URISchemeHandlerMap uriSchemeHandlers;
-    URISchemeRequestMap uriSchemeRequests;
-#if ENABLE(GEOLOCATION)
-    std::unique_ptr<WebKitGeolocationProvider> geolocationProvider;
-#endif
+    GRefPtr<WebKitGeolocationManager> geolocationManager;
     std::unique_ptr<WebKitNotificationProvider> notificationProvider;
     GRefPtr<WebKitWebsiteDataManager> websiteDataManager;
 
     CString faviconDatabaseDirectory;
-    WebKitTLSErrorsPolicy tlsErrorsPolicy;
     WebKitProcessModel processModel;
-    unsigned processCountLimit;
 
-    HashMap<uint64_t, WebKitWebView*> webViews;
-    unsigned ephemeralPageCount;
+    HashMap<WebPageProxyIdentifier, WebKitWebView*> webViews;
 
     CString webExtensionsDirectory;
     GRefPtr<GVariant> webExtensionsInitializationUserData;
@@ -195,12 +236,17 @@ struct _WebKitWebContextPrivate {
     std::unique_ptr<WebKitAutomationClient> automationClient;
     GRefPtr<WebKitAutomationSession> automationSession;
 #endif
+    std::unique_ptr<WebKitProtocolHandler> webkitProtocolHandler;
+
+    HashSet<String> dnsPrefetchedHosts;
+    PAL::HysteresisActivity dnsPrefetchHystereris;
 };
 
 static guint signals[LAST_SIGNAL] = { 0, };
 
 #if ENABLE(REMOTE_INSPECTOR)
 class WebKitAutomationClient final : Inspector::RemoteInspector::Client {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     explicit WebKitAutomationClient(WebKitWebContext* context)
         : m_webContext(context)
@@ -289,6 +335,16 @@ static void webkitWebContextGetProperty(GObject* object, guint propID, GValue* v
     case PROP_WEBSITE_DATA_MANAGER:
         g_value_set_object(value, webkit_web_context_get_website_data_manager(context));
         break;
+#if PLATFORM(GTK)
+    case PROP_PSON_ENABLED:
+        g_value_set_boolean(value, context->priv->psonEnabled);
+        break;
+#if !USE(GTK4)
+    case PROP_USE_SYSYEM_APPEARANCE_FOR_SCROLLBARS:
+        g_value_set_boolean(value, webkit_web_context_get_use_system_appearance_for_scrollbars(context));
+        break;
+#endif
+#endif
     default:
         G_OBJECT_WARN_INVALID_PROPERTY_ID(object, propID, paramSpec);
     }
@@ -309,21 +365,19 @@ static void webkitWebContextSetProperty(GObject* object, guint propID, const GVa
         context->priv->websiteDataManager = manager ? WEBKIT_WEBSITE_DATA_MANAGER(manager) : nullptr;
         break;
     }
+#if PLATFORM(GTK)
+    case PROP_PSON_ENABLED:
+        context->priv->psonEnabled = g_value_get_boolean(value);
+        break;
+#if !USE(GTK4)
+    case PROP_USE_SYSYEM_APPEARANCE_FOR_SCROLLBARS:
+        webkit_web_context_set_use_system_appearance_for_scrollbars(context, g_value_get_boolean(value));
+        break;
+#endif
+#endif
     default:
         G_OBJECT_WARN_INVALID_PROPERTY_ID(object, propID, paramSpec);
     }
-}
-
-static inline Ref<WebsiteDataStoreConfiguration> websiteDataStoreConfigurationForWebProcessPoolConfiguration(const API::ProcessPoolConfiguration& processPoolconfigurarion)
-{
-    auto configuration = WebsiteDataStoreConfiguration::create();
-    configuration->setApplicationCacheDirectory(String(processPoolconfigurarion.applicationCacheDirectory()));
-    configuration->setNetworkCacheDirectory(String(processPoolconfigurarion.diskCacheDirectory()));
-    configuration->setWebSQLDatabaseDirectory(String(processPoolconfigurarion.webSQLDatabaseDirectory()));
-    configuration->setLocalStorageDirectory(String(processPoolconfigurarion.localStorageDirectory()));
-    configuration->setDeviceIdHashSaltsStorageDirectory(String(processPoolconfigurarion.deviceIdHashSaltsStorageDirectory()));
-    configuration->setMediaKeysStorageDirectory(String(processPoolconfigurarion.mediaKeysStorageDirectory()));
-    return configuration;
 }
 
 static void webkitWebContextConstructed(GObject* object)
@@ -332,31 +386,30 @@ static void webkitWebContextConstructed(GObject* object)
 
     GUniquePtr<char> bundleFilename(g_build_filename(injectedBundleDirectory(), INJECTED_BUNDLE_FILENAME, nullptr));
 
-    API::ProcessPoolConfiguration configuration;
-    configuration.setInjectedBundlePath(FileSystem::stringFromFileSystemRepresentation(bundleFilename.get()));
-    configuration.setDiskCacheSpeculativeValidationEnabled(true);
-
     WebKitWebContext* webContext = WEBKIT_WEB_CONTEXT(object);
     WebKitWebContextPrivate* priv = webContext->priv;
-    if (priv->websiteDataManager && !webkit_website_data_manager_is_ephemeral(priv->websiteDataManager.get())) {
-        configuration.setLocalStorageDirectory(FileSystem::stringFromFileSystemRepresentation(webkit_website_data_manager_get_local_storage_directory(priv->websiteDataManager.get())));
-        configuration.setDiskCacheDirectory(FileSystem::pathByAppendingComponent(FileSystem::stringFromFileSystemRepresentation(webkit_website_data_manager_get_disk_cache_directory(priv->websiteDataManager.get())), networkCacheSubdirectory));
-        configuration.setApplicationCacheDirectory(FileSystem::stringFromFileSystemRepresentation(webkit_website_data_manager_get_offline_application_cache_directory(priv->websiteDataManager.get())));
-        configuration.setIndexedDBDatabaseDirectory(FileSystem::stringFromFileSystemRepresentation(webkit_website_data_manager_get_indexeddb_directory(priv->websiteDataManager.get())));
-        configuration.setWebSQLDatabaseDirectory(FileSystem::stringFromFileSystemRepresentation(webkit_website_data_manager_get_websql_directory(priv->websiteDataManager.get())));
-    } else if (!priv->localStorageDirectory.isNull())
-        configuration.setLocalStorageDirectory(FileSystem::stringFromFileSystemRepresentation(priv->localStorageDirectory.data()));
 
-    priv->processPool = WebProcessPool::create(configuration);
+    API::ProcessPoolConfiguration configuration;
+    configuration.setInjectedBundlePath(FileSystem::stringFromFileSystemRepresentation(bundleFilename.get()));
+#if PLATFORM(GTK)
+    configuration.setProcessSwapsOnNavigation(priv->psonEnabled);
+#if !USE(GTK4)
+    configuration.setUseSystemAppearanceForScrollbars(priv->useSystemAppearanceForScrollbars);
+#endif
+#endif
 
     if (!priv->websiteDataManager)
-        priv->websiteDataManager = adoptGRef(webkitWebsiteDataManagerCreate(websiteDataStoreConfigurationForWebProcessPoolConfiguration(configuration)));
-    priv->processPool->setPrimaryDataStore(webkitWebsiteDataManagerGetDataStore(priv->websiteDataManager.get()));
+        priv->websiteDataManager = adoptGRef(webkit_website_data_manager_new("local-storage-directory", priv->localStorageDirectory.data(), nullptr));
 
-    webkitWebsiteDataManagerAddProcessPool(priv->websiteDataManager.get(), *priv->processPool);
+    priv->processPool = WebProcessPool::create(configuration);
+    priv->processPool->setUserMessageHandler([webContext](UserMessage&& message, CompletionHandler<void(UserMessage&&)>&& completionHandler) {
+        // Sink the floating ref.
+        GRefPtr<WebKitUserMessage> userMessage = webkitUserMessageCreate(WTFMove(message), WTFMove(completionHandler));
+        gboolean returnValue;
+        g_signal_emit(webContext, signals[USER_MESSAGE_RECEIVED], 0, userMessage.get(), &returnValue);
+    });
 
-    priv->tlsErrorsPolicy = WEBKIT_TLS_ERRORS_POLICY_FAIL;
-    priv->processPool->setIgnoreTLSErrors(false);
+    priv->processModel = WEBKIT_PROCESS_MODEL_MULTIPLE_SECONDARY_PROCESSES;
 
 #if ENABLE(MEMORY_SAMPLER)
     if (getenv("WEBKIT_SAMPLE_MEMORY"))
@@ -365,15 +418,13 @@ static void webkitWebContextConstructed(GObject* object)
 
     attachInjectedBundleClientToContext(webContext);
     attachDownloadClientToContext(webContext);
-    attachCustomProtocolManagerClientToContext(webContext);
 
-#if ENABLE(GEOLOCATION)
-    priv->geolocationProvider = std::make_unique<WebKitGeolocationProvider>(priv->processPool->supplement<WebGeolocationManagerProxy>());
-#endif
-    priv->notificationProvider = std::make_unique<WebKitNotificationProvider>(priv->processPool->supplement<WebNotificationManagerProxy>(), webContext);
+    priv->geolocationManager = adoptGRef(webkitGeolocationManagerCreate(priv->processPool->supplement<WebGeolocationManagerProxy>()));
+    priv->notificationProvider = makeUnique<WebKitNotificationProvider>(priv->processPool->supplement<WebNotificationManagerProxy>(), webContext);
 #if PLATFORM(GTK) && ENABLE(REMOTE_INSPECTOR)
-    priv->remoteInspectorProtocolHandler = std::make_unique<RemoteInspectorProtocolHandler>(webContext);
+    priv->remoteInspectorProtocolHandler = makeUnique<RemoteInspectorProtocolHandler>(webContext);
 #endif
+    priv->webkitProtocolHandler = makeUnique<WebKitProtocolHandler>(webContext);
 }
 
 static void webkitWebContextDispose(GObject* object)
@@ -382,13 +433,17 @@ static void webkitWebContextDispose(GObject* object)
     if (!priv->clientsDetached) {
         priv->clientsDetached = true;
         priv->processPool->setInjectedBundleClient(nullptr);
-        priv->processPool->setDownloadClient(nullptr);
-        priv->processPool->setLegacyCustomProtocolManagerClient(nullptr);
+        priv->processPool->setLegacyDownloadClient(nullptr);
     }
 
-    if (priv->websiteDataManager) {
-        webkitWebsiteDataManagerRemoveProcessPool(priv->websiteDataManager.get(), *priv->processPool);
-        priv->websiteDataManager = nullptr;
+    if (priv->faviconDatabase) {
+        webkitFaviconDatabaseClose(priv->faviconDatabase.get());
+        priv->faviconDatabase = nullptr;
+    }
+
+    if (priv->processPool) {
+        priv->processPool->setUserMessageHandler(nullptr);
+        priv->processPool = nullptr;
     }
 
     G_OBJECT_CLASS(webkit_web_context_parent_class)->dispose(object);
@@ -396,6 +451,8 @@ static void webkitWebContextDispose(GObject* object)
 
 static void webkit_web_context_class_init(WebKitWebContextClass* webContextClass)
 {
+    webkitInitialize();
+
     GObjectClass* gObjectClass = G_OBJECT_CLASS(webContextClass);
 
     bindtextdomain(GETTEXT_PACKAGE, LOCALEDIR);
@@ -443,6 +500,54 @@ static void webkit_web_context_class_init(WebKitWebContextClass* webContextClass
             _("The WebKitWebsiteDataManager associated with this context"),
             WEBKIT_TYPE_WEBSITE_DATA_MANAGER,
             static_cast<GParamFlags>(WEBKIT_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY)));
+
+#if PLATFORM(GTK)
+    /**
+     * WebKitWebContext:process-swap-on-cross-site-navigation-enabled:
+     *
+     * Whether swap Web processes on cross-site navigations is enabled.
+     *
+     * When enabled, pages from each security origin will be handled by
+     * their own separate Web processes, which are started (and
+     * terminated) on demand as the user navigates across different
+     * domains. This is an important security measure which helps prevent
+     * websites stealing data from other visited pages.
+     *
+     * Since: 2.28
+     */
+    g_object_class_install_property(
+        gObjectClass,
+        PROP_PSON_ENABLED,
+        g_param_spec_boolean(
+            "process-swap-on-cross-site-navigation-enabled",
+            _("Swap Processes on Cross-Site Navigation"),
+            _("Whether swap Web processes on cross-site navigations is enabled"),
+            FALSE,
+            static_cast<GParamFlags>(WEBKIT_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY)));
+
+#if !USE(GTK4)
+    /**
+     * WebKitWebContext:use-system-appearance-for-scrollbars:
+     *
+     * Whether to use system appearance for rendering scrollbars.
+     *
+     * This is enabled by default for backwards compatibility, but it's only
+     * recommened to use when the application includes other widgets to ensure
+     * consistency, or when consistency with other applications is required too.
+     *
+     * Since: 2.30
+     */
+    g_object_class_install_property(
+        gObjectClass,
+        PROP_USE_SYSYEM_APPEARANCE_FOR_SCROLLBARS,
+        g_param_spec_boolean(
+            "use-system-appearance-for-scrollbars",
+            _("Use system appearance for scrollbars"),
+            _("Whether to use system appearance for rendering scrollbars"),
+            TRUE,
+            static_cast<GParamFlags>(WEBKIT_PARAM_READWRITE | G_PARAM_CONSTRUCT)));
+#endif
+#endif
 
     /**
      * WebKitWebContext::download-started:
@@ -525,6 +630,32 @@ static void webkit_web_context_class_init(WebKitWebContextClass* webContextClass
             g_cclosure_marshal_VOID__OBJECT,
             G_TYPE_NONE, 1,
             WEBKIT_TYPE_AUTOMATION_SESSION);
+
+    /**
+     * WebKitWebContext::user-message-received:
+     * @context: the #WebKitWebContext
+     * @message: the #WebKitUserMessage received
+     *
+     * This signal is emitted when a #WebKitUserMessage is received from a
+     * #WebKitWebExtension. You can reply to the message using
+     * webkit_user_message_send_reply().
+     *
+     * You can handle the user message asynchronously by calling g_object_ref() on
+     * @message and returning %TRUE.
+     *
+     * Returns: %TRUE if the message was handled, or %FALSE otherwise.
+     *
+     * Since: 2.28
+     */
+    signals[USER_MESSAGE_RECEIVED] = g_signal_new(
+        "user-message-received",
+        G_TYPE_FROM_CLASS(gObjectClass),
+        G_SIGNAL_RUN_LAST,
+        G_STRUCT_OFFSET(WebKitWebContextClass, user_message_received),
+        g_signal_accumulator_true_handled, nullptr,
+        g_cclosure_marshal_generic,
+        G_TYPE_BOOLEAN, 1,
+        WEBKIT_TYPE_USER_MESSAGE);
 }
 
 static gpointer createDefaultWebContext(gpointer)
@@ -681,7 +812,7 @@ void webkit_web_context_set_automation_allowed(WebKitWebContext* context, gboole
             g_warning("Not enabling automation on WebKitWebContext because there's another context with automation enabled, only one is allowed");
             return;
         }
-        context->priv->automationClient = std::make_unique<WebKitAutomationClient>(context);
+        context->priv->automationClient = makeUnique<WebKitAutomationClient>(context);
     } else
         context->priv->automationClient = nullptr;
 #endif
@@ -711,11 +842,9 @@ void webkit_web_context_set_automation_allowed(WebKitWebContext* context, gboole
  * specifying %WEBKIT_CACHE_MODEL_DOCUMENT_VIEWER. The default value is
  * %WEBKIT_CACHE_MODEL_WEB_BROWSER.
  */
-void webkit_web_context_set_cache_model(WebKitWebContext* context, WebKitCacheModel model)
+void webkit_web_context_set_cache_model(WebKitWebContext*, WebKitCacheModel model)
 {
     CacheModel cacheModel;
-
-    g_return_if_fail(WEBKIT_IS_WEB_CONTEXT(context));
 
     switch (model) {
     case WEBKIT_CACHE_MODEL_DOCUMENT_VIEWER:
@@ -731,8 +860,8 @@ void webkit_web_context_set_cache_model(WebKitWebContext* context, WebKitCacheMo
         g_assert_not_reached();
     }
 
-    if (cacheModel != context->priv->processPool->cacheModel())
-        context->priv->processPool->setCacheModel(cacheModel);
+    if (cacheModel != LegacyGlobalSettings::singleton().cacheModel())
+        LegacyGlobalSettings::singleton().setCacheModel(cacheModel);
 }
 
 /**
@@ -749,7 +878,7 @@ WebKitCacheModel webkit_web_context_get_cache_model(WebKitWebContext* context)
 {
     g_return_val_if_fail(WEBKIT_IS_WEB_CONTEXT(context), WEBKIT_CACHE_MODEL_WEB_BROWSER);
 
-    switch (context->priv->processPool->cacheModel()) {
+    switch (LegacyGlobalSettings::singleton().cacheModel()) {
     case CacheModel::DocumentViewer:
         return WEBKIT_CACHE_MODEL_DOCUMENT_VIEWER;
     case CacheModel::PrimaryWebBrowser:
@@ -777,7 +906,7 @@ void webkit_web_context_clear_cache(WebKitWebContext* context)
     OptionSet<WebsiteDataType> websiteDataTypes;
     websiteDataTypes.add(WebsiteDataType::MemoryCache);
     websiteDataTypes.add(WebsiteDataType::DiskCache);
-    auto& websiteDataStore = webkitWebsiteDataManagerGetDataStore(context->priv->websiteDataManager.get()).websiteDataStore();
+    auto& websiteDataStore = webkitWebsiteDataManagerGetDataStore(context->priv->websiteDataManager.get());
     websiteDataStore.removeData(websiteDataTypes, -WallTime::infinity(), [] { });
 }
 
@@ -797,29 +926,14 @@ void webkit_web_context_clear_cache(WebKitWebContext* context)
  * a valid #WebKitNetworkProxySettings; otherwise, @proxy_settings must be %NULL.
  *
  * Since: 2.16
+ *
+ * Deprecated: 2.32. Use webkit_website_data_manager_set_network_proxy_settings() instead.
  */
 void webkit_web_context_set_network_proxy_settings(WebKitWebContext* context, WebKitNetworkProxyMode proxyMode, WebKitNetworkProxySettings* proxySettings)
 {
     g_return_if_fail(WEBKIT_IS_WEB_CONTEXT(context));
-    g_return_if_fail((proxyMode != WEBKIT_NETWORK_PROXY_MODE_CUSTOM && !proxySettings) || (proxyMode == WEBKIT_NETWORK_PROXY_MODE_CUSTOM && proxySettings));
 
-    WebKitWebContextPrivate* priv = context->priv;
-    switch (proxyMode) {
-    case WEBKIT_NETWORK_PROXY_MODE_DEFAULT:
-        priv->processPool->setNetworkProxySettings({ });
-        break;
-    case WEBKIT_NETWORK_PROXY_MODE_NO_PROXY:
-        priv->processPool->setNetworkProxySettings(WebCore::SoupNetworkProxySettings(WebCore::SoupNetworkProxySettings::Mode::NoProxy));
-        break;
-    case WEBKIT_NETWORK_PROXY_MODE_CUSTOM:
-        const auto& settings = webkitNetworkProxySettingsGetNetworkProxySettings(proxySettings);
-        if (settings.isEmpty()) {
-            g_warning("Invalid attempt to set custom network proxy settings with an empty WebKitNetworkProxySettings. Use "
-                "WEBKIT_NETWORK_PROXY_MODE_NO_PROXY to not use any proxy or WEBKIT_NETWORK_PROXY_MODE_DEFAULT to use the default system settings");
-        } else
-            priv->processPool->setNetworkProxySettings(settings);
-        break;
-    }
+    webkit_website_data_manager_set_network_proxy_settings(context->priv->websiteDataManager.get(), proxyMode, proxySettings);
 }
 
 typedef HashMap<DownloadProxy*, GRefPtr<WebKitDownload> > DownloadsMap;
@@ -867,6 +981,23 @@ WebKitCookieManager* webkit_web_context_get_cookie_manager(WebKitWebContext* con
     return webkit_website_data_manager_get_cookie_manager(context->priv->websiteDataManager.get());
 }
 
+/**
+ * webkit_web_context_get_geolocation_manager:
+ * @context: a #WebKitWebContext
+ *
+ * Get the #WebKitGeolocationManager of @context.
+ *
+ * Returns: (transfer none): the #WebKitGeolocationManager of @context.
+ *
+ * Since: 2.26
+ */
+WebKitGeolocationManager* webkit_web_context_get_geolocation_manager(WebKitWebContext* context)
+{
+    g_return_val_if_fail(WEBKIT_IS_WEB_CONTEXT(context), nullptr);
+
+    return context->priv->geolocationManager.get();
+}
+
 static void ensureFaviconDatabase(WebKitWebContext* context)
 {
     WebKitWebContextPrivate* priv = context->priv;
@@ -874,31 +1005,6 @@ static void ensureFaviconDatabase(WebKitWebContext* context)
         return;
 
     priv->faviconDatabase = adoptGRef(webkitFaviconDatabaseCreate());
-}
-
-static void webkitWebContextEnableIconDatabasePrivateBrowsingIfNeeded(WebKitWebContext* context, WebKitWebView* webView)
-{
-    if (webkit_web_context_is_ephemeral(context))
-        return;
-    if (!webkit_web_view_is_ephemeral(webView))
-        return;
-
-    if (!context->priv->ephemeralPageCount && context->priv->faviconDatabase)
-        webkitFaviconDatabaseSetPrivateBrowsingEnabled(context->priv->faviconDatabase.get(), true);
-    context->priv->ephemeralPageCount++;
-}
-
-static void webkitWebContextDisableIconDatabasePrivateBrowsingIfNeeded(WebKitWebContext* context, WebKitWebView* webView)
-{
-    if (webkit_web_context_is_ephemeral(context))
-        return;
-    if (!webkit_web_view_is_ephemeral(webView))
-        return;
-
-    ASSERT(context->priv->ephemeralPageCount);
-    context->priv->ephemeralPageCount--;
-    if (!context->priv->ephemeralPageCount && context->priv->faviconDatabase)
-        webkitFaviconDatabaseSetPrivateBrowsingEnabled(context->priv->faviconDatabase.get(), false);
 }
 
 /**
@@ -941,10 +1047,7 @@ void webkit_web_context_set_favicon_database_directory(WebKitWebContext* context
         "WebpageIcons.db", nullptr));
 
     // Setting the path will cause the icon database to be opened.
-    webkitFaviconDatabaseOpen(priv->faviconDatabase.get(), FileSystem::stringFromFileSystemRepresentation(faviconDatabasePath.get()));
-
-    if (webkit_web_context_is_ephemeral(context))
-        webkitFaviconDatabaseSetPrivateBrowsingEnabled(priv->faviconDatabase.get(), true);
+    webkitFaviconDatabaseOpen(priv->faviconDatabase.get(), FileSystem::stringFromFileSystemRepresentation(faviconDatabasePath.get()), webkit_web_context_is_ephemeral(context));
 }
 
 /**
@@ -1018,31 +1121,12 @@ WebKitSecurityManager* webkit_web_context_get_security_manager(WebKitWebContext*
  * @directory: the directory to add
  *
  * Set an additional directory where WebKit will look for plugins.
+ *
+ * Deprecated: 2.32
  */
-void webkit_web_context_set_additional_plugins_directory(WebKitWebContext* context, const char* directory)
+void webkit_web_context_set_additional_plugins_directory(WebKitWebContext*, const char*)
 {
-    g_return_if_fail(WEBKIT_IS_WEB_CONTEXT(context));
-    g_return_if_fail(directory);
-
-#if ENABLE(NETSCAPE_PLUGIN_API)
-    context->priv->processPool->setAdditionalPluginsDirectory(FileSystem::stringFromFileSystemRepresentation(directory));
-#endif
-}
-
-static void destroyPluginList(GList* plugins)
-{
-    g_list_free_full(plugins, g_object_unref);
-}
-
-static void webkitWebContextGetPluginThread(GTask* task, gpointer object, gpointer /* taskData */, GCancellable*)
-{
-    GList* returnValue = 0;
-#if ENABLE(NETSCAPE_PLUGIN_API)
-    Vector<PluginModuleInfo> plugins = WEBKIT_WEB_CONTEXT(object)->priv->processPool->pluginInfoStore().plugins();
-    for (size_t i = 0; i < plugins.size(); ++i)
-        returnValue = g_list_prepend(returnValue, webkitPluginCreate(plugins[i]));
-#endif
-    g_task_return_pointer(task, returnValue, reinterpret_cast<GDestroyNotify>(destroyPluginList));
+    g_warning("webkit_web_context_set_additional_plugins_directory is deprecated and does nothing. Netscape plugins are no longer supported.");
 }
 
 /**
@@ -1056,13 +1140,17 @@ static void webkitWebContextGetPluginThread(GTask* task, gpointer object, gpoint
  *
  * When the operation is finished, @callback will be called. You can then call
  * webkit_web_context_get_plugins_finish() to get the result of the operation.
+ *
+ * Deprecated: 2.32
  */
 void webkit_web_context_get_plugins(WebKitWebContext* context, GCancellable* cancellable, GAsyncReadyCallback callback, gpointer userData)
 {
     g_return_if_fail(WEBKIT_IS_WEB_CONTEXT(context));
 
+    g_warning("webkit_web_context_get_plugins is deprecated and always returns an empty list. Netscape plugins are no longer supported.");
+
     GRefPtr<GTask> task = adoptGRef(g_task_new(context, cancellable, callback, userData));
-    g_task_run_in_thread(task.get(), webkitWebContextGetPluginThread);
+    g_task_return_pointer(task.get(), nullptr, nullptr);
 }
 
 /**
@@ -1075,11 +1163,13 @@ void webkit_web_context_get_plugins(WebKitWebContext* context, GCancellable* can
  *
  * Returns: (element-type WebKitPlugin) (transfer full): a #GList of #WebKitPlugin. You must free the #GList with
  *    g_list_free() and unref the #WebKitPlugin<!-- -->s with g_object_unref() when you're done with them.
+ *
+ * Deprecated: 2.32
  */
 GList* webkit_web_context_get_plugins_finish(WebKitWebContext* context, GAsyncResult* result, GError** error)
 {
-    g_return_val_if_fail(WEBKIT_IS_WEB_CONTEXT(context), 0);
-    g_return_val_if_fail(g_task_is_valid(result, context), 0);
+    g_return_val_if_fail(WEBKIT_IS_WEB_CONTEXT(context), nullptr);
+    g_return_val_if_fail(g_task_is_valid(result, context), nullptr);
 
     return static_cast<GList*>(g_task_propagate_pointer(G_TASK(result), error));
 }
@@ -1110,9 +1200,7 @@ GList* webkit_web_context_get_plugins_finish(WebKitWebContext* context, GAsyncRe
  *     const gchar  *path;
  *
  *     path = webkit_uri_scheme_request_get_path (request);
- *     if (!g_strcmp0 (path, "plugins")) {
- *         /<!-- -->* Create a GInputStream with the contents of plugins about page, and set its length to stream_length *<!-- -->/
- *     } else if (!g_strcmp0 (path, "memory")) {
+ *     if (!g_strcmp0 (path, "memory")) {
  *         /<!-- -->* Create a GInputStream with the contents of memory about page, and set its length to stream_length *<!-- -->/
  *     } else if (!g_strcmp0 (path, "applications")) {
  *         /<!-- -->* Create a GInputStream with the contents of applications about page, and set its length to stream_length *<!-- -->/
@@ -1141,10 +1229,21 @@ void webkit_web_context_register_uri_scheme(WebKitWebContext* context, const cha
     g_return_if_fail(scheme);
     g_return_if_fail(callback);
 
-    RefPtr<WebKitURISchemeHandler> handler = adoptRef(new WebKitURISchemeHandler(callback, userData, destroyNotify));
-    auto addResult = context->priv->uriSchemeHandlers.set(String::fromUTF8(scheme), handler.get());
-    if (addResult.isNewEntry)
-        context->priv->processPool->registerSchemeForCustomProtocol(String::fromUTF8(scheme));
+    auto canonicalizedScheme = WTF::URLParser::maybeCanonicalizeScheme(scheme);
+    if (!canonicalizedScheme) {
+        g_critical("Cannot register invalid URI scheme %s", scheme);
+        return;
+    }
+
+    if (WTF::URLParser::isSpecialScheme(canonicalizedScheme.value())) {
+        g_warning("Registering special URI scheme %s is no longer allowed", scheme);
+        return;
+    }
+
+    auto handler = WebKitURISchemeHandler::create(context, callback, userData, destroyNotify);
+    auto addResult = context->priv->uriSchemeHandlers.set(String::fromUTF8(scheme), WTFMove(handler));
+    for (auto* webView : context->priv->webViews.values())
+        webkitWebViewGetPage(webView).setURLSchemeHandlerForScheme(*addResult.iterator->value, String::fromUTF8(scheme));
 }
 
 /**
@@ -1171,6 +1270,21 @@ void webkit_web_context_set_sandbox_enabled(WebKitWebContext* context, gboolean 
     context->priv->processPool->setSandboxEnabled(enabled);
 }
 
+static bool pathIsBlocked(const char* path)
+{
+    static const Vector<CString, 4> blockedPrefixes = {
+        // These are recreated by bwrap and it doesn't make sense to try and rebind them.
+        "sys", "proc", "dev",
+        "", // All of `/` isn't acceptable.
+    };
+
+    if (!g_path_is_absolute(path))
+        return true;
+
+    GUniquePtr<char*> splitPath(g_strsplit(path, G_DIR_SEPARATOR_S, 3));
+    return blockedPrefixes.contains(splitPath.get()[1]);
+}
+
 /**
  * webkit_web_context_add_path_to_sandbox:
  * @context: a #WebKitWebContext
@@ -1181,6 +1295,9 @@ void webkit_web_context_set_sandbox_enabled(WebKitWebContext* context, gboolean 
  * has been created otherwise it will be silently ignored. It is a fatal error to
  * add paths after a web process has been spawned.
  *
+ * Paths in directories such as `/sys`, `/proc`, and `/dev` or all of `/`
+ * are not valid.
+ *
  * See also webkit_web_context_set_sandbox_enabled()
  *
  * Since: 2.26
@@ -1188,7 +1305,11 @@ void webkit_web_context_set_sandbox_enabled(WebKitWebContext* context, gboolean 
 void webkit_web_context_add_path_to_sandbox(WebKitWebContext* context, const char* path, gboolean readOnly)
 {
     g_return_if_fail(WEBKIT_IS_WEB_CONTEXT(context));
-    g_return_if_fail(g_path_is_absolute(path));
+
+    if (pathIsBlocked(path)) {
+        g_critical("Attempted to add disallowed path to sandbox: %s", path);
+        return;
+    }
 
     if (context->priv->processPool->processes().size())
         g_error("Sandbox paths cannot be changed after subprocesses were spawned.");
@@ -1347,18 +1468,14 @@ void webkit_web_context_set_preferred_languages(WebKitWebContext* context, const
  * @policy: a #WebKitTLSErrorsPolicy
  *
  * Set the TLS errors policy of @context as @policy
+ *
+ * Deprecated: 2.32. Use webkit_website_data_manager_set_tls_errors_policy() instead.
  */
 void webkit_web_context_set_tls_errors_policy(WebKitWebContext* context, WebKitTLSErrorsPolicy policy)
 {
     g_return_if_fail(WEBKIT_IS_WEB_CONTEXT(context));
 
-    if (context->priv->tlsErrorsPolicy == policy)
-        return;
-
-    context->priv->tlsErrorsPolicy = policy;
-    bool ignoreTLSErrors = policy == WEBKIT_TLS_ERRORS_POLICY_IGNORE;
-    if (context->priv->processPool->ignoreTLSErrors() != ignoreTLSErrors)
-        context->priv->processPool->setIgnoreTLSErrors(ignoreTLSErrors);
+    webkit_website_data_manager_set_tls_errors_policy(context->priv->websiteDataManager.get(), policy);
 }
 
 /**
@@ -1368,12 +1485,14 @@ void webkit_web_context_set_tls_errors_policy(WebKitWebContext* context, WebKitT
  * Get the TLS errors policy of @context
  *
  * Returns: a #WebKitTLSErrorsPolicy
+ *
+ * Deprecated: 2.32. Use webkit_website_data_manager_get_tls_errors_policy() instead.
  */
 WebKitTLSErrorsPolicy webkit_web_context_get_tls_errors_policy(WebKitWebContext* context)
 {
     g_return_val_if_fail(WEBKIT_IS_WEB_CONTEXT(context), WEBKIT_TLS_ERRORS_POLICY_IGNORE);
 
-    return context->priv->tlsErrorsPolicy;
+    return webkit_website_data_manager_get_tls_errors_policy(context->priv->websiteDataManager.get());
 }
 
 /**
@@ -1393,6 +1512,7 @@ void webkit_web_context_set_web_extensions_directory(WebKitWebContext* context, 
     g_return_if_fail(directory);
 
     context->priv->webExtensionsDirectory = directory;
+    context->priv->processPool->addSandboxPath(directory, SandboxPermission::ReadOnly);
 }
 
 /**
@@ -1434,12 +1554,9 @@ void webkit_web_context_set_web_extensions_initialization_user_data(WebKitWebCon
  *
  * Deprecated: 2.10. Use webkit_web_context_new_with_website_data_manager() instead.
  */
-void webkit_web_context_set_disk_cache_directory(WebKitWebContext* context, const char* directory)
+void webkit_web_context_set_disk_cache_directory(WebKitWebContext*, const char*)
 {
-    g_return_if_fail(WEBKIT_IS_WEB_CONTEXT(context));
-    g_return_if_fail(directory);
-
-    context->priv->processPool->configuration().setDiskCacheDirectory(FileSystem::pathByAppendingComponent(FileSystem::stringFromFileSystemRepresentation(directory), networkCacheSubdirectory));
+    g_warning("webkit_web_context_set_disk_cache_directory is deprecated and does nothing, use WebKitWebsiteDataManager instead");
 }
 #endif
 
@@ -1456,9 +1573,9 @@ void webkit_web_context_prefetch_dns(WebKitWebContext* context, const char* host
     g_return_if_fail(WEBKIT_IS_WEB_CONTEXT(context));
     g_return_if_fail(hostname);
 
-    API::Dictionary::MapType message;
-    message.set(String::fromUTF8("Hostname"), API::String::create(String::fromUTF8(hostname)));
-    context->priv->processPool->postMessageToInjectedBundle(String::fromUTF8("PrefetchDNS"), API::Dictionary::create(WTFMove(message)).ptr());
+    auto& websiteDataStore = webkitWebsiteDataManagerGetDataStore(context->priv->websiteDataManager.get());
+    websiteDataStore.networkProcess().send(Messages::NetworkProcess::PrefetchDNS(String::fromUTF8(hostname)), 0);
+    context->priv->dnsPrefetchHystereris.impulse();
 }
 
 /**
@@ -1478,7 +1595,8 @@ void webkit_web_context_allow_tls_certificate_for_host(WebKitWebContext* context
     g_return_if_fail(host);
 
     auto webCertificateInfo = WebCertificateInfo::create(WebCore::CertificateInfo(certificate, static_cast<GTlsCertificateFlags>(0)));
-    context->priv->processPool->allowSpecificHTTPSCertificateForHost(webCertificateInfo.ptr(), String::fromUTF8(host));
+    auto& websiteDataStore = webkitWebsiteDataManagerGetDataStore(context->priv->websiteDataManager.get());
+    websiteDataStore.allowSpecificHTTPSCertificateForHost(webCertificateInfo.ptr(), String::fromUTF8(host));
 }
 
 /**
@@ -1487,20 +1605,18 @@ void webkit_web_context_allow_tls_certificate_for_host(WebKitWebContext* context
  * @process_model: a #WebKitProcessModel
  *
  * Specifies a process model for WebViews, which WebKit will use to
- * determine how auxiliary processes are handled. The default setting
- * (%WEBKIT_PROCESS_MODEL_SHARED_SECONDARY_PROCESS) is suitable for most
- * applications which embed a small amount of WebViews, or are used to
- * display documents which are considered safe — like local files.
+ * determine how auxiliary processes are handled.
  *
- * Applications which may potentially use a large amount of WebViews
- * —for example a multi-tabbed web browser— may want to use
- * %WEBKIT_PROCESS_MODEL_MULTIPLE_SECONDARY_PROCESSES, which will use
+ * %WEBKIT_PROCESS_MODEL_MULTIPLE_SECONDARY_PROCESSES will use
  * one process per view most of the time, while still allowing for web
  * views to share a process when needed (for example when different
  * views interact with each other). Using this model, when a process
  * hangs or crashes, only the WebViews using it stop working, while
  * the rest of the WebViews in the application will still function
  * normally.
+ *
+ * %WEBKIT_PROCESS_MODEL_SHARED_SECONDARY_PROCESS is deprecated since 2.26,
+ * using it has no effect for security reasons.
  *
  * This method **must be called before any web process has been created**,
  * as early as possible in your application. Calling it later will make
@@ -1511,6 +1627,11 @@ void webkit_web_context_allow_tls_certificate_for_host(WebKitWebContext* context
 void webkit_web_context_set_process_model(WebKitWebContext* context, WebKitProcessModel processModel)
 {
     g_return_if_fail(WEBKIT_IS_WEB_CONTEXT(context));
+
+    if (processModel == WEBKIT_PROCESS_MODEL_SHARED_SECONDARY_PROCESS) {
+        g_warning("WEBKIT_PROCESS_MODEL_SHARED_SECONDARY_PROCESS is deprecated and has no effect");
+        return;
+    }
 
     if (processModel == context->priv->processModel)
         return;
@@ -1531,7 +1652,7 @@ void webkit_web_context_set_process_model(WebKitWebContext* context, WebKitProce
  */
 WebKitProcessModel webkit_web_context_get_process_model(WebKitWebContext* context)
 {
-    g_return_val_if_fail(WEBKIT_IS_WEB_CONTEXT(context), WEBKIT_PROCESS_MODEL_SHARED_SECONDARY_PROCESS);
+    g_return_val_if_fail(WEBKIT_IS_WEB_CONTEXT(context), WEBKIT_PROCESS_MODEL_MULTIPLE_SECONDARY_PROCESSES);
 
     return context->priv->processModel;
 }
@@ -1544,20 +1665,17 @@ WebKitProcessModel webkit_web_context_get_process_model(WebKitWebContext* contex
  * Sets the maximum number of web processes that can be created at the same time for the @context.
  * The default value is 0 and means no limit.
  *
- * This method **must be called before any web process has been created**,
- * as early as possible in your application. Calling it later will make
- * your application crash.
+ * This function is now deprecated and does nothing for security reasons.
  *
  * Since: 2.10
+ *
+ * Deprecated: 2.26
  */
 void webkit_web_context_set_web_process_count_limit(WebKitWebContext* context, guint limit)
 {
     g_return_if_fail(WEBKIT_IS_WEB_CONTEXT(context));
 
-    if (context->priv->processCountLimit == limit)
-        return;
-
-    context->priv->processCountLimit = limit;
+    g_warning("webkit_web_context_set_web_process_count_limit is deprecated and does nothing. Limiting the number of web processes is no longer possible for security reasons");
 }
 
 /**
@@ -1566,15 +1684,19 @@ void webkit_web_context_set_web_process_count_limit(WebKitWebContext* context, g
  *
  * Gets the maximum number of web processes that can be created at the same time for the @context.
  *
+ * This function is now deprecated and always returns 0 (no limit). See also webkit_web_context_set_web_process_count_limit().
+ *
  * Returns: the maximum limit of web processes, or 0 if there isn't a limit.
  *
  * Since: 2.10
+ *
+ * Deprecated: 2.26
  */
 guint webkit_web_context_get_web_process_count_limit(WebKitWebContext* context)
 {
     g_return_val_if_fail(WEBKIT_IS_WEB_CONTEXT(context), 0);
 
-    return context->priv->processCountLimit;
+    return 0;
 }
 
 static void addOriginToMap(WebKitSecurityOrigin* origin, HashMap<String, bool>* map, bool allowed)
@@ -1620,6 +1742,72 @@ void webkit_web_context_initialize_notification_permissions(WebKitWebContext* co
     context->priv->notificationProvider->setNotificationPermissions(WTFMove(map));
 }
 
+/**
+ * webkit_web_context_send_message_to_all_extensions:
+ * @context: the #WebKitWebContext
+ * @message: a #WebKitUserMessage
+ *
+ * Send @message to all #WebKitWebExtension<!-- -->s associated to @context.
+ * If @message is floating, it's consumed.
+ *
+ * Since: 2.28
+ */
+void webkit_web_context_send_message_to_all_extensions(WebKitWebContext* context, WebKitUserMessage* message)
+{
+    g_return_if_fail(WEBKIT_IS_WEB_CONTEXT(context));
+    g_return_if_fail(WEBKIT_IS_USER_MESSAGE(message));
+
+    // We sink the reference in case of being floating.
+    GRefPtr<WebKitUserMessage> adoptedMessage = message;
+    for (auto& process : context->priv->processPool->processes())
+        process->send(Messages::WebProcess::SendMessageToWebExtension(webkitUserMessageGetMessage(message)), 0);
+}
+
+#if PLATFORM(GTK) && !USE(GTK4)
+/**
+ * webkit_web_context_set_use_system_appearance_for_scrollbars:
+ * @context: a #WebKitWebContext
+ * @enabled: value to set
+ *
+ * Set the #WebKitWebContext:use-system-appearance-for-scrollbars property.
+ *
+ * Since: 2.30
+ */
+void webkit_web_context_set_use_system_appearance_for_scrollbars(WebKitWebContext* context, gboolean enabled)
+{
+    g_return_if_fail(WEBKIT_IS_WEB_CONTEXT(context));
+
+    if (context->priv->useSystemAppearanceForScrollbars == enabled)
+        return;
+
+    context->priv->useSystemAppearanceForScrollbars = enabled;
+    g_object_notify(G_OBJECT(context), "use-system-appearance-for-scrollbars");
+
+    if (!context->priv->processPool)
+        return;
+
+    context->priv->processPool->configuration().setUseSystemAppearanceForScrollbars(enabled);
+    context->priv->processPool->sendToAllProcesses(Messages::WebProcess::SetUseSystemAppearanceForScrollbars(enabled));
+}
+
+/**
+ * webkit_web_context_get_use_system_appearance_for_scrollbars:
+ * @context: a #WebKitWebContext
+ *
+ * Get the #WebKitWebContext:use-system-appearance-for-scrollbars property.
+ *
+ * Returns: %TRUE if scrollbars are rendering using the system appearance, or %FALSE otherwise
+ *
+ * Since: 2.30
+ */
+gboolean webkit_web_context_get_use_system_appearance_for_scrollbars(WebKitWebContext* context)
+{
+    g_return_val_if_fail(WEBKIT_IS_WEB_CONTEXT(context), TRUE);
+
+    return context->priv->useSystemAppearanceForScrollbars;
+}
+#endif
+
 void webkitWebContextInitializeNotificationPermissions(WebKitWebContext* context)
 {
     g_signal_emit(context, signals[INITIALIZE_NOTIFICATION_PERMISSIONS], 0);
@@ -1639,7 +1827,8 @@ WebKitDownload* webkitWebContextGetOrCreateDownload(DownloadProxy* downloadProxy
 WebKitDownload* webkitWebContextStartDownload(WebKitWebContext* context, const char* uri, WebPageProxy* initiatingPage)
 {
     WebCore::ResourceRequest request(String::fromUTF8(uri));
-    return webkitWebContextGetOrCreateDownload(context->priv->processPool->download(initiatingPage, request));
+    auto& websiteDataStore = webkitWebsiteDataManagerGetDataStore(context->priv->websiteDataManager.get());
+    return webkitWebContextGetOrCreateDownload(&context->priv->processPool->download(websiteDataStore, initiatingPage, request));
 }
 
 void webkitWebContextRemoveDownload(DownloadProxy* downloadProxy)
@@ -1667,51 +1856,8 @@ WebProcessPool& webkitWebContextGetProcessPool(WebKitWebContext* context)
     return *context->priv->processPool;
 }
 
-void webkitWebContextStartLoadingCustomProtocol(WebKitWebContext* context, uint64_t customProtocolID, const WebCore::ResourceRequest& resourceRequest, LegacyCustomProtocolManagerProxy& manager)
+void webkitWebContextCreatePageForWebView(WebKitWebContext* context, WebKitWebView* webView, WebKitUserContentManager* userContentManager, WebKitWebView* relatedView, WebKitWebsitePolicies* defaultWebsitePolicies)
 {
-    GRefPtr<WebKitURISchemeRequest> request = adoptGRef(webkitURISchemeRequestCreate(customProtocolID, context, resourceRequest, manager));
-    String scheme(String::fromUTF8(webkit_uri_scheme_request_get_scheme(request.get())));
-    RefPtr<WebKitURISchemeHandler> handler = context->priv->uriSchemeHandlers.get(scheme);
-    ASSERT(handler.get());
-    if (!handler->hasCallback())
-        return;
-
-    context->priv->uriSchemeRequests.set(customProtocolID, request.get());
-    handler->performCallback(request.get());
-}
-
-void webkitWebContextStopLoadingCustomProtocol(WebKitWebContext* context, uint64_t customProtocolID)
-{
-    GRefPtr<WebKitURISchemeRequest> request = context->priv->uriSchemeRequests.get(customProtocolID);
-    if (!request.get())
-        return;
-    webkitURISchemeRequestCancel(request.get());
-}
-
-void webkitWebContextInvalidateCustomProtocolRequests(WebKitWebContext* context, LegacyCustomProtocolManagerProxy& manager)
-{
-    for (auto& request : copyToVector(context->priv->uriSchemeRequests.values())) {
-        if (webkitURISchemeRequestGetManager(request.get()) == &manager)
-            webkitURISchemeRequestInvalidate(request.get());
-    }
-}
-
-void webkitWebContextDidFinishLoadingCustomProtocol(WebKitWebContext* context, uint64_t customProtocolID)
-{
-    context->priv->uriSchemeRequests.remove(customProtocolID);
-}
-
-bool webkitWebContextIsLoadingCustomProtocol(WebKitWebContext* context, uint64_t customProtocolID)
-{
-    return context->priv->uriSchemeRequests.get(customProtocolID);
-}
-
-void webkitWebContextCreatePageForWebView(WebKitWebContext* context, WebKitWebView* webView, WebKitUserContentManager* userContentManager, WebKitWebView* relatedView)
-{
-    // FIXME: icon database private mode is global, not per page, so while there are
-    // pages in private mode we need to enable the private mode in the icon database.
-    webkitWebContextEnableIconDatabasePrivateBrowsingIfNeeded(context, webView);
-
     auto pageConfiguration = API::PageConfiguration::create();
     pageConfiguration->setProcessPool(context->priv->processPool.get());
     pageConfiguration->setPreferences(webkitSettingsGetPreferences(webkit_web_view_get_settings(webView)));
@@ -1723,19 +1869,24 @@ void webkitWebContextCreatePageForWebView(WebKitWebContext* context, WebKitWebVi
     if (!manager)
         manager = context->priv->websiteDataManager.get();
     pageConfiguration->setWebsiteDataStore(&webkitWebsiteDataManagerGetDataStore(manager));
-    pageConfiguration->setSessionID(pageConfiguration->websiteDataStore()->websiteDataStore().sessionID());
+    pageConfiguration->setDefaultWebsitePolicies(webkitWebsitePoliciesGetWebsitePolicies(defaultWebsitePolicies));
     webkitWebViewCreatePage(webView, WTFMove(pageConfiguration));
 
-    context->priv->webViews.set(webkit_web_view_get_page_id(webView), webView);
+    auto& page = webkitWebViewGetPage(webView);
+    for (auto& it : context->priv->uriSchemeHandlers) {
+        Ref<WebURLSchemeHandler> handler(*it.value);
+        page.setURLSchemeHandlerForScheme(WTFMove(handler), it.key);
+    }
+
+    context->priv->webViews.set(page.identifier(), webView);
 }
 
 void webkitWebContextWebViewDestroyed(WebKitWebContext* context, WebKitWebView* webView)
 {
-    webkitWebContextDisableIconDatabasePrivateBrowsingIfNeeded(context, webView);
-    context->priv->webViews.remove(webkit_web_view_get_page_id(webView));
+    context->priv->webViews.remove(webkitWebViewGetPage(webView).identifier());
 }
 
 WebKitWebView* webkitWebContextGetWebViewForPage(WebKitWebContext* context, WebPageProxy* page)
 {
-    return page ? context->priv->webViews.get(page->pageID()) : 0;
+    return page ? context->priv->webViews.get(page->identifier()) : nullptr;
 }

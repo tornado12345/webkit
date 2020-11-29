@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,12 +23,14 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef RemoteObjectRegistry_h
-#define RemoteObjectRegistry_h
+#pragma once
 
 #include "MessageReceiver.h"
 #include "ProcessThrottler.h"
-#include <wtf/Function.h>
+#include "WebPageProxyIdentifier.h"
+#include <wtf/HashMap.h>
+#include <wtf/WeakObjCPtr.h>
+#include <wtf/WeakPtr.h>
 
 OBJC_CLASS _WKRemoteObjectRegistry;
 
@@ -40,22 +42,24 @@ namespace WebKit {
 
 class RemoteObjectInvocation;
 class UserData;
-class WebPage;
-class WebPageProxy;
 
-class RemoteObjectRegistry final : public IPC::MessageReceiver {
+class RemoteObjectRegistry : public CanMakeWeakPtr<RemoteObjectRegistry>, public IPC::MessageReceiver {
     WTF_MAKE_FAST_ALLOCATED;
 public:
-    RemoteObjectRegistry(_WKRemoteObjectRegistry *, WebPage&);
-    RemoteObjectRegistry(_WKRemoteObjectRegistry *, WebPageProxy&);
+    virtual ~RemoteObjectRegistry();
 
-    ~RemoteObjectRegistry();
-
-    void sendInvocation(const RemoteObjectInvocation&);
+    virtual void sendInvocation(const RemoteObjectInvocation&);
     void sendReplyBlock(uint64_t replyID, const UserData& blockInvocation);
     void sendUnusedReply(uint64_t replyID);
 
+protected:
+    explicit RemoteObjectRegistry(_WKRemoteObjectRegistry *);
+    
 private:
+    virtual std::unique_ptr<ProcessThrottler::BackgroundActivity> backgroundActivity(ASCIILiteral) { return nullptr; }
+    virtual IPC::MessageSender& messageSender() = 0;
+    virtual uint64_t messageDestinationID() = 0;
+
     // IPC::MessageReceiver
     void didReceiveMessage(IPC::Connection&, IPC::Decoder&) override;
 
@@ -64,12 +68,8 @@ private:
     void callReplyBlock(uint64_t replyID, const UserData& blockInvocation);
     void releaseUnusedReplyBlock(uint64_t replyID);
 
-    _WKRemoteObjectRegistry *m_remoteObjectRegistry;
-    IPC::MessageSender& m_messageSender;
-    WTF::Function<ProcessThrottler::BackgroundActivityToken()> m_takeBackgroundActivityToken;
-    HashMap<uint64_t, ProcessThrottler::BackgroundActivityToken> m_pendingReplies;
+    WeakObjCPtr<_WKRemoteObjectRegistry> m_remoteObjectRegistry;
+    HashMap<uint64_t, std::unique_ptr<ProcessThrottler::BackgroundActivity>> m_pendingReplies;
 };
 
 } // namespace WebKit
-
-#endif // RemoteObjectRegistry_h

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -37,9 +37,17 @@
 #import "WebProcessPool.h"
 #import <sys/sysctl.h>
 #import <wtf/NeverDestroyed.h>
+#import <wtf/Scope.h>
+#import <wtf/cocoa/VectorCocoa.h>
 #import <wtf/spi/darwin/SandboxSPI.h>
 
+#if ENABLE(REMOTE_INSPECTOR)
+#import <JavaScriptCore/RemoteInspectorConstants.h>
+#endif
+
 namespace WebKit {
+
+static const Seconds unexpectedActivityDuration = 10_s;
 
 const HashSet<String>& WebProcessProxy::platformPathsWithAssumedReadAccess()
 {
@@ -74,7 +82,7 @@ RefPtr<ObjCObjectGraph> WebProcessProxy::transformHandlesToObjects(ObjCObjectGra
         RetainPtr<id> transformObject(id object) const override
         {
             if (auto* handle = dynamic_objc_cast<WKBrowsingContextHandle>(object)) {
-                if (auto* webPageProxy = m_webProcessProxy.webPage(handle.pageID)) {
+                if (auto* webPageProxy = m_webProcessProxy.webPage(handle.pageProxyID)) {
                     ALLOW_DEPRECATED_DECLARATIONS_BEGIN
                     return [WKBrowsingContextController _browsingContextControllerForPageRef:toAPI(webPageProxy)];
                     ALLOW_DEPRECATED_DECLARATIONS_END
@@ -168,7 +176,7 @@ void WebProcessProxy::cacheMediaMIMETypesInternal(const Vector<String>& types)
     send(Messages::WebProcess::SetMediaMIMETypes(types), 0);
 }
 
-Vector<String> WebProcessProxy::mediaMIMETypes()
+Vector<String> WebProcessProxy::mediaMIMETypes() const
 {
     return mediaTypeCache();
 }
@@ -186,5 +194,64 @@ void WebProcessProxy::releaseHighPerformanceGPU()
     HighPerformanceGPUManager::singleton().removeProcessRequiringHighPerformance(this);
 }
 #endif
+
+#if ENABLE(REMOTE_INSPECTOR)
+void WebProcessProxy::enableRemoteInspectorIfNeeded()
+{
+    if (!CFPreferencesGetAppIntegerValue(WIRRemoteInspectorEnabledKey, WIRRemoteInspectorDomainName, nullptr))
+        return;
+    SandboxExtension::Handle handle;
+    auto auditToken = connection() ? connection()->getAuditToken() : WTF::nullopt;
+    if (SandboxExtension::createHandleForMachLookup("com.apple.webinspector"_s, auditToken, handle))
+        send(Messages::WebProcess::EnableRemoteWebInspector(handle), 0);
+}
+#endif
+
+void WebProcessProxy::unblockAccessibilityServerIfNeeded()
+{
+    if (m_hasSentMessageToUnblockAccessibilityServer)
+        return;
+#if PLATFORM(IOS_FAMILY)
+    if (!_AXSApplicationAccessibilityEnabled())
+        return;
+#endif
+    if (!processIdentifier())
+        return;
+    if (!canSendMessage())
+        return;
+
+    SandboxExtension::HandleArray handleArray;
+#if PLATFORM(IOS_FAMILY)
+    handleArray = SandboxExtension::createHandlesForMachLookup({ "com.apple.iphone.axserver-systemwide"_s, "com.apple.frontboard.systemappservices"_s }, connection() ? connection()->getAuditToken() : WTF::nullopt);
+    ASSERT(handleArray.size() == 2);
+#endif
+
+    send(Messages::WebProcess::UnblockServicesRequiredByAccessibility(handleArray), 0);
+    m_hasSentMessageToUnblockAccessibilityServer = true;
+}
+
+#if ENABLE(CFPREFS_DIRECT_MODE)
+void WebProcessProxy::unblockPreferenceServiceIfNeeded()
+{
+    if (m_hasSentMessageToUnblockPreferenceService)
+        return;
+    if (!processIdentifier())
+        return;
+    if (!canSendMessage())
+        return;
+
+    auto handleArray = SandboxExtension::createHandlesForMachLookup({ "com.apple.cfprefsd.agent"_s, "com.apple.cfprefsd.daemon"_s }, connection() ? connection()->getAuditToken() : WTF::nullopt);
+    ASSERT(handleArray.size() == 2);
+    
+    send(Messages::WebProcess::UnblockPreferenceService(WTFMove(handleArray)), 0);
+    m_hasSentMessageToUnblockPreferenceService = true;
+}
+#endif
+
+Vector<String> WebProcessProxy::platformOverrideLanguages() const
+{
+    static const NeverDestroyed<Vector<String>> overrideLanguages = makeVector<String>([[NSUserDefaults standardUserDefaults] valueForKey:@"AppleLanguages"]);
+    return overrideLanguages;
+}
 
 }

@@ -4,8 +4,26 @@
 description: |
     Collection of functions used to safely verify the correctness of
     property descriptors.
+defines:
+  - verifyProperty
+  - verifyEqualTo
+  - verifyWritable
+  - verifyNotWritable
+  - verifyEnumerable
+  - verifyNotEnumerable
+  - verifyConfigurable
+  - verifyNotConfigurable
 ---*/
 
+// @ts-check
+
+/**
+ * @param {object} obj
+ * @param {string|symbol} name
+ * @param {PropertyDescriptor|undefined} desc
+ * @param {object} [options]
+ * @param {boolean} [options.restore]
+ */
 function verifyProperty(obj, name, desc, options) {
   assert(
     arguments.length > 2,
@@ -47,7 +65,7 @@ function verifyProperty(obj, name, desc, options) {
   var failures = [];
 
   if (Object.prototype.hasOwnProperty.call(desc, 'value')) {
-    if (desc.value !== originalDesc.value) {
+    if (!isSameValue(desc.value, originalDesc.value)) {
       failures.push("descriptor value should be " + desc.value);
     }
   }
@@ -83,6 +101,7 @@ function verifyProperty(obj, name, desc, options) {
 }
 
 function isConfigurable(obj, name) {
+  var hasOwnProperty = Object.prototype.hasOwnProperty;
   try {
     delete obj[name];
   } catch (e) {
@@ -90,7 +109,7 @@ function isConfigurable(obj, name) {
       $ERROR("Expected TypeError, got " + e);
     }
   }
-  return !Object.prototype.hasOwnProperty.call(obj, name);
+  return !hasOwnProperty.call(obj, name);
 }
 
 function isEnumerable(obj, name) {
@@ -113,14 +132,19 @@ function isEnumerable(obj, name) {
     Object.prototype.propertyIsEnumerable.call(obj, name);
 }
 
-function isEqualTo(obj, name, expectedValue) {
-  var actualValue = obj[name];
+function isSameValue(a, b) {
+  if (a === 0 && b === 0) return 1 / a === 1 / b;
+  if (a !== a && b !== b) return true;
 
-  return assert._isSameValue(actualValue, expectedValue);
+  return a === b;
 }
 
+var __isArray = Array.isArray;
 function isWritable(obj, name, verifyProp, value) {
-  var newValue = value || "unlikelyValue";
+  var unlikelyValue = __isArray(obj) && name === "length" ?
+    Math.pow(2, 32) - 1 :
+    "unlikelyValue";
+  var newValue = value || unlikelyValue;
   var hadValue = Object.prototype.hasOwnProperty.call(obj, name);
   var oldValue = obj[name];
   var writeSucceeded;
@@ -133,7 +157,7 @@ function isWritable(obj, name, verifyProp, value) {
     }
   }
 
-  writeSucceeded = isEqualTo(obj, verifyProp || name, newValue);
+  writeSucceeded = isSameValue(obj[verifyProp || name], newValue);
 
   // Revert the change only if it was successful (in other cases, reverting
   // is unnecessary and may trigger exceptions for certain property
@@ -150,7 +174,7 @@ function isWritable(obj, name, verifyProp, value) {
 }
 
 function verifyEqualTo(obj, name, value) {
-  if (!isEqualTo(obj, name, value)) {
+  if (!isSameValue(obj[name], value)) {
     $ERROR("Expected obj[" + String(name) + "] to equal " + value +
            ", actually " + obj[name]);
   }

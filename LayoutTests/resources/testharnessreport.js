@@ -22,11 +22,15 @@ if (self.testRunner) {
     if (testRunner.timeout && (location.port == 8800 || location.port == 9443))
         setTimeout(timeout, testRunner.timeout * 0.9);
 
-    // Make WebAudio map to webkitWebAudio for WPT tests
     if (location.port == 8800 || location.port == 9443) {
-        self.AudioContext = self.webkitAudioContext;
-        self.OfflineAudioContext = self.webkitOfflineAudioContext;
+        if (self.internals) {
+            // Use 44100 sample rate by default instead of the hardware sample rate so that we get consistent results across machines.
+            internals.settings.setDefaultAudioContextSampleRate(44100);
+        }
     }
+
+    if (testRunner.setStatisticsShouldDowngradeReferrer) 
+       testRunner.setStatisticsShouldDowngradeReferrer(false, function() { });
 }
 
 if (self.internals && internals.setICECandidateFiltering)
@@ -58,7 +62,6 @@ if (self.testRunner) {
     *   manner that allows dumpAsText to produce readable test results
     */
     add_completion_callback(function (tests, harness_status) {
-        var results = document.createElement("pre");
         var resultStr = "\n";
 
         // Sanitizes the given text for display in test results.
@@ -73,6 +76,9 @@ if (self.testRunner) {
         if(harness_status.status != 0)
             resultStr += "Harness Error (" + convertResult(harness_status.status) + "), message = " + harness_status.message + "\n\n";
 
+        // Strip arrays from output in webaudio tests to avoid test flakiness due to floating point precision issues.
+        const shouldStripArraysFromPassLines = document.URL.indexOf('/webaudio') >= 0;
+
         for (var i = 0; i < tests.length; i++) {
             var message = sanitize(tests[i].message);
             if (tests[i].status == 1 && !tests[i].dumpStack) {
@@ -82,20 +88,49 @@ if (self.testRunner) {
                 if (stackIndex > 0)
                     message = message.substr(0, stackIndex);
             }
-            resultStr += convertResult(tests[i].status) + " " + sanitize(tests[i].name) + " " + message + "\n";
+ 
+            let testName = tests[i].name;
+            if (tests[i].status == 0 && shouldStripArraysFromPassLines)
+                  testName = testName.replace(/\[[0-9.,\-e]*[0-9]\.[0-9]{7,}[0-9.,\-e]*\]/, "[expected array]");
+
+            resultStr += convertResult(tests[i].status) + " " + sanitize(testName) + " " + message + "\n";
         }
 
+        var results = document.createElementNS("http://www.w3.org/1999/xhtml", "pre");
         results.innerText = resultStr;
+
         var log = document.getElementById("log");
         if (log)
             log.appendChild(results);
-        else
+        else if (document.body)
             document.body.appendChild(results);
+        else {
+            var root = document.documentElement;
+            var is_html = root
+                    && root.namespaceURI == "http://www.w3.org/1999/xhtml"
+                    && root.localName == "html";
+            var is_svg = document.defaultView
+                    && "SVGSVGElement" in document.defaultView
+                    && root instanceof document.defaultView.SVGSVGElement;
+
+            if (is_svg) {
+                var foreignObject = document.createElementNS("http://www.w3.org/2000/svg", "foreignObject");
+                foreignObject.setAttribute("width", "100%");
+                foreignObject.setAttribute("height", "100%");
+                root.appendChild(foreignObject);
+                foreignObject.appendChild(results);
+            } else if (is_html) {
+                root.appendChild(document.createElementNS("http://www.w3.org/1999/xhtml", "body"))
+                    .appendChild(results);
+            } else {
+                root.appendChild(results);
+            }
+        }
 
         // Wait for any other completion callbacks, which may eliminate test elements
         // from the page and therefore reduce the output.
         setTimeout(function () {
-            testRunner.notifyDone();
+            testRunner.forceImmediateCompletion();
         }, 0);
     });
 }

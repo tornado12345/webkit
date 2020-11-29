@@ -26,7 +26,7 @@
 #import "config.h"
 #import "PaymentAuthorizationViewController.h"
 
-#if USE(PASSKIT)
+#if USE(PASSKIT) && ENABLE(APPLE_PAY)
 
 #import "WKPaymentAuthorizationDelegate.h"
 #import <pal/cocoa/PassKitSoftLink.h>
@@ -47,14 +47,17 @@
     return self;
 }
 
+- (void)_getPaymentServicesMerchantURL:(void(^)(NSURL *, NSError *))completion
+{
+    [PAL::getPKPaymentAuthorizationViewControllerClass() paymentServicesMerchantURLForAPIType:[_request APIType] completion:completion];
+}
+
 #pragma mark PKPaymentAuthorizationViewControllerDelegate
 
 - (void)paymentAuthorizationViewControllerDidFinish:(PKPaymentAuthorizationViewController *)controller
 {
     [self _didFinish];
 }
-
-#if HAVE(PASSKIT_GRANULAR_ERRORS)
 
 - (void)paymentAuthorizationViewController:(PKPaymentAuthorizationViewController *)controller didAuthorizePayment:(PKPayment *)payment handler:(void (^)(PKPaymentAuthorizationResult *result))completion
 {
@@ -76,30 +79,6 @@
     [self _didSelectPaymentMethod:paymentMethod completion:completion];
 }
 
-#else
-
-- (void)paymentAuthorizationViewController:(PKPaymentAuthorizationViewController *)controller didAuthorizePayment:(PKPayment *)payment completion:(void(^)(PKPaymentAuthorizationStatus))completion
-{
-    [self _didAuthorizePayment:payment completion:completion];
-}
-
-- (void)paymentAuthorizationViewController:(PKPaymentAuthorizationViewController *)controller didSelectShippingMethod:(PKShippingMethod *)shippingMethod completion:(void(^)(PKPaymentAuthorizationStatus, NSArray<PKPaymentSummaryItem *> *))completion
-{
-    [self _didSelectShippingMethod:shippingMethod completion:completion];
-}
-
-- (void)paymentAuthorizationViewController:(PKPaymentAuthorizationViewController *)controller didSelectShippingContact:(PKContact *)contact completion:(void(^)(PKPaymentAuthorizationStatus, NSArray<PKShippingMethod *> *, NSArray<PKPaymentSummaryItem *> *))completion
-{
-    [self _didSelectShippingContact:contact completion:completion];
-}
-
-- (void)paymentAuthorizationViewController:(PKPaymentAuthorizationViewController *)controller didSelectPaymentMethod:(PKPaymentMethod *)paymentMethod completion:(void(^)(NSArray<PKPaymentSummaryItem *> *))completion
-{
-    [self _didSelectPaymentMethod:paymentMethod completion:completion];
-}
-
-#endif
-
 #pragma mark PKPaymentAuthorizationViewControllerDelegatePrivate
 
 - (void)paymentAuthorizationViewController:(PKPaymentAuthorizationViewController *)controller willFinishWithError:(NSError *)error
@@ -107,10 +86,12 @@
     [self _willFinishWithError:error];
 }
 
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 - (void)paymentAuthorizationViewController:(PKPaymentAuthorizationViewController *)controller didRequestMerchantSession:(void(^)(PKPaymentMerchantSession *, NSError *))completion
 {
     [self _didRequestMerchantSession:completion];
 }
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 
 @end
 
@@ -167,4 +148,4 @@ void PaymentAuthorizationViewController::present(UIViewController *presentingVie
 
 } // namespace WebKit
 
-#endif // USE(PASSKIT)
+#endif // USE(PASSKIT) && ENABLE(APPLE_PAY)

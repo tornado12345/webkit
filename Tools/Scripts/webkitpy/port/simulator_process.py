@@ -22,9 +22,11 @@
 
 
 import os
+import sys
 import time
 
-from webkitpy.common.timeout_context import Timeout
+from webkitcorepy import Timeout
+
 from webkitpy.port.server_process import ServerProcess
 
 
@@ -66,13 +68,19 @@ class SimulatorProcess(ServerProcess):
             return getattr(self._file, name)
 
         def close(self):
-            result = self._file.close()
-            self.socket.close()
-            return result
+            try:
+                result = self._file.close()
+                # Closing the file implicitly closes the socket in Python 3
+                if sys.version_info < (3, 0):
+                    self.socket.close()
+                return result
+            except IOError:
+                # If the file descriptor is bad, we don't have to worry about closing it
+                pass
 
-    def __init__(self, port_obj, name, cmd, env=None, universal_newlines=False, treat_no_data_as_crash=False, target_host=None):
+    def __init__(self, port_obj, name, cmd, env=None, universal_newlines=False, treat_no_data_as_crash=False, target_host=None, crash_message=None):
         env['PORT'] = str(target_host.listening_port())  # The target_host should be a device.
-        super(SimulatorProcess, self).__init__(port_obj, name, cmd, env, universal_newlines, treat_no_data_as_crash, target_host)
+        super(SimulatorProcess, self).__init__(port_obj, name, cmd, env, universal_newlines, treat_no_data_as_crash, target_host, crash_message, allow_emulation=False)
 
         self._bundle_id = port_obj.app_identifier_from_bundle(cmd[0])
 
@@ -94,14 +102,16 @@ class SimulatorProcess(ServerProcess):
         # 3 client connections will be accepted for stdin, stdout and stderr in that order.
         self._target_host.listening_socket.listen(3)
         self._pid = self._target_host.launch_app(self._bundle_id, self._cmd[1:], env=self._env)
+        self._system_pid = self._pid
 
-        with Timeout(15, RuntimeError('Timed out waiting for pid {} to connect at port {}'.format(self._pid, self._target_host.listening_port()))):
+        # FIXME <rdar://problem/57032042>: This timeout should be 15 seconds
+        with Timeout(30, handler=RuntimeError('Timed out waiting for pid {} to connect at port {}'.format(self._pid, self._target_host.listening_port())), patch=False):
             stdin = None
             stdout = None
             stderr = None
             try:
                 # This order matches the client side connections in Tools/TestRunnerShared/IOSLayoutTestCommunication.cpp setUpIOSLayoutTestCommunication()
-                stdin = SimulatorProcess._accept_connection_create_file(self._target_host.listening_socket, 'w')
+                stdin = SimulatorProcess._accept_connection_create_file(self._target_host.listening_socket, 'wb')
                 stdout = SimulatorProcess._accept_connection_create_file(self._target_host.listening_socket, 'rb')
                 stderr = SimulatorProcess._accept_connection_create_file(self._target_host.listening_socket, 'rb')
             except:
@@ -120,6 +130,9 @@ class SimulatorProcess(ServerProcess):
         # Only bother to check for leaks or stderr if the process is still running.
         if self.poll() is None:
             self._port.check_for_leaks(self.process_name(), self.pid())
+            for child_process_name in self._child_processes.keys():
+                for child_process_id in self._child_processes[child_process_name]:
+                    self._port.check_for_leaks(child_process_name, child_process_id)
 
         if self._proc and self._proc.pid:
             self._target_host.executive.kill_process(self._proc.pid)

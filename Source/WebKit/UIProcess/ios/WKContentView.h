@@ -28,7 +28,10 @@
 #import "WKBrowsingContextController.h"
 #import "WKBrowsingContextGroup.h"
 #import "WKProcessGroup.h"
+#import <WebCore/InspectorOverlay.h>
+#import <wtf/NakedRef.h>
 #import <wtf/RetainPtr.h>
+#import <wtf/WeakObjCPtr.h>
 
 @class WKContentView;
 @class WKWebView;
@@ -38,7 +41,7 @@ class PageConfiguration;
 }
 
 namespace WebCore {
-struct Highlight;
+class FloatRect;
 }
 
 namespace WebKit {
@@ -53,7 +56,7 @@ class WebProcessPool;
 @interface WKContentView : WKApplicationStateTrackingView {
 @package
     RefPtr<WebKit::WebPageProxy> _page;
-    WKWebView *_webView;
+    WeakObjCPtr<WKWebView> _webView;
 }
 
 #pragma clang diagnostic push
@@ -66,8 +69,9 @@ class WebProcessPool;
 @property (nonatomic, getter=isShowingInspectorIndication) BOOL showingInspectorIndication;
 @property (nonatomic, readonly, getter=isResigningFirstResponder) BOOL resigningFirstResponder;
 @property (nonatomic) BOOL sizeChangedSinceLastVisibleContentRectUpdate;
+@property (nonatomic, readonly) UIInterfaceOrientation interfaceOrientation;
 
-- (instancetype)initWithFrame:(CGRect)frame processPool:(WebKit::WebProcessPool&)processPool configuration:(Ref<API::PageConfiguration>&&)configuration webView:(WKWebView *)webView;
+- (instancetype)initWithFrame:(CGRect)frame processPool:(NakedRef<WebKit::WebProcessPool>)processPool configuration:(Ref<API::PageConfiguration>&&)configuration webView:(WKWebView *)webView;
 
 - (void)didUpdateVisibleRect:(CGRect)visibleRect
     unobscuredRect:(CGRect)unobscuredRect
@@ -79,7 +83,8 @@ class WebProcessPool;
     scale:(CGFloat)scale minimumScale:(CGFloat)minimumScale
     inStableState:(BOOL)isStableState
     isChangingObscuredInsetsInteractively:(BOOL)isChangingObscuredInsetsInteractively
-    enclosedInScrollableAncestorView:(BOOL)enclosedInScrollableAncestorView;
+    enclosedInScrollableAncestorView:(BOOL)enclosedInScrollableAncestorView
+    sendEvenIfUnchanged:(BOOL)sendEvenIfUnchanged;
 
 - (void)didFinishScrolling;
 - (void)didInterruptScrolling;
@@ -88,16 +93,24 @@ class WebProcessPool;
 
 - (void)_webViewDestroyed;
 
+- (WKWebView *)webView;
+
 - (std::unique_ptr<WebKit::DrawingAreaProxy>)_createDrawingAreaProxy:(WebKit::WebProcessProxy&)process;
 - (void)_processDidExit;
+#if ENABLE(GPU_PROCESS)
+- (void)_gpuProcessCrashed;
+#endif
 - (void)_processWillSwap;
 - (void)_didRelaunchProcess;
+#if HAVE(VISIBILITY_PROPAGATION_VIEW)
+- (void)_processDidCreateContextForVisibilityPropagation;
+- (void)_gpuProcessDidCreateContextForVisibilityPropagation;
+#endif
 - (void)_setAcceleratedCompositingRootView:(UIView *)rootView;
 
-- (void)_showInspectorHighlight:(const WebCore::Highlight&)highlight;
+- (void)_showInspectorHighlight:(const WebCore::InspectorOverlay::Highlight&)highlight;
 - (void)_hideInspectorHighlight;
 
-- (void)_didCommitLoadForMainFrame;
 - (void)_didCommitLayerTree:(const WebKit::RemoteLayerTreeTransaction&)layerTreeTransaction;
 - (void)_layerTreeCommitComplete;
 
@@ -108,5 +121,8 @@ class WebProcessPool;
 - (BOOL)_zoomToRect:(CGRect)targetRect withOrigin:(CGPoint)origin fitEntireRect:(BOOL)fitEntireRect minimumScale:(double)minimumScale maximumScale:(double)maximumScale minimumScrollDistance:(CGFloat)minimumScrollDistance;
 - (void)_zoomOutWithOrigin:(CGPoint)origin;
 - (void)_zoomToInitialScaleWithOrigin:(CGPoint)origin;
+- (double)_initialScaleFactor;
+- (double)_contentZoomScale;
+- (double)_targetContentZoomScaleForRect:(const WebCore::FloatRect&)targetRect currentScale:(double)currentScale fitEntireRect:(BOOL)fitEntireRect minimumScale:(double)minimumScale maximumScale:(double)maximumScale;
 
 @end

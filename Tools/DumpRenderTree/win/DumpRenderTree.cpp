@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005-2015 Apple Inc.  All rights reserved.
+ * Copyright (C) 2005-2020 Apple Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,6 +29,7 @@
 #include "config.h"
 #include "DumpRenderTree.h"
 
+#include "DefaultPolicyDelegate.h"
 #include "EditingDelegate.h"
 #include "FrameLoadDelegate.h"
 #include "GCController.h"
@@ -37,6 +38,8 @@
 #include "PixelDumpSupport.h"
 #include "PolicyDelegate.h"
 #include "ResourceLoadDelegate.h"
+#include "TestCommand.h"
+#include "TestFeatures.h"
 #include "TestOptions.h"
 #include "TestRunner.h"
 #include "UIDelegate.h"
@@ -45,6 +48,8 @@
 #include "WorkQueue.h"
 
 #include <CoreFoundation/CoreFoundation.h>
+#include <JavaScriptCore/InitializeThreading.h>
+#include <JavaScriptCore/Options.h>
 #include <JavaScriptCore/TestRunnerUtils.h>
 #include <WebKitLegacy/WebKit.h>
 #include <WebKitLegacy/WebKitCOMAPI.h>
@@ -65,6 +70,7 @@
 #include <wtf/RetainPtr.h>
 #include <wtf/Vector.h>
 #include <wtf/text/CString.h>
+#include <wtf/text/StringBuilder.h>
 #include <wtf/text/StringConcatenateNumbers.h>
 #include <wtf/text/StringHash.h>
 
@@ -104,7 +110,6 @@ static bool useAcceleratedDrawing = true; // Not used
 static bool gcBetweenTests = true; 
 static bool printSeparators = false;
 static bool leakChecking = false;
-static bool printSupportedFeatures = false;
 static bool showWebView = false;
 static RetainPtr<CFStringRef> persistentUserStyleSheetLocation;
 
@@ -312,6 +317,8 @@ static const wstring& fontsPath()
 
 static void initialize()
 {
+    JSC::Config::configureForTesting();
+
     if (HMODULE webKitModule = LoadLibrary(WEBKITDLL))
         if (FARPROC dllRegisterServer = GetProcAddress(webKitModule, "DllRegisterServer"))
             dllRegisterServer();
@@ -483,6 +490,13 @@ static wstring dumpFramesAsText(IWebFrame* frame)
             result.append(dumpFramesAsText(framePtr.get()));
         }
     }
+
+    // To keep things tidy, strip all trailing spaces: they are not a meaningful part of dumpAsText test output.
+    std::wstring::size_type spacePosition;
+    while ((spacePosition = result.find(L" \n")) != std::wstring::npos)
+        result.erase(spacePosition, 1);
+    while (!result.empty() && result.back() == ' ')
+        result.pop_back();
 
     return result;
 }
@@ -716,7 +730,11 @@ void dump()
             COMPtr<IWebFramePrivate> framePrivate;
             if (FAILED(frame->QueryInterface(&framePrivate)))
                 goto fail;
-            framePrivate->renderTreeAsExternalRepresentation(::gTestRunner->isPrinting(), &resultString.GetBSTR());
+
+            if (::gTestRunner->isPrinting())
+                framePrivate->renderTreeAsExternalRepresentationForPrinting(&resultString.GetBSTR());
+            else
+                framePrivate->renderTreeAsExternalRepresentation(::gTestRunner->renderTreeDumpOptions(), &resultString.GetBSTR());
         }
 
         if (resultString.length()) {
@@ -787,10 +805,15 @@ static void enableExperimentalFeatures(IWebPreferences* preferences)
     // FIXME: SubtleCrypto
     prefsPrivate->setVisualViewportAPIEnabled(TRUE);
     prefsPrivate->setCSSOMViewScrollingAPIEnabled(TRUE);
-    prefsPrivate->setWebAnimationsEnabled(TRUE);
+    prefsPrivate->setResizeObserverEnabled(TRUE);
+    prefsPrivate->setWebAnimationsCompositeOperationsEnabled(TRUE);
+    prefsPrivate->setWebAnimationsMutableTimelinesEnabled(TRUE);
+    prefsPrivate->setCSSCustomPropertiesAndValuesEnabled(TRUE);
     prefsPrivate->setServerTimingEnabled(TRUE);
+    prefsPrivate->setAspectRatioOfImgFromWidthAndHeightEnabled(TRUE);
     // FIXME: WebGL2
     // FIXME: WebRTC
+    prefsPrivate->setCSSOMViewSmoothScrollingEnabled(TRUE);
 }
 
 static void resetWebPreferencesToConsistentValues(IWebPreferences* preferences)
@@ -801,7 +824,7 @@ static void resetWebPreferencesToConsistentValues(IWebPreferences* preferences)
 
     preferences->setAutosaves(FALSE);
 
-    COMPtr<IWebPreferencesPrivate6> prefsPrivate(Query, preferences);
+    COMPtr<IWebPreferencesPrivate8> prefsPrivate(Query, preferences);
     ASSERT(prefsPrivate);
     prefsPrivate->setFullScreenEnabled(TRUE);
 
@@ -821,6 +844,8 @@ static void resetWebPreferencesToConsistentValues(IWebPreferences* preferences)
     static _bstr_t pictographFamily(TEXT("Segoe UI Symbol"));
 #endif
 
+    prefsPrivate->setAllowTopNavigationToDataURLs(TRUE);
+    prefsPrivate->setModernUnprefixedWebAudioEnabled(TRUE);
     prefsPrivate->setAllowUniversalAccessFromFileURLs(TRUE);
     prefsPrivate->setAllowFileAccessFromFileURLs(TRUE);
     preferences->setStandardFontFamily(standardFamily);
@@ -837,7 +862,6 @@ static void resetWebPreferencesToConsistentValues(IWebPreferences* preferences)
     preferences->setJavaEnabled(FALSE);
     preferences->setJavaScriptEnabled(TRUE);
     preferences->setEditableLinkBehavior(WebKitEditableLinkOnlyLiveWithShiftKey);
-    preferences->setTabsToLinks(FALSE);
     preferences->setDOMPasteAllowed(TRUE);
     preferences->setShouldPrintBackgrounds(TRUE);
     preferences->setCacheModel(WebCacheModelDocumentBrowser);
@@ -859,7 +883,6 @@ static void resetWebPreferencesToConsistentValues(IWebPreferences* preferences)
     preferences->setLoadsImagesAutomatically(TRUE);
     prefsPrivate->setLoadsSiteIconsIgnoringImageLoadingPreference(FALSE);
     prefsPrivate->setFrameFlatteningEnabled(FALSE);
-    prefsPrivate->setSpatialNavigationEnabled(FALSE);
     if (persistentUserStyleSheetLocation) {
         size_t stringLength = CFStringGetLength(persistentUserStyleSheetLocation.get());
         Vector<UniChar> urlCharacters(stringLength + 1, 0);
@@ -881,26 +904,40 @@ static void resetWebPreferencesToConsistentValues(IWebPreferences* preferences)
 
     preferences->setFontSmoothing(FontSmoothingTypeStandard);
 
-    prefsPrivate->setFetchAPIEnabled(TRUE);
-    prefsPrivate->setShadowDOMEnabled(TRUE);
-    prefsPrivate->setCustomElementsEnabled(TRUE);
-    prefsPrivate->setResourceTimingEnabled(TRUE);
-    prefsPrivate->setUserTimingEnabled(TRUE);
+    prefsPrivate->setWebSQLEnabled(true);
+
     prefsPrivate->setDataTransferItemsEnabled(TRUE);
     prefsPrivate->clearNetworkLoaderSession();
 
     setAlwaysAcceptCookies(false);
 }
 
-static void setWebPreferencesForTestOptions(IWebPreferences* preferences, const TestOptions& options)
+static bool boolWebPreferenceFeatureValue(std::string key, bool defaultValue, const WTR::TestOptions& options)
 {
-    COMPtr<IWebPreferencesPrivate6> prefsPrivate { Query, preferences };
+    auto it = options.boolWebPreferenceFeatures().find(key);
+    if (it != options.boolWebPreferenceFeatures().end())
+        return it->second;
+    return defaultValue;
+}
 
-    prefsPrivate->setWebAnimationsCSSIntegrationEnabled(options.enableWebAnimationsCSSIntegration);
-    prefsPrivate->setMenuItemElementEnabled(options.enableMenuItemElement);
-    prefsPrivate->setModernMediaControlsEnabled(options.enableModernMediaControls);
-    prefsPrivate->setIsSecureContextAttributeEnabled(options.enableIsSecureContextAttribute);
-    prefsPrivate->setInspectorAdditionsEnabled(options.enableInspectorAdditions);
+static void setWebPreferencesForTestOptions(IWebPreferences* preferences, const WTR::TestOptions& options)
+{
+    COMPtr<IWebPreferencesPrivate8> prefsPrivate { Query, preferences };
+
+    preferences->setPrivateBrowsingEnabled(options.useEphemeralSession());
+
+    preferences->setUsesPageCache(boolWebPreferenceFeatureValue("UsesBackForwardCache", false, options));
+    prefsPrivate->setMenuItemElementEnabled(boolWebPreferenceFeatureValue("MenuItemElementEnabled", false, options));
+    prefsPrivate->setKeygenElementEnabled(boolWebPreferenceFeatureValue("KeygenElementEnabled", false, options));
+    prefsPrivate->setModernMediaControlsEnabled(boolWebPreferenceFeatureValue("ModernMediaControlsEnabled", true, options));
+    prefsPrivate->setInspectorAdditionsEnabled(boolWebPreferenceFeatureValue("InspectorAdditionsEnabled", false, options));
+    prefsPrivate->setRequestIdleCallbackEnabled(boolWebPreferenceFeatureValue("RequestIdleCallbackEnabled", false, options));
+    prefsPrivate->setAsyncClipboardAPIEnabled(boolWebPreferenceFeatureValue("AsyncClipboardAPIEnabled", false, options));
+    prefsPrivate->setContactPickerAPIEnabled(boolWebPreferenceFeatureValue("ContactPickerAPIEnabled", false, options));
+    prefsPrivate->setAllowTopNavigationToDataURLs(boolWebPreferenceFeatureValue("AllowTopNavigationToDataURLs", true, options));
+    prefsPrivate->setCSSOMViewSmoothScrollingEnabled(boolWebPreferenceFeatureValue("CSSOMViewSmoothScrollingEnabled", false, options));
+    prefsPrivate->setSpatialNavigationEnabled(boolWebPreferenceFeatureValue("SpatialNavigationEnabled", false, options));
+    preferences->setTabsToLinks(boolWebPreferenceFeatureValue("TabsToLinks", false, options));
 }
 
 static String applicationId()
@@ -937,8 +974,25 @@ static void setDefaultsToConsistentValuesForTesting()
 #endif
 }
 
-static void resetWebViewToConsistentStateBeforeTesting(const TestOptions& options)
+static void setJSCOptions(const WTR::TestOptions& options)
 {
+    static WTF::StringBuilder savedOptions;
+
+    if (!savedOptions.isEmpty()) {
+        JSC::Options::setOptions(savedOptions.toString().ascii().data());
+        savedOptions.clear();
+    }
+
+    if (!options.jscOptions().empty()) {
+        JSC::Options::dumpAllOptionsInALine(savedOptions);
+        JSC::Options::setOptions(options.jscOptions().c_str());
+    }
+}
+
+static void resetWebViewToConsistentStateBeforeTesting(const WTR::TestOptions& options)
+{
+    setJSCOptions(options);
+
     COMPtr<IWebView> webView;
     if (FAILED(frame->webView(&webView))) 
         return;
@@ -970,7 +1024,7 @@ static void resetWebViewToConsistentStateBeforeTesting(const TestOptions& option
         webViewPrivate->setTabKeyCyclesThroughElements(TRUE);
     }
 
-    webView->setPolicyDelegate(nullptr);
+    webView->setPolicyDelegate(DefaultPolicyDelegate::sharedInstance());
     policyDelegate->setPermissive(false);
     policyDelegate->setControllerToNotifyDone(nullptr);
     sharedFrameLoadDelegate->resetToConsistentState();
@@ -1011,7 +1065,7 @@ static void resetWebViewToConsistentStateBeforeTesting(const TestOptions& option
     if (webViewPrivate && SUCCEEDED(webViewPrivate->viewWindow(&viewWindow)) && viewWindow)
         ::SetFocus(viewWindow);
 
-    webViewPrivate->resetOriginAccessWhitelists();
+    webViewPrivate->resetOriginAccessAllowLists();
 
     sharedUIDelegate->resetUndoManager();
 
@@ -1021,6 +1075,9 @@ static void resetWebViewToConsistentStateBeforeTesting(const TestOptions& option
 
     COMPtr<IWebViewPrivate5> webViewPrivate5(Query, webView);
     webViewPrivate5->exitFullscreenIfNeeded();
+
+    WebCoreTestSupport::clearAllLogChannelsToAccumulate();
+    WebCoreTestSupport::initializeLogChannelsIfNecessary();
 }
 
 static void sizeWebViewForCurrentTest()
@@ -1119,11 +1176,20 @@ static bool handleControlCommand(const char* command)
     return false;
 }
 
+static WTR::TestOptions testOptionsForTest(const WTR::TestCommand& command)
+{
+    WTR::TestFeatures features = WTR::TestOptions::defaults();
+    WTR::merge(features, WTR::hardcodedFeaturesBasedOnPathForTest(command));
+    WTR::merge(features, WTR::featureDefaultsFromTestHeaderForTest(command, WTR::TestOptions::keyTypeMapping()));
+
+    return WTR::TestOptions { WTFMove(features) };
+}
+
 static void runTest(const string& inputLine)
 {
     ASSERT(!inputLine.empty());
 
-    TestCommand command = parseInputLine(inputLine);
+    auto command = WTR::parseInputLine(inputLine);
     const string& pathOrURL = command.pathOrURL;
     dumpPixelsForCurrentTest = command.shouldDumpPixels || dumpPixelsForAllTests;
 
@@ -1167,13 +1233,13 @@ static void runTest(const string& inputLine)
 
     CFRelease(url);
 
-    TestOptions options { command.pathOrURL, command.absolutePath };
+    auto options = testOptionsForTest(command);
 
     resetWebViewToConsistentStateBeforeTesting(options);
 
     ::gTestRunner = TestRunner::create(testURL.data(), command.expectedPixelHash);
-    ::gTestRunner->setCustomTimeout(command.timeout);
-    ::gTestRunner->setDumpJSConsoleLogInStdErr(command.dumpJSConsoleLogInStdErr || options.dumpJSConsoleLogInStdErr);
+    ::gTestRunner->setCustomTimeout(command.timeout.milliseconds());
+    ::gTestRunner->setDumpJSConsoleLogInStdErr(command.dumpJSConsoleLogInStdErr || options.dumpJSConsoleLogInStdErr());
 
     topLoadingFrame = nullptr;
     done = false;
@@ -1460,11 +1526,6 @@ static Vector<const char*> initializeGlobalsFromCommandLineOptions(int argc, con
             continue;
         }
 
-        if (!stricmp(argv[i], "--print-supported-features")) {
-            printSupportedFeatures = true;
-            continue;
-        }
-
         if (!stricmp(argv[i], "--show-webview")) {
             showWebView = true;
             continue;
@@ -1562,6 +1623,10 @@ int main(int argc, const char* argv[])
 
     Vector<const char*> tests = initializeGlobalsFromCommandLineOptions(argc, argv);
 
+    JSC::initialize();
+    WTF::initializeMainThread();
+    WebCoreTestSupport::populateJITOperations();
+
     // FIXME - need to make DRT pass with Windows native controls <http://bugs.webkit.org/show_bug.cgi?id=25592>
     COMPtr<IWebPreferences> tmpPreferences;
     if (FAILED(WebKitCreateInstance(CLSID_WebPreferences, 0, IID_IWebPreferences, reinterpret_cast<void**>(&tmpPreferences))))
@@ -1574,23 +1639,6 @@ int main(int argc, const char* argv[])
         return -3;
 
     prepareConsistentTestingEnvironment(standardPreferences.get(), standardPreferencesPrivate.get());
-
-    if (printSupportedFeatures) {
-        BOOL acceleratedCompositingAvailable = FALSE;
-        standardPreferences->acceleratedCompositingEnabled(&acceleratedCompositingAvailable);
-
-#if ENABLE(3D_TRANSFORMS)
-        // In theory, we could have a software-based 3D rendering implementation that we use when
-        // hardware-acceleration is not available. But we don't have any such software
-        // implementation, so 3D rendering is only available when hardware-acceleration is.
-        BOOL threeDTransformsAvailable = acceleratedCompositingAvailable;
-#else
-        BOOL threeDTransformsAvailable = FALSE;
-#endif
-
-        fprintf(testResult, "SupportedFeatures:%s %s\n", acceleratedCompositingAvailable ? "AcceleratedCompositing" : "", threeDTransformsAvailable ? "3DTransforms" : "");
-        return 0;
-    }
 
     COMPtr<IWebView> webView(AdoptCOM, createWebViewAndOffscreenWindow(&webViewWindow));
     if (!webView)

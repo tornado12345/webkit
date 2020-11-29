@@ -39,7 +39,6 @@ namespace WebCore {
 class AudioTrack;
 class HTMLMediaElement;
 class TextTrack;
-class PlaybackSessionInterface;
 
 class PlaybackSessionModelMediaElement final : public PlaybackSessionModel, public EventListener {
 public:
@@ -51,8 +50,10 @@ public:
     WEBCORE_EXPORT void setMediaElement(HTMLMediaElement*);
     HTMLMediaElement* mediaElement() const { return m_mediaElement.get(); }
 
+    WEBCORE_EXPORT void mediaEngineChanged();
+
     WEBCORE_EXPORT void handleEvent(WebCore::ScriptExecutionContext&, WebCore::Event&) final;
-    void updateForEventName(const WTF::AtomicString&);
+    void updateForEventName(const WTF::AtomString&);
     bool operator==(const EventListener& rhs) const final { return static_cast<const WebCore::EventListener*>(this) == &rhs; }
 
     WEBCORE_EXPORT void addClient(PlaybackSessionModelClient&);
@@ -98,13 +99,13 @@ public:
     bool isPictureInPictureSupported() const final;
     bool isPictureInPictureActive() const final;
 
-protected:
+private:
     WEBCORE_EXPORT PlaybackSessionModelMediaElement();
 
-private:
     void progressEventTimerFired();
-    static const Vector<WTF::AtomicString>& observedEventNames();
-    const WTF::AtomicString& eventNameAll();
+    static const Vector<WTF::AtomString>& observedEventNames();
+    const WTF::AtomString& eventNameAll();
+    bool isStalled() const;
 
     RefPtr<HTMLMediaElement> m_mediaElement;
     bool m_isListening { false };

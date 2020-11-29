@@ -30,7 +30,6 @@
 
 #include "Color.h"
 #include "FloatRect.h"
-#include "GeometryUtilities.h"
 #include "GraphicsContextCG.h"
 #include "IntSize.h"
 #include "SubimageCacheWithTimer.h"
@@ -64,22 +63,9 @@ Color nativeImageSinglePixelSolidColor(const NativeImagePtr& image)
     CGContextDrawImage(bitmapContext.get(), CGRectMake(0, 0, 1, 1), image.get());
 
     if (!pixel[3])
-        return Color(0, 0, 0, 0);
+        return Color::transparentBlack;
 
-    return Color(pixel[0] * 255 / pixel[3], pixel[1] * 255 / pixel[3], pixel[2] * 255 / pixel[3], pixel[3]);
-}
-
-void drawNativeImage(const NativeImagePtr& image, GraphicsContext& context, const FloatRect& destRect, const FloatRect& srcRect, const IntSize& srcSize, CompositeOperator op, BlendMode mode, const ImageOrientation& orientation)
-{
-    // Subsampling may have given us an image that is smaller than size().
-    IntSize subsampledImageSize = nativeImageSize(image);
-
-    // srcRect is in the coordinates of the unsubsampled image, so we have to map it to the subsampled image.
-    FloatRect adjustedSrcRect = srcRect;
-    if (subsampledImageSize != srcSize)
-        adjustedSrcRect = mapRect(srcRect, FloatRect({ }, srcSize), FloatRect({ }, subsampledImageSize));
-
-    context.drawNativeImage(image, subsampledImageSize, destRect, adjustedSrcRect, op, mode, orientation);
+    return clampToComponentBytes<SRGBA>(pixel[0] * 255 / pixel[3], pixel[1] * 255 / pixel[3], pixel[2] * 255 / pixel[3], pixel[3]);
 }
 
 void clearNativeImageSubimages(const NativeImagePtr& image)

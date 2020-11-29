@@ -54,7 +54,7 @@ MockData = {
             db.insert('commits', {id: 2017, repository: this.ownedJSCRepositoryId(), revision: 'owned-jsc-9191', time: '2016-05-02T23:13:57.1Z'}),
             db.insert('commit_ownerships', {owner: 93116, owned: 1797}),
             db.insert('commit_ownerships', {owner: 96336, owned: 2017}),
-            db.insert('builds', {id: 901, number: '901', time: '2015-10-27T12:05:27.1Z'}),
+            db.insert('builds', {id: 901, tag: '901', time: '2015-10-27T12:05:27.1Z'}),
             db.insert('platforms', {id: MockData.somePlatformId(), name: 'some platform'}),
             db.insert('platforms', {id: MockData.otherPlatformId(), name: 'other platform'}),
             db.insert('tests', {id: MockData.someTestId(), name: 'some test'}),
@@ -304,6 +304,7 @@ MockData = {
             "results": -1,
             "submitted_at": options.buildTime || (new Date('2016-03-23T03:49:43Z') / 1000),
             "waited_for": false,
+            "state_string": options.statusDescription || null,
             "properties": {
                 "build-request-id": [(options.buildRequestId || 702).toString(), "Force Build Form"],
                 "scheduler": ["ABTest-iPad-RunBenchmark-Tests-ForceScheduler", "Scheduler"],
@@ -327,7 +328,7 @@ MockData = {
         overrides = overrides || {};
         return {
             "builderid": options.builderId || 2,
-            "number":  options.buildNumber || 124, 
+            "number":  options.buildTag || 124,
             "buildrequestid": options.buildbotBuildRequestId || 19,
             "complete": 'isComplete' in overrides ? overrides.isComplete : (options.isComplete || false),
             "complete_at": null,
@@ -335,7 +336,7 @@ MockData = {
             "masterid": 1,
             "results": null,
             "started_at": new Date('2017-12-19T23:11:49Z') / 1000,
-            "state_string": "building",
+            "state_string": options.statusDescription || null,
             "workerid": 41,
             "properties": {
                 "build-request-id": [(options.buildRequestId || 701).toString(), "Force Build Form"],
@@ -364,8 +365,8 @@ MockData = {
         options = options || {};
         if (!options.buildRequestId)
             options.buildRequestId = 700;
-        if (!options.buildNumber)
-            options.buildNumber = 123;
+        if (!options.buildTag)
+            options.buildTag = 123;
         if (!options.webkitRevision)
             options.webkitRevision = '191622';
         return this.sampleBuildData(options, {isComplete: true});

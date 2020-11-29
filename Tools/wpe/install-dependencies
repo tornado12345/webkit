@@ -58,6 +58,7 @@ function installDependenciesWithApt {
         automake \
         autopoint \
         autotools-dev \
+        bubblewrap \
         cmake \
         g++ \
         gawk \
@@ -76,11 +77,15 @@ function installDependenciesWithApt {
         libicu-dev \
         libjpeg-dev \
         libfile-copy-recursive-perl \
-        $(aptIfElse libpng-dev libpng12-dev) \
+        libopenjp2-7-dev \
+        libpng-dev \
+        libseccomp-dev \
         libsqlite3-dev \
+        libsystemd-dev \
         libtasn1-6-dev \
         libtool \
         libwebp-dev \
+        libwoff-dev \
         libxml2-dev \
         libxslt1-dev \
         ninja-build \
@@ -94,7 +99,7 @@ function installDependenciesWithApt {
         apache2 \
         curl \
         gdb \
-        libapache2-mod-bw \
+        fonts-liberation \
         libapache2-mod-php \
         php-json \
         libcgi-pm-perl \
@@ -106,12 +111,18 @@ function installDependenciesWithApt {
         ruby-highline \
         ruby-json"
 
+    # These are dependencies necessary for building with the Flatpak SDK.
+    packages="$packages \
+        flatpak"
+
     # These are dependencies necessary for building the jhbuild.
     packages="$packages \
         git \
         gsettings-desktop-schemas-dev \
+        gyp \
         libegl1-mesa-dev \
         libexpat1-dev \
+        libfdk-aac-dev \
         libgles2-mesa-dev \
         libluajit-5.1-dev \
         libmount-dev \
@@ -120,7 +131,7 @@ function installDependenciesWithApt {
         libproxy-dev \
         libpsl-dev \
         libpulse-dev \
-        libsrtp0-dev \
+        libsrtp2-dev \
         libtheora-dev \
         libtool-bin \
         libvorbis-dev \
@@ -132,14 +143,34 @@ function installDependenciesWithApt {
         libwayland-dev \
         luajit \
         python3-setuptools \
+        uuid-dev \
         yasm"
 
     # These are dependencies necessary for using webkit-patch
     packages="$packages \
         git-svn \
+        python3-secretstorage \
         subversion"
 
+    # These are GStreamer plugins needed to play different media files.
+    packages="$packages \
+        gstreamer1.0-gl \
+        gstreamer1.0-libav \
+        gstreamer1.0-plugins-bad \
+        gstreamer1.0-plugins-base \
+        gstreamer1.0-plugins-good \
+        gstreamer1.0-plugins-ugly \
+        gstreamer1.0-pulseaudio"
+
     apt-get install $packages
+
+    # Ubuntu Bionic doesn't ship pipenv. So fallback to the pip3 install path.
+    if apt-cache show pipenv &>/dev/null; then
+        apt-get install pipenv
+    else
+        apt-get install -y python3-pip
+        pip3 install pipenv
+    fi
 }
 
 function installDependenciesWithPacman {
@@ -148,6 +179,7 @@ function installDependenciesWithPacman {
         alsa-lib \
         autoconf \
         automake \
+        bubblewrap \
         cmake \
         file \
         findutils \
@@ -159,7 +191,6 @@ function installDependenciesWithPacman {
         grep \
         groff \
         gstreamer \
-        gst-plugins-bad \
         gst-plugins-base-libs \
         gzip \
         icu \
@@ -168,6 +199,7 @@ function installDependenciesWithPacman {
         libevent \
         libjpeg-turbo \
         libpng \
+        libseccomp \
         libtasn1 \
         libtool \
         libwebp \
@@ -176,18 +208,21 @@ function installDependenciesWithPacman {
         m4 \
         make \
         ninja \
+        openjpeg2 \
         patch \
         perl-file-copy-recursive \
         pkg-config \
         ruby
         sed \
         sqlite \
+        libsystemd \
         texinfo \
         which \
-        zlib"
+        zlib \
+        woff2"
 
     # These are dependencies necessary for running tests.
-    # Note: apache-mod_bw and ruby-json is available in the AUR
+    # Note: ruby-json and ruby-highline are available in the AUR
     packages="$packages \
         apache \
         curl \
@@ -201,19 +236,25 @@ function installDependenciesWithPacman {
         python2-lxml \
         python2-psutil \
         ruby \
-        ruby-highline"
+        ttf-liberation"
+
+    # These are dependencies necessary for building with the Flatpak SDK.
+    packages="$packages \
+        flatpak \
+        python-pipenv"
 
     # These are dependencies necessary for building the jhbuild.
     packages="$packages \
         expat \
         git \
         gsettings-desktop-schemas \
+        gyp \
+        libfdk-aac \
         libproxy \
         libpsl \
         libpulse \
         libsrtp \
         libtheora \
-        libv4l-dev \
         libvorbis \
         libvpx \
         libxcb \
@@ -224,7 +265,7 @@ function installDependenciesWithPacman {
         opus \
         orc \
         perl-xml-libxml \
-        python3-setuptools \
+        python-setuptools \
         util-linux \
         v4l-utils \
         xorg-xrandr \
@@ -233,12 +274,38 @@ function installDependenciesWithPacman {
 
     # These are dependencies necessary for using webkit-patch
     packages="$packages \
+        python-secretstorage \
         svn"
+
+    # These are GStreamer plugins needed to play different media files.
+    packages="$packages \
+        gst-plugins-bad \
+        gst-plugins-base \
+        gst-plugins-good \
+        gst-plugins-ugly"
+
     pacman -S --needed $packages
 
-    echo "You will also need to follow the instructions on the Arch Wiki to make"
-    echo "'python' call python2 in the webkit folder"
-    echo "https://wiki.archlinux.org/index.php/Python#Dealing_with_version_problem_in_build_scripts"
+	cat <<-EOF
+
+The following packages are available from AUR, and needed for running tests:
+
+    ruby-json ruby-highline
+
+Instructions on how to use the AUR can be found on the Arch Wiki:
+
+    https://wiki.archlinux.org/index.php/Arch_User_Repository
+
+You will also need to follow the instructions on the wiki to make 'python'
+call python2 in the WebKit folder:
+
+    https://wiki.archlinux.org/index.php/Python#Dealing_with_version_problem_in_build_scripts
+
+Alternatively, you may use a Python 2.x virtualenv while hacking on WPE:
+
+    https://wiki.archlinux.org/index.php/Python/Virtual_environment
+
+EOF
 }
 
 function installDependenciesWithDnf {
@@ -247,6 +314,7 @@ function installDependenciesWithDnf {
         autoconf \
         automake \
         alsa-lib-devel \
+        bubblewrap \
         cmake \
         gcc-c++ \
         gnutls-devel \
@@ -261,12 +329,14 @@ function installDependenciesWithDnf {
         libicu-devel \
         libjpeg-turbo-devel \
         libpng-devel \
+        libseccomp-devel \
         libtasn1-devel \
         libtool \
         libwebp-devel \
         libxml2-devel \
         libxslt-devel \
         ninja-build \
+        openjpeg2-devel \
         patch \
         perl-File-Copy-Recursive \
         perl-JSON-PP \
@@ -274,6 +344,7 @@ function installDependenciesWithDnf {
         perl-version \
         ruby \
         sqlite-devel \
+        systemd-devel \
         zlib-devel"
 
     # These are dependencies necessary for running tests.
@@ -281,7 +352,7 @@ function installDependenciesWithDnf {
         curl \
         gdb \
         httpd \
-        mod_bw \
+        liberation-fonts \
         mod_ssl \
         perl-CGI \
         php \
@@ -294,16 +365,24 @@ function installDependenciesWithDnf {
         rubygem-highline \
         rubygem-json"
 
+    # These are dependencies necessary for building with the Flatpak SDK.
+    packages="$packages \
+        flatpak \
+        pipenv"
+
     # These are dependencies necessary for building the jhbuild.
     packages="$packages \
         expat-devel \
+        fdk-aac-devel \
         git \
         gsettings-desktop-schemas-devel \
+        gyp \
         libmount-devel \
         libproxy-devel \
         libpsl-devel \
         libsrtp-devel \
         libtheora-devel \
+        libuuid-devel \
         libv4l-devel \
         libvorbis-devel \
         libvpx-devel \
@@ -320,12 +399,23 @@ function installDependenciesWithDnf {
         pulseaudio-libs-devel \
         python3-setuptools \
         wayland-devel \
+        woff2-devel \
         yasm"
 
     # These are dependencies necessary for using webkit-patch
     packages="$packages
         git-svn \
+        python3-secretstorage \
         subversion"
+
+    # These are GStreamer plugins needed to play different media files.
+    packages="$packages \
+        gstreamer1-plugins-bad-free \
+        gstreamer1-plugins-bad-free-extras \
+        gstreamer1-plugins-base \
+        gstreamer1-plugins-good \
+        gstreamer1-plugins-good-extras \
+        gstreamer1-plugins-ugly-free"
 
     dnf install $packages
 }

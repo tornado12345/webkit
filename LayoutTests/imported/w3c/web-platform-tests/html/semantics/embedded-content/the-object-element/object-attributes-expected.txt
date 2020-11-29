@@ -1,5 +1,6 @@
 
-FAIL object.contentWindow undefined is not an object (evaluating 'obj1.contentWindow.name')
-FAIL object.width assert_equals: The width should be 100px. expected "100px" but got "auto"
-FAIL object.height assert_equals: The height should be 50px. expected "50px" but got "auto"
- 
+FAIL object.contentWindow assert_equals: The contentWindow of the object element should be null as it is showing fallback content. expected null but got object "[object Window]"
+PASS object.contentWindow.name
+PASS object.width
+PASS object.height
+

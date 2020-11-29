@@ -6,11 +6,11 @@
 if (window.internals)
     window.internals.settings.setWebGLErrorsToConsoleEnabled(false);
 
-let timeoutID = NaN;
+let requestAnimationFrameId = NaN;
 
 function cancelActions() {
-    clearTimeout(timeoutID);
-    timeoutID = NaN;
+    cancelAnimationFrame(requestAnimationFrameId);
+    requestAnimationFrameId = NaN;
 }
 
 function performActions(frames) {
@@ -19,7 +19,7 @@ function performActions(frames) {
         frames[index++]();
 
         if (index < frames.length)
-            timeoutID = setTimeout(executeFrameFunction, 0);
+            requestAnimationFrameId = requestAnimationFrame(executeFrameFunction);
         else {
             setTimeout(() => {
                 TestPage.dispatchEventToFrontend("LastFrame");
@@ -77,8 +77,8 @@ function test() {
                     handleRecordingStopped(canvas, event.data.recording);
                 }
 
-                WI.canvasManager.singleFireEventListener(WI.CanvasManager.Event.CanvasAdded, (event) => {
-                    canvas = event.data.canvas;
+                WI.canvasManager.canvasCollection.singleFireEventListener(WI.Collection.Event.ItemAdded, (event) => {
+                    canvas = event.data.item;
                     InspectorTest.assert(!canvas.recordingActive)
 
                     canvas.addEventListener(WI.Canvas.Event.RecordingStarted, handleRecordingStartedWrapper);

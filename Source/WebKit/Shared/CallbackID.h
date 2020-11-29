@@ -47,6 +47,12 @@ public:
         ASSERT(HashTraits<uint64_t>::emptyValue() != m_id && !HashTraits<uint64_t>::isDeletedValue(m_id));
     }
 
+    ALWAYS_INLINE CallbackID& operator=(const CallbackID& otherID)
+    {
+        m_id = otherID.m_id;
+        return *this;
+    }
+
     bool operator==(const CallbackID& other) const { return m_id == other.m_id; }
 
     uint64_t toInteger() const { return m_id; }
@@ -115,8 +121,6 @@ template<> struct HashTraits<WebKit::CallbackID> : GenericHashTraits<WebKit::Cal
     static void constructDeletedValue(WebKit::CallbackID& slot) { slot = WebKit::CallbackID(std::numeric_limits<uint64_t>::max()); }
     static bool isDeletedValue(const WebKit::CallbackID& slot) { return slot.m_id == std::numeric_limits<uint64_t>::max(); }
 };
-template<> struct DefaultHash<WebKit::CallbackID> {
-    typedef CallbackIDHash Hash;
-};
+template<> struct DefaultHash<WebKit::CallbackID> : CallbackIDHash { };
 
 }

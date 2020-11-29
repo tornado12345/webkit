@@ -33,8 +33,8 @@
 #if ENABLE(MEDIA_STREAM)
 
 #include "MockRealtimeVideoSource.h"
-#include "OrientationNotifier.h"
 #include "PixelBufferConformerCV.h"
+#include <wtf/WorkQueue.h>
 
 typedef struct __CVBuffer *CVBufferRef;
 typedef CVBufferRef CVImageBufferRef;
@@ -45,9 +45,11 @@ namespace WebCore {
 
 class ImageTransferSessionVT;
 
-class MockRealtimeVideoSourceMac final : public MockRealtimeVideoSource, private OrientationNotifier::Observer {
+class MockRealtimeVideoSourceMac final : public MockRealtimeVideoSource {
 public:
-    virtual ~MockRealtimeVideoSourceMac() = default;
+    static Ref<MockRealtimeVideoSource> createForMockDisplayCapturer(String&& deviceID, String&& name, String&& hashSalt);
+
+    ~MockRealtimeVideoSourceMac() = default;
 
 private:
     friend class MockRealtimeVideoSource;
@@ -57,12 +59,9 @@ private:
     void updateSampleBuffer() final;
     bool canResizeVideoFrames() const final { return true; }
 
-    void orientationChanged(int orientation) final;
-    void monitorOrientation(OrientationNotifier&) final;
-
-    MediaSample::VideoRotation m_deviceOrientation { MediaSample::VideoRotation::None };
     std::unique_ptr<ImageTransferSessionVT> m_imageTransferSession;
     IntSize m_presetSize;
+    Ref<WorkQueue> m_workQueue;
 };
 
 } // namespace WebCore

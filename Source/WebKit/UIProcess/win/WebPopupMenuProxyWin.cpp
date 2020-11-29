@@ -41,6 +41,15 @@
 #include <WebCore/ScrollbarThemeWin.h>
 #include <WebCore/WebCoreInstanceHandle.h>
 #include <windowsx.h>
+#include <wtf/HexNumber.h>
+#include <wtf/text/StringBuilder.h>
+
+#if USE(DIRECT2D)
+#include <WebCore/Direct2DUtilities.h>
+#include <d3d11_1.h>
+#include <directxcolors.h> 
+#include <dxgi.h>
+#endif
 
 namespace WebKit {
 using namespace WebCore;
@@ -189,7 +198,7 @@ void WebPopupMenuProxyWin::showPopupMenu(const IntRect& rect, TextDirection, dou
     HWND hostWindow = m_webView->window();
 
     if (!m_scrollbar && visibleItems() < m_items.size()) {
-        m_scrollbar = Scrollbar::createNativeScrollbar(*this, VerticalScrollbar, SmallScrollbar);
+        m_scrollbar = Scrollbar::createNativeScrollbar(*this, VerticalScrollbar, ScrollbarControlSize::Small);
         m_scrollbar->styleChanged();
     }
 
@@ -205,6 +214,11 @@ void WebPopupMenuProxyWin::showPopupMenu(const IntRect& rect, TextDirection, dou
 
         if (!m_popup)
             return;
+
+#if USE(DIRECT2D)
+        Direct2D::createDeviceAndContext(m_d3dDevice, m_immediateContext);
+        setupSwapChain(m_windowRect.size());
+#endif
     }
 
     BOOL shouldAnimate = FALSE;
@@ -370,7 +384,7 @@ void WebPopupMenuProxyWin::calculatePositionAndSize(const IntRect& rect)
 
     if (naturalHeight > maxPopupHeight) {
         // We need room for a scrollbar
-        popupWidth += ScrollbarTheme::theme().scrollbarThickness(SmallScrollbar);
+        popupWidth += ScrollbarTheme::theme().scrollbarThickness(ScrollbarControlSize::Small);
     }
 
     popupHeight += 2 * popupWindowBorderWidth;
@@ -441,9 +455,9 @@ void WebPopupMenuProxyWin::invalidateItem(int index)
     ::InvalidateRect(m_popup, &r, TRUE);
 }
 
-int WebPopupMenuProxyWin::scrollSize(ScrollbarOrientation orientation) const
+ScrollPosition WebPopupMenuProxyWin::scrollPosition() const
 {
-    return ((orientation == VerticalScrollbar) && m_scrollbar) ? (m_scrollbar->totalSize() - m_scrollbar->visibleSize()) : 0;
+    return { 0, m_scrollOffset };
 }
 
 void WebPopupMenuProxyWin::setScrollOffset(const IntPoint& offset)
@@ -554,9 +568,9 @@ LRESULT WebPopupMenuProxyWin::onKeyDown(HWND hWnd, UINT message, WPARAM wParam, 
         focusLast();
         break;
     case VK_PRIOR:
-        if (focusedIndex() != scrollOffset(VerticalScrollbar)) {
+        if (focusedIndex() != m_scrollOffset) {
             // Set the selection to the first visible item
-            int firstVisibleItem = scrollOffset(VerticalScrollbar);
+            int firstVisibleItem = m_scrollOffset;
             up(focusedIndex() - firstVisibleItem);
         } else {
             // The first visible item is selected, so move the selection back one page
@@ -564,7 +578,7 @@ LRESULT WebPopupMenuProxyWin::onKeyDown(HWND hWnd, UINT message, WPARAM wParam, 
         }
         break;
     case VK_NEXT: {
-        int lastVisibleItem = scrollOffset(VerticalScrollbar) + visibleItems() - 1;
+        int lastVisibleItem = m_scrollOffset + visibleItems() - 1;
         if (focusedIndex() != lastVisibleItem) {
             // Set the selection to the last visible item
             down(lastVisibleItem - focusedIndex());
@@ -813,6 +827,7 @@ void WebPopupMenuProxyWin::paint(const IntRect& damageRect, HDC hdc)
     if (!m_popup)
         return;
 
+#if !USE(DIRECT2D)
     if (!m_DC) {
         m_DC = adoptGDIObject(::CreateCompatibleDC(HWndDC(m_popup)));
         if (!m_DC)
@@ -838,6 +853,22 @@ void WebPopupMenuProxyWin::paint(const IntRect& damageRect, HDC hdc)
     }
 
     GraphicsContext context(m_DC.get());
+#else
+    COMPtr<ID3D11Texture2D> backBuffer; 
+    HRESULT hr = m_swapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&backBuffer)); 
+    if (!SUCCEEDED(hr))
+        return;
+
+    COMPtr<IDXGISurface1> surface(Query, backBuffer);
+    if (!surface)
+        return;
+
+    auto renderTarget = WebCore::Direct2D::createSurfaceRenderTarget(surface.get());
+
+    PlatformContextDirect2D platformContext(renderTarget.get());
+    platformContext.setD3DDevice(m_d3dDevice.get());
+    GraphicsContext context(&platformContext, GraphicsContext::BitmapRenderingContextType::GPUMemory);
+#endif
 
     IntRect translatedDamageRect = damageRect;
     translatedDamageRect.move(IntSize(0, m_scrollOffset * m_itemHeight));
@@ -852,11 +883,15 @@ void WebPopupMenuProxyWin::paint(const IntRect& damageRect, HDC hdc)
     if (m_scrollbar)
         m_scrollbar->paint(context, damageRect);
 
-
+#if !USE(DIRECT2D)
     HWndDC hWndDC;
     HDC localDC = hdc ? hdc : hWndDC.setHWnd(m_popup);
 
     ::BitBlt(localDC, damageRect.x(), damageRect.y(), damageRect.width(), damageRect.height(), m_DC.get(), damageRect.x(), damageRect.y(), SRCCOPY);
+#else
+    context.flush();
+    m_swapChain->Present(0, 0); 
+#endif
 }
 
 bool WebPopupMenuProxyWin::setFocusedIndex(int i, bool hotTracking)
@@ -921,7 +956,6 @@ void WebPopupMenuProxyWin::focusLast()
     }
 }
 
-
 void WebPopupMenuProxyWin::incrementWheelDelta(int delta)
 {
     m_wheelDelta += delta;
@@ -958,6 +992,53 @@ bool WebPopupMenuProxyWin::scrollToRevealSelection()
     }
 
     return false;
+}
+
+#if USE(DIRECT2D)
+void WebPopupMenuProxyWin::setupSwapChain(const WebCore::IntSize& size)
+{
+    m_swapChain = Direct2D::swapChainOfSizeForWindowAndDevice(size, m_popup, m_d3dDevice);
+    RELEASE_ASSERT(m_swapChain);
+    auto factory = Direct2D::factoryForDXGIDevice(Direct2D::toDXGIDevice(m_d3dDevice));
+
+    factory->MakeWindowAssociation(m_popup, 0);
+    configureBackingStore(size);
+}
+
+void WebPopupMenuProxyWin::configureBackingStore(const WebCore::IntSize& size)
+{
+    ASSERT(m_swapChain);
+    ASSERT(m_d3dDevice);
+    ASSERT(m_immediateContext);
+
+    // Create a render target view 
+    COMPtr<ID3D11Texture2D> backBuffer; 
+    HRESULT hr = m_swapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&backBuffer)); 
+    RELEASE_ASSERT(SUCCEEDED(hr));
+
+    hr = m_d3dDevice->CreateRenderTargetView(backBuffer.get(), nullptr, &m_renderTargetView); 
+    RELEASE_ASSERT(SUCCEEDED(hr));
+
+    auto* renderTargetView = m_renderTargetView.get();
+    m_immediateContext->OMSetRenderTargets(1, &renderTargetView, nullptr);
+
+    // Setup the viewport 
+    D3D11_VIEWPORT viewport;
+    viewport.Width = (FLOAT)size.width();
+    viewport.Height = (FLOAT)size.height();
+    viewport.MinDepth = 0.0f;
+    viewport.MaxDepth = 1.0f;
+    viewport.TopLeftX = 0;
+    viewport.TopLeftY = 0;
+    m_immediateContext->RSSetViewports(1, &viewport);
+
+    m_immediateContext->ClearRenderTargetView(m_renderTargetView.get(), DirectX::Colors::BlanchedAlmond); 
+}
+#endif
+
+String WebPopupMenuProxyWin::debugDescription() const
+{
+    return makeString("WebPopupMenuProxyWin 0x", hex(reinterpret_cast<uintptr_t>(this), Lowercase));
 }
 
 } // namespace WebKit

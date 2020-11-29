@@ -1,3 +1,4 @@
+//@ skip if $memoryLimited
 var exception;
 try {
     print('\ud000'.repeat(2**30));
@@ -5,5 +6,5 @@ try {
     exception = e;
 }
 
-if (exception != "Error: Out of memory")
+if (exception != "RangeError: Out of memory")
     throw "FAILED";

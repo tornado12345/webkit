@@ -61,6 +61,7 @@ public:
     static void registerMediaEngine(MediaEngineRegistrar);
 
 private:
+    friend class MediaPlayerFactoryAVFoundationCF;
     static void getSupportedTypes(HashSet<String, ASCIICaseInsensitiveHash>& types);
     static MediaPlayer::SupportsType supportsType(const MediaEngineSupportParameters&);
     static bool supportsKeySystem(const String& keySystem, const String& mimeType);
@@ -73,7 +74,7 @@ private:
     virtual void platformPause();
     MediaTime currentMediaTime() const override;
     virtual void setVolume(float);
-    virtual void setClosedCaptionsVisible(bool);
+    void setClosedCaptionsVisible(bool) override;
     virtual void paint(GraphicsContext&, const FloatRect&);
     virtual void paintCurrentFrameInContext(GraphicsContext&, const FloatRect&);
     virtual PlatformLayer* platformLayer() const;
@@ -86,7 +87,6 @@ private:
     virtual MediaPlayerPrivateAVFoundation::ItemStatus playerItemStatus() const;
     virtual MediaPlayerPrivateAVFoundation::AssetStatus assetStatus() const;
 
-    virtual void checkPlayability();
     void setRate(float) override;
     double rate() const override;
     virtual void seekToTime(const MediaTime&, const MediaTime& negativeTolerance, const MediaTime& positiveTolerance);

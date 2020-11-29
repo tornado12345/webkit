@@ -30,7 +30,7 @@
 #import <CoreLocation/CLLocation.h>
 #import <CoreLocation/CLLocationManagerDelegate.h>
 #import <CoreLocation/CoreLocation.h>
-#import <WebCore/GeolocationPosition.h>
+#import <WebCore/GeolocationPositionData.h>
 #import <WebKitLogging.h>
 #import <objc/objc-runtime.h>
 #import <wtf/RefPtr.h>
@@ -89,10 +89,6 @@ using namespace WebCore;
 
 - (void)requestGeolocationAuthorization
 {
-#if PLATFORM(IOSMAC)
-    [_positionListener geolocationAuthorizationDenied];
-    return;
-#else
     if (![getCLLocationManagerClass() locationServicesEnabled]) {
         [_positionListener geolocationAuthorizationDenied];
         return;
@@ -116,7 +112,6 @@ using namespace WebCore;
         [_positionListener geolocationAuthorizationDenied];
         break;
     }
-#endif
 }
 
 static bool isAuthorizationGranted(CLAuthorizationStatus authorizationStatus)
@@ -141,7 +136,9 @@ static bool isAuthorizationGranted(CLAuthorizationStatus authorizationStatus)
     [_locationManager stopUpdatingLocation];
 }
 
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 - (void)locationManager:(CLLocationManager *)manager didChangeAuthorizationStatus:(CLAuthorizationStatus)status
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 {
     if (_isWaitingForAuthorization) {
         switch (status) {
@@ -170,7 +167,7 @@ static bool isAuthorizationGranted(CLAuthorizationStatus authorizationStatus)
 
 - (void)sendLocation:(CLLocation *)newLocation
 {
-    [_positionListener positionChanged:GeolocationPosition { newLocation }];
+    [_positionListener positionChanged:GeolocationPositionData { newLocation }];
 }
 
 - (void)locationManager:(CLLocationManager *)manager didUpdateLocations:(NSArray *)locations

@@ -28,6 +28,7 @@
 
 #include "APIArray.h"
 #include "APIData.h"
+#include "APIDownloadClient.h"
 #include "APIURLRequest.h"
 #include "DownloadProxy.h"
 #include "WKAPICast.h"
@@ -40,9 +41,9 @@ WKTypeID WKDownloadGetTypeID()
     return toAPI(DownloadProxy::APIType);
 }
 
-uint64_t WKDownloadGetID(WKDownloadRef download)
+uint64_t WKDownloadGetID(WKDownloadRef)
 {
-    return toImpl(download)->downloadID().downloadID();
+    return 0;
 }
 
 WKURLRequestRef WKDownloadCopyRequest(WKDownloadRef download)
@@ -52,12 +53,14 @@ WKURLRequestRef WKDownloadCopyRequest(WKDownloadRef download)
 
 WKDataRef WKDownloadGetResumeData(WKDownloadRef download)
 {
-    return toAPI(toImpl(download)->resumeData());
+    return toAPI(toImpl(download)->legacyResumeData());
 }
 
 void WKDownloadCancel(WKDownloadRef download)
 {
-    return toImpl(download)->cancel();
+    return toImpl(download)->cancel([download = makeRef(*toImpl(download))] (auto*) {
+        download->client().legacyDidCancel(download.get());
+    });
 }
 
 WKPageRef WKDownloadGetOriginatingPage(WKDownloadRef download)

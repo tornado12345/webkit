@@ -27,29 +27,23 @@
 
 #if ENABLE(WEBGPU)
 
+#include "GPUBuffer.h"
 #include "GPUOrigin3D.h"
+#include "GPUPlatformTypes.h"
+#include "GPUTexture.h"
+#include <wtf/HashSet.h>
 #include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
-#include <wtf/RetainPtr.h>
-#include <wtf/Vector.h>
-
-OBJC_PROTOCOL(MTLBlitCommandEncoder);
-OBJC_PROTOCOL(MTLCommandBuffer);
 
 namespace WebCore {
 
-class GPUBuffer;
 class GPUDevice;
-class GPUTexture;
 
 struct GPUExtent3D;
 
-using PlatformCommandBuffer = MTLCommandBuffer;
-using PlatformCommandBufferSmartPtr = RetainPtr<MTLCommandBuffer>;
-
 struct GPUBufferCopyViewBase {
-    unsigned long offset;
-    unsigned long rowPitch;
+    uint64_t offset;
+    unsigned rowPitch;
     unsigned imageHeight;
 };
 
@@ -81,11 +75,11 @@ struct GPUTextureCopyView final : GPUTextureCopyViewBase {
 
 class GPUCommandBuffer : public RefCounted<GPUCommandBuffer> {
 public:
-    static RefPtr<GPUCommandBuffer> create(GPUDevice&);
+    static RefPtr<GPUCommandBuffer> tryCreate(const GPUDevice&);
 
     PlatformCommandBuffer* platformCommandBuffer() const { return m_platformCommandBuffer.get(); }
-    const Vector<Ref<GPUBuffer>>& usedBuffers() const { return m_usedBuffers; }
-    const Vector<Ref<GPUTexture>>& usedTextures() const { return m_usedTextures; }
+    const HashSet<Ref<GPUBuffer>>& usedBuffers() const { return m_usedBuffers; }
+    const HashSet<Ref<GPUTexture>>& usedTextures() const { return m_usedTextures; }
     bool isEncodingPass() const { return m_isEncodingPass; }
 
     void setIsEncodingPass(bool isEncoding) { m_isEncodingPass = isEncoding; }
@@ -94,21 +88,21 @@ public:
     void endBlitEncoding();
 #endif
 
-    void copyBufferToBuffer(Ref<GPUBuffer>&&, unsigned long srcOffset, Ref<GPUBuffer>&&, unsigned long dstOffset, unsigned long size);
+    void copyBufferToBuffer(Ref<GPUBuffer>&&, uint64_t srcOffset, Ref<GPUBuffer>&&, uint64_t dstOffset, uint64_t size);
     void copyBufferToTexture(GPUBufferCopyView&&, GPUTextureCopyView&&, const GPUExtent3D&);
     void copyTextureToBuffer(GPUTextureCopyView&&, GPUBufferCopyView&&, const GPUExtent3D&);
     void copyTextureToTexture(GPUTextureCopyView&&, GPUTextureCopyView&&, const GPUExtent3D&);
 
-    void useBuffer(Ref<GPUBuffer>&& buffer) { m_usedBuffers.append(WTFMove(buffer)); }
-    void useTexture(Ref<GPUTexture>&& texture) { m_usedTextures.append(WTFMove(texture)); }
+    void useBuffer(Ref<GPUBuffer>&& buffer) { m_usedBuffers.addVoid(WTFMove(buffer)); }
+    void useTexture(Ref<GPUTexture>&& texture) { m_usedTextures.addVoid(WTFMove(texture)); }
 
 private:
     GPUCommandBuffer(PlatformCommandBufferSmartPtr&&);
 
     PlatformCommandBufferSmartPtr m_platformCommandBuffer;
-    Vector<Ref<GPUBuffer>> m_usedBuffers;
-    Vector<Ref<GPUTexture>> m_usedTextures;
-    bool m_isEncodingPass = false;
+    HashSet<Ref<GPUBuffer>> m_usedBuffers;
+    HashSet<Ref<GPUTexture>> m_usedTextures;
+    bool m_isEncodingPass { false };
 #if USE(METAL)
     MTLBlitCommandEncoder *blitEncoder() const;
     mutable RetainPtr<MTLBlitCommandEncoder> m_blitEncoder;

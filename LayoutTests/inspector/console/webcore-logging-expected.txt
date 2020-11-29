@@ -7,20 +7,19 @@ Test WebKit logging configuration and console display.
 PASS: Log channels should be supported.
 PASS: Has WI.consoleManager.customLoggingChannels.
 PASS: WI.consoleManager.customLoggingChannels is not empty.
-PASS: Has WI.consoleManager.logChannelSources.
-PASS: WI.consoleManager.logChannelSources is not empty.
 PASS: Log channel has known source.
 PASS: Log channel disabled by default.
 PASS: Log channel has known source.
 PASS: Log channel disabled by default.
 PASS: Log channel has known source.
 PASS: Log channel disabled by default.
-
--- Running test case: Console.Logging.InvalidChannel
-PASS: Logging channel not found
+PASS: Log channel has known source.
+PASS: Log channel disabled by default.
+PASS: Log channel has known source.
+PASS: Log channel disabled by default.
 
 -- Running test case: Console.Logging.InvalidLevel
-PASS: Invalid logging level
+PASS: Unknown level: DOES_NOT_EXIST
 
 -- Running test case: Console.Logging.NoLogging
 PASS: Media logging disabled.

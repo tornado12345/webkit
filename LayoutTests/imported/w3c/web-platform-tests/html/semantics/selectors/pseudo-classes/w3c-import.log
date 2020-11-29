@@ -1,7 +1,7 @@
 The tests in this directory were imported from the W3C repository.
 Do NOT modify these tests directly in WebKit.
 Instead, create a pull request on the WPT github:
-	https://github.com/w3c/web-platform-tests
+	https://github.com/web-platform-tests/wpt
 
 Then run the Tools/Scripts/import-w3c-tests in WebKit to reimport
 
@@ -17,6 +17,7 @@ List of files:
 /LayoutTests/imported/w3c/web-platform-tests/html/semantics/selectors/pseudo-classes/checked-type-change.html
 /LayoutTests/imported/w3c/web-platform-tests/html/semantics/selectors/pseudo-classes/checked.html
 /LayoutTests/imported/w3c/web-platform-tests/html/semantics/selectors/pseudo-classes/default.html
+/LayoutTests/imported/w3c/web-platform-tests/html/semantics/selectors/pseudo-classes/dir-html-input-dynamic-text.html
 /LayoutTests/imported/w3c/web-platform-tests/html/semantics/selectors/pseudo-classes/dir.html
 /LayoutTests/imported/w3c/web-platform-tests/html/semantics/selectors/pseudo-classes/dir01.html
 /LayoutTests/imported/w3c/web-platform-tests/html/semantics/selectors/pseudo-classes/disabled.html

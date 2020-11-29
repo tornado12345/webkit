@@ -32,13 +32,13 @@
 #import "config.h"
 #import "EventSendingController.h"
 
+#import "ClassMethodSwizzler.h"
 #import "DumpRenderTree.h"
 #import "DumpRenderTreeDraggingInfo.h"
 #import "DumpRenderTreeFileDraggingSource.h"
 #import "DumpRenderTreePasteboard.h"
 #import "WebCoreTestSupport.h"
 #import <WebKit/DOMPrivate.h>
-#import <WebKit/WebKit.h>
 #import <WebKit/WebViewPrivate.h>
 #import <functional>
 #import <wtf/RetainPtr.h>
@@ -46,8 +46,8 @@
 #if !PLATFORM(IOS_FAMILY)
 #import <Carbon/Carbon.h> // for GetCurrentEventTime()
 #import <WebKit/WebHTMLView.h>
+#import <WebKit/WebHTMLViewPrivate.h>
 #import <objc/runtime.h>
-#import <wtf/mac/AppKitCompatibilityDeclarations.h>
 #endif
 
 #if PLATFORM(IOS_FAMILY)
@@ -77,7 +77,7 @@ enum MouseButton {
     LeftMouseButton = 0,
     MiddleMouseButton = 1,
     RightMouseButton = 2,
-    NoMouseButton = -1
+    NoMouseButton = -2
 };
 
 struct KeyMappingEntry {
@@ -93,7 +93,7 @@ int lastClickButton = NoMouseButton;
 NSArray *webkitDomEventNames;
 NSMutableArray *savedMouseEvents; // mouse events sent between mouseDown and mouseUp are stored here, and then executed at once.
 BOOL replayingSavedEvents;
-
+unsigned mouseButtonsCurrentlyDown = 0;
 
 #if PLATFORM(IOS_FAMILY)
 @interface SyntheticTouch : NSObject {
@@ -253,7 +253,7 @@ static NSDraggingSession *drt_WebHTMLView_beginDraggingSessionWithItemsEventSour
             || aSelector == @selector(mouseScrollByX:andY:)
             || aSelector == @selector(mouseScrollByX:andY:withWheel:andMomentumPhases:)
             || aSelector == @selector(continuousMouseScrollByX:andY:)
-            || aSelector == @selector(monitorWheelEvents)
+            || aSelector == @selector(monitorWheelEventsWithOptions:)
             || aSelector == @selector(callAfterScrollingCompletes:)
 #if PLATFORM(MAC)
             || aSelector == @selector(beginDragWithFiles:)
@@ -318,7 +318,7 @@ static NSDraggingSession *drt_WebHTMLView_beginDraggingSessionWithItemsEventSour
         return @"continuousMouseScrollBy";
     if (aSelector == @selector(scalePageBy:atX:andY:))
         return @"scalePageBy";
-    if (aSelector == @selector(monitorWheelEvents))
+    if (aSelector == @selector(monitorWheelEventsWithOptions:))
         return @"monitorWheelEvents";
     if (aSelector == @selector(callAfterScrollingCompletes:))
         return @"callAfterScrollingCompletes";
@@ -439,7 +439,7 @@ static NSEventType eventTypeForMouseButtonAndAction(int button, MouseAction acti
     assert([jsFilePaths isKindOfClass:[WebScriptObject class]]);
 
     NSPasteboard *pboard = [NSPasteboard pasteboardWithUniqueName];
-    [pboard declareTypes:[NSArray arrayWithObject:NSFilenamesPboardType] owner:nil];
+    [pboard declareTypes:@[NSFilenamesPboardType] owner:nil];
 
     NSURL *currentTestURL = [NSURL URLWithString:[[mainFrame webView] mainFrameURL]];
 
@@ -561,8 +561,24 @@ static int buildModifierFlags(const WebScriptObject* modifiers)
     return flags;
 }
 
+#if !PLATFORM(IOS_FAMILY)
+static std::unique_ptr<ClassMethodSwizzler> eventPressedMouseButtonsSwizzlerForViewAndEvent(NSView* view, NSEvent* event)
+{
+    if ([view isKindOfClass:[WebHTMLView class]])
+        view = [(WebHTMLView *)view _hitViewForEvent:event];
+    return ![view isKindOfClass:[NSScroller class]] ? makeUnique<ClassMethodSwizzler>([NSEvent class], @selector(pressedMouseButtons), reinterpret_cast<IMP>(swizzledEventPressedMouseButtons)) : NULL;
+}
+
+static NSUInteger swizzledEventPressedMouseButtons()
+{
+    return mouseButtonsCurrentlyDown;
+}
+#endif
+
 - (void)mouseDown:(int)buttonNumber withModifiers:(WebScriptObject*)modifiers
 {
+    mouseButtonsCurrentlyDown |= (1 << buttonNumber);
+
     [[[mainFrame frameView] documentView] layout];
     [self updateClickCountForButton:buttonNumber];
     
@@ -588,7 +604,12 @@ static int buildModifierFlags(const WebScriptObject* modifiers)
 #if !PLATFORM(IOS_FAMILY)
         [NSApp _setCurrentEvent:event];
 #endif
-        [subView mouseDown:event];
+        {
+#if !PLATFORM(IOS_FAMILY)
+            auto eventPressedMouseButtonsSwizzler = eventPressedMouseButtonsSwizzlerForViewAndEvent(subView, event);
+#endif
+            [subView mouseDown:event];
+        }
 #if !PLATFORM(IOS_FAMILY)
         [NSApp _setCurrentEvent:nil];
 #endif
@@ -637,6 +658,8 @@ static int buildModifierFlags(const WebScriptObject* modifiers)
 
 - (void)mouseUp:(int)buttonNumber withModifiers:(WebScriptObject*)modifiers
 {
+    mouseButtonsCurrentlyDown &= ~(1 << buttonNumber);
+
     if (dragMode && !replayingSavedEvents) {
         NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:[EventSendingController instanceMethodSignatureForSelector:@selector(mouseUp:withModifiers:)]];
         [invocation setTarget:self];
@@ -677,7 +700,12 @@ static int buildModifierFlags(const WebScriptObject* modifiers)
 #if !PLATFORM(IOS_FAMILY)
     [NSApp _setCurrentEvent:event];
 #endif
-    [targetView mouseUp:event];
+    {
+#if !PLATFORM(IOS_FAMILY)
+        auto eventPressedMouseButtonsSwizzler = eventPressedMouseButtonsSwizzlerForViewAndEvent(targetView, event);
+#endif
+        [targetView mouseUp:event];
+    }
 #if !PLATFORM(IOS_FAMILY)
     [NSApp _setCurrentEvent:nil];
 #endif
@@ -762,11 +790,19 @@ static int buildModifierFlags(const WebScriptObject* modifiers)
                 if ([[draggingInfo draggingSource] respondsToSelector:@selector(draggedImage:movedTo:)])
                     [[draggingInfo draggingSource] draggedImage:[draggingInfo draggedImage] movedTo:lastMousePosition];
                 [[mainFrame webView] draggingUpdated:draggingInfo];
-            } else
-                [subView mouseDragged:event];
+            } else {
+#if !PLATFORM(IOS_FAMILY)
+                auto eventPressedMouseButtonsSwizzler = eventPressedMouseButtonsSwizzlerForViewAndEvent(subView, event);
 #endif
-        } else
+                [subView mouseDragged:event];
+            }
+#endif
+        } else {
+#if !PLATFORM(IOS_FAMILY)
+            auto eventPressedMouseButtonsSwizzler = eventPressedMouseButtonsSwizzlerForViewAndEvent(subView, event);
+#endif
             [subView mouseMoved:event];
+        }
 #if !PLATFORM(IOS_FAMILY)
         [NSApp _setCurrentEvent:nil];
 #endif
@@ -781,7 +817,7 @@ static int buildModifierFlags(const WebScriptObject* modifiers)
 {
 #if !PLATFORM(IOS_FAMILY)
     CGScrollEventUnit unit = continuously ? kCGScrollEventUnitPixel : kCGScrollEventUnitLine;
-    CGEventRef cgScrollEvent = CGEventCreateScrollWheelEvent(NULL, unit, 2, y, x);
+    CGEventRef cgScrollEvent = CGEventCreateScrollWheelEvent2(NULL, unit, 2, y, x, 0);
     
     // Set the CGEvent location in flipped coords relative to the first screen, which
     // compensates for the behavior of +[NSEvent eventWithCGEvent:] when the event has
@@ -815,31 +851,39 @@ static int buildModifierFlags(const WebScriptObject* modifiers)
 - (void)mouseScrollByX:(int)x andY:(int)y withWheel:(NSString*)phaseName andMomentumPhases:(NSString*)momentumName
 {
 #if PLATFORM(MAC)
+    [[[mainFrame frameView] documentView] layout];
+
     uint32_t phase = 0;
     if ([phaseName isEqualToString: @"none"])
         phase = 0;
     else if ([phaseName isEqualToString: @"began"])
-        phase = 1; // kCGScrollPhaseBegan
+        phase = kCGScrollPhaseBegan;
     else if ([phaseName isEqualToString: @"changed"])
-        phase = 2; // kCGScrollPhaseChanged;
+        phase = kCGScrollPhaseChanged;
     else if ([phaseName isEqualToString: @"ended"])
-        phase = 4; // kCGScrollPhaseEnded
+        phase = kCGScrollPhaseEnded;
     else if ([phaseName isEqualToString: @"cancelled"])
-        phase = 8; // kCGScrollPhaseCancelled
+        phase = kCGScrollPhaseCancelled;
     else if ([phaseName isEqualToString: @"maybegin"])
-        phase = 128; // kCGScrollPhaseMayBegin
+        phase = kCGScrollPhaseMayBegin;
 
     uint32_t momentum = 0;
     if ([momentumName isEqualToString: @"none"])
-        momentum = 0; //kCGMomentumScrollPhaseNone;
+        momentum = kCGMomentumScrollPhaseNone;
     else if ([momentumName isEqualToString:@"begin"])
-        momentum = 1; // kCGMomentumScrollPhaseBegin;
+        momentum = kCGMomentumScrollPhaseBegin;
     else if ([momentumName isEqualToString:@"continue"])
-        momentum = 2; // kCGMomentumScrollPhaseContinue;
+        momentum = kCGMomentumScrollPhaseContinue;
     else if ([momentumName isEqualToString:@"end"])
-        momentum = 3; // kCGMomentumScrollPhaseEnd;
+        momentum = kCGMomentumScrollPhaseEnd;
 
-    CGEventRef cgScrollEvent = CGEventCreateScrollWheelEvent(NULL, kCGScrollEventUnitLine, 2, y, x);
+    if (phase == kCGScrollPhaseEnded || phase == kCGScrollPhaseCancelled)
+        _sentWheelPhaseEndOrCancel = YES;
+
+    if (momentum == kCGMomentumScrollPhaseEnd)
+        _sentMomentumPhaseEnd = YES;
+
+    CGEventRef cgScrollEvent = CGEventCreateScrollWheelEvent2(NULL, kCGScrollEventUnitLine, 2, y, x, 0);
 
     // Set the CGEvent location in flipped coords relative to the first screen, which
     // compensates for the behavior of +[NSEvent eventWithCGEvent:] when the event has
@@ -1226,7 +1270,8 @@ static int buildModifierFlags(const WebScriptObject* modifiers)
     }
     
     if ([event isKindOfClass:[DOMKeyboardEvent class]]) {
-        printf("  keyIdentifier: %s\n", [[(DOMKeyboardEvent*)event keyIdentifier] UTF8String]);
+        auto keyIdentifier = [(DOMKeyboardEvent*)event keyIdentifier];
+        printf("  keyIdentifier:%s%s\n", keyIdentifier.length ? " " : "", [keyIdentifier UTF8String]);
         printf("  keyLocation:   %d\n", [(DOMKeyboardEvent*)event location]);
         printf("  modifier keys: c:%d s:%d a:%d m:%d\n", 
                [(DOMKeyboardEvent*)event ctrlKey] ? 1 : 0, 
@@ -1343,14 +1388,26 @@ static int buildModifierFlags(const WebScriptObject* modifiers)
     
 }
 
-- (void)monitorWheelEvents
+- (void)monitorWheelEventsWithOptions:(WebScriptObject*)options
 {
 #if PLATFORM(MAC)
     WebCore::Frame* frame = [[mainFrame webView] _mainCoreFrame];
     if (!frame)
         return;
 
-    WebCoreTestSupport::monitorWheelEvents(*frame);
+    _sentWheelPhaseEndOrCancel = NO;
+    _sentMomentumPhaseEnd = NO;
+
+    bool resetLatching = true;
+
+    if (![options isKindOfClass:[WebUndefined class]]) {
+        if (id resetLatchingValue = [options valueForKey:@"resetLatching"]) {
+            if ([resetLatchingValue isKindOfClass:[NSNumber class]])
+                resetLatching = [resetLatchingValue boolValue];
+        }
+    }
+
+    WebCoreTestSupport::monitorWheelEvents(*frame, resetLatching);
 #endif
 }
 
@@ -1366,7 +1423,7 @@ static int buildModifierFlags(const WebScriptObject* modifiers)
         return;
 
     JSGlobalContextRef globalContext = [mainFrame globalContext];
-    WebCoreTestSupport::setTestCallbackAndStartNotificationTimer(*frame, globalContext, jsCallbackFunction);
+    WebCoreTestSupport::setWheelEventMonitorTestCallbackAndStartMonitoring(_sentWheelPhaseEndOrCancel, _sentMomentumPhaseEnd, *frame, globalContext, jsCallbackFunction);
 #endif
 }
 
@@ -1446,8 +1503,8 @@ static int buildModifierFlags(const WebScriptObject* modifiers)
 
     for (SyntheticTouch *currTouch in touches) {
         [touchLocations addObject:[NSValue valueWithCGPoint:currTouch.location]];
-        [touchIdentifiers addObject:[NSNumber numberWithUnsignedInt:currTouch.identifier]];
-        [touchPhases addObject:[NSNumber numberWithUnsignedInt:currTouch.phase]];
+        [touchIdentifiers addObject:@(currTouch.identifier)];
+        [touchPhases addObject:@(currTouch.phase)];
 
         if ((currTouch.phase == UITouchPhaseEnded) || (currTouch.phase == UITouchPhaseCancelled))
             continue;

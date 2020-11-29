@@ -29,6 +29,7 @@
 
 #include "InjectedBundleTest.h"
 #include <WebKit/WKBundlePageGroup.h>
+#include <WebKit/WKBundlePagePrivate.h>
 #include <WebKit/WKBundlePrivate.h>
 #include <WebKit/WKBundleScriptWorld.h>
 #include <WebKit/WKRetainPtr.h>
@@ -42,15 +43,12 @@ public:
         : InjectedBundleTest(identifier)
     { }
 
-    virtual void initialize(WKBundleRef bundle, WKTypeRef userData)
+    void didCreatePage(WKBundleRef, WKBundlePageRef page) override
     {
-        assert(WKGetTypeID(userData) == WKBundlePageGroupGetTypeID());
-        WKBundlePageGroupRef pageGroup = static_cast<WKBundlePageGroupRef>(userData);
-
         auto world = WKBundleScriptWorldCreateWorld();
         WKBundleScriptWorldMakeAllShadowRootsOpen(world);
 
-        WKRetainPtr<WKStringRef> source(AdoptWK, WKStringCreateWithUTF8CString(
+        WKRetainPtr<WKStringRef> source = adoptWK(WKStringCreateWithUTF8CString(
             "window.onload = function () {\n"
             "    const element = document.createElement('div');\n"
             "    const queryMethodName = 'collectMatchingElementsInFlatTree';\n"
@@ -87,7 +85,7 @@ public:
             "    queryResult = window.matchingElementInFlatTree(document, 'div');\n"
             "    alert(`Found:${!!queryResult}`);\n"
             "}\n"));
-        WKBundleAddUserScript(bundle, pageGroup, world, source.get(), 0, 0, 0, kWKInjectAtDocumentStart, kWKInjectInAllFrames);
+        WKBundlePageAddUserScriptInWorld(page, source.get(), world, kWKInjectAtDocumentStart, kWKInjectInAllFrames);
     }
 };
 

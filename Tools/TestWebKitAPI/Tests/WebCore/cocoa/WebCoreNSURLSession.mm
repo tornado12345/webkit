@@ -27,7 +27,7 @@
 
 #if !PLATFORM(IOS_FAMILY)
 
-#import "PlatformUtilities.h"
+#import "Utilities.h"
 #import <JavaScriptCore/InitializeThreading.h>
 #import <WebCore/Frame.h>
 #import <WebCore/FrameLoadRequest.h>
@@ -114,7 +114,7 @@ public:
     virtual void SetUp()
     {
 #if PLATFORM(IOS_FAMILY)
-        JSC::initializeThreading();
+        JSC::initialize();
 #endif
         view = [[WebView alloc] initWithFrame:NSZeroRect];
         view.frameLoadDelegate = [[[TestNSURLSessionLoaderDelegate alloc] init] autorelease];

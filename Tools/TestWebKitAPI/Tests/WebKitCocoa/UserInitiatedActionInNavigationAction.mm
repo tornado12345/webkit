@@ -23,7 +23,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
+#import "config.h"
 
 #if PLATFORM(MAC)
 
@@ -33,7 +33,6 @@
 #import <WebKit/WKWebViewPrivate.h>
 #import <WebKit/_WKUserInitiatedAction.h>
 #import <wtf/RetainPtr.h>
-#import <wtf/mac/AppKitCompatibilityDeclarations.h>
 
 static bool finishedNavigation;
 

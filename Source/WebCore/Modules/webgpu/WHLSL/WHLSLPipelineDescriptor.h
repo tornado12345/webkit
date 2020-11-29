@@ -25,7 +25,7 @@
 
 #pragma once
 
-#if ENABLE(WEBGPU)
+#if ENABLE(WHLSL_COMPILER)
 
 #include <wtf/OptionSet.h>
 #include <wtf/Variant.h>
@@ -44,16 +44,48 @@ enum class VertexFormat : uint8_t {
 
 struct VertexAttribute {
     VertexFormat vertexFormat;
-    unsigned name;
+    unsigned shaderLocation;
+    unsigned metalLocation;
 };
 
 using VertexAttributes = Vector<VertexAttribute>;
 
+// FIXME: Add back < 32 bit texture values and figure out how to box them in wider types when we load from them.
+// https://bugs.webkit.org/show_bug.cgi?id=200315
+
 enum class TextureFormat {
-    R8G8B8A8Unorm,
-    R8G8B8A8Uint,
-    B8G8R8A8Unorm,
-    D32FloatS8Uint
+    R8Unorm,
+    R8UnormSrgb,
+    R8Snorm,
+    R16Unorm,
+    R16Snorm,
+    R16Float,
+    RG8Unorm,
+    RG8UnormSrgb,
+    RG8Snorm,
+    B5G6R5Unorm,
+    R32Uint,
+    R32Sint,
+    R32Float,
+    RG16Unorm,
+    RG16Snorm,
+    RG16Float,
+    RGBA8Unorm,
+    RGBA8UnormSrgb,
+    RGBA8Snorm,
+    BGRA8Unorm,
+    BGRA8UnormSrgb,
+    RGB10A2Unorm,
+    RG11B10Float,
+    RG32Uint,
+    RG32Sint,
+    RG32Float,
+    RGBA16Unorm,
+    RGBA16Snorm,
+    RGBA16Float,
+    RGBA32Uint,
+    RGBA32Sint,
+    RGBA32Float
 };
 
 struct AttachmentDescriptor {
@@ -73,18 +105,28 @@ enum class ShaderStage : uint8_t {
     Compute = 1 << 2
 };
 
-enum class BindingType : uint8_t {
-    UniformBuffer,
-    Sampler,
-    Texture,
-    StorageBuffer,
-    // FIXME: Add the dynamic types
+struct UniformBufferBinding {
+    unsigned lengthName;
 };
 
+struct SamplerBinding {
+};
+
+struct TextureBinding {
+};
+
+struct StorageBufferBinding {
+    unsigned lengthName;
+};
+
+// FIXME: https://bugs.webkit.org/show_bug.cgi?id=198168 Add the dynamic types
+
 struct Binding {
+    using BindingDetails = Variant<UniformBufferBinding, SamplerBinding, TextureBinding, StorageBufferBinding>;
     OptionSet<ShaderStage> visibility;
-    BindingType bindingType;
-    unsigned name;
+    BindingDetails binding;
+    unsigned internalName;
+    unsigned externalName;
 };
 
 struct BindGroup {
@@ -113,4 +155,4 @@ using PipelineDescriptor = Variant<RenderPipelineDescriptor, ComputePipelineDesc
 
 } // namespace WebCore
 
-#endif // ENABLE(WEBGPU)
+#endif // ENABLE(WHLSL_COMPILER)

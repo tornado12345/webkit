@@ -33,6 +33,7 @@
 #import "TestNavigationDelegate.h"
 #import <WebKit/WKWebViewPrivate.h>
 #import <wtf/RetainPtr.h>
+#import <wtf/WeakObjCPtr.h>
 
 static bool isDone;
 
@@ -53,6 +54,82 @@ TEST(WKWebView, PrepareForMoveToWindow)
     }];
 
     TestWebKitAPI::Util::run(&isDone);
+}
+
+
+TEST(WKWebView, PrepareForMoveToWindowThenClose)
+{
+    auto webView = adoptNS([[WKWebView alloc] init]);
+
+    NSURLRequest *request = [NSURLRequest requestWithURL:[[NSBundle mainBundle] URLForResource:@"simple" withExtension:@"html" subdirectory:@"TestWebKitAPI.resources"]];
+    [webView loadRequest:request];
+
+    [webView _test_waitForDidFinishNavigation];
+
+    RetainPtr<NSWindow> window = adoptNS([[NSWindow alloc] initWithContentRect:[webView frame] styleMask:NSBorderlessWindowMask backing:NSBackingStoreBuffered defer:NO]);
+
+    [webView _prepareForMoveToWindow:window.get() completionHandler:[webView, window] {
+        isDone = true;
+    }];
+
+    [webView _close];
+
+    TestWebKitAPI::Util::run(&isDone);
+}
+
+TEST(WKWebView, PrepareForMoveToWindowThenViewDeallocBeforeMoving)
+{
+    auto window = adoptNS([[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 200, 200) styleMask:NSBorderlessWindowMask backing:NSBackingStoreBuffered defer:NO]);
+
+    @autoreleasepool {
+        auto webView = adoptNS([[WKWebView alloc] init]);
+        [webView _prepareForMoveToWindow:window.get() completionHandler:^{
+            isDone = true;
+        }];
+
+        TestWebKitAPI::Util::run(&isDone);
+        isDone = false;
+
+        webView = nil;
+    }
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [window setFrame:NSMakeRect(0, 0, 10, 10) display:YES];
+        isDone = true;
+    });
+
+    TestWebKitAPI::Util::run(&isDone);
+}
+
+TEST(WKWebView, PrepareForMoveToWindowThenWindowDeallocBeforeMoving)
+{
+    auto webView = adoptNS([[WKWebView alloc] init]);
+    static WeakObjCPtr<NSWindow> weakWindow;
+
+    @autoreleasepool {
+        auto window = adoptNS([[NSWindow alloc] initWithContentRect:[webView frame] styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO]);
+        weakWindow = window.get();
+        [webView _prepareForMoveToWindow:window.get() completionHandler:^{
+            isDone = true;
+        }];
+
+        TestWebKitAPI::Util::run(&isDone);
+        isDone = false;
+
+        window = nil;
+    }
+
+    // Target window is kept alive by webView before it actually moves to.
+    ASSERT(weakWindow);
+
+    @autoreleasepool {
+        RetainPtr<NSWindow> window = weakWindow.getAutoreleased();
+        [window.get().contentView addSubview:webView.get()];
+        
+        window = nil;
+    }
+
+    ASSERT(!weakWindow);
 }
 
 #endif

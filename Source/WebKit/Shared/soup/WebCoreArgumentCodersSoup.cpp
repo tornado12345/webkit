@@ -30,6 +30,9 @@
 #include "WebCoreArgumentCoders.h"
 
 #include <WebCore/CertificateInfo.h>
+#include <WebCore/DictionaryPopupInfo.h>
+#include <WebCore/Font.h>
+#include <WebCore/FontAttributes.h>
 #include <WebCore/ResourceError.h>
 #include <WebCore/ResourceRequest.h>
 #include <WebCore/ResourceResponse.h>
@@ -159,7 +162,7 @@ bool ArgumentCoder<ResourceError>::decodePlatformData(Decoder& decoder, Resource
 void ArgumentCoder<SoupNetworkProxySettings>::encode(Encoder& encoder, const SoupNetworkProxySettings& settings)
 {
     ASSERT(!settings.isEmpty());
-    encoder.encodeEnum(settings.mode);
+    encoder << settings.mode;
     if (settings.mode != SoupNetworkProxySettings::Mode::Custom)
         return;
 
@@ -175,7 +178,7 @@ void ArgumentCoder<SoupNetworkProxySettings>::encode(Encoder& encoder, const Sou
 
 bool ArgumentCoder<SoupNetworkProxySettings>::decode(Decoder& decoder, SoupNetworkProxySettings& settings)
 {
-    if (!decoder.decodeEnum(settings.mode))
+    if (!decoder.decode(settings.mode))
         return false;
 
     if (settings.mode != SoupNetworkProxySettings::Mode::Custom)
@@ -226,6 +229,52 @@ bool ArgumentCoder<Credential>::decodePlatformData(Decoder&, Credential&)
     ASSERT_NOT_REACHED();
     return false;
 }
+
+void ArgumentCoder<FontAttributes>::encodePlatformData(Encoder&, const FontAttributes&)
+{
+    ASSERT_NOT_REACHED();
+}
+
+Optional<FontAttributes> ArgumentCoder<FontAttributes>::decodePlatformData(Decoder&, FontAttributes&)
+{
+    ASSERT_NOT_REACHED();
+    return WTF::nullopt;
+}
+
+void ArgumentCoder<DictionaryPopupInfo>::encodePlatformData(Encoder&, const DictionaryPopupInfo&)
+{
+    ASSERT_NOT_REACHED();
+}
+
+bool ArgumentCoder<DictionaryPopupInfo>::decodePlatformData(Decoder&, DictionaryPopupInfo&)
+{
+    ASSERT_NOT_REACHED();
+    return false;
+}
+
+void ArgumentCoder<Ref<Font>>::encodePlatformData(Encoder&, const Ref<Font>&)
+{
+    ASSERT_NOT_REACHED();
+}
+
+Optional<FontPlatformData> ArgumentCoder<Ref<Font>>::decodePlatformData(Decoder&)
+{
+    ASSERT_NOT_REACHED();
+    return WTF::nullopt;
+}
+
+#if ENABLE(VIDEO)
+void ArgumentCoder<SerializedPlatformDataCueValue>::encodePlatformData(Encoder& encoder, const SerializedPlatformDataCueValue& value)
+{
+    ASSERT_NOT_REACHED();
+}
+
+Optional<SerializedPlatformDataCueValue>  ArgumentCoder<SerializedPlatformDataCueValue>::decodePlatformData(Decoder& decoder, WebCore::SerializedPlatformDataCueValue::PlatformType platformType)
+{
+    ASSERT_NOT_REACHED();
+    return WTF::nullopt;
+}
+#endif
 
 }
 

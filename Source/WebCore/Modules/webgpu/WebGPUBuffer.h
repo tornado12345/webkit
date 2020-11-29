@@ -29,8 +29,8 @@
 
 #include "GPUBuffer.h"
 #include "GPUBufferUsage.h"
-#include "JSDOMPromiseDeferred.h"
-#include <wtf/RefCounted.h>
+#include "GPUObjectBase.h"
+#include "IDLTypes.h"
 #include <wtf/RefPtr.h>
 
 namespace JSC {
@@ -41,13 +41,15 @@ namespace WebCore {
 
 struct GPUBufferDescriptor;
 
-class WebGPUBuffer : public RefCounted<WebGPUBuffer> {
+template<typename IDLType> class DOMPromiseDeferred;
+
+class WebGPUBuffer : public GPUObjectBase {
 public:
-    static Ref<WebGPUBuffer> create(RefPtr<GPUBuffer>&&);
+    static Ref<WebGPUBuffer> create(RefPtr<GPUBuffer>&&, GPUErrorScopes&);
 
-    RefPtr<GPUBuffer> buffer() const { return m_buffer; }
+    GPUBuffer* buffer() { return m_buffer.get(); }
+    const GPUBuffer* buffer() const { return m_buffer.get(); }
 
-    void setSubData(unsigned long long, const JSC::ArrayBuffer&);
     using BufferMappingPromise = DOMPromiseDeferred<IDLInterface<JSC::ArrayBuffer>>;
     void mapReadAsync(BufferMappingPromise&&);
     void mapWriteAsync(BufferMappingPromise&&);
@@ -55,7 +57,7 @@ public:
     void destroy();
 
 private:
-    explicit WebGPUBuffer(RefPtr<GPUBuffer>&&);
+    explicit WebGPUBuffer(RefPtr<GPUBuffer>&&, GPUErrorScopes&);
 
     void rejectOrRegisterPromiseCallback(BufferMappingPromise&&, bool);
 

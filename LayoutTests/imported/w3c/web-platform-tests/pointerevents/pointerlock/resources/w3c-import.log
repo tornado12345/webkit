@@ -15,3 +15,4 @@ None
 ------------------------------------------------------------------------
 List of files:
 /LayoutTests/imported/w3c/web-platform-tests/pointerevents/pointerlock/resources/pointerevent_movementxy-iframe.html
+/LayoutTests/imported/w3c/web-platform-tests/pointerevents/pointerlock/resources/pointerevent_pointermove_in_pointerlock-iframe.html

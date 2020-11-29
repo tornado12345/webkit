@@ -23,7 +23,7 @@
 #include "GraphicsContext.h"
 #include "GraphicsLayerFactory.h"
 #include "ImageBuffer.h"
-#include "TextureMapperAnimation.h"
+#include "NicosiaAnimation.h"
 
 #if !USE(COORDINATED_GRAPHICS)
 
@@ -272,6 +272,15 @@ void GraphicsLayerTextureMapper::setContentsRect(const FloatRect& value)
     notifyChange(ContentsRectChange);
 }
 
+void GraphicsLayerTextureMapper::setContentsClippingRect(const FloatRoundedRect& rect)
+{
+    if (rect == m_contentsClippingRect)
+        return;
+
+    GraphicsLayer::setContentsClippingRect(rect);
+    notifyChange(ContentsRectChange);
+}
+
 void GraphicsLayerTextureMapper::setContentsToSolidColor(const Color& color)
 {
     if (color == m_solidColor)
@@ -401,11 +410,32 @@ void GraphicsLayerTextureMapper::commitLayerChanges()
         m_layer.setChildren(rawChildren);
     }
 
-    if (m_changeMask & MaskLayerChange)
-        m_layer.setMaskLayer(&downcast<GraphicsLayerTextureMapper>(maskLayer())->layer());
+    if (m_changeMask & MaskLayerChange) {
+        auto* layer = downcast<GraphicsLayerTextureMapper>(maskLayer());
+        m_layer.setMaskLayer(layer ? &layer->layer() : nullptr);
+    }
 
-    if (m_changeMask & ReplicaLayerChange)
-        m_layer.setReplicaLayer(&downcast<GraphicsLayerTextureMapper>(replicaLayer())->layer());
+    if (m_changeMask & ReplicaLayerChange) {
+        auto* layer = downcast<GraphicsLayerTextureMapper>(replicaLayer());
+        m_layer.setReplicaLayer(layer ? &layer->layer() : nullptr);
+    }
+
+    if (m_changeMask & BackdropLayerChange) {
+        if (needsBackdrop()) {
+            if (!m_backdropLayer) {
+                m_backdropLayer = makeUnique<TextureMapperLayer>();
+                m_backdropLayer->setAnchorPoint(FloatPoint3D());
+                m_backdropLayer->setContentsVisible(true);
+                m_backdropLayer->setMasksToBounds(true);
+            }
+            m_backdropLayer->setFilters(m_backdropFilters);
+            m_backdropLayer->setSize(m_backdropFiltersRect.rect().size());
+            m_backdropLayer->setPosition(m_backdropFiltersRect.rect().location());
+        } else
+            m_backdropLayer = nullptr;
+
+        m_layer.setBackdropLayer(m_backdropLayer.get());
+    }
 
     if (m_changeMask & PositionChange)
         m_layer.setPosition(position());
@@ -425,8 +455,10 @@ void GraphicsLayerTextureMapper::commitLayerChanges()
     if (m_changeMask & Preserves3DChange)
         m_layer.setPreserves3D(preserves3D());
 
-    if (m_changeMask & ContentsRectChange)
+    if (m_changeMask & ContentsRectChange) {
         m_layer.setContentsRect(contentsRect());
+        m_layer.setContentsClippingRect(contentsClippingRect());
+    }
 
     if (m_changeMask & MasksToBoundsChange)
         m_layer.setMasksToBounds(masksToBounds());
@@ -480,10 +512,16 @@ void GraphicsLayerTextureMapper::flushCompositingState(const FloatRect& rect)
 
     flushCompositingStateForThisLayerOnly();
 
+    auto now = MonotonicTime::now();
+
     if (maskLayer())
         maskLayer()->flushCompositingState(rect);
-    if (replicaLayer())
+    if (replicaLayer()) {
         replicaLayer()->flushCompositingState(rect);
+        downcast<GraphicsLayerTextureMapper>(replicaLayer())->layer().applyAnimationsRecursively(now);
+    }
+    if (m_backdropLayer)
+        m_backdropLayer->applyAnimationsRecursively(now);
     for (auto& child : children())
         child->flushCompositingState(rect);
 }
@@ -572,7 +610,7 @@ bool GraphicsLayerTextureMapper::addAnimation(const KeyframeValueList& valueList
         listsMatch = validateTransformOperations(valueList, hasBigRotation) >= 0;
 
     const MonotonicTime currentTime = MonotonicTime::now();
-    m_animations.add(TextureMapperAnimation(keyframesName, valueList, boxSize, *anim, listsMatch, currentTime - Seconds(timeOffset), 0_s, TextureMapperAnimation::AnimationState::Playing));
+    m_animations.add(Nicosia::Animation(keyframesName, valueList, boxSize, *anim, listsMatch, currentTime - Seconds(timeOffset), 0_s, Nicosia::Animation::AnimationState::Playing));
     // m_animationStartTime is the time of the first real frame of animation, now or delayed by a negative offset.
     if (Seconds(timeOffset) > 0_s)
         m_animationStartTime = currentTime;
@@ -595,9 +633,6 @@ void GraphicsLayerTextureMapper::removeAnimation(const String& animationName)
 
 bool GraphicsLayerTextureMapper::setFilters(const FilterOperations& filters)
 {
-    if (!m_layer.textureMapper())
-        return false;
-
     bool canCompositeFilters = filtersCanBeComposited(filters);
     if (GraphicsLayer::filters() == filters)
         return canCompositeFilters;
@@ -612,6 +647,31 @@ bool GraphicsLayerTextureMapper::setFilters(const FilterOperations& filters)
     }
 
     return canCompositeFilters;
+}
+
+bool GraphicsLayerTextureMapper::setBackdropFilters(const FilterOperations& filters)
+{
+    bool canCompositeFilters = filtersCanBeComposited(filters);
+    if (m_backdropFilters == filters)
+        return canCompositeFilters;
+
+    if (canCompositeFilters)
+        GraphicsLayer::setBackdropFilters(filters);
+    else
+        clearBackdropFilters();
+
+    notifyChange(BackdropLayerChange);
+
+    return canCompositeFilters;
+}
+
+void GraphicsLayerTextureMapper::setBackdropFiltersRect(const FloatRoundedRect& backdropFiltersRect)
+{
+    if (m_backdropFiltersRect == backdropFiltersRect)
+        return;
+
+    GraphicsLayer::setBackdropFiltersRect(backdropFiltersRect);
+    notifyChange(BackdropLayerChange);
 }
 
 }

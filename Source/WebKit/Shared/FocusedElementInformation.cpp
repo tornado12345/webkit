@@ -63,7 +63,8 @@ Optional<OptionItem> OptionItem::decode(IPC::Decoder& decoder)
 
 void FocusedElementInformation::encode(IPC::Encoder& encoder) const
 {
-    encoder << elementRect;
+    encoder << interactionRect;
+    encoder << elementContext;
     encoder << lastInteractionLocation;
     encoder << minimumScaleFactor;
     encoder << maximumScaleFactor;
@@ -75,9 +76,10 @@ void FocusedElementInformation::encode(IPC::Encoder& encoder) const
     encoder << previousNodeRect;
     encoder << isAutocorrect;
     encoder << isRTL;
-    encoder.encodeEnum(autocapitalizeType);
-    encoder.encodeEnum(elementType);
-    encoder.encodeEnum(inputMode);
+    encoder << autocapitalizeType;
+    encoder << elementType;
+    encoder << inputMode;
+    encoder << enterKeyHint;
     encoder << formAction;
     encoder << selectOptions;
     encoder << selectedIndex;
@@ -91,13 +93,11 @@ void FocusedElementInformation::encode(IPC::Encoder& encoder) const
     encoder << title;
     encoder << acceptsAutofilledLoginCredentials;
     encoder << isAutofillableUsernameField;
-    encoder << elementIsTransparentOrFullyClipped;
     encoder << representingPageURL;
-    encoder.encodeEnum(autofillFieldName);
+    encoder << autofillFieldName;
     encoder << placeholder;
     encoder << label;
     encoder << ariaLabel;
-    encoder << embeddedViewID;
     encoder << focusedElementIdentifier;
 #if ENABLE(DATALIST_ELEMENT)
     encoder << hasSuggestions;
@@ -105,11 +105,20 @@ void FocusedElementInformation::encode(IPC::Encoder& encoder) const
     encoder << suggestedColors;
 #endif
 #endif
+    encoder << shouldSynthesizeKeyEventsForEditing;
+    encoder << isSpellCheckingEnabled;
+    encoder << shouldAvoidResizingWhenInputViewBoundsChange;
+    encoder << shouldAvoidScrollingWhenFocusedContentIsVisible;
+    encoder << shouldUseLegacySelectPopoverDismissalBehaviorInDataActivation;
+    encoder << isFocusingWithValidationMessage;
 }
 
 bool FocusedElementInformation::decode(IPC::Decoder& decoder, FocusedElementInformation& result)
 {
-    if (!decoder.decode(result.elementRect))
+    if (!decoder.decode(result.interactionRect))
+        return false;
+
+    if (!decoder.decode(result.elementContext))
         return false;
 
     if (!decoder.decode(result.lastInteractionLocation))
@@ -145,13 +154,16 @@ bool FocusedElementInformation::decode(IPC::Decoder& decoder, FocusedElementInfo
     if (!decoder.decode(result.isRTL))
         return false;
 
-    if (!decoder.decodeEnum(result.autocapitalizeType))
+    if (!decoder.decode(result.autocapitalizeType))
         return false;
 
-    if (!decoder.decodeEnum(result.elementType))
+    if (!decoder.decode(result.elementType))
         return false;
 
-    if (!decoder.decodeEnum(result.inputMode))
+    if (!decoder.decode(result.inputMode))
+        return false;
+
+    if (!decoder.decode(result.enterKeyHint))
         return false;
 
     if (!decoder.decode(result.formAction))
@@ -193,13 +205,10 @@ bool FocusedElementInformation::decode(IPC::Decoder& decoder, FocusedElementInfo
     if (!decoder.decode(result.isAutofillableUsernameField))
         return false;
 
-    if (!decoder.decode(result.elementIsTransparentOrFullyClipped))
-        return false;
-
     if (!decoder.decode(result.representingPageURL))
         return false;
 
-    if (!decoder.decodeEnum(result.autofillFieldName))
+    if (!decoder.decode(result.autofillFieldName))
         return false;
 
     if (!decoder.decode(result.placeholder))
@@ -209,9 +218,6 @@ bool FocusedElementInformation::decode(IPC::Decoder& decoder, FocusedElementInfo
         return false;
 
     if (!decoder.decode(result.ariaLabel))
-        return false;
-
-    if (!decoder.decode(result.embeddedViewID))
         return false;
 
     if (!decoder.decode(result.focusedElementIdentifier))
@@ -226,6 +232,23 @@ bool FocusedElementInformation::decode(IPC::Decoder& decoder, FocusedElementInfo
         return false;
 #endif
 #endif
+    if (!decoder.decode(result.shouldSynthesizeKeyEventsForEditing))
+        return false;
+
+    if (!decoder.decode(result.isSpellCheckingEnabled))
+        return false;
+
+    if (!decoder.decode(result.shouldAvoidResizingWhenInputViewBoundsChange))
+        return false;
+
+    if (!decoder.decode(result.shouldAvoidScrollingWhenFocusedContentIsVisible))
+        return false;
+
+    if (!decoder.decode(result.shouldUseLegacySelectPopoverDismissalBehaviorInDataActivation))
+        return false;
+
+    if (!decoder.decode(result.isFocusingWithValidationMessage))
+        return false;
 
     return true;
 }

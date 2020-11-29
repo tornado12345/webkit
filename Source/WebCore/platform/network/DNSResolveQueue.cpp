@@ -27,14 +27,15 @@
 #include "config.h"
 #include "DNSResolveQueue.h"
 
-#if USE(SOUP)
-#include "DNSResolveQueueSoup.h"
+#if USE(GLIB)
+#include "DNSResolveQueueGLib.h"
 #elif USE(CURL)
 #include "DNSResolveQueueCurl.h"
 #elif USE(CF)
 #include "DNSResolveQueueCFNet.h"
 #endif
 
+#include <wtf/CompletionHandler.h>
 #include <wtf/NeverDestroyed.h>
 
 namespace WebCore {

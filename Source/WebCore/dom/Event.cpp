@@ -32,10 +32,13 @@
 #include "Performance.h"
 #include "UserGestureIndicator.h"
 #include "WorkerGlobalScope.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
 
-ALWAYS_INLINE Event::Event(MonotonicTime createTime, const AtomicString& type, IsTrusted isTrusted, CanBubble canBubble, IsCancelable cancelable, IsComposed composed)
+WTF_MAKE_ISO_ALLOCATED_IMPL(Event);
+
+ALWAYS_INLINE Event::Event(MonotonicTime createTime, const AtomString& type, IsTrusted isTrusted, CanBubble canBubble, IsCancelable cancelable, IsComposed composed)
     : m_isInitialized { !type.isNull() }
     , m_canBubble { canBubble == CanBubble::Yes }
     , m_cancelable { cancelable == IsCancelable::Yes }
@@ -47,7 +50,6 @@ ALWAYS_INLINE Event::Event(MonotonicTime createTime, const AtomicString& type, I
     , m_isDefaultEventHandlerIgnored { false }
     , m_isTrusted { isTrusted == IsTrusted::Yes }
     , m_isExecutingPassiveEventListener { false }
-    , m_hasEncounteredListener { false }
     , m_eventPhase { NONE }
     , m_type { type }
     , m_createTime { createTime }
@@ -59,19 +61,19 @@ Event::Event(IsTrusted isTrusted)
 {
 }
 
-Event::Event(const AtomicString& eventType, CanBubble canBubble, IsCancelable isCancelable, IsComposed isComposed)
+Event::Event(const AtomString& eventType, CanBubble canBubble, IsCancelable isCancelable, IsComposed isComposed)
     : Event { MonotonicTime::now(), eventType, IsTrusted::Yes, canBubble, isCancelable, isComposed }
 {
     ASSERT(!eventType.isNull());
 }
 
-Event::Event(const AtomicString& eventType, CanBubble canBubble, IsCancelable isCancelable, IsComposed isComposed, MonotonicTime timestamp, IsTrusted isTrusted)
+Event::Event(const AtomString& eventType, CanBubble canBubble, IsCancelable isCancelable, IsComposed isComposed, MonotonicTime timestamp, IsTrusted isTrusted)
     : Event { timestamp, eventType, isTrusted, canBubble, isCancelable, isComposed }
 {
     ASSERT(!eventType.isNull());
 }
 
-Event::Event(const AtomicString& eventType, const EventInit& initializer, IsTrusted isTrusted)
+Event::Event(const AtomString& eventType, const EventInit& initializer, IsTrusted isTrusted)
     : Event { MonotonicTime::now(), eventType, isTrusted,
         initializer.bubbles ? CanBubble::Yes : CanBubble::No,
         initializer.cancelable ? IsCancelable::Yes : IsCancelable::No,
@@ -82,7 +84,7 @@ Event::Event(const AtomicString& eventType, const EventInit& initializer, IsTrus
 
 Event::~Event() = default;
 
-Ref<Event> Event::create(const AtomicString& type, CanBubble canBubble, IsCancelable isCancelable, IsComposed isComposed)
+Ref<Event> Event::create(const AtomString& type, CanBubble canBubble, IsCancelable isCancelable, IsComposed isComposed)
 {
     return adoptRef(*new Event(type, canBubble, isCancelable, isComposed));
 }
@@ -92,12 +94,12 @@ Ref<Event> Event::createForBindings()
     return adoptRef(*new Event);
 }
 
-Ref<Event> Event::create(const AtomicString& type, const EventInit& initializer, IsTrusted isTrusted)
+Ref<Event> Event::create(const AtomString& type, const EventInit& initializer, IsTrusted isTrusted)
 {
     return adoptRef(*new Event(type, initializer, isTrusted));
 }
 
-void Event::initEvent(const AtomicString& eventTypeArg, bool canBubbleArg, bool cancelableArg)
+void Event::initEvent(const AtomString& eventTypeArg, bool canBubbleArg, bool cancelableArg)
 {
     if (isBeingDispatched())
         return;

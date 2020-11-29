@@ -85,14 +85,23 @@ static bool globalAutomaticInspectionState()
 
 RemoteInspector& RemoteInspector::singleton()
 {
-    static NeverDestroyed<RemoteInspector> shared;
+    static LazyNeverDestroyed<RemoteInspector> shared;
+    static dispatch_once_t onceConstructKey;
+    dispatch_once(&onceConstructKey, ^{
+        shared.construct();
+    });
 
+#if PLATFORM(COCOA)
+    if (needMachSandboxExtension)
+        return shared;
+#endif
+    
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         if (canAccessWebInspectorMachPort()) {
             dispatch_block_t initialize = ^{
                 WTF::initializeMainThread();
-                JSC::initializeThreading();
+                JSC::initialize();
                 if (RemoteInspector::startEnabled)
                     shared.get().start();
             };
@@ -122,19 +131,8 @@ void RemoteInspector::updateAutomaticInspectionCandidate(RemoteInspectionTarget*
     {
         LockHolder lock(m_mutex);
 
-        unsigned targetIdentifier = target->targetIdentifier();
-        if (!targetIdentifier)
+        if (!updateTargetMap(target))
             return;
-
-        auto result = m_targetMap.set(targetIdentifier, target);
-        ASSERT_UNUSED(result, !result.isNewEntry);
-
-        // If the target has just allowed remote control, then the listing won't exist yet.
-        // If the target has no identifier remove the old listing.
-        if (RetainPtr<NSDictionary> targetListing = listingForTarget(*target))
-            m_targetListingMap.set(targetIdentifier, targetListing);
-        else
-            m_targetListingMap.remove(targetIdentifier);
 
         // Don't allow automatic inspection unless it is allowed or we are stopped.
         if (!m_automaticInspectionEnabled || !m_enabled) {
@@ -142,11 +140,13 @@ void RemoteInspector::updateAutomaticInspectionCandidate(RemoteInspectionTarget*
             return;
         }
 
+        auto targetIdentifier = target->targetIdentifier();
+
         // FIXME: We should handle multiple debuggables trying to pause at the same time on different threads.
         // To make this work we will need to change m_automaticInspectionCandidateTargetIdentifier to be a per-thread value.
         // Multiple attempts on the same thread should not be possible because our nested run loop is in a special RWI mode.
         if (m_automaticInspectionPaused) {
-            LOG_ERROR("Skipping Automatic Inspection Candidate with pageId(%u) because we are already paused waiting for pageId(%u)", targetIdentifier, m_automaticInspectionCandidateTargetIdentifier);
+            WTFLogAlways("Skipping Automatic Inspection Candidate with pageId(%u) because we are already paused waiting for pageId(%u)", targetIdentifier, m_automaticInspectionCandidateTargetIdentifier);
             pushListingsSoon();
             return;
         }
@@ -161,15 +161,11 @@ void RemoteInspector::updateAutomaticInspectionCandidate(RemoteInspectionTarget*
         }
 
         // In case debuggers fail to respond, or we cannot connect to webinspectord, automatically continue after a short period of time.
-#if PLATFORM(WATCHOS)
-        int64_t debuggerTimeoutDelay = 5;
-#else
-        int64_t debuggerTimeoutDelay = 1;
-#endif
+        int64_t debuggerTimeoutDelay = 10;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, debuggerTimeoutDelay * NSEC_PER_SEC), dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
             LockHolder lock(m_mutex);
             if (m_automaticInspectionCandidateTargetIdentifier == targetIdentifier) {
-                LOG_ERROR("Skipping Automatic Inspection Candidate with pageId(%u) because we failed to receive a response in time.", m_automaticInspectionCandidateTargetIdentifier);
+                WTFLogAlways("Skipping Automatic Inspection Candidate with pageId(%u) because we failed to receive a response in time.", m_automaticInspectionCandidateTargetIdentifier);
                 m_automaticInspectionPaused = false;
             }
         });
@@ -197,7 +193,7 @@ void RemoteInspector::sendAutomaticInspectionCandidateMessage()
     m_relayConnection->sendMessage(WIRAutomaticInspectionCandidateMessage, details);
 }
 
-void RemoteInspector::sendMessageToRemote(unsigned targetIdentifier, const String& message)
+void RemoteInspector::sendMessageToRemote(TargetID targetIdentifier, const String& message)
 {
     LockHolder lock(m_mutex);
 
@@ -248,7 +244,7 @@ void RemoteInspector::stopInternal(StopSource source)
 
     m_pushScheduled = false;
 
-    for (auto targetConnection : m_targetConnectionMap.values())
+    for (const auto& targetConnection : m_targetConnectionMap.values())
         targetConnection->close();
     m_targetConnectionMap.clear();
 
@@ -356,7 +352,7 @@ void RemoteInspector::xpcConnectionFailed(RemoteInspectorXPCConnection* relayCon
 
     m_pushScheduled = false;
 
-    for (auto targetConnection : m_targetConnectionMap.values())
+    for (const auto& targetConnection : m_targetConnectionMap.values())
         targetConnection->close();
     m_targetConnectionMap.clear();
 
@@ -387,19 +383,28 @@ RetainPtr<NSDictionary> RemoteInspector::listingForInspectionTarget(const Remote
     [listing setObject:@(target.targetIdentifier()) forKey:WIRTargetIdentifierKey];
 
     switch (target.type()) {
+    case RemoteInspectionTarget::Type::ITML:
+        [listing setObject:target.name() forKey:WIRTitleKey];
+        [listing setObject:WIRTypeITML forKey:WIRTypeKey];
+        break;
     case RemoteInspectionTarget::Type::JavaScript:
         [listing setObject:target.name() forKey:WIRTitleKey];
         [listing setObject:WIRTypeJavaScript forKey:WIRTypeKey];
+        break;
+    case RemoteInspectionTarget::Type::Page:
+        [listing setObject:target.url() forKey:WIRURLKey];
+        [listing setObject:target.name() forKey:WIRTitleKey];
+        [listing setObject:WIRTypePage forKey:WIRTypeKey];
         break;
     case RemoteInspectionTarget::Type::ServiceWorker:
         [listing setObject:target.url() forKey:WIRURLKey];
         [listing setObject:target.name() forKey:WIRTitleKey];
         [listing setObject:WIRTypeServiceWorker forKey:WIRTypeKey];
         break;
-    case RemoteInspectionTarget::Type::Web:
+    case RemoteInspectionTarget::Type::WebPage:
         [listing setObject:target.url() forKey:WIRURLKey];
         [listing setObject:target.name() forKey:WIRTitleKey];
-        [listing setObject:WIRTypeWeb forKey:WIRTypeKey];
+        [listing setObject:WIRTypeWebPage forKey:WIRTypeKey];
         break;
     default:
         ASSERT_NOT_REACHED();
@@ -446,7 +451,7 @@ void RemoteInspector::pushListingsNow()
     m_pushScheduled = false;
 
     RetainPtr<NSMutableDictionary> listings = adoptNS([[NSMutableDictionary alloc] init]);
-    for (RetainPtr<NSDictionary> listing : m_targetListingMap.values()) {
+    for (const auto& listing : m_targetListingMap.values()) {
         NSString *targetIdentifierString = [[listing.get() objectForKey:WIRTargetIdentifierKey] stringValue];
         [listings setObject:listing.get() forKey:targetIdentifierString];
     }
@@ -454,6 +459,14 @@ void RemoteInspector::pushListingsNow()
     RetainPtr<NSMutableDictionary> message = adoptNS([[NSMutableDictionary alloc] init]);
     [message setObject:listings.get() forKey:WIRListingKey];
 
+    if (!m_clientCapabilities)
+        [message setObject:WIRAutomationAvailabilityUnknown forKey:WIRAutomationAvailabilityKey];
+    else if (m_clientCapabilities->remoteAutomationAllowed)
+        [message setObject:WIRAutomationAvailabilityAvailable forKey:WIRAutomationAvailabilityKey];
+    else
+        [message setObject:WIRAutomationAvailabilityNotAvailable forKey:WIRAutomationAvailabilityKey];
+
+    // COMPATIBILITY(iOS 13): this key is deprecated and not used by newer versions of webinspectord.
     BOOL isAllowed = m_clientCapabilities && m_clientCapabilities->remoteAutomationAllowed;
     [message setObject:@(isAllowed) forKey:WIRRemoteAutomationEnabledKey];
 
@@ -494,7 +507,7 @@ void RemoteInspector::receivedSetupMessage(NSDictionary *userInfo)
     BAIL_IF_UNEXPECTED_TYPE_ALLOWING_NIL(automaticallyPauseNumber, [NSNumber class]);
     BOOL automaticallyPause = automaticallyPauseNumber.boolValue;
 
-    unsigned targetIdentifier = targetIdentifierNumber.unsignedIntValue;
+    TargetID targetIdentifier = targetIdentifierNumber.unsignedIntValue;
     if (!targetIdentifier)
         return;
 
@@ -537,7 +550,7 @@ void RemoteInspector::receivedDataMessage(NSDictionary *userInfo)
     NSData *data = userInfo[WIRSocketDataKey];
     BAIL_IF_UNEXPECTED_TYPE(data, [NSData class]);
 
-    unsigned targetIdentifier = targetIdentifierNumber.unsignedIntValue;
+    TargetID targetIdentifier = targetIdentifierNumber.unsignedIntValue;
     if (!targetIdentifier)
         return;
 
@@ -557,7 +570,7 @@ void RemoteInspector::receivedDidCloseMessage(NSDictionary *userInfo)
     NSString *connectionIdentifier = userInfo[WIRConnectionIdentifierKey];
     BAIL_IF_UNEXPECTED_TYPE(connectionIdentifier, [NSString class]);
 
-    unsigned targetIdentifier = targetIdentifierNumber.unsignedIntValue;
+    TargetID targetIdentifier = targetIdentifierNumber.unsignedIntValue;
     if (!targetIdentifier)
         return;
 
@@ -588,11 +601,11 @@ void RemoteInspector::receivedIndicateMessage(NSDictionary *userInfo)
     BAIL_IF_UNEXPECTED_TYPE(indicateEnabledNumber, [NSNumber class]);
     BOOL indicateEnabled = indicateEnabledNumber.boolValue;
 
-    unsigned targetIdentifier = targetIdentifierNumber.unsignedIntValue;
+    TargetID targetIdentifier = targetIdentifierNumber.unsignedIntValue;
     if (!targetIdentifier)
         return;
 
-    callOnWebThreadOrDispatchAsyncOnMainThread(^{
+    dispatchAsyncOnMainThreadWithWebThreadLockIfNeeded(^{
         RemoteControllableTarget* target = nullptr;
         {
             LockHolder lock(m_mutex);
@@ -672,7 +685,7 @@ void RemoteInspector::receivedAutomaticInspectionRejectMessage(NSDictionary *use
     NSNumber *targetIdentifierNumber = userInfo[WIRTargetIdentifierKey];
     BAIL_IF_UNEXPECTED_TYPE(targetIdentifierNumber, [NSNumber class]);
 
-    unsigned targetIdentifier = targetIdentifierNumber.unsignedIntValue;
+    TargetID targetIdentifier = targetIdentifierNumber.unsignedIntValue;
     if (!targetIdentifier)
         return;
 

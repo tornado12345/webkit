@@ -102,14 +102,14 @@ class LayoutTestFinder(object):
             except IOError as e:
                 if e.errno == errno.ENOENT:
                     _log.critical('')
-                    _log.critical('--test-list file "%s" not found' % file)
+                    _log.critical('--test-list file "{}" not found'.format(filenames))
                 raise
         return tests
 
     @staticmethod
     def _strip_comments(line):
         commentIndex = line.find('//')
-        if commentIndex is -1:
+        if commentIndex == -1:
             commentIndex = len(line)
 
         line = re.sub(r'\s+', ' ', line[:commentIndex].strip())
@@ -130,9 +130,6 @@ class LayoutTestFinder(object):
             tests_to_skip = all_tests - tests_to_skip
         elif self._options.skipped == 'ignore':
             tests_to_skip = set()
-        elif self._options.skipped != 'always':
-            # make sure we're explicitly running any tests passed on the command line; equivalent to 'default'.
-            tests_to_skip -= set(paths)
 
         # unless of course we don't want to run the HTTP tests :)
         if not self._options.http:
@@ -165,7 +162,7 @@ class LayoutTestFinder(object):
         if self._options.run_chunk:
             chunk_len = test_size
             # In this case chunk_num can be really large. We need
-            # to make the slave fit in the current number of tests.
+            # to make the worker fit in the current number of tests.
             slice_start = (chunk_num * chunk_len) % num_tests
         else:
             # Validate the data.
@@ -179,7 +176,7 @@ class LayoutTestFinder(object):
             if rounded_tests % test_size != 0:
                 rounded_tests = (num_tests + test_size - (num_tests % test_size))
 
-            chunk_len = rounded_tests / test_size
+            chunk_len = rounded_tests // test_size
             slice_start = chunk_len * (chunk_num - 1)
             # It does not mind if we go over test_size.
 

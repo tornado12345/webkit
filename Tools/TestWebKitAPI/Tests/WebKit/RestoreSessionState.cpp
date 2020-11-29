@@ -85,7 +85,7 @@ static WKRetainPtr<WKDataRef> createSessionStateData(WKContextRef context)
 
 TEST(WebKit, RestoreSessionStateContainingScrollRestorationDefault)
 {
-    WKRetainPtr<WKContextRef> context(AdoptWK, WKContextCreateWithConfiguration(nullptr));
+    WKRetainPtr<WKContextRef> context = adoptWK(WKContextCreateWithConfiguration(nullptr));
 
     PlatformWebView webView(context.get());
     setPageLoaderClient(webView.page());
@@ -103,7 +103,7 @@ TEST(WebKit, RestoreSessionStateContainingScrollRestorationDefault)
 
 TEST(WebKit, RestoreSessionStateContainingScrollRestorationDefaultWithAsyncPolicyDelegates)
 {
-    WKRetainPtr<WKContextRef> context(AdoptWK, WKContextCreateWithConfiguration(nullptr));
+    WKRetainPtr<WKContextRef> context = adoptWK(WKContextCreateWithConfiguration(nullptr));
 
     PlatformWebView webView(context.get());
     setPageLoaderClient(webView.page());
@@ -136,6 +136,24 @@ TEST(WebKit, RestoreSessionStateAfterClose)
     WKPageClose(webView.page());
     auto sessionState = adoptWK(WKSessionStateCreateFromData(data.get()));
     WKPageRestoreFromSessionState(webView.page(), sessionState.get());
+}
+
+TEST(WebKit, PendingURLAfterRestoreSessionState)
+{
+    auto context = adoptWK(WKContextCreateWithConfiguration(nullptr));
+    PlatformWebView webView(context.get());
+    setPageLoaderClient(webView.page());
+    auto data = createSessionStateData(context.get());
+    EXPECT_NOT_NULL(data);
+    auto sessionState = adoptWK(WKSessionStateCreateFromData(data.get()));
+    WKPageRestoreFromSessionState(webView.page(), sessionState.get());
+    auto pendingURL = adoptWK(WKPageCopyPendingAPIRequestURL(webView.page()));
+    EXPECT_NOT_NULL(pendingURL);
+    if (!pendingURL)
+        return;
+
+    auto expectedURL = adoptWK(Util::createURLForResource("simple-form", "html"));
+    EXPECT_WK_STREQ(adoptWK(WKURLCopyString(expectedURL.get())).get(), adoptWK(WKURLCopyString(pendingURL.get())).get());
 }
     
 } // namespace TestWebKitAPI

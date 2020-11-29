@@ -78,6 +78,13 @@ LayerHostingMode RemoteLayerTreeContext::layerHostingMode() const
     return m_webPage.layerHostingMode();
 }
 
+#if PLATFORM(IOS_FAMILY)
+bool RemoteLayerTreeContext::canShowWhileLocked() const
+{
+    return m_webPage.canShowWhileLocked();
+}
+#endif
+
 void RemoteLayerTreeContext::layerDidEnterContext(PlatformCALayerRemote& layer, PlatformCALayer::LayerType type)
 {
     GraphicsLayer::PlatformLayerID layerID = layer.layerID();
@@ -85,7 +92,6 @@ void RemoteLayerTreeContext::layerDidEnterContext(PlatformCALayerRemote& layer, 
     RemoteLayerTreeTransaction::LayerCreationProperties creationProperties;
     creationProperties.layerID = layerID;
     creationProperties.type = type;
-    creationProperties.embeddedViewID = layer.embeddedViewID();
 
     if (layer.isPlatformCALayerRemoteCustom()) {
         creationProperties.hostingContextID = layer.hostingContextID();

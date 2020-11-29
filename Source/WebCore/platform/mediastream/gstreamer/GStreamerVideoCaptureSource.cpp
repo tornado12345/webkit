@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2018 Metrological Group B.V.
+ * Copyright (C) 2020 Igalia S.L.
  * Author: Thibault Saunier <tsaunier@igalia.com>
  * Author: Alejandro G. Castro  <alex@igalia.com>
  *
@@ -21,24 +22,15 @@
 
 #include "config.h"
 
-#if ENABLE(MEDIA_STREAM) && USE(LIBWEBRTC) && USE(GSTREAMER)
+#if ENABLE(MEDIA_STREAM) && USE(GSTREAMER)
 #include "GStreamerVideoCaptureSource.h"
 
 #include "GStreamerCaptureDeviceManager.h"
 #include "MediaSampleGStreamer.h"
 
 #include <gst/app/gstappsink.h>
-#include <webrtc/api/mediastreaminterface.h>
-#include <webrtc/api/peerconnectioninterface.h>
-#include <webrtc/media/base/videocommon.h>
-#include <webrtc/media/engine/webrtcvideocapturer.h>
-#include <webrtc/media/engine/webrtcvideocapturerfactory.h>
-#include <webrtc/modules/video_capture/video_capture_defines.h>
 
 namespace WebCore {
-
-const static int defaultWidth = 640;
-const static int defaultHeight = 480;
 
 GST_DEBUG_CATEGORY(webkit_video_capture_source_debug);
 #define GST_CAT_DEFAULT webkit_video_capture_source_debug
@@ -126,15 +118,15 @@ DisplayCaptureFactory& GStreamerVideoCaptureSource::displayFactory()
 }
 
 GStreamerVideoCaptureSource::GStreamerVideoCaptureSource(String&& deviceID, String&& name, String&& hashSalt, const gchar *source_factory)
-    : RealtimeVideoSource(WTFMove(deviceID), WTFMove(name), WTFMove(hashSalt))
-    , m_capturer(std::make_unique<GStreamerVideoCapturer>(source_factory))
+    : RealtimeVideoCaptureSource(WTFMove(deviceID), WTFMove(name), WTFMove(hashSalt))
+    , m_capturer(makeUnique<GStreamerVideoCapturer>(source_factory))
 {
     initializeGStreamerDebug();
 }
 
 GStreamerVideoCaptureSource::GStreamerVideoCaptureSource(GStreamerCaptureDevice device, String&& hashSalt)
-    : RealtimeVideoSource(String { device.persistentId() }, String { device.label() }, WTFMove(hashSalt))
-    , m_capturer(std::make_unique<GStreamerVideoCapturer>(device))
+    : RealtimeVideoCaptureSource(String { device.persistentId() }, String { device.label() }, WTFMove(hashSalt))
+    , m_capturer(makeUnique<GStreamerVideoCapturer>(device))
 {
     initializeGStreamerDebug();
 }
@@ -160,14 +152,21 @@ void GStreamerVideoCaptureSource::startProducingData()
     m_capturer->play();
 }
 
+void GStreamerVideoCaptureSource::processNewFrame(Ref<MediaSample>&& sample)
+{
+    if (!isProducingData() || muted())
+        return;
+
+    dispatchMediaSampleToObservers(WTFMove(sample));
+}
+
 GstFlowReturn GStreamerVideoCaptureSource::newSampleCallback(GstElement* sink, GStreamerVideoCaptureSource* source)
 {
     auto gstSample = adoptGRef(gst_app_sink_pull_sample(GST_APP_SINK(sink)));
     auto mediaSample = MediaSampleGStreamer::create(WTFMove(gstSample), WebCore::FloatSize(), String());
 
-    // FIXME - Check how presentationSize is supposed to be used here.
-    callOnMainThread([protectedThis = makeRef(*source), mediaSample = WTFMove(mediaSample)] {
-        protectedThis->videoSampleAvailable(mediaSample.get());
+    source->scheduleDeferredTask([source, sample = WTFMove(mediaSample)] () mutable {
+        source->processNewFrame(WTFMove(sample));
     });
 
     return GST_FLOW_OK;
@@ -287,4 +286,4 @@ void GStreamerVideoCaptureSource::generatePresets()
 
 } // namespace WebCore
 
-#endif // ENABLE(MEDIA_STREAM) && USE(LIBWEBRTC)
+#endif // ENABLE(MEDIA_STREAM) && USE(GSTREAMER)

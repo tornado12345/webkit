@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2013 University of Szeged
- * Copyright (C) 2017 Sony Interactive Entertainment Inc.
+ * Copyright (C) 2020 Sony Interactive Entertainment Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,17 +27,14 @@
 #pragma once
 
 #include "CertificateInfo.h"
+#include "OpenSSLHelper.h"
 #include <wtf/Noncopyable.h>
 #include <wtf/text/WTFString.h>
 
-struct x509_store_ctx_st;
-typedef struct x509_store_ctx_st X509StoreCTX;
-
 namespace WebCore {
 
-class CurlHandle;
-
 class CurlSSLVerifier {
+    WTF_MAKE_FAST_ALLOCATED;
     WTF_MAKE_NONCOPYABLE(CurlSSLVerifier);
 public:
     enum class SSLCertificateFlags {
@@ -50,20 +47,22 @@ public:
         SSL_CERTIFICATE_GENERIC_ERROR = (1 << 6) // Some other error occurred validating the certificate
     };
 
-    CurlSSLVerifier(CurlHandle&, void* sslCtx);
+    CurlSSLVerifier(void* sslCtx);
 
     int sslErrors() { return m_sslErrors; }
     const CertificateInfo& certificateInfo() const { return m_certificateInfo; }
 
 private:
-    static int verifyCallback(int, X509StoreCTX*);
+    static int verifyCallback(int, X509_STORE_CTX*);
+    void collectInfo(X509_STORE_CTX*);
 
-    CurlHandle& m_curlHandle;
+#if ENABLE(TLS_DEBUG)
+    static void infoCallback(const SSL*, int, int);
+    void logTLSKey(const SSL*);
+#endif
 
     int m_sslErrors { 0 };
     CertificateInfo m_certificateInfo;
-
-    void collectInfo(X509StoreCTX*);
 };
 
 } // namespace WebCore

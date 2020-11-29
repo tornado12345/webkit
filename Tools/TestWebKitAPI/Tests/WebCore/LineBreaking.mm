@@ -23,10 +23,10 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
+#import "config.h"
 
-#import "PlatformUtilities.h"
 #import "TestNavigationDelegate.h"
+#import "Utilities.h"
 #import <unicode/ubrk.h>
 #import <wtf/RetainPtr.h>
 #import <wtf/Vector.h>
@@ -52,7 +52,7 @@ Vector<unsigned> breakingLocationsFromICU(const Vector<UInt16>& testString, cons
     uloc_setKeywordValue("lb", icuValue.data(), buffer, bufferSize, &status);
     ASSERT(U_SUCCESS(status));
 
-    UBreakIterator* iterator = ubrk_open(UBRK_LINE, buffer, testString.data(), testString.size(), &status);
+    UBreakIterator* iterator = ubrk_open(UBRK_LINE, buffer, reinterpret_cast<const UChar*>(testString.data()), testString.size(), &status);
     ASSERT(U_SUCCESS(status));
     ASSERT(iterator);
 

@@ -42,7 +42,7 @@
 - (NSString *)href
 {
     WebCore::JSMainThreadNullState state;
-    return IMPL->href();
+    return IMPL->href().string();
 }
 
 - (void)setHref:(NSString *)newHref
@@ -64,3 +64,5 @@
 }
 
 @end
+
+#undef IMPL

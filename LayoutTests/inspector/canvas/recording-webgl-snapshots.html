@@ -3,9 +3,10 @@
 <head>
 <script src="../../http/tests/inspector/resources/inspector-test.js"></script>
 <script src="resources/recording-utilities.js"></script>
-<script src="resources/shaderProgram-utilities.js"></script>
+<script src="resources/shaderProgram-utilities-webgl.js"></script>
 <script id="vertex-shader" type="x-shader/x-vertex">
     attribute vec3 position;
+    uniform vec4 testUniform;
     void main(void) {
         gl_Position = vec4(position, 1.0);
     }
@@ -102,6 +103,7 @@ function test() {
         test(resolve, reject) {
             startRecording(WI.Canvas.ContextType.WebGL, resolve, reject, {frameCount: 1, checkForContentChange: true});
         },
+        timeout: -1,
     });
 
     suite.runTestCasesAndFinish();

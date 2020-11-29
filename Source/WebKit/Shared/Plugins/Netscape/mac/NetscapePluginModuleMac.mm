@@ -60,12 +60,6 @@ static bool getPluginArchitecture(CFBundleRef bundle, PluginModuleInfo& plugin)
         plugin.pluginArchitecture = CPU_TYPE_X86_64;
         return true;
     }
-
-    // We also support 32-bit Intel plug-ins on 64-bit Intel.
-    if (architectures.contains(kCFBundleExecutableArchitectureI386)) {
-        plugin.pluginArchitecture = CPU_TYPE_X86;
-        return true;
-    }
 #endif
 
     return false;
@@ -200,7 +194,7 @@ bool NetscapePluginModule::getPluginInfo(const String& pluginPath, PluginModuleI
         plugin.info.desc = plugin.info.file;
 
     plugin.info.isApplicationPlugin = false;
-    plugin.info.clientLoadPolicy = PluginLoadClientPolicyUndefined;
+    plugin.info.clientLoadPolicy = PluginLoadClientPolicy::Undefined;
 #if PLATFORM(MAC)
     plugin.info.bundleIdentifier = plugin.bundleIdentifier;
     plugin.info.versionString = plugin.versionString;

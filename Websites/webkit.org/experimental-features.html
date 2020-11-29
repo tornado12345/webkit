@@ -103,6 +103,10 @@ function testWebGL2() {
     return canvas.getContext("webgl2");
 }
 
+function testWebGPU() {
+    return window.gpu;
+}
+
 function testWebMetal() {
     return window.WebMetalRenderingContext;
 }
@@ -120,8 +124,11 @@ function testObjectRest() {
     return true;
 }
 
-function testImageBitmapOffscreenCanvas() {
-    return 'createImageBitmap' in window && 'OffscreenCanvas' in window;
+function testImageBitmap() {
+    return 'createImageBitmap' in window;
+}
+function testOffscreenCanvas() {
+    return 'OffscreenCanvas' in window;
 }
 window.addEventListener("load", function () {
     Array.from(document.querySelectorAll(".test")).forEach(element => {
@@ -145,13 +152,15 @@ window.addEventListener("load", function () {
 
         <div class="test" id="SpringAnimation"><p>CSS Spring Animations</p></div>
         <div class="test" id="ES6Modules"><p>ES6 Modules in HTML</p></div>
-        <div class="test" id="ImageBitmapOffscreenCanvas"><p>ImageBitmap and OffscreenCanvas</p></div>
+        <div class="test" id="ImageBitmap"><p>ImageBitmap</p></div>
+        <div class="test" id="OffscreenCanvas"><p>OffscreenCanvas</p></div>
         <div class="test" id="LinkPreload"><p>Link Preload</p></div>
         <div class="test" id="SubtleCrypto"><p>SubtleCrypto</p></div>
         <div class="test" id="VariationFonts"><p>Variation Fonts</p></div>
         <div class="test" id="WebAnimations"><p>Web Animations</p></div>
         <div class="test" id="WebAnimationsCSSIntegration"><p>Web Animations and CSS Integration</p></div>
         <div class="test" id="WebGL2"><p>WebGL 2.0</p></div>
+        <div class="test" id="WebGPU"><p>Web GPU</p></div>
         <div class="test" id="WebMetal"><p>WebMetal</p></div>
         <div class="test" id="WebRTC"><p>WebRTC</p></div>
         <div class="test" id="ObjectRest"><p>ObjectRest</p></div>

@@ -25,6 +25,7 @@
 
 #import "config.h"
 #import "WKNavigationInternal.h"
+#import "WKWebpagePreferencesInternal.h"
 
 #import "APINavigation.h"
 
@@ -43,6 +44,15 @@
 {
     return _navigation->originalRequest().nsURLRequest(WebCore::HTTPBodyUpdatePolicy::DoNotUpdateHTTPBody);
 }
+
+#if PLATFORM(IOS_FAMILY)
+
+- (WKContentMode)effectiveContentMode
+{
+    return WebKit::contentMode(_navigation->effectiveContentMode());
+}
+
+#endif // PLATFORM(IOS_FAMILY)
 
 #pragma mark WKObject protocol implementation
 

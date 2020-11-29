@@ -25,7 +25,7 @@
 
 #pragma once
 
-#if ENABLE(WEBGPU)
+#if ENABLE(WHLSL_COMPILER)
 
 #include "WHLSLGatherEntryPointItems.h"
 #include "WHLSLPipelineDescriptor.h"
@@ -48,7 +48,7 @@ struct MatchedRenderSemantics {
     HashMap<AttachmentDescriptor*, size_t> matchedColorAttachments;
 };
 
-Optional<MatchedRenderSemantics> matchSemantics(Program&, RenderPipelineDescriptor&);
+Optional<MatchedRenderSemantics> matchSemantics(Program&, RenderPipelineDescriptor&, bool distinctFragmentShader, bool fragmentShaderExists);
 
 struct MatchedComputeSemantics {
     AST::FunctionDefinition* shader;
@@ -62,4 +62,4 @@ Optional<MatchedComputeSemantics> matchSemantics(Program&, ComputePipelineDescri
 
 } // namespace WebCore
 
-#endif // ENABLE(WEBGPU)
+#endif // ENABLE(WHLSL_COMPILER)

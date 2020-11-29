@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010-2018 Apple Inc. All rights reserved.
+ * Copyright (C) 2010-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,7 +29,7 @@
 #include "SandboxExtension.h"
 #include "TextCheckerState.h"
 #include "UserData.h"
-#include <pal/SessionID.h>
+#include "WebProcessDataStoreParameters.h"
 #include <wtf/HashMap.h>
 #include <wtf/ProcessID.h>
 #include <wtf/RetainPtr.h>
@@ -38,17 +38,17 @@
 #include <wtf/text/WTFString.h>
 
 #if PLATFORM(COCOA)
+#include <WebCore/PlatformScreen.h>
+#include <WebCore/ScreenProperties.h>
 #include <wtf/MachSendRight.h>
 #endif
 
-#if PLATFORM(MAC)
-#include <WebCore/PlatformScreen.h>
-#include <WebCore/ScreenProperties.h>
+#if PLATFORM(IOS_FAMILY)
+#include <WebCore/RenderThemeIOS.h>
 #endif
 
-#if USE(SOUP)
-#include "HTTPCookieAcceptPolicy.h"
-#include <WebCore/SoupNetworkProxySettings.h>
+#if ENABLE(NETSCAPE_PLUGIN_API)
+#include <WebCore/PluginData.h>
 #endif
 
 namespace API {
@@ -65,9 +65,11 @@ namespace WebKit {
 struct WebProcessCreationParameters {
     WebProcessCreationParameters();
     ~WebProcessCreationParameters();
+    WebProcessCreationParameters(WebProcessCreationParameters&&);
+    WebProcessCreationParameters& operator=(WebProcessCreationParameters&&);
 
     void encode(IPC::Encoder&) const;
-    static bool decode(IPC::Decoder&, WebProcessCreationParameters&);
+    static WARN_UNUSED_RETURN bool decode(IPC::Decoder&, WebProcessCreationParameters&);
 
     String injectedBundlePath;
     SandboxExtension::Handle injectedBundlePathExtensionHandle;
@@ -75,28 +77,14 @@ struct WebProcessCreationParameters {
 
     UserData initializationUserData;
 
-    String applicationCacheDirectory;
-    String applicationCacheFlatFileSubdirectoryName;
-    SandboxExtension::Handle applicationCacheDirectoryExtensionHandle;
-    String webSQLDatabaseDirectory;
-    SandboxExtension::Handle webSQLDatabaseDirectoryExtensionHandle;
-    String mediaCacheDirectory;
-    SandboxExtension::Handle mediaCacheDirectoryExtensionHandle;
-    String javaScriptConfigurationDirectory;
-    SandboxExtension::Handle javaScriptConfigurationDirectoryExtensionHandle;
 #if PLATFORM(IOS_FAMILY)
     SandboxExtension::Handle cookieStorageDirectoryExtensionHandle;
     SandboxExtension::Handle containerCachesDirectoryExtensionHandle;
     SandboxExtension::Handle containerTemporaryDirectoryExtensionHandle;
 #endif
-    SandboxExtension::Handle mediaKeyStorageDirectoryExtensionHandle;
 #if ENABLE(MEDIA_STREAM)
     SandboxExtension::Handle audioCaptureExtensionHandle;
-    bool shouldCaptureAudioInUIProcess { false };
-    bool shouldCaptureVideoInUIProcess { false };
-    bool shouldCaptureDisplayInUIProcess { false };
 #endif
-    String mediaKeyStorageDirectory;
 
     String webCoreLoggingChannels;
     String webKitLoggingChannels;
@@ -111,11 +99,10 @@ struct WebProcessCreationParameters {
     Vector<String> urlSchemesRegisteredAsCORSEnabled;
     Vector<String> urlSchemesRegisteredAsAlwaysRevalidated;
     Vector<String> urlSchemesRegisteredAsCachePartitioned;
-    Vector<String> urlSchemesServiceWorkersCanHandle;
     Vector<String> urlSchemesRegisteredAsCanDisplayOnlyIfCanRequest;
 
-    Vector<String> fontWhitelist;
-    Vector<String> languages;
+    Vector<String> fontAllowList;
+    Vector<String> overrideLanguages;
 #if USE(GSTREAMER)
     Vector<String> gstreamerOptions;
 #endif
@@ -123,15 +110,20 @@ struct WebProcessCreationParameters {
     CacheModel cacheModel;
 
     double defaultRequestTimeoutInterval { INT_MAX };
+    unsigned backForwardCacheCapacity { 0 };
 
     bool shouldAlwaysUseComplexTextCodePath { false };
     bool shouldEnableMemoryPressureReliefLogging { false };
     bool shouldSuppressMemoryPressureHandler { false };
     bool shouldUseFontSmoothing { true };
-    bool resourceLoadStatisticsEnabled { false };
     bool fullKeyboardAccessEnabled { false };
+#if HAVE(UIKIT_WITH_MOUSE_SUPPORT) && PLATFORM(IOS)
+    bool hasMouseDevice { false };
+#endif
+    bool hasStylusDevice { false };
     bool memoryCacheDisabled { false };
     bool attrStyleEnabled { false };
+    bool useGPUProcessForMediaEnabled { false };
 
 #if ENABLE(SERVICE_CONTROLS)
     bool hasImageServices { false };
@@ -167,11 +159,10 @@ struct WebProcessCreationParameters {
     HashMap<String, bool> notificationPermissions;
 #endif
 
-    HashMap<PAL::SessionID, HashMap<unsigned, WallTime>> plugInAutoStartOriginHashes;
     Vector<String> plugInAutoStartOrigins;
 
 #if ENABLE(NETSCAPE_PLUGIN_API)
-    HashMap<String, HashMap<String, HashMap<String, uint8_t>>> pluginLoadClientPolicies;
+    HashMap<String, HashMap<String, HashMap<String, WebCore::PluginLoadClientPolicy>>> pluginLoadClientPolicies;
 #endif
 
 #if PLATFORM(COCOA)
@@ -182,12 +173,9 @@ struct WebProcessCreationParameters {
     String waylandCompositorDisplayName;
 #endif
 
-#if USE(SOUP)
-    WebCore::SoupNetworkProxySettings proxySettings;
-#endif
-
 #if PLATFORM(COCOA)
     Vector<String> mediaMIMETypes;
+    WebCore::ScreenProperties screenProperties;
 #endif
 
 #if ENABLE(RESOURCE_LOAD_STATISTICS) && !RELEASE_LOG_DISABLED
@@ -195,14 +183,58 @@ struct WebProcessCreationParameters {
 #endif
 
 #if PLATFORM(MAC)
-    WebCore::ScreenProperties screenProperties;
     bool useOverlayScrollbars { true };
 #endif
 
-#if PLATFORM(WPE)
+#if USE(WPE_RENDERER)
     bool isServiceWorkerProcess { false };
     IPC::Attachment hostClientFileDescriptor;
     CString implementationLibraryName;
+#endif
+
+    Optional<WebProcessDataStoreParameters> websiteDataStoreParameters;
+    
+#if PLATFORM(IOS)
+    SandboxExtension::HandleArray compilerServiceExtensionHandles;
+#endif
+
+    Optional<SandboxExtension::Handle> containerManagerExtensionHandle;
+    Optional<SandboxExtension::Handle> mobileGestaltExtensionHandle;
+    Optional<SandboxExtension::Handle> launchServicesExtensionHandle;
+
+    SandboxExtension::HandleArray diagnosticsExtensionHandles;
+#if PLATFORM(IOS_FAMILY)
+    SandboxExtension::HandleArray dynamicMachExtensionHandles;
+    SandboxExtension::HandleArray dynamicIOKitExtensionHandles;
+#endif
+
+#if PLATFORM(COCOA)
+    bool systemHasBattery { false };
+    bool systemHasAC { false };
+#endif
+
+#if PLATFORM(IOS_FAMILY)
+    bool currentUserInterfaceIdiomIsPad { false };
+    bool supportsPictureInPicture { false };
+    WebCore::RenderThemeIOS::CSSValueToSystemColorMap cssValueToSystemColorMap;
+    WebCore::Color focusRingColor;
+    String localizedDeviceModel;
+#endif
+
+#if PLATFORM(COCOA)
+    SandboxExtension::HandleArray mediaExtensionHandles; // FIXME(207716): Remove when GPU process is complete.
+    SandboxExtension::HandleArray gpuIOKitExtensionHandles;
+#if ENABLE(CFPREFS_DIRECT_MODE)
+    Optional<SandboxExtension::HandleArray> preferencesExtensionHandles;
+#endif
+#endif
+
+#if PLATFORM(GTK)
+    bool useSystemAppearanceForScrollbars { false };
+#endif
+
+#if HAVE(CATALYST_USER_INTERFACE_IDIOM_AND_SCALE_FACTOR)
+    std::pair<int64_t, double> overrideUserInterfaceIdiomAndScale;
 #endif
 };
 

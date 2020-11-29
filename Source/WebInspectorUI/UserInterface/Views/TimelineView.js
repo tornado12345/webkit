@@ -56,6 +56,12 @@ WI.TimelineView = class TimelineView extends WI.ContentView
         return true;
     }
 
+    get showsImportedRecordingMessage()
+    {
+        // Implemented by sub-classes if needed.
+        return false;
+    }
+
     get showsFilterBar()
     {
         // Implemented by sub-classes if needed.
@@ -339,4 +345,5 @@ WI.TimelineView.Event = {
     RecordWasSelected: "timeline-view-record-was-selected",
     ScannerShow: "timeline-view-scanner-show",
     ScannerHide: "timeline-view-scanner-hide",
+    NeedsEntireSelectedRange: "timeline-view-needs-entire-selected-range",
 };

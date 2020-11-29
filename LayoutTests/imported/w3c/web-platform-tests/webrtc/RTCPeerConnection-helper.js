@@ -140,6 +140,15 @@ async function generateAnswer(offer) {
   return answer;
 }
 
+// Helper function to generate offer using a freshly
+// created RTCPeerConnection object
+async function generateOffer() {
+  const pc = new RTCPeerConnection();
+  const offer = await pc.createOffer();
+  pc.close();
+  return offer;
+}
+
 // Run a test function that return a promise that should
 // never be resolved. For lack of better options,
 // we wait for a time out and pass the test if the
@@ -181,76 +190,105 @@ function exchangeIceCandidates(pc1, pc2) {
   doExchange(pc2, pc1);
 }
 
-// Helper function for doing one round of offer/answer exchange
-// betweeen two local peer connections
-function doSignalingHandshake(localPc, remotePc) {
-  return localPc.createOffer()
-  .then(offer => Promise.all([
-    localPc.setLocalDescription(offer),
-    remotePc.setRemoteDescription(offer)]))
-  .then(() => remotePc.createAnswer())
-  .then(answer => Promise.all([
-    remotePc.setLocalDescription(answer),
-    localPc.setRemoteDescription(answer)]))
+// Returns a promise that resolves when a |name| event is fired.
+function waitUntilEvent(obj, name) {
+  return new Promise(r => obj.addEventListener(name, r, {once: true}));
 }
 
-// Helper function to create a pair of connected data channel.
+// Returns a promise that resolves when the |transport.state| is |state|
+// This should work for RTCSctpTransport, RTCDtlsTransport and RTCIceTransport.
+async function waitForState(transport, state) {
+  while (transport.state != state) {
+    await waitUntilEvent(transport, 'statechange');
+  }
+}
+
+// Returns a promise that resolves when |pc.iceConnectionState| is 'connected'
+// or 'completed'.
+async function listenToIceConnected(pc) {
+  await waitForIceStateChange(pc, ['connected', 'completed']);
+}
+
+// Returns a promise that resolves when |pc.iceConnectionState| is in one of the
+// wanted states.
+async function waitForIceStateChange(pc, wantedStates) {
+  while (!wantedStates.includes(pc.iceConnectionState)) {
+    await waitUntilEvent(pc, 'iceconnectionstatechange');
+  }
+}
+
+// Returns a promise that resolves when |pc.connectionState| is 'connected'.
+async function listenToConnected(pc) {
+  while (pc.connectionState != 'connected') {
+    await waitUntilEvent(pc, 'connectionstatechange');
+  }
+}
+
+// Returns a promise that resolves when |pc.connectionState| is in one of the
+// wanted states.
+async function waitForConnectionStateChange(pc, wantedStates) {
+  while (!wantedStates.includes(pc.connectionState)) {
+    await waitUntilEvent(pc, 'connectionstatechange');
+  }
+}
+
+// Resolves when RTP packets have been received.
+async function listenForSSRCs(t, receiver) {
+  while (true) {
+    const ssrcs = receiver.getSynchronizationSources();
+    assert_true(Array.isArray(ssrcs));
+    if (ssrcs.length > 0) {
+      return ssrcs;
+    }
+    await new Promise(r => t.step_timeout(r, 0));
+  }
+}
+
+// Helper function to create a pair of connected data channels.
 // On success the promise resolves to an array with two data channels.
 // It does the heavy lifting of performing signaling handshake,
 // ICE candidate exchange, and waiting for data channel at two
-// end points to open.
-function createDataChannelPair(
-  pc1=new RTCPeerConnection(),
-  pc2=new RTCPeerConnection())
-{
-  const channel1 = pc1.createDataChannel('');
-
-  exchangeIceCandidates(pc1, pc2);
-
-  return new Promise((resolve, reject) => {
-    let channel2;
-    let opened1 = false;
-    let opened2 = false;
-
-    function onBothOpened() {
-      resolve([channel1, channel2]);
+// end points to open. Can do both negotiated and non-negotiated setup.
+async function createDataChannelPair(t, options,
+                                     pc1 = createPeerConnectionWithCleanup(t),
+                                     pc2 = createPeerConnectionWithCleanup(t)) {
+  let pair = [], bothOpen;
+  try {
+    if (options.negotiated) {
+      pair = [pc1, pc2].map(pc => pc.createDataChannel('', options));
+      bothOpen = Promise.all(pair.map(dc => new Promise((r, e) => {
+        dc.onopen = r;
+        dc.onerror = ({error}) => e(error);
+      })));
+    } else {
+      pair = [pc1.createDataChannel('', options)];
+      bothOpen = Promise.all([
+        new Promise((r, e) => {
+          pair[0].onopen = r;
+          pair[0].onerror = ({error}) => e(error);
+        }),
+        new Promise((r, e) => pc2.ondatachannel = ({channel}) => {
+          pair[1] = channel;
+          channel.onopen = r;
+          channel.onerror = ({error}) => e(error);
+        })
+      ]);
     }
-
-    function onOpen1() {
-      opened1 = true;
-      if(opened2) onBothOpened();
+    exchangeIceCandidates(pc1, pc2);
+    await exchangeOfferAnswer(pc1, pc2);
+    await bothOpen;
+    return pair;
+  } finally {
+    for (const dc of pair) {
+       dc.onopen = dc.onerror = null;
     }
-
-    function onOpen2() {
-      opened2 = true;
-      if(opened1) onBothOpened();
-    }
-
-    function onDataChannel(event) {
-      channel2 = event.channel;
-      channel2.addEventListener('error', reject);
-      const { readyState } = channel2;
-
-      if(readyState === 'open') {
-        onOpen2();
-      } else if(readyState === 'connecting') {
-        channel2.addEventListener('open', onOpen2);
-      } else {
-        reject(new Error(`Unexpected ready state ${readyState}`));
-      }
-    }
-
-    channel1.addEventListener('open', onOpen1);
-    channel1.addEventListener('error', reject);
-
-    pc2.addEventListener('datachannel', onDataChannel);
-
-    doSignalingHandshake(pc1, pc2);
-  });
+  }
 }
 
 // Wait for RTP and RTCP stats to arrive
 async function waitForRtpAndRtcpStats(pc) {
+  // If remote stats are never reported, return after 5 seconds.
+  const startTime = performance.now();
   while (true) {
     const report = await pc.getStats();
     const stats = [...report.values()].filter(({type}) => type.endsWith("bound-rtp"));
@@ -259,54 +297,52 @@ async function waitForRtpAndRtcpStats(pc) {
     if (stats.length && stats.every(({localId, remoteId}) => localId || remoteId)) {
       break;
     }
+    if (performance.now() > startTime + 5000) {
+      break;
+    }
   }
 }
 
 // Wait for a single message event and return
 // a promise that resolve when the event fires
 function awaitMessage(channel) {
+  const once = true;
   return new Promise((resolve, reject) => {
-    channel.addEventListener('message',
-      event => resolve(event.data),
-      { once: true });
-
-    channel.addEventListener('error', reject, { once: true });
+    channel.addEventListener('message', ({data}) => resolve(data), {once});
+    channel.addEventListener('error', reject, {once});
   });
 }
 
 // Helper to convert a blob to array buffer so that
 // we can read the content
-function blobToArrayBuffer(blob) {
+async function blobToArrayBuffer(blob) {
+  const reader = new FileReader();
+  reader.readAsArrayBuffer(blob);
   return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-
-    reader.addEventListener('load', () => {
-      resolve(reader.result);
-    });
-
-    reader.addEventListener('error', reject);
-
-    reader.readAsArrayBuffer(blob);
+    reader.addEventListener('load', () => resolve(reader.result), {once: true});
+    reader.addEventListener('error', () => reject(reader.error), {once: true});
   });
 }
 
-// Assert that two ArrayBuffer objects have the same byte values
-function assert_equals_array_buffer(buffer1, buffer2) {
-  assert_true(buffer1 instanceof ArrayBuffer,
-    'Expect buffer to be instance of ArrayBuffer');
+// Assert that two TypedArray or ArrayBuffer objects have the same byte values
+function assert_equals_typed_array(array1, array2) {
+  const [view1, view2] = [array1, array2].map((array) => {
+    if (array instanceof ArrayBuffer) {
+      return new DataView(array);
+    } else {
+      assert_true(array.buffer instanceof ArrayBuffer,
+        'Expect buffer to be instance of ArrayBuffer');
+      return new DataView(array.buffer, array.byteOffset, array.byteLength);
+    }
+  });
 
-  assert_true(buffer2 instanceof ArrayBuffer,
-    'Expect buffer to be instance of ArrayBuffer');
+  assert_equals(view1.byteLength, view2.byteLength,
+    'Expect both arrays to be of the same byte length');
 
-  assert_equals(buffer1.byteLength, buffer2.byteLength,
-    'Expect both array buffers to be of the same byte length');
+  const byteLength = view1.byteLength;
 
-  const byteLength = buffer1.byteLength;
-  const byteArray1 = new Uint8Array(buffer1);
-  const byteArray2 = new Uint8Array(buffer2);
-
-  for(let i=0; i<byteLength; i++) {
-    assert_equals(byteArray1[i], byteArray2[i],
+  for (let i = 0; i < byteLength; ++i) {
+    assert_equals(view1.getUint8(i), view2.getUint8(i),
       `Expect byte at buffer position ${i} to be equal`);
   }
 }
@@ -356,7 +392,7 @@ const trackFactories = {
     return dst.stream.getAudioTracks()[0];
   },
 
-  video({width = 640, height = 480} = {}) {
+  video({width = 640, height = 480, signal = null} = {}) {
     const canvas = Object.assign(
       document.createElement("canvas"), {width, height}
     );
@@ -367,8 +403,13 @@ const trackFactories = {
     setInterval(() => {
       ctx.fillStyle = `rgb(${count%255}, ${count*count%255}, ${count%255})`;
       count += 1;
-
       ctx.fillRect(0, 0, width, height);
+      // If signal is set, add a constant-color box to the video frame
+      // at coordinates 10 to 30 in both X and Y direction.
+      if (signal !== null) {
+        ctx.fillStyle = `rgb(${signal}, ${signal}, ${signal})`;
+        ctx.fillRect(10, 10, 20, 20);
+      }
     }, 100);
 
     if (document.body) {
@@ -383,13 +424,42 @@ const trackFactories = {
   }
 };
 
+// Get the signal from a video element inserted by createNoiseStream
+function getVideoSignal(v) {
+  if (v.videoWidth < 21 || v.videoHeight < 21) {
+    return null;
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = v.videoWidth;
+  canvas.height = v.videoHeight;
+  const context = canvas.getContext('2d');
+  context.drawImage(v, 0, 0, v.videoWidth, v.videoHeight);
+  // Extract pixel value at position 20, 20
+  const pixel = context.getImageData(20, 20, 1, 1);
+  // Use luma reconstruction to get back original value according to
+  // ITU-R rec BT.709
+  return (pixel.data[0] * 0.21 + pixel.data[1] * 0.72 + pixel.data[2] * 0.07);
+}
+
+async function detectSignal(t, v, value) {
+  while (true) {
+    const signal = getVideoSignal(v);
+    if (signal !== null && signal < value + 1 && signal > value - 1) {
+      return;
+    }
+    // We would like to wait for each new frame instead here,
+    // but there seems to be no such callback.
+    await new Promise(r => t.step_timeout(r, 100));
+  }
+}
+
 // Generate a MediaStream bearing the specified tracks.
 //
 // @param {object} [caps]
 // @param {boolean} [caps.audio] - flag indicating whether the generated stream
 //                                 should include an audio track
 // @param {boolean} [caps.video] - flag indicating whether the generated stream
-//                                 should include a video track
+//                                 should include a video track, or parameters for video
 async function getNoiseStream(caps = {}) {
   if (!trackFactories.canCreate(caps)) {
     return navigator.mediaDevices.getUserMedia(caps);
@@ -401,7 +471,7 @@ async function getNoiseStream(caps = {}) {
   }
 
   if (caps.video) {
-    tracks.push(trackFactories.video());
+    tracks.push(trackFactories.video(caps.video));
   }
 
   return new MediaStream(tracks);
@@ -446,20 +516,19 @@ function getUserMediaTracksAndStreams(count, type = 'audio') {
 
 // Performs an offer exchange caller -> callee.
 async function exchangeOffer(caller, callee) {
-  const offer = await caller.createOffer();
-  await caller.setLocalDescription(offer);
-  return callee.setRemoteDescription(offer);
+  await caller.setLocalDescription(await caller.createOffer());
+  await callee.setRemoteDescription(caller.localDescription);
 }
 // Performs an answer exchange caller -> callee.
 async function exchangeAnswer(caller, callee) {
-  const answer = await callee.createAnswer();
-  await callee.setLocalDescription(answer);
-  return caller.setRemoteDescription(answer);
+  await callee.setLocalDescription(await callee.createAnswer());
+  await caller.setRemoteDescription(callee.localDescription);
 }
 async function exchangeOfferAnswer(caller, callee) {
   await exchangeOffer(caller, callee);
-  return exchangeAnswer(caller, callee);
+  await exchangeAnswer(caller, callee);
 }
+
 // The returned promise is resolved with caller's ontrack event.
 async function exchangeAnswerAndListenToOntrack(t, caller, callee) {
   const ontrackPromise = addEventListenerPromise(t, caller, 'track');
@@ -473,29 +542,55 @@ async function exchangeOfferAndListenToOntrack(t, caller, callee) {
   return ontrackPromise;
 }
 
-// The resolver has a |promise| that can be resolved or rejected using |resolve|
+// The resolver extends a |promise| that can be resolved or rejected using |resolve|
 // or |reject|.
-class Resolver {
-  constructor() {
-    let promiseResolve;
-    let promiseReject;
-    this.promise = new Promise(function(resolve, reject) {
-      promiseResolve = resolve;
-      promiseReject = reject;
+class Resolver extends Promise {
+  constructor(executor) {
+    let resolve, reject;
+    super((resolve_, reject_) => {
+      resolve = resolve_;
+      reject = reject_;
+      if (executor) {
+        return executor(resolve_, reject_);
+      }
     });
-    this.resolve = promiseResolve;
-    this.reject = promiseReject;
+
+    this._done = false;
+    this._resolve = resolve;
+    this._reject = reject;
+  }
+
+  /**
+   * Return whether the promise is done (resolved or rejected).
+   */
+  get done() {
+    return this._done;
+  }
+
+  /**
+   * Resolve the promise.
+   */
+  resolve(...args) {
+    this._done = true;
+    return this._resolve(...args);
+  }
+
+  /**
+   * Reject the promise.
+   */
+  reject(...args) {
+    this._done = true;
+    return this._reject(...args);
   }
 }
 
-function addEventListenerPromise(t, target, type, listener) {
-  return new Promise((resolve, reject) => {
-    target.addEventListener(type, t.step_func(e => {
-      if (listener != undefined)
-        e = listener(e);
-      resolve(e);
-    }));
-  });
+function addEventListenerPromise(t, obj, type, listener) {
+  if (!listener) {
+    return waitUntilEvent(obj, type);
+  }
+  return new Promise(r => obj.addEventListener(type,
+                                               t.step_func(e => r(listener(e))),
+                                               {once: true}));
 }
 
 function createPeerConnectionWithCleanup(t) {
@@ -507,7 +602,7 @@ function createPeerConnectionWithCleanup(t) {
 async function createTrackAndStreamWithCleanup(t, kind = 'audio') {
   let constraints = {};
   constraints[kind] = true;
-  const stream = await navigator.mediaDevices.getUserMedia(constraints);
+  const stream = await getNoiseStream(constraints);
   const [track] = stream.getTracks();
   t.add_cleanup(() => track.stop());
   return [track, stream];
@@ -520,4 +615,36 @@ function findTransceiverForSender(pc, sender) {
       return transceivers[i];
   }
   return null;
+}
+
+function preferCodec(transceiver, mimeType, sdpFmtpLine) {
+  const {codecs} = RTCRtpSender.getCapabilities(transceiver.receiver.track.kind);
+  // sdpFmtpLine is optional, pick the first partial match if not given.
+  const selectedCodecIndex = codecs.findIndex(c => {
+    return c.mimeType === mimeType && (c.sdpFmtpLine === sdpFmtpLine || !sdpFmtpLine);
+  });
+  const selectedCodec = codecs[selectedCodecIndex];
+  codecs.slice(selectedCodecIndex, 1);
+  codecs.unshift(selectedCodec);
+  return transceiver.setCodecPreferences(codecs);
+}
+
+// Contains a set of values and will yell at you if you try to add a value twice.
+class UniqueSet extends Set {
+  constructor(items) {
+    super();
+    if (items !== undefined) {
+      for (const item of items) {
+        this.add(item);
+      }
+    }
+  }
+
+  add(value, message) {
+    if (message === undefined) {
+      message = `Value '${value}' needs to be unique but it is already in the set`;
+    }
+    assert_true(!this.has(value), message);
+    super.add(value);
+  }
 }

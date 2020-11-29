@@ -4,7 +4,7 @@ import os
 import subprocess
 import time
 
-from browser_driver import BrowserDriver
+from webkitpy.benchmark_runner.browser_driver.browser_driver import BrowserDriver
 from webkitpy.benchmark_runner.utils import write_defaults
 
 
@@ -15,6 +15,9 @@ class OSXBrowserDriver(BrowserDriver):
     process_name = None
     platform = 'osx'
     bundle_id = None
+
+    def prepare_initial_env(self, config):
+        pass
 
     def prepare_env(self, config):
         self.close_browsers()
@@ -28,6 +31,9 @@ class OSXBrowserDriver(BrowserDriver):
         if self.updated_dock_animation_defaults:
             write_defaults('com.apple.dock', 'launchanim', True)
             self._terminate_processes('Dock', 'com.apple.dock')
+
+    def restore_env_after_all_testing(self):
+        pass
 
     def close_browsers(self):
         self._terminate_processes(self.process_name, self.bundle_id)

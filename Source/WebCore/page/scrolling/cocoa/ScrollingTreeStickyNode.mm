@@ -31,7 +31,9 @@
 #import "Logging.h"
 #import "ScrollingStateStickyNode.h"
 #import "ScrollingTree.h"
+#import "ScrollingTreeFixedNode.h"
 #import "ScrollingTreeFrameScrollingNode.h"
+#import "ScrollingTreeOverflowScrollProxyNode.h"
 #import "ScrollingTreeOverflowScrollingNode.h"
 #import "WebCoreCALayerExtras.h"
 #import <wtf/text/TextStream.h>
@@ -59,30 +61,61 @@ void ScrollingTreeStickyNode::commitStateBeforeChildren(const ScrollingStateNode
     const ScrollingStateStickyNode& stickyStateNode = downcast<ScrollingStateStickyNode>(stateNode);
 
     if (stickyStateNode.hasChangedProperty(ScrollingStateNode::Layer))
-        m_layer = stickyStateNode.layer();
+        m_layer = static_cast<CALayer*>(stickyStateNode.layer());
 
     if (stateNode.hasChangedProperty(ScrollingStateStickyNode::ViewportConstraints))
         m_constraints = stickyStateNode.viewportConstraints();
 }
 
-void ScrollingTreeStickyNode::relatedNodeScrollPositionDidChange(const ScrollingTreeScrollingNode&, const FloatRect& layoutViewport, FloatSize& cumulativeDelta)
+FloatPoint ScrollingTreeStickyNode::computeLayerPosition() const
 {
-    FloatRect constrainingRect;
+    auto computeLayerPositionForScrollingNode = [&](ScrollingTreeNode& scrollingNode) {
+        FloatRect constrainingRect;
+        if (is<ScrollingTreeFrameScrollingNode>(scrollingNode)) {
+            auto& frameScrollingNode = downcast<ScrollingTreeFrameScrollingNode>(scrollingNode);
+            constrainingRect = frameScrollingNode.layoutViewport();
+        } else {
+            auto& overflowScrollingNode = downcast<ScrollingTreeOverflowScrollingNode>(scrollingNode);
+            constrainingRect = FloatRect(overflowScrollingNode.currentScrollPosition(), m_constraints.constrainingRectAtLastLayout().size());
+        }
+        return m_constraints.layerPositionForConstrainingRect(constrainingRect);
+    };
 
-    auto* enclosingScrollingNode = enclosingScrollingNodeIncludingSelf();
-    if (is<ScrollingTreeOverflowScrollingNode>(enclosingScrollingNode))
-        constrainingRect = FloatRect(downcast<ScrollingTreeOverflowScrollingNode>(*enclosingScrollingNode).currentScrollPosition(), m_constraints.constrainingRectAtLastLayout().size());
-    else if (is<ScrollingTreeFrameScrollingNode>(enclosingScrollingNode))
-        constrainingRect = layoutViewport;
-    else
-        return;
+    for (auto* ancestor = parent(); ancestor; ancestor = ancestor->parent()) {
+        if (is<ScrollingTreeOverflowScrollProxyNode>(*ancestor)) {
+            auto& overflowProxyNode = downcast<ScrollingTreeOverflowScrollProxyNode>(*ancestor);
+            auto overflowNode = scrollingTree().nodeForID(overflowProxyNode.overflowScrollingNodeID());
+            if (!overflowNode)
+                break;
 
-    LOG_WITH_STREAM(Scrolling, stream << "ScrollingTreeStickyNode " << scrollingNodeID() << " relatedNodeScrollPositionDidChange: new viewport " << layoutViewport << " constrainingRectAtLastLayout " << m_constraints.constrainingRectAtLastLayout() << " last layer pos " << m_constraints.layerPositionAtLastLayout());
+            return computeLayerPositionForScrollingNode(*overflowNode);
+        }
 
-    FloatPoint layerPosition = m_constraints.layerPositionForConstrainingRect(constrainingRect) - m_constraints.alignmentOffset();
-    [m_layer _web_setLayerTopLeftPosition:layerPosition];
+        if (is<ScrollingTreeScrollingNode>(*ancestor))
+            return computeLayerPositionForScrollingNode(*ancestor);
 
-    cumulativeDelta += layerPosition - m_constraints.layerPositionAtLastLayout();
+        if (is<ScrollingTreeFixedNode>(*ancestor) || is<ScrollingTreeStickyNode>(*ancestor)) {
+            // FIXME: Do we need scrolling tree nodes at all for nested cases?
+            return m_constraints.layerPositionAtLastLayout();
+        }
+    }
+    ASSERT_NOT_REACHED();
+    return m_constraints.layerPositionAtLastLayout();
+}
+
+void ScrollingTreeStickyNode::applyLayerPositions()
+{
+    auto layerPosition = computeLayerPosition();
+
+    LOG_WITH_STREAM(Scrolling, stream << "ScrollingTreeStickyNode " << scrollingNodeID() << " constrainingRectAtLastLayout " << m_constraints.constrainingRectAtLastLayout() << " last layer pos " << m_constraints.layerPositionAtLastLayout() << " layerPosition " << layerPosition);
+
+    [m_layer _web_setLayerTopLeftPosition:layerPosition - m_constraints.alignmentOffset()];
+}
+
+FloatSize ScrollingTreeStickyNode::scrollDeltaSinceLastCommit() const
+{
+    auto layerPosition = computeLayerPosition();
+    return layerPosition - m_constraints.layerPositionAtLastLayout();
 }
 
 void ScrollingTreeStickyNode::dumpProperties(TextStream& ts, ScrollingStateTreeAsTextBehavior behavior) const

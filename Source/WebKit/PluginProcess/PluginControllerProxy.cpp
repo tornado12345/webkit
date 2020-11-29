@@ -40,6 +40,7 @@
 #include "ShareableBitmap.h"
 #include "WebCoreArgumentCoders.h"
 #include "WebProcessConnection.h"
+#include "WebProcessConnectionMessages.h"
 #include <WebCore/GraphicsContext.h>
 #include <WebCore/HTTPHeaderMap.h>
 #include <WebCore/IdentifierRep.h>
@@ -118,7 +119,7 @@ bool PluginControllerProxy::initialize(const PluginCreationParameters& creationP
     if (creationParameters.windowNPObjectID)
         m_windowNPObject = m_connection->npRemoteObjectMap()->createNPObjectProxy(creationParameters.windowNPObjectID, m_plugin.get());
 
-    bool returnValue = m_plugin->initialize(this, creationParameters.parameters);
+    bool returnValue = m_plugin->initialize(*this, creationParameters.parameters);
 
     if (!returnValue) {
         // Get the plug-in so we can pass it to removePluginControllerProxy. The pointer is only
@@ -183,6 +184,8 @@ void PluginControllerProxy::paint()
 
     // Create a graphics context.
     auto graphicsContext = m_backingStore->createGraphicsContext();
+    if (!graphicsContext)
+        return;
 
 #if PLATFORM(COCOA)
     // FIXME: We should really call applyDeviceScaleFactor instead of scale, but that ends up calling into WKSI

@@ -30,8 +30,8 @@
 
 #import "LocalAuthenticator.h"
 #import "LocalConnection.h"
-#import <WebCore/RuntimeEnabledFeatures.h>
 
+#import "AppAttestInternalSoftLink.h"
 #import "LocalAuthenticationSoftLink.h"
 
 namespace WebKit {
@@ -43,21 +43,23 @@ LocalService::LocalService(Observer& observer)
 
 bool LocalService::isAvailable()
 {
-// FIXME(182772)
-#if !PLATFORM(IOS_FAMILY)
-    return false;
-#else
-    if (!WebCore::RuntimeEnabledFeatures::sharedFeatures().webAuthenticationLocalAuthenticatorEnabled())
-        return false;
-
     auto context = adoptNS([allocLAContextInstance() init]);
     NSError *error = nil;
     if (![context canEvaluatePolicy:LAPolicyDeviceOwnerAuthenticationWithBiometrics error:&error]) {
         LOG_ERROR("Couldn't find local authenticators: %@", error);
         return false;
     }
-    return true;
+
+#if HAVE(APPLE_ATTESTATION)
+    if (!AppAttest_WebAuthentication_IsSupported()) {
+        LOG_ERROR("Device is unable to support Apple attestation features.");
+        return false;
+    }
+#else
+    return false;
 #endif
+
+    return true;
 }
 
 void LocalService::startDiscoveryInternal()

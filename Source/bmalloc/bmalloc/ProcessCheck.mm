@@ -46,13 +46,14 @@ bool gigacageEnabledForProcess()
     bool isOptInBinary = [processName isEqualToString:@"jsc"]
         || [processName isEqualToString:@"DumpRenderTree"]
         || [processName isEqualToString:@"wasm"]
-        || [processName hasPrefix:@"test"];
+        || [processName hasPrefix:@"test"]
+        || [processName hasPrefix:@"Test"];
 
     return isOptInBinary;
 }
 #endif // !BPLATFORM(WATCHOS)
 
-#if BUSE(CHECK_NANO_MALLOC)
+#if BPLATFORM(IOS_FAMILY)
 bool shouldProcessUnconditionallyUseBmalloc()
 {
     static bool result;
@@ -65,12 +66,14 @@ bool shouldProcessUnconditionallyUseBmalloc()
             result = contains(@"com.apple.WebKit") || contains(@"safari");
         } else {
             NSString *processName = [[NSProcessInfo processInfo] processName];
-            result = [processName isEqualToString:@"jsc"] || [processName isEqualToString:@"wasm"];
+            result = [processName isEqualToString:@"jsc"]
+                || [processName isEqualToString:@"wasm"]
+                || [processName hasPrefix:@"test"];
         }
     });
 
     return result;
 }
-#endif // BUSE(CHECK_NANO_MALLOC)
+#endif // BPLATFORM(IOS_FAMILY)
 
 }

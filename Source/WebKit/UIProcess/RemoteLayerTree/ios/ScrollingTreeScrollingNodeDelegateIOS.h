@@ -23,17 +23,16 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#pragma once
-
 #if PLATFORM(IOS_FAMILY) && ENABLE(ASYNC_SCROLLING)
 
-#include <UIKit/UIScrollView.h>
-#include <WebCore/ScrollingCoordinator.h>
-#include <WebCore/ScrollingTreeScrollingNode.h>
-#include <WebCore/ScrollingTreeScrollingNodeDelegate.h>
+#import <UIKit/UIScrollView.h>
+#import <WebCore/ScrollingCoordinator.h>
+#import <WebCore/ScrollingTreeScrollingNode.h>
+#import <WebCore/ScrollingTreeScrollingNodeDelegate.h>
 
-OBJC_CLASS CALayer;
-OBJC_CLASS WKScrollingNodeScrollViewDelegate;
+@class CALayer;
+@class UIScrollView;
+@class WKScrollingNodeScrollViewDelegate;
 
 namespace WebCore {
 
@@ -47,6 +46,7 @@ class ScrollingTreeScrollingNode;
 namespace WebKit {
 
 class ScrollingTreeScrollingNodeDelegateIOS : public WebCore::ScrollingTreeScrollingNodeDelegate {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     explicit ScrollingTreeScrollingNodeDelegateIOS(WebCore::ScrollingTreeScrollingNode&);
     ~ScrollingTreeScrollingNodeDelegateIOS() final;
@@ -54,7 +54,7 @@ public:
     void scrollWillStart() const;
     void scrollDidEnd() const;
     void scrollViewWillStartPanGesture() const;
-    void scrollViewDidScroll(const WebCore::FloatPoint& scrollPosition, bool inUserInteraction);
+    void scrollViewDidScroll(const WebCore::FloatPoint& scrollOffset, bool inUserInteraction);
 
     void currentSnapPointIndicesDidChange(unsigned horizontal, unsigned vertical) const;
     CALayer *scrollLayer() const { return m_scrollLayer.get(); }
@@ -65,15 +65,19 @@ public:
 
     void repositionScrollingLayers();
 
-#if ENABLE(POINTER_EVENTS)
-    Optional<WebCore::TouchActionData> touchActionData() const;
+    OptionSet<WebCore::TouchAction> activeTouchActions() const { return m_activeTouchActions; }
+    void computeActiveTouchActionsForGestureRecognizer(UIGestureRecognizer*);
+    void clearActiveTouchActions() { m_activeTouchActions = { }; }
     void cancelPointersForGestureRecognizer(UIGestureRecognizer*);
-#endif
+
+    UIScrollView *findActingScrollParent(UIScrollView *);
+    UIScrollView *scrollView() const;
 
 private:
     RetainPtr<CALayer> m_scrollLayer;
     RetainPtr<CALayer> m_scrolledContentsLayer;
     RetainPtr<WKScrollingNodeScrollViewDelegate> m_scrollViewDelegate;
+    OptionSet<WebCore::TouchAction> m_activeTouchActions { };
     bool m_updatingFromStateNode { false };
 };
 

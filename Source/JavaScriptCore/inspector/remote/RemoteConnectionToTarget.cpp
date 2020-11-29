@@ -31,6 +31,7 @@
 #include "RemoteAutomationTarget.h"
 #include "RemoteInspectionTarget.h"
 #include "RemoteInspector.h"
+#include <wtf/RunLoop.h>
 
 namespace Inspector {
 
@@ -49,7 +50,7 @@ bool RemoteConnectionToTarget::setup(bool isAutomaticInspection, bool automatica
     if (!m_target)
         return false;
 
-    unsigned targetIdentifier = this->targetIdentifier().valueOr(0);
+    auto targetIdentifier = this->targetIdentifier().valueOr(0);
 
     if (!m_target || !m_target->remoteControlAllowed()) {
         RemoteInspector::singleton().setupFailed(targetIdentifier);
@@ -86,18 +87,20 @@ void RemoteConnectionToTarget::sendMessageToTarget(const String& message)
 
 void RemoteConnectionToTarget::close()
 {
-    LockHolder lock(m_targetMutex);
-    if (!m_target)
-        return;
+    RunLoop::current().dispatch([this, protectThis = makeRef(*this)] {
+        LockHolder lock(m_targetMutex);
+        if (!m_target)
+            return;
 
-    unsigned targetIdentifier = m_target->targetIdentifier();
+        auto targetIdentifier = m_target->targetIdentifier();
 
-    if (m_connected)
-        m_target->disconnect(*this);
+        if (m_connected)
+            m_target->disconnect(*this);
 
-    m_target = nullptr;
+        m_target = nullptr;
 
-    RemoteInspector::singleton().updateTargetListing(targetIdentifier);
+        RemoteInspector::singleton().updateTargetListing(targetIdentifier);
+    });
 }
 
 void RemoteConnectionToTarget::targetClosed()
@@ -106,9 +109,9 @@ void RemoteConnectionToTarget::targetClosed()
     m_target = nullptr;
 }
 
-Optional<unsigned> RemoteConnectionToTarget::targetIdentifier() const
+Optional<TargetID> RemoteConnectionToTarget::targetIdentifier() const
 {
-    return m_target ? Optional<unsigned>(m_target->targetIdentifier()) : WTF::nullopt;
+    return m_target ? Optional<TargetID>(m_target->targetIdentifier()) : WTF::nullopt;
 }
 
 void RemoteConnectionToTarget::sendMessageToFrontend(const String& message)

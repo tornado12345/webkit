@@ -29,11 +29,15 @@
 #if ENABLE(APPLE_PAY)
 
 #include "ApplePaySessionPaymentRequest.h"
+#include "MockApplePaySetupFeature.h"
 #include "MockPayment.h"
 #include "MockPaymentContact.h"
 #include "MockPaymentMethod.h"
 #include "Page.h"
 #include "PaymentCoordinator.h"
+#include "PaymentMethodUpdate.h"
+#include "PaymentSessionError.h"
+#include <wtf/CompletionHandler.h>
 #include <wtf/RunLoop.h>
 #include <wtf/URL.h>
 
@@ -66,16 +70,16 @@ bool MockPaymentCoordinator::canMakePayments()
     return m_canMakePayments;
 }
 
-void MockPaymentCoordinator::canMakePaymentsWithActiveCard(const String&, const String&, Function<void(bool)>&& completionHandler)
+void MockPaymentCoordinator::canMakePaymentsWithActiveCard(const String&, const String&, CompletionHandler<void(bool)>&& completionHandler)
 {
-    RunLoop::main().dispatch([completionHandler = WTFMove(completionHandler), canMakePaymentsWithActiveCard = m_canMakePaymentsWithActiveCard] {
+    RunLoop::main().dispatch([completionHandler = WTFMove(completionHandler), canMakePaymentsWithActiveCard = m_canMakePaymentsWithActiveCard]() mutable {
         completionHandler(canMakePaymentsWithActiveCard);
     });
 }
 
-void MockPaymentCoordinator::openPaymentSetup(const String&, const String&, Function<void(bool)>&& completionHandler)
+void MockPaymentCoordinator::openPaymentSetup(const String&, const String&, CompletionHandler<void(bool)>&& completionHandler)
 {
-    RunLoop::main().dispatch([completionHandler = WTFMove(completionHandler)] {
+    RunLoop::main().dispatch([completionHandler = WTFMove(completionHandler)]() mutable {
         completionHandler(true);
     });
 }
@@ -106,6 +110,9 @@ bool MockPaymentCoordinator::showPaymentUI(const URL&, const Vector<URL>&, const
     m_shippingMethods = convert(request.shippingMethods());
     m_requiredBillingContactFields = request.requiredBillingContactFields();
     m_requiredShippingContactFields = request.requiredShippingContactFields();
+#if ENABLE(APPLE_PAY_INSTALLMENTS)
+    m_installmentConfiguration = request.installmentConfiguration().applePayInstallmentConfiguration();
+#endif
 
     ASSERT(showCount == hideCount);
     ++showCount;
@@ -158,7 +165,7 @@ void MockPaymentCoordinator::completeShippingContactSelection(Optional<ShippingC
 void MockPaymentCoordinator::completePaymentMethodSelection(Optional<PaymentMethodUpdate>&& paymentMethodUpdate)
 {
     if (paymentMethodUpdate)
-        updateTotalAndLineItems(paymentMethodUpdate->newTotalAndLineItems);
+        updateTotalAndLineItems(paymentMethodUpdate->totalAndLineItems());
 }
 
 void MockPaymentCoordinator::changeShippingOption(String&& shippingOption)
@@ -189,7 +196,7 @@ void MockPaymentCoordinator::acceptPayment()
 void MockPaymentCoordinator::cancelPayment()
 {
     dispatchIfShowing([page = &m_page] {
-        page->paymentCoordinator().didCancelPaymentSession();
+        page->paymentCoordinator().didCancelPaymentSession({ });
         ++hideCount;
         ASSERT(showCount == hideCount);
     });
@@ -223,6 +230,24 @@ void MockPaymentCoordinator::paymentCoordinatorDestroyed()
 {
     ASSERT(showCount == hideCount);
     delete this;
+}
+
+void MockPaymentCoordinator::addSetupFeature(ApplePaySetupFeatureState state, ApplePaySetupFeatureType type, bool supportsInstallments)
+{
+    m_setupFeatures.append(MockApplePaySetupFeature::create(state, type, supportsInstallments));
+}
+
+void MockPaymentCoordinator::getSetupFeatures(const ApplePaySetupConfiguration& configuration, const URL&, CompletionHandler<void(Vector<Ref<ApplePaySetupFeature>>&&)>&& completionHandler)
+{
+    m_setupConfiguration = configuration;
+    auto setupFeaturesCopy = m_setupFeatures;
+    completionHandler(WTFMove(setupFeaturesCopy));
+}
+
+void MockPaymentCoordinator::beginApplePaySetup(const ApplePaySetupConfiguration& configuration, const URL&, Vector<RefPtr<ApplePaySetupFeature>>&&, CompletionHandler<void(bool)>&& completionHandler)
+{
+    m_setupConfiguration = configuration;
+    completionHandler(true);
 }
 
 } // namespace WebCore

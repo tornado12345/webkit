@@ -1,4 +1,5 @@
 // Copyright (C) 2010 Adam Barth. All rights reserved.
+// Copyright (C) 2019 Apple Inc. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are met:
@@ -567,7 +568,7 @@ var CODE_REVIEW_UNITTEST;
       addFlagsForAttachment(details);
 
       var statusBubble = document.createElement('iframe');
-      statusBubble.src  = 'https://webkit-queues.webkit.org/status-bubble/' + attachment_id;
+      statusBubble.src  = 'https://ews.webkit.org/status-bubble/' + attachment_id + '?hide_icons=True';
       statusBubble.scrolling = 'no';
       // Can't append the HTML because we need to set the onload handler before appending the iframe to the DOM.
       statusBubble.onload = function () { handleStatusBubbleLoad(this); };

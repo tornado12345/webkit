@@ -77,6 +77,11 @@ public:
     //       that already contains content.
     void setSecurityOriginPolicy(RefPtr<SecurityOriginPolicy>&&);
 
+    // Explicitly override the content security policy for this security context.
+    // Note: It is dangerous to change the content security policy of a script
+    //       context that already contains content.
+    void setContentSecurityPolicy(std::unique_ptr<ContentSecurityPolicy>&&);
+
     WEBCORE_EXPORT SecurityOrigin* securityOrigin() const;
 
     static SandboxFlags parseSandboxPolicy(const String& policy, String& invalidTokensErrorMessage);
@@ -87,6 +92,8 @@ public:
         Active = 1 << 1,
     };
 
+    bool usedLegacyTLS() const { return m_usedLegacyTLS; }
+    void setUsedLegacyTLS(bool used) { m_usedLegacyTLS = used; }
     const OptionSet<MixedContentType>& foundMixedContent() const { return m_mixedContentTypes; }
     void setFoundMixedContent(MixedContentType type) { m_mixedContentTypes.add(type); }
     bool geolocationAccessed() const { return m_geolocationAccessed; }
@@ -105,8 +112,6 @@ protected:
     SecurityContext();
     virtual ~SecurityContext();
 
-    void setContentSecurityPolicy(std::unique_ptr<ContentSecurityPolicy>);
-
     // It's only appropriate to call this during security context initialization; it's needed for
     // flags that can't be disabled with allow-* attributes, such as SandboxNavigation.
     void disableSandboxFlags(SandboxFlags mask) { m_sandboxFlags &= ~mask; }
@@ -123,6 +128,7 @@ private:
     bool m_geolocationAccessed { false };
     bool m_secureCookiesAccessed { false };
     bool m_isStrictMixedContentMode { false };
+    bool m_usedLegacyTLS { false };
 };
 
 } // namespace WebCore

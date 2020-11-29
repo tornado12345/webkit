@@ -45,7 +45,7 @@ UserInputBridge::UserInputBridge(Page& page)
 {
 }
 
-#if ENABLE(CONTEXT_MENUS)
+#if ENABLE(CONTEXT_MENU_EVENT)
 bool UserInputBridge::handleContextMenuEvent(const PlatformMouseEvent& mouseEvent, Frame& frame, InputSource)
 {
     return frame.eventHandler().sendContextMenuEvent(mouseEvent);
@@ -87,9 +87,9 @@ bool UserInputBridge::handleAccessKeyEvent(const PlatformKeyboardEvent& keyEvent
     return m_page.focusController().focusedOrMainFrame().eventHandler().handleAccessKey(keyEvent);
 }
 
-bool UserInputBridge::handleWheelEvent(const PlatformWheelEvent& wheelEvent, InputSource)
+bool UserInputBridge::handleWheelEvent(const PlatformWheelEvent& wheelEvent, OptionSet<WheelEventProcessingSteps> processingSteps, InputSource)
 {
-    return m_page.mainFrame().eventHandler().handleWheelEvent(wheelEvent);
+    return m_page.mainFrame().eventHandler().handleWheelEvent(wheelEvent, processingSteps);
 }
 
 void UserInputBridge::focusSetActive(bool active, InputSource)

@@ -27,15 +27,17 @@
 #define GeolocationProviderMock_h
 
 #include <WebKit/WKRetainPtr.h>
+#include <wtf/FastMalloc.h>
 
 namespace WTR {
 
 class GeolocationProviderMock {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     GeolocationProviderMock(WKContextRef);
     ~GeolocationProviderMock();
 
-    void setPosition(double latitude, double longitude, double accuracy, bool providesAltitude, double altitude, bool providesAltitudeAccuracy, double altitudeAccuracy, bool providesHeading, double heading, bool providesSpeed, double speed, bool providesFloorLevel, double floorLevel);
+    void setPosition(double latitude, double longitude, double accuracy, Optional<double> altitude, Optional<double> altitudeAccuracy, Optional<double> heading, Optional<double> speed, Optional<double> floorLevel);
     void setPositionUnavailableError(WKStringRef errorMessage);
 
     void startUpdating(WKGeolocationManagerRef);

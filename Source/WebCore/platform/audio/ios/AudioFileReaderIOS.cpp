@@ -53,7 +53,7 @@ namespace WebCore {
 
 static WARN_UNUSED_RETURN AudioBufferList* createAudioBufferList(size_t numberOfBuffers)
 {
-    Checked<size_t, RecordOverflow> bufferListSize = sizeof(AudioBufferList) - sizeof(AudioBuffer);
+    CheckedSize bufferListSize = sizeof(AudioBufferList) - sizeof(AudioBuffer);
     bufferListSize += numberOfBuffers * sizeof(AudioBuffer);
 
     AudioBufferList* bufferList = static_cast<AudioBufferList*>(calloc(1, bufferListSize.unsafeGet()));
@@ -190,8 +190,8 @@ RefPtr<AudioBus> AudioFileReader::createBus(float sampleRate, bool mixToMono)
     const size_t bufferSize = numberOfFrames * sizeof(float);
 
     if (mixToMono && numberOfChannels == 2) {
-        leftChannel.allocate(numberOfFrames);
-        rightChannel.allocate(numberOfFrames);
+        leftChannel.resize(numberOfFrames);
+        rightChannel.resize(numberOfFrames);
 
         bufferList->mBuffers[0].mNumberChannels = 1;
         bufferList->mBuffers[0].mDataByteSize = bufferSize;

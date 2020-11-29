@@ -80,7 +80,7 @@ class TestServer {
             },
             'uploadFileLimitInMB': 2,
             'uploadUserQuotaInMB': 5,
-            'uploadTotalQuotaInMB': 6,
+            'uploadTotalQuotaInMB': 7,
             'uploadDirectory': Config.value('dataDirectory') + '/uploaded',
             'universalSlavePassword': null,
             'maintenanceMode': false,
@@ -140,9 +140,12 @@ class TestServer {
             this._database.disconnect();
         this._database = null;
 
-        let initFilePath = Config.pathFromRoot('init-database.sql');
-        this._executePgsqlCommand('psql', ['--username', this._databaseUser, '--file', initFilePath],
-            {stdio: ['ignore', 'ignore', 'ignore']});
+        const initFilePath = Config.pathFromRoot('init-database.sql');
+        const migrateFilePath = Config.pathFromRoot('migrate-database.sql');
+        for (const filePath of [initFilePath, migrateFilePath]) {
+            this._executePgsqlCommand('psql', ['--username', this._databaseUser, '--file', filePath],
+                {stdio: ['ignore', 'ignore', 'ignore']});
+        }
     }
 
     _executePgsqlCommand(command, args, options)

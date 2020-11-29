@@ -28,12 +28,13 @@
 #include "PageClientImpl.h"
 
 #include "DrawingAreaProxyCoordinatedGraphics.h"
-#include "NotImplemented.h"
 #include "WebContextMenuProxyWin.h"
 #include "WebPageProxy.h"
 #include "WebPopupMenuProxyWin.h"
 #include "WebView.h"
 #include <WebCore/DOMPasteAccess.h>
+#include <WebCore/NotImplemented.h>
+#include <d3d11_1.h>
 
 namespace WebKit {
 using namespace WebCore;
@@ -46,7 +47,7 @@ PageClientImpl::PageClientImpl(WebView& view)
 // PageClient's pure virtual functions
 std::unique_ptr<DrawingAreaProxy> PageClientImpl::createDrawingAreaProxy(WebProcessProxy& process)
 {
-    return std::make_unique<DrawingAreaProxyCoordinatedGraphics>(*m_view.page(), process);
+    return makeUnique<DrawingAreaProxyCoordinatedGraphics>(*m_view.page(), process);
 }
 
 void PageClientImpl::setViewNeedsDisplay(const WebCore::Region& region)
@@ -54,7 +55,7 @@ void PageClientImpl::setViewNeedsDisplay(const WebCore::Region& region)
     m_view.setViewNeedsDisplay(region);
 }
 
-void PageClientImpl::requestScroll(const WebCore::FloatPoint&, const WebCore::IntPoint&, bool)
+void PageClientImpl::requestScroll(const WebCore::FloatPoint&, const WebCore::IntPoint&)
 {
     notImplemented();
 }
@@ -229,7 +230,7 @@ void PageClientImpl::didChangeContentSize(const IntSize& size)
     notImplemented();
 }
 
-void PageClientImpl::handleDownloadRequest(DownloadProxy* download)
+void PageClientImpl::handleDownloadRequest(DownloadProxy& download)
 {
     notImplemented();
 }
@@ -329,7 +330,7 @@ void PageClientImpl::didFirstVisuallyNonEmptyLayoutForMainFrame()
     notImplemented();
 }
 
-void PageClientImpl::didFinishLoadForMainFrame()
+void PageClientImpl::didFinishNavigation(API::Navigation*)
 {
     notImplemented();
 }

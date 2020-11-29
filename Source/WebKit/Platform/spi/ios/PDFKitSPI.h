@@ -54,8 +54,12 @@
 - (void) goToPageIndex:(NSInteger) pageIndex;
 - (void) updatePDFViewLayout;
 
++ (UIColor *)backgroundColor;
+
 - (void) beginPDFViewRotation;
 - (void) endPDFViewRotation;
+
+- (void) snapshotViewRect: (CGRect) rect snapshotWidth: (NSNumber*) width afterScreenUpdates: (BOOL) afterScreenUpdates withResult: (void (^)(UIImage* image)) completion;
 
 @end
 

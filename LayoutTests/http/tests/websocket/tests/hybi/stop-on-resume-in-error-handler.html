@@ -1,3 +1,4 @@
+<!-- webkit-test-runner [ UsesBackForwardCache=true ] -->
 <!DOCTYPE html>
 <html>
 <body>
@@ -8,8 +9,6 @@ description("Tests that WebSocket correctly handles being stopped in the error e
 var wasRestoredFromPageCache = false;
 
 window.jsTestIsAsync = true;
-if (window.testRunner)
-    testRunner.overridePreference("WebKitUsesPageCachePreferenceKey", 1);
 
 window.addEventListener("pageshow", function(event) {
     debug("pageshow - " + (event.persisted ? "" : "not ") + "from cache");
@@ -46,6 +45,7 @@ function loaded() {
     }
     ws.onclose = function(ev) {
         testFailed("Close event should not have fired.");
+        finishJSTest();
     }
 
     setTimeout(function() {

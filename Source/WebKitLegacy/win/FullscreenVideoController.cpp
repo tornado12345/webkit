@@ -74,11 +74,11 @@ static const int borderRadius = 12;
 static const int borderThickness = 2;
 
 // Colors
-static const unsigned int backgroundColor = 0xA0202020;
-static const unsigned int borderColor = 0xFFA0A0A0;
-static const unsigned int sliderGutterColor = 0xFF141414;
-static const unsigned int sliderButtonColor = 0xFF808080;
-static const unsigned int textColor = 0xFFFFFFFF;
+static constexpr auto backgroundColor = SRGBA<uint8_t> { 32, 32, 32, 160 };
+static constexpr auto borderColor = SRGBA<uint8_t> { 160, 160, 160 };
+static constexpr auto sliderGutterColor = SRGBA<uint8_t> { 20, 20, 20 };
+static constexpr auto sliderButtonColor = SRGBA<uint8_t> { 128, 128, 128 };
+static constexpr auto textColor = Color::white;
 
 HUDButton::HUDButton(HUDButtonType type, const IntPoint& position)
     : HUDWidget(IntRect(position, IntSize()))
@@ -176,6 +176,7 @@ void HUDSlider::drag(const IntPoint& point, bool start)
 
 #if USE(CA)
 class FullscreenVideoController::LayerClient : public WebCore::PlatformCALayerClient {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     LayerClient(FullscreenVideoController* parent) : m_parent(parent) { }
 
@@ -208,7 +209,7 @@ void FullscreenVideoController::LayerClient::platformCALayerLayoutSublayersOfLay
         return;
 
 
-    PlatformCALayer* videoLayer = PlatformCALayer::platformCALayer(videoElement->platformLayer());
+    auto videoLayer = PlatformCALayer::platformCALayerForLayer(videoElement->platformLayer());
     if (!videoLayer || videoLayer->superlayer() != layer)
         return;
 
@@ -246,10 +247,12 @@ FullscreenVideoController::FullscreenVideoController()
     , m_movingWindow(false)
     , m_timer(*this, &FullscreenVideoController::timerFired)
 #if USE(CA)
-    , m_layerClient(std::make_unique<LayerClient>(this))
+    , m_layerClient(makeUnique<LayerClient>(this))
     , m_rootChild(PlatformCALayerWin::create(PlatformCALayer::LayerTypeLayer, m_layerClient.get()))
 #endif
-    , m_fullscreenWindow(std::make_unique<MediaPlayerPrivateFullscreenWindow>(static_cast<MediaPlayerPrivateFullscreenClient*>(this)))
+#if ENABLE(FULLSCREEN_API)
+    , m_fullscreenWindow(makeUnique<MediaPlayerPrivateFullscreenWindow>(static_cast<MediaPlayerPrivateFullscreenClient*>(this)))
+#endif
 {
 }
 
@@ -274,6 +277,7 @@ void FullscreenVideoController::setVideoElement(HTMLVideoElement* videoElement)
 
 void FullscreenVideoController::enterFullscreen()
 {
+#if ENABLE(FULLSCREEN_API)
     if (!m_videoElement)
         return;
 
@@ -286,7 +290,7 @@ void FullscreenVideoController::enterFullscreen()
 #if USE(CA)
     m_fullscreenWindow->setRootChildLayer(*m_rootChild);
 
-    PlatformCALayer* videoLayer = PlatformCALayer::platformCALayer(m_videoElement->platformLayer());
+    auto videoLayer = PlatformCALayer::platformCALayerForLayer(m_videoElement->platformLayer());
     ASSERT(videoLayer);
     m_rootChild->appendSublayer(*videoLayer);
     m_rootChild->setNeedsLayout();
@@ -299,13 +303,16 @@ void FullscreenVideoController::enterFullscreen()
     m_fullscreenSize.setHeight(windowRect.bottom - windowRect.top);
 
     createHUDWindow();
+#endif
 }
 
 void FullscreenVideoController::exitFullscreen()
 {
     SetWindowLongPtr(m_hudWindow, 0, 0);
 
+#if ENABLE(FULLSCREEN_API)
     m_fullscreenWindow = nullptr;
+#endif
 
     ASSERT(!IsWindow(m_hudWindow));
     m_hudWindow = 0;
@@ -432,6 +439,7 @@ void FullscreenVideoController::registerHUDWindowClass()
 
 void FullscreenVideoController::createHUDWindow()
 {
+#if ENABLE(FULLSCREEN_API)
     m_hudPosition.setX((m_fullscreenSize.width() - windowWidth) / 2);
     m_hudPosition.setY(m_fullscreenSize.height() * initialHUDPositionY - windowHeight / 2);
 
@@ -461,6 +469,7 @@ void FullscreenVideoController::createHUDWindow()
     SetWindowLongPtr(m_hudWindow, 0, reinterpret_cast<LONG_PTR>(this));
 
     draw();
+#endif
 }
 
 static String timeToString(float time)
@@ -492,7 +501,7 @@ void FullscreenVideoController::draw()
     IntRect innerRect(borderThickness, borderThickness, windowWidth - borderThickness * 2, windowHeight - borderThickness * 2);
 
     context.fillRoundedRect(FloatRoundedRect(outerRect, outerRadius, outerRadius, outerRadius, outerRadius), Color(borderColor));
-    context.setCompositeOperation(CompositeCopy);
+    context.setCompositeOperation(CompositeOperator::Copy);
     context.fillRoundedRect(FloatRoundedRect(innerRect, innerRadius, innerRadius, innerRadius, innerRadius), Color(backgroundColor));
 
     // Draw the widgets

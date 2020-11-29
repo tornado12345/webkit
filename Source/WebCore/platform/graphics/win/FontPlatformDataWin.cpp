@@ -34,7 +34,7 @@
 #include <wtf/text/WTFString.h>
 
 #if USE(DIRECT2D)
-#include <dwrite.h>
+#include <dwrite_3.h>
 #endif
 
 using std::min;
@@ -52,25 +52,15 @@ FontPlatformData::FontPlatformData(GDIObject<HFONT> font, float size, bool bold,
     SaveDC(hdc);
     
     ::SelectObject(hdc, m_font->get());
-    UINT bufferSize = GetOutlineTextMetrics(hdc, 0, NULL);
 
-    ASSERT_WITH_MESSAGE(bufferSize, "Bitmap fonts not supported with CoreGraphics.");
-
-    if (bufferSize) {
-        static const constexpr unsigned InitialBufferSize { 256 };
-        Vector<char, InitialBufferSize> buffer(bufferSize);
-        auto* metrics = reinterpret_cast<OUTLINETEXTMETRICW*>(buffer.data());
-
-        GetOutlineTextMetricsW(hdc, bufferSize, metrics);
-        WCHAR* faceName = (WCHAR*)((uintptr_t)metrics + (uintptr_t)metrics->otmpFaceName);
-
-        platformDataInit(m_font->get(), size, hdc, faceName);
-    }
+    wchar_t faceName[LF_FACESIZE];
+    GetTextFace(hdc, LF_FACESIZE, faceName);
+    platformDataInit(m_font->get(), size, hdc, faceName);
 
     RestoreDC(hdc, -1);
 }
 
-RefPtr<SharedBuffer> FontPlatformData::openTypeTable(uint32_t table) const
+RefPtr<SharedBuffer> FontPlatformData::platformOpenTypeTable(uint32_t table) const
 {
     HWndDC hdc(0);
     HGDIOBJ oldFont = SelectObject(hdc, hfont());
@@ -87,12 +77,5 @@ RefPtr<SharedBuffer> FontPlatformData::openTypeTable(uint32_t table) const
     SelectObject(hdc, oldFont);
     return buffer;
 }
-
-#if !LOG_DISABLED
-String FontPlatformData::description() const
-{
-    return String();
-}
-#endif
 
 }

@@ -30,7 +30,6 @@
 #include <glib.h>
 #include <unordered_map>
 
-typedef void* EGLImageKHR;
 typedef void* EGLSurface;
 typedef struct wl_egl_window  *EGLNativeWindowType;
 
@@ -41,8 +40,19 @@ public:
     WindowViewBackend(uint32_t width, uint32_t height);
     virtual ~WindowViewBackend();
 
+    struct wpe_view_backend* backend() const override;
+
 private:
-    void displayBuffer(EGLImageKHR) override;
+    void createViewTexture();
+    void resize(uint32_t width, uint32_t height);
+
+    bool initialize(EGLDisplay);
+    void deinitialize(EGLDisplay);
+
+    void displayBuffer(struct wpe_fdo_egl_exported_image*);
+#if WPE_FDO_CHECK_VERSION(1, 5, 0)
+    void displayBuffer(struct wpe_fdo_shm_exported_buffer*);
+#endif
 
     static const struct wl_registry_listener s_registryListener;
     static const struct zxdg_shell_v6_listener s_xdgWmBaseListener;
@@ -93,6 +103,13 @@ private:
 
     } m_seatData;
 
+    struct {
+        uint32_t width;
+        uint32_t height;
+    } m_initialSize;
+
+    struct wpe_view_backend_exportable_fdo* m_exportable { nullptr };
+
     struct wl_display* m_display { nullptr };
     struct wl_compositor* m_compositor { nullptr };
     struct zxdg_shell_v6* m_xdg { nullptr };
@@ -102,11 +119,13 @@ private:
     struct zxdg_surface_v6* m_xdgSurface { nullptr };
     struct zxdg_toplevel_v6* m_xdgToplevel { nullptr };
     struct wl_egl_window* m_eglWindow { nullptr };
+    EGLContext m_eglContext { nullptr };
+    EGLConfig m_eglConfig;
     EGLSurface m_eglSurface { nullptr };
     unsigned m_program { 0 };
     unsigned m_textureUniform { 0 };
     unsigned m_viewTexture { 0 };
-    EGLImageKHR m_committedImage;
+    struct wpe_fdo_egl_exported_image* m_committedImage { nullptr };
 };
 
 } // WPEToolingBackends

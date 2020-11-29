@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2018 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,16 +26,64 @@
 #import "config.h"
 #import "WebCoreArgumentCoders.h"
 
-#if ENABLE(APPLE_PAY)
-
+#import "ArgumentCodersCF.h"
 #import "ArgumentCodersCocoa.h"
+#import <CoreText/CoreText.h>
+#import <WebCore/AttributedString.h>
+#import <WebCore/DictionaryPopupInfo.h>
+#import <WebCore/Font.h>
+#import <WebCore/FontAttributes.h>
+#import <WebCore/FontCustomPlatformData.h>
+#import <pal/spi/cocoa/CoreTextSPI.h>
+
+#if PLATFORM(IOS_FAMILY)
+#import <UIKit/UIFont.h>
+#endif
+
+#if ENABLE(APPLE_PAY)
 #import "DataReference.h"
 #import <WebCore/PaymentAuthorizationStatus.h>
 #import <pal/cocoa/PassKitSoftLink.h>
-#import <pal/spi/cocoa/NSKeyedArchiverSPI.h>
+#endif
 
 namespace IPC {
 using namespace WebCore;
+
+void ArgumentCoder<WebCore::AttributedString>::encode(Encoder& encoder, const WebCore::AttributedString& attributedString)
+{
+    encoder << attributedString.string << attributedString.documentAttributes;
+}
+
+Optional<WebCore::AttributedString> ArgumentCoder<WebCore::AttributedString>::decode(Decoder& decoder)
+{
+    RetainPtr<NSAttributedString> attributedString;
+    if (!IPC::decode(decoder, attributedString))
+        return WTF::nullopt;
+    RetainPtr<NSDictionary> documentAttributes;
+    if (!IPC::decode(decoder, documentAttributes))
+        return WTF::nullopt;
+    return { { WTFMove(attributedString), WTFMove(documentAttributes) } };
+}
+
+#if ENABLE(APPLE_PAY)
+
+#if HAVE(PASSKIT_INSTALLMENTS)
+
+void ArgumentCoder<WebCore::PaymentInstallmentConfiguration>::encode(Encoder& encoder, const WebCore::PaymentInstallmentConfiguration& configuration)
+{
+    encoder << configuration.platformConfiguration();
+}
+
+Optional<WebCore::PaymentInstallmentConfiguration> ArgumentCoder<WebCore::PaymentInstallmentConfiguration>::decode(Decoder& decoder)
+{
+    auto configuration = IPC::decode<PKPaymentInstallmentConfiguration>(decoder, PAL::getPKPaymentInstallmentConfigurationClass());
+    if (!configuration)
+        return WTF::nullopt;
+
+    return { WTFMove(*configuration) };
+}
+
+#endif // HAVE(PASSKIT_INSTALLMENTS)
 
 void ArgumentCoder<WebCore::Payment>::encode(Encoder& encoder, const WebCore::Payment& payment)
 {
@@ -143,16 +191,16 @@ Optional<WebCore::PaymentMethod> ArgumentCoder<WebCore::PaymentMethod>::decode(D
 
 void ArgumentCoder<WebCore::PaymentMethodUpdate>::encode(Encoder& encoder, const WebCore::PaymentMethodUpdate& update)
 {
-    encoder << update.newTotalAndLineItems;
+    encoder << update.platformUpdate();
 }
 
 Optional<WebCore::PaymentMethodUpdate> ArgumentCoder<WebCore::PaymentMethodUpdate>::decode(Decoder& decoder)
 {
-    Optional<ApplePaySessionPaymentRequest::TotalAndLineItems> newTotalAndLineItems;
-    decoder >> newTotalAndLineItems;
-    if (!newTotalAndLineItems)
+    auto update = IPC::decode<PKPaymentRequestPaymentMethodUpdate>(decoder, PAL::getPKPaymentRequestPaymentMethodUpdateClass());
+    if (!update)
         return WTF::nullopt;
-    return {{ WTFMove(*newTotalAndLineItems) }};
+
+    return PaymentMethodUpdate { WTFMove(*update) };
 }
 
 void ArgumentCoder<ApplePaySessionPaymentRequest>::encode(Encoder& encoder, const ApplePaySessionPaymentRequest& request)
@@ -165,13 +213,16 @@ void ArgumentCoder<ApplePaySessionPaymentRequest>::encode(Encoder& encoder, cons
     encoder << request.shippingContact();
     encoder << request.merchantCapabilities();
     encoder << request.supportedNetworks();
-    encoder.encodeEnum(request.shippingType());
+    encoder << request.shippingType();
     encoder << request.shippingMethods();
     encoder << request.lineItems();
     encoder << request.total();
     encoder << request.applicationData();
     encoder << request.supportedCountries();
-    encoder.encodeEnum(request.requester());
+    encoder << request.requester();
+#if ENABLE(APPLE_PAY_INSTALLMENTS)
+    encoder << request.installmentConfiguration();
+#endif
 }
 
 bool ArgumentCoder<ApplePaySessionPaymentRequest>::decode(Decoder& decoder, ApplePaySessionPaymentRequest& request)
@@ -219,7 +270,7 @@ bool ArgumentCoder<ApplePaySessionPaymentRequest>::decode(Decoder& decoder, Appl
     request.setSupportedNetworks(supportedNetworks);
 
     ApplePaySessionPaymentRequest::ShippingType shippingType;
-    if (!decoder.decodeEnum(shippingType))
+    if (!decoder.decode(shippingType))
         return false;
     request.setShippingType(shippingType);
 
@@ -250,9 +301,18 @@ bool ArgumentCoder<ApplePaySessionPaymentRequest>::decode(Decoder& decoder, Appl
     request.setSupportedCountries(WTFMove(supportedCountries));
 
     ApplePaySessionPaymentRequest::Requester requester;
-    if (!decoder.decodeEnum(requester))
+    if (!decoder.decode(requester))
         return false;
     request.setRequester(requester);
+    
+#if ENABLE(APPLE_PAY_INSTALLMENTS)
+    Optional<WebCore::PaymentInstallmentConfiguration> installmentConfiguration;
+    decoder >> installmentConfiguration;
+    if (!installmentConfiguration)
+        return false;
+
+    request.setInstallmentConfiguration(WTFMove(*installmentConfiguration));
+#endif
 
     return true;
 }
@@ -284,7 +344,7 @@ bool ArgumentCoder<ApplePaySessionPaymentRequest::ContactFields>::decode(Decoder
 
 void ArgumentCoder<ApplePaySessionPaymentRequest::LineItem>::encode(Encoder& encoder, const ApplePaySessionPaymentRequest::LineItem& lineItem)
 {
-    encoder.encodeEnum(lineItem.type);
+    encoder << lineItem.type;
     encoder << lineItem.label;
     encoder << lineItem.amount;
 }
@@ -292,7 +352,7 @@ void ArgumentCoder<ApplePaySessionPaymentRequest::LineItem>::encode(Encoder& enc
 Optional<ApplePaySessionPaymentRequest::LineItem> ArgumentCoder<ApplePaySessionPaymentRequest::LineItem>::decode(Decoder& decoder)
 {
     WebCore::ApplePaySessionPaymentRequest::LineItem lineItem;
-    if (!decoder.decodeEnum(lineItem.type))
+    if (!decoder.decode(lineItem.type))
         return WTF::nullopt;
     if (!decoder.decode(lineItem.label))
         return WTF::nullopt;
@@ -408,5 +468,179 @@ Optional<WebCore::ShippingMethodUpdate> ArgumentCoder<WebCore::ShippingMethodUpd
     return {{ WTFMove(*newTotalAndLineItems) }};
 }
 
+void ArgumentCoder<WebCore::PaymentSessionError>::encode(Encoder& encoder, const WebCore::PaymentSessionError& error)
+{
+    encoder << error.platformError();
 }
-#endif
+
+Optional<WebCore::PaymentSessionError> ArgumentCoder<WebCore::PaymentSessionError>::decode(Decoder& decoder)
+{
+    auto platformError = IPC::decode<NSError>(decoder);
+    if (!platformError)
+        return WTF::nullopt;
+
+    return { WTFMove(*platformError) };
+}
+
+#endif // ENABLE(APPLEPAY)
+
+void ArgumentCoder<WebCore::DictionaryPopupInfo>::encodePlatformData(Encoder& encoder, const WebCore::DictionaryPopupInfo& info)
+{
+    encoder << info.options << info.attributedString;
+}
+
+bool ArgumentCoder<WebCore::DictionaryPopupInfo>::decodePlatformData(Decoder& decoder, WebCore::DictionaryPopupInfo& result)
+{
+    if (!IPC::decode(decoder, result.options))
+        return false;
+    if (!IPC::decode(decoder, result.attributedString))
+        return false;
+    return true;
+}
+
+void ArgumentCoder<WebCore::FontAttributes>::encodePlatformData(Encoder& encoder, const WebCore::FontAttributes& attributes)
+{
+    encoder << attributes.font;
+}
+
+Optional<FontAttributes> ArgumentCoder<WebCore::FontAttributes>::decodePlatformData(Decoder& decoder, WebCore::FontAttributes& attributes)
+{
+    if (!IPC::decode(decoder, attributes.font))
+        return WTF::nullopt;
+    return attributes;
+}
+
+void ArgumentCoder<Ref<Font>>::encodePlatformData(Encoder& encoder, const Ref<WebCore::Font>& font)
+{
+    const auto& platformData = font->platformData();
+    encoder << platformData.orientation();
+    encoder << platformData.widthVariant();
+    encoder << platformData.textRenderingMode();
+    encoder << platformData.size();
+    encoder << platformData.syntheticBold();
+    encoder << platformData.syntheticOblique();
+
+    auto ctFont = platformData.font();
+    auto fontDescriptor = adoptCF(CTFontCopyFontDescriptor(ctFont));
+    auto attributes = adoptCF(CTFontDescriptorCopyAttributes(fontDescriptor.get()));
+    IPC::encode(encoder, attributes.get());
+
+    const auto& creationData = platformData.creationData();
+    encoder << static_cast<bool>(creationData);
+    if (creationData) {
+        encoder << creationData->fontFaceData;
+        encoder << creationData->itemInCollection;
+    } else {
+        auto referenceURL = adoptCF(static_cast<CFURLRef>(CTFontCopyAttribute(ctFont, kCTFontReferenceURLAttribute)));
+        auto string = CFURLGetString(referenceURL.get());
+        encoder << String(string);
+        encoder << String(adoptCF(CTFontCopyPostScriptName(ctFont)).get());
+    }
+}
+
+static RetainPtr<CTFontDescriptorRef> findFontDescriptor(const String& referenceURL, const String& postScriptName)
+{
+    auto url = adoptCF(CFURLCreateWithString(kCFAllocatorDefault, referenceURL.createCFString().get(), nullptr));
+    if (!url)
+        return nullptr;
+    auto fontDescriptors = adoptCF(CTFontManagerCreateFontDescriptorsFromURL(url.get()));
+    if (!fontDescriptors || !CFArrayGetCount(fontDescriptors.get()))
+        return nullptr;
+    if (CFArrayGetCount(fontDescriptors.get()) == 1)
+        return static_cast<CTFontDescriptorRef>(CFArrayGetValueAtIndex(fontDescriptors.get(), 0));
+
+    // There's supposed to only be a single item in the array, but we can be defensive here.
+    for (CFIndex i = 0; i < CFArrayGetCount(fontDescriptors.get()); ++i) {
+        auto fontDescriptor = static_cast<CTFontDescriptorRef>(CFArrayGetValueAtIndex(fontDescriptors.get(), i));
+        auto currentPostScriptName = adoptCF(static_cast<CFStringRef>(CTFontDescriptorCopyAttribute(fontDescriptor, kCTFontNameAttribute)));
+        if (String(currentPostScriptName.get()) == postScriptName)
+            return fontDescriptor;
+    }
+    return nullptr;
+}
+
+Optional<FontPlatformData> ArgumentCoder<Ref<Font>>::decodePlatformData(Decoder& decoder)
+{
+    Optional<FontOrientation> orientation;
+    decoder >> orientation;
+    if (!orientation.hasValue())
+        return WTF::nullopt;
+
+    Optional<FontWidthVariant> widthVariant;
+    decoder >> widthVariant;
+    if (!widthVariant.hasValue())
+        return WTF::nullopt;
+
+    Optional<TextRenderingMode> textRenderingMode;
+    decoder >> textRenderingMode;
+    if (!textRenderingMode.hasValue())
+        return WTF::nullopt;
+
+    Optional<float> size;
+    decoder >> size;
+    if (!size.hasValue())
+        return WTF::nullopt;
+
+    Optional<bool> syntheticBold;
+    decoder >> syntheticBold;
+    if (!syntheticBold.hasValue())
+        return WTF::nullopt;
+
+    Optional<bool> syntheticOblique;
+    decoder >> syntheticOblique;
+    if (!syntheticOblique.hasValue())
+        return WTF::nullopt;
+
+    RetainPtr<CFDictionaryRef> attributes;
+    if (!IPC::decode(decoder, attributes))
+        return WTF::nullopt;
+
+    Optional<bool> includesCreationData;
+    decoder >> includesCreationData;
+    if (!includesCreationData.hasValue())
+        return WTF::nullopt;
+
+    if (includesCreationData.value()) {
+        Optional<Ref<SharedBuffer>> fontFaceData;
+        decoder >> fontFaceData;
+        if (!fontFaceData.hasValue())
+            return WTF::nullopt;
+
+        Optional<String> itemInCollection;
+        decoder >> itemInCollection;
+        if (!itemInCollection.hasValue())
+            return WTF::nullopt;
+
+        auto fontCustomPlatformData = createFontCustomPlatformData(fontFaceData.value(), itemInCollection.value());
+        if (!fontCustomPlatformData)
+            return WTF::nullopt;
+        auto baseFontDescriptor = fontCustomPlatformData->fontDescriptor.get();
+        if (!baseFontDescriptor)
+            return WTF::nullopt;
+        auto fontDescriptor = adoptCF(CTFontDescriptorCreateCopyWithAttributes(baseFontDescriptor, attributes.get()));
+        auto ctFont = adoptCF(CTFontCreateWithFontDescriptor(fontDescriptor.get(), size.value(), nullptr));
+
+        auto creationData = FontPlatformData::CreationData { fontFaceData.value(), itemInCollection.value() };
+        return FontPlatformData(ctFont.get(), size.value(), syntheticBold.value(), syntheticOblique.value(), orientation.value(), widthVariant.value(), textRenderingMode.value(), &creationData);
+    }
+
+    Optional<String> referenceURL;
+    decoder >> referenceURL;
+    if (!referenceURL.hasValue())
+        return WTF::nullopt;
+
+    Optional<String> postScriptName;
+    decoder >> postScriptName;
+    if (!postScriptName.hasValue())
+        return WTF::nullopt;
+
+    RetainPtr<CTFontDescriptorRef> fontDescriptor = findFontDescriptor(referenceURL.value(), postScriptName.value());
+    if (!fontDescriptor)
+        return WTF::nullopt;
+    fontDescriptor = adoptCF(CTFontDescriptorCreateCopyWithAttributes(fontDescriptor.get(), attributes.get()));
+    auto ctFont = adoptCF(CTFontCreateWithFontDescriptor(fontDescriptor.get(), size.value(), nullptr));
+
+    return FontPlatformData(ctFont.get(), size.value(), syntheticBold.value(), syntheticOblique.value(), orientation.value(), widthVariant.value(), textRenderingMode.value());
+}
+
+} // namespace IPC

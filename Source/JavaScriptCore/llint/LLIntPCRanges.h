@@ -40,14 +40,14 @@ extern "C" {
 ALWAYS_INLINE bool isLLIntPC(void* pc)
 {
     uintptr_t pcAsInt = bitwise_cast<uintptr_t>(pc);
-    uintptr_t llintStart = untagCodePtr<uintptr_t>(llintPCRangeStart, CFunctionPtrTag);
-    uintptr_t llintEnd = untagCodePtr<uintptr_t>(llintPCRangeEnd, CFunctionPtrTag);
+    uintptr_t llintStart = untagCodePtr<uintptr_t, CFunctionPtrTag>(llintPCRangeStart);
+    uintptr_t llintEnd = untagCodePtr<uintptr_t, CFunctionPtrTag>(llintPCRangeEnd);
     RELEASE_ASSERT(llintStart < llintEnd);
     return llintStart <= pcAsInt && pcAsInt <= llintEnd;
 }
 
 #if !ENABLE(C_LOOP)
-static const GPRReg LLIntPC = GPRInfo::regT4;
+static constexpr GPRReg LLIntPC = GPRInfo::regT4;
 #endif
 
 } } // namespace JSC::LLInt

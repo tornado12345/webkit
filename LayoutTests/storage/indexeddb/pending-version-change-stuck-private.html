@@ -1,3 +1,4 @@
+<!-- webkit-test-runner [ useEphemeralSession=true ] -->
 <html>
 <head>
 <script src="../../resources/js-test.js"></script>
@@ -5,9 +6,6 @@
 </head>
 <body>
 <script>
-if (window.internals)
-    window.internals.settings.setIndexedDBWorkersEnabled(true);
-
 description("Implicitly terminating worker with blocked setVersion call should allow later open calls to proceed");
 
 function test()

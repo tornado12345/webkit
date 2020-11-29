@@ -103,6 +103,24 @@ void WebsiteDataRecord::addHSTSCacheHostname(const String& hostName)
     HSTSCacheHostNames.add(hostName);
 }
 
+void WebsiteDataRecord::addAlternativeServicesHostname(const String& hostName)
+{
+#if HAVE(CFNETWORK_ALTERNATIVE_SERVICE)
+    types.add(WebsiteDataType::AlternativeServices);
+    alternativeServicesHostNames.add(hostName);
+#else
+    UNUSED_PARAM(hostName);
+#endif
+}
+
+#if ENABLE(RESOURCE_LOAD_STATISTICS)
+void WebsiteDataRecord::addResourceLoadStatisticsRegistrableDomain(const WebCore::RegistrableDomain& domain)
+{
+    types.add(WebsiteDataType::ResourceLoadStatistics);
+    resourceLoadStatisticsRegistrableDomains.add(domain);
+}
+#endif
+
 static inline bool hostIsInDomain(StringView host, StringView domain)
 {
     if (!host.endsWithIgnoringASCIICase(domain))
@@ -113,20 +131,20 @@ static inline bool hostIsInDomain(StringView host, StringView domain)
     return !suffixOffset || host[suffixOffset - 1] == '.';
 }
 
-bool WebsiteDataRecord::matchesTopPrivatelyControlledDomain(const String& topPrivatelyControlledDomain) const
+bool WebsiteDataRecord::matches(const WebCore::RegistrableDomain& domain) const
 {
-    if (topPrivatelyControlledDomain.isEmpty())
+    if (domain.isEmpty())
         return false;
 
     if (types.contains(WebsiteDataType::Cookies)) {
         for (const auto& hostName : cookieHostNames) {
-            if (hostIsInDomain(hostName, topPrivatelyControlledDomain))
+            if (hostIsInDomain(hostName, domain.string()))
                 return true;
         }
     }
 
     for (const auto& dataRecordOriginData : origins) {
-        if (hostIsInDomain(dataRecordOriginData.host, topPrivatelyControlledDomain))
+        if (hostIsInDomain(dataRecordOriginData.host, domain.string()))
             return true;
     }
 
@@ -150,12 +168,6 @@ String WebsiteDataRecord::topPrivatelyControlledDomain()
 #endif // ENABLE(PUBLIC_SUFFIX_LIST)
     
     return emptyString();
-}
-
-void WebsiteDataRecord::addOriginWithCredential(const String& origin)
-{
-    types.add(WebsiteDataType::Credentials);
-    originsWithCredentials.add(origin);
 }
 
 }

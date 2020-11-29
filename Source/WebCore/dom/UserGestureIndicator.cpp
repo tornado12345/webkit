@@ -26,11 +26,13 @@
 #include "config.h"
 #include "UserGestureIndicator.h"
 
+#include "DOMWindow.h"
 #include "Document.h"
 #include "Frame.h"
 #include "ResourceLoadObserver.h"
 #include <wtf/MainThread.h>
 #include <wtf/NeverDestroyed.h>
+#include <wtf/Optional.h>
 
 namespace WebCore {
 
@@ -47,6 +49,17 @@ UserGestureToken::~UserGestureToken()
         observer(*this);
 }
 
+static Seconds maxIntervalForUserGestureForwardingForFetch { 10 };
+const Seconds& UserGestureToken::maximumIntervalForUserGestureForwardingForFetch()
+{
+    return maxIntervalForUserGestureForwardingForFetch;
+}
+
+void UserGestureToken::setMaximumIntervalForUserGestureForwardingForFetchForTesting(Seconds value)
+{
+    maxIntervalForUserGestureForwardingForFetch = WTFMove(value);
+}
+
 UserGestureIndicator::UserGestureIndicator(Optional<ProcessingUserGestureState> state, Document* document, UserGestureType gestureType, ProcessInteractionStyle processInteractionStyle)
     : m_previousToken { currentToken() }
 {
@@ -55,8 +68,8 @@ UserGestureIndicator::UserGestureIndicator(Optional<ProcessingUserGestureState> 
     if (state)
         currentToken() = UserGestureToken::create(state.value(), gestureType);
 
-    if (document && currentToken()->processingUserGesture()) {
-        document->updateLastHandledUserGestureTimestamp(MonotonicTime::now());
+    if (document && currentToken()->processingUserGesture() && state) {
+        document->updateLastHandledUserGestureTimestamp(currentToken()->startTime());
         if (processInteractionStyle == ProcessInteractionStyle::Immediate)
             ResourceLoadObserver::shared().logUserInteractionWithReducedTimeResolution(document->topDocument());
         document->topDocument().setUserDidInteractWithPage(true);
@@ -66,10 +79,13 @@ UserGestureIndicator::UserGestureIndicator(Optional<ProcessingUserGestureState> 
                     frame->setHasHadUserInteraction();
             }
         }
+
+        if (auto* window = document->domWindow())
+            window->notifyActivated(currentToken()->startTime());
     }
 }
 
-UserGestureIndicator::UserGestureIndicator(RefPtr<UserGestureToken> token)
+UserGestureIndicator::UserGestureIndicator(RefPtr<UserGestureToken> token, UserGestureToken::GestureScope scope, UserGestureToken::IsPropagatedFromFetch isPropagatedFromFetch)
 {
     // Silently ignore UserGestureIndicators on non main threads.
     if (!isMainThread())
@@ -78,8 +94,11 @@ UserGestureIndicator::UserGestureIndicator(RefPtr<UserGestureToken> token)
     // It is only safe to use currentToken() on the main thread.
     m_previousToken = currentToken();
 
-    if (token)
+    if (token) {
+        token->setScope(scope);
+        token->setIsPropagatedFromFetch(isPropagatedFromFetch);
         currentToken() = token;
+    }
 }
 
 UserGestureIndicator::~UserGestureIndicator()
@@ -87,8 +106,11 @@ UserGestureIndicator::~UserGestureIndicator()
     if (!isMainThread())
         return;
     
-    if (auto token = currentToken())
+    if (auto token = currentToken()) {
         token->resetDOMPasteAccess();
+        token->resetScope();
+        token->resetIsPropagatedFromFetch();
+    }
 
     currentToken() = m_previousToken;
 }

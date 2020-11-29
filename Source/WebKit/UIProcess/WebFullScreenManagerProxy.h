@@ -69,6 +69,7 @@ public:
     void willExitFullScreen();
     void didExitFullScreen();
     void setAnimatingFullScreen(bool);
+    void requestEnterFullScreen();
     void requestExitFullScreen();
     void saveScrollPosition();
     void restoreScrollPosition();
@@ -77,7 +78,7 @@ public:
     void setFullscreenControlsHidden(bool);
 
 private:
-    void supportsFullScreen(bool withKeyboard, bool&);
+    void supportsFullScreen(bool withKeyboard, CompletionHandler<void(bool)>&&);
     void enterFullScreen();
     void exitFullScreen();
     void beganEnterFullScreen(const WebCore::IntRect& initialFrame, const WebCore::IntRect& finalFrame);

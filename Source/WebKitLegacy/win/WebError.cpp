@@ -34,7 +34,7 @@
 #endif
 
 #if USE(CFURLCONNECTION)
-#include <pal/spi/cf/CFNetworkSPI.h>
+#include <pal/spi/win/CFNetworkSPIWin.h>
 #endif
 
 using namespace WebCore;
@@ -42,8 +42,8 @@ using namespace WebCore;
 // WebError ---------------------------------------------------------------------
 
 WebError::WebError(const ResourceError& error, IPropertyBag* userInfo)
-    : m_error(error)
-    , m_userInfo(userInfo)
+    : m_userInfo(userInfo)
+    , m_error(error)
 {
     gClassCount++;
     gClassNameCount().add("WebError");

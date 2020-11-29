@@ -27,13 +27,14 @@
 
 #if PLATFORM(IOS_FAMILY)
 
-#import "WebEvent.h"
+#import "WebKeyboardEvent.h"
+#import "WebMouseEvent.h"
 #import <UIKit/UIKit.h>
 #import <WebCore/WebEvent.h>
 
 class WebIOSEventFactory {
 public:
-    static WebKit::WebKeyboardEvent createWebKeyboardEvent(::WebEvent *);
+    static WebKit::WebKeyboardEvent createWebKeyboardEvent(::WebEvent *, bool handledByInputMethod);
     static WebKit::WebMouseEvent createWebMouseEvent(::WebEvent *);
 
     static UIKeyModifierFlags toUIKeyModifierFlags(OptionSet<WebKit::WebEvent::Modifier>);

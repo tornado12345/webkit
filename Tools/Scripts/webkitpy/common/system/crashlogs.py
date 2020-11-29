@@ -31,13 +31,16 @@ import datetime
 import logging
 import re
 
+from webkitcorepy import string_utils
+
 
 _log = logging.getLogger(__name__)
 
 
 class CrashLogs(object):
 
-    GLOBAL_PID_REGEX = re.compile(r'\s+Global\s+PID:\s+\[(?P<pid>\d+)\]')
+    # Matches a string like '    Global    D1    PID: [14516]'
+    GLOBAL_PID_REGEX = re.compile(r'\s+Global\b.+\bPID:\s+\[(?P<pid>\d+)\]')
     EXIT_PROCESS_PID_REGEX = re.compile(r'Exit process \d+:(?P<pid>\w+), code')
     DARWIN_PROCESS_REGEX = re.compile(r'^Process:\s+(?P<process_name>.*) \[(?P<pid>\d+)\]$')
 
@@ -108,7 +111,7 @@ class CrashLogs(object):
         for path in reversed(sorted(logs)):
             try:
                 if not newer_than or self._host.filesystem.mtime(path) > newer_than:
-                    log_file = self._host.filesystem.read_binary_file(path).decode('ascii', 'ignore')
+                    log_file = string_utils.decode(self._host.filesystem.read_binary_file(path), encoding='ascii', errors='ignore')
                     match = self.GLOBAL_PID_REGEX.search(log_file)
                     if match:
                         if int(match.group('pid')) == pid:

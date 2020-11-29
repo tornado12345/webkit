@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011-2018 Apple Inc. All rights reserved.
+ * Copyright (C) 2011-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -40,7 +40,7 @@ class ConservativeRoots;
 class GCThreadSharedData;
 class Heap;
 class HeapCell;
-class HeapSnapshotBuilder;
+class HeapAnalyzer;
 class MarkedBlock;
 class MarkingConstraint;
 class MarkingConstraintSolver;
@@ -91,8 +91,8 @@ public:
     template<typename T, typename Traits> void append(const WriteBarrierBase<T, Traits>&);
     template<typename T, typename Traits> void appendHidden(const WriteBarrierBase<T, Traits>&);
     template<typename Iterator> void append(Iterator begin , Iterator end);
-    void appendValues(const WriteBarrierBase<Unknown, DumbValueTraits<Unknown>>*, size_t count);
-    void appendValuesHidden(const WriteBarrierBase<Unknown, DumbValueTraits<Unknown>>*, size_t count);
+    void appendValues(const WriteBarrierBase<Unknown, RawValueTraits<Unknown>>*, size_t count);
+    void appendValuesHidden(const WriteBarrierBase<Unknown, RawValueTraits<Unknown>>*, size_t count);
     
     // These don't require you to prove that you have a WriteBarrier<>. That makes sense
     // for:
@@ -119,6 +119,8 @@ public:
 
     bool isEmpty() { return m_collectorStack.isEmpty() && m_mutatorStack.isEmpty(); }
 
+    bool isFirstVisit() const { return m_isFirstVisit; }
+
     void didStartMarking();
     void reset();
     void clearMarkStacks();
@@ -132,7 +134,7 @@ public:
     void drain(MonotonicTime timeout = MonotonicTime::infinity());
     void donateAndDrain(MonotonicTime timeout = MonotonicTime::infinity());
     
-    enum SharedDrainMode { SlaveDrain, MasterDrain };
+    enum SharedDrainMode { HelperDrain, MainDrain };
     enum class SharedDrainResult { Done, TimedOut };
     SharedDrainResult drainFromShared(SharedDrainMode, MonotonicTime timeout = MonotonicTime::infinity());
 
@@ -158,8 +160,8 @@ public:
     
     void dump(PrintStream&) const;
 
-    bool isBuildingHeapSnapshot() const { return !!m_heapSnapshotBuilder; }
-    HeapSnapshotBuilder* heapSnapshotBuilder() const { return m_heapSnapshotBuilder; }
+    bool isAnalyzingHeap() const { return !!m_heapAnalyzer; }
+    HeapAnalyzer* heapAnalyzer() const { return m_heapAnalyzer; }
     
     RootMarkReason rootMarkReason() const { return m_rootMarkReason; }
     void setRootMarkReason(RootMarkReason reason) { m_rootMarkReason = reason; }
@@ -211,8 +213,6 @@ private:
     template<typename ContainerType>
     void appendToMarkStack(ContainerType&, JSCell*);
     
-    void appendToMutatorMarkStack(const JSCell*);
-    
     void noteLiveAuxiliaryCell(HeapCell*);
     
     void visitChildren(const JSCell*);
@@ -234,19 +234,19 @@ private:
 
     MarkStackArray m_collectorStack;
     MarkStackArray m_mutatorStack;
-    bool m_ignoreNewOpaqueRoots { false }; // Useful as a debugging mode.
     
     size_t m_bytesVisited;
     size_t m_visitCount;
     size_t m_nonCellVisitCount { 0 }; // Used for incremental draining, ignored otherwise.
-    Checked<size_t, RecordOverflow> m_extraMemorySize { 0 };
+    CheckedSize m_extraMemorySize { 0 };
     bool m_isInParallelMode;
+    bool m_ignoreNewOpaqueRoots { false }; // Useful as a debugging mode.
 
     HeapVersion m_markingVersion;
     
     Heap& m_heap;
 
-    HeapSnapshotBuilder* m_heapSnapshotBuilder { nullptr };
+    HeapAnalyzer* m_heapAnalyzer { nullptr };
     JSCell* m_currentCell { nullptr };
     RootMarkReason m_rootMarkReason { RootMarkReason::None };
     bool m_isFirstVisit { false };
@@ -259,8 +259,10 @@ private:
     MarkingConstraint* m_currentConstraint { nullptr };
     MarkingConstraintSolver* m_currentSolver { nullptr };
     
+    // Put padding here to mitigate false sharing between multiple SlotVisitors.
+    char padding[64];
 public:
-#if !ASSERT_DISABLED
+#if ASSERT_ENABLED
     bool m_isCheckingForDefaultMarkViolation;
     bool m_isDraining;
 #endif

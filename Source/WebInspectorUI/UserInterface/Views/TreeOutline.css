@@ -30,10 +30,10 @@
     list-style: none;
     outline: none;
 
+    --tree-outline-item-padding: 5px;
+
     --tree-outline-icon-margin-start: 16px;
     --tree-outline-icon-margin-end: 3px;
-
-    --tree-outline-status-margin-start: 4px;
 }
 
 .tree-outline .children {
@@ -47,11 +47,12 @@
 .tree-outline .item {
     height: 20px;
 
-    padding: 0 5px;
+    padding: 0 var(--tree-outline-item-padding);
 
     border-top: 1px solid transparent;
 
     white-space: nowrap;
+    outline: none;
 }
 
 .tree-outline.compact .item {
@@ -69,7 +70,8 @@
     background-color: var(--selected-background-color-unfocused);
 }
 
-body[dir=ltr] .tree-outline .item :matches(.disclosure-button, .icon) {
+body[dir=ltr] .tree-outline .item :matches(.disclosure-button, .icon),
+body[dir=rtl] [dir=ltr] .tree-outline .item :matches(.disclosure-button, .icon) {
     float: left;
 }
 
@@ -85,12 +87,8 @@ body[dir=rtl] .tree-outline .item :matches(.disclosure-button, .icon) {
     display: none;
 }
 
-body[dir=ltr] .tree-outline:not(.hide-disclosure-buttons) .item:not(.parent) > .icon {
-    margin-left: var(--tree-outline-icon-margin-start);
-}
-
-body[dir=rtl] .tree-outline:not(.hide-disclosure-buttons) .item:not(.parent) > .icon {
-    margin-right: var(--tree-outline-icon-margin-start);
+.tree-outline:not(.hide-disclosure-buttons) .item:not(.parent) > .icon {
+    -webkit-margin-start: var(--tree-outline-icon-margin-start);
 }
 
 .tree-outline .item .disclosure-button {
@@ -110,6 +108,10 @@ body[dir=rtl] .tree-outline .item .disclosure-button {
     transform: scaleX(-1);
 }
 
+body[dir=rtl] [dir=ltr] .tree-outline .item .disclosure-button {
+    transform: unset;
+}
+
 .tree-outline.hide-disclosure-buttons .item .disclosure-button {
     display: none;
 }
@@ -118,7 +120,7 @@ body[dir=rtl] .tree-outline .item .disclosure-button {
     display: block;
 }
 
-.tree-outline:focus .item.selected .disclosure-button {
+body:not(.window-inactive, .window-docked-inactive) .tree-outline:focus-within .item.selected .disclosure-button {
     background-image: url(../Images/DisclosureTriangles.svg#closed-selected) !important;
 }
 
@@ -126,7 +128,7 @@ body[dir=rtl] .tree-outline .item .disclosure-button {
     background-image: url(../Images/DisclosureTriangles.svg#open-normal);
 }
 
-.tree-outline:focus .item.selected.expanded .disclosure-button {
+body:not(.window-inactive, .window-docked-inactive) .tree-outline:focus-within .item.selected.expanded .disclosure-button {
     background-image: url(../Images/DisclosureTriangles.svg#open-selected) !important;
 }
 
@@ -135,14 +137,7 @@ body[dir=rtl] .tree-outline .item .disclosure-button {
     width: 16px;
     height: 16px;
     margin-top: 1px;
-}
-
-body[dir=ltr] .tree-outline .item .icon {
-    margin-right: var(--tree-outline-icon-margin-end);
-}
-
-body[dir=rtl] .tree-outline .item .icon {
-    margin-left: var(--tree-outline-icon-margin-end);
+    -webkit-margin-end: var(--tree-outline-icon-margin-end);
 }
 
 .tree-outline.compact .item .icon {
@@ -157,17 +152,16 @@ body[dir=rtl] .tree-outline .item .icon {
 
 .tree-outline .item .status {
     margin-top: 1px;
+    -webkit-margin-start: 4px;
     line-height: 1em;
 }
 
 body[dir=ltr] .tree-outline .item .status {
     float: right;
-    margin-left: var(--tree-outline-status-margin-start);
 }
 
 body[dir=rtl] .tree-outline .item .status {
     float: left;
-    margin-right: var(--tree-outline-status-margin-start);
 }
 
 .tree-outline.large .item .status {
@@ -182,7 +176,7 @@ body[dir=rtl] .tree-outline .item .status {
     background-color: var(--selected-background-color-unfocused);
 }
 
-.tree-outline:focus .item.selected {
+body:not(.window-inactive, .window-docked-inactive) .tree-outline:focus-within .item.selected {
     color: var(--selected-foreground-color);
     background-color: var(--selected-background-color);
 }
@@ -227,7 +221,7 @@ body[dir=rtl] .tree-outline .item .status {
     font-size: 9px;
 }
 
-.tree-outline:focus .item.selected .subtitle {
+body:not(.window-inactive, .window-docked-inactive) .tree-outline:focus-within .item.selected .subtitle {
     color: hsla(0, 0%, 100%, 0.9);
 }
 
@@ -242,7 +236,7 @@ body[dir=rtl] .tree-outline .item .status {
     height: 14px;
 }
 
-.tree-outline:not(.large):focus .item.selected .status .indeterminate-progress-spinner {
+body:not(.window-inactive, .window-docked-inactive) .tree-outline:not(.large):focus-within .item.selected .status .indeterminate-progress-spinner {
     filter: invert();
 }
 

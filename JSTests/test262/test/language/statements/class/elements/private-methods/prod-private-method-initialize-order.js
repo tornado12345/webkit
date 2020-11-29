@@ -4,7 +4,7 @@
 /*---
 description: Private methods are added before any field initializer is run, even if they appear textually later (private method definitions in a class declaration)
 esid: prod-MethodDefinition
-features: [class-methods-private, class-fields-private, class]
+features: [class-methods-private, class-fields-private, class-fields-public, class]
 flags: [generated]
 info: |
     ClassElement :
@@ -67,7 +67,6 @@ info: |
     6. Append { [[PrivateName]]: P, [[PrivateFieldDescriptor]]: desc } to O.[[PrivateFieldDescriptors]].
 
 
-    
     InitializeInstanceElements ( O, constructor )
       ...
       4. For each item element in order from elements,

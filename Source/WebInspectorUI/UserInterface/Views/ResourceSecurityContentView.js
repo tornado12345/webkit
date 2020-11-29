@@ -286,7 +286,12 @@ WI.ResourceSecurityContentView = class ResourceSecurityContentView extends WI.Co
 
     _perfomSearchOnKeyValuePairs()
     {
-        let searchRegex = WI.SearchUtilities.regExpForString(this._searchQuery, WI.SearchUtilities.defaultSettings);
+        let searchRegex = WI.SearchUtilities.searchRegExpForString(this._searchQuery, WI.SearchUtilities.defaultSettings);
+        if (!searchRegex) {
+            this.searchCleared();
+            this.dispatchEventToListeners(WI.TextEditor.Event.NumberOfSearchResultsDidChange);
+            return;
+        }
 
         let elements = this.element.querySelectorAll(".key, .value");
         for (let element of elements) {
@@ -298,7 +303,7 @@ WI.ResourceSecurityContentView = class ResourceSecurityContentView extends WI.Co
 
             if (matchRanges.length) {
                 let highlightedNodes = WI.highlightRangesWithStyleClass(element, matchRanges, "search-highlight", this._searchDOMChanges);
-                this._searchResults = this._searchResults.concat(highlightedNodes);
+                this._searchResults.pushAll(highlightedNodes);
             }
         }
     }

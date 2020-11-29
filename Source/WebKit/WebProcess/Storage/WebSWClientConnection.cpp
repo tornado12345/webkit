@@ -32,13 +32,16 @@
 #include "FormDataReference.h"
 #include "Logging.h"
 #include "NetworkConnectionToWebProcessMessages.h"
-#include "ServiceWorkerClientFetch.h"
+#include "NetworkProcessConnection.h"
+#include "NetworkProcessMessages.h"
 #include "WebCoreArgumentCoders.h"
 #include "WebProcess.h"
 #include "WebProcessPoolMessages.h"
 #include "WebSWOriginTable.h"
 #include "WebSWServerConnectionMessages.h"
 #include <WebCore/Document.h>
+#include <WebCore/DocumentLoader.h>
+#include <WebCore/ProcessIdentifier.h>
 #include <WebCore/SecurityOrigin.h>
 #include <WebCore/SerializedScriptValue.h>
 #include <WebCore/ServiceWorkerClientData.h>
@@ -51,46 +54,60 @@ namespace WebKit {
 using namespace PAL;
 using namespace WebCore;
 
-WebSWClientConnection::WebSWClientConnection(IPC::Connection& connection, SessionID sessionID)
-    : m_sessionID(sessionID)
-    , m_connection(connection)
+
+WebSWClientConnection::WebSWClientConnection()
+    : m_identifier(Process::identifier())
     , m_swOriginTable(makeUniqueRef<WebSWOriginTable>())
 {
-    ASSERT(sessionID.isValid());
-    bool result = sendSync(Messages::NetworkConnectionToWebProcess::EstablishSWServerConnection(sessionID), Messages::NetworkConnectionToWebProcess::EstablishSWServerConnection::Reply(m_identifier));
-
-    ASSERT_UNUSED(result, result);
 }
 
 WebSWClientConnection::~WebSWClientConnection()
 {
+    clear();
+}
+
+IPC::Connection* WebSWClientConnection::messageSenderConnection() const
+{
+    return &WebProcess::singleton().ensureNetworkProcessConnection().connection();
 }
 
 void WebSWClientConnection::scheduleJobInServer(const ServiceWorkerJobData& jobData)
 {
-    send(Messages::WebSWServerConnection::ScheduleJobInServer(jobData));
+    runOrDelayTaskForImport([this, jobData] {
+        send(Messages::WebSWServerConnection::ScheduleJobInServer { jobData });
+    });
 }
 
 void WebSWClientConnection::finishFetchingScriptInServer(const ServiceWorkerFetchResult& result)
 {
-    send(Messages::WebSWServerConnection::FinishFetchingScriptInServer(result));
+    send(Messages::WebSWServerConnection::FinishFetchingScriptInServer { result });
 }
 
 void WebSWClientConnection::addServiceWorkerRegistrationInServer(ServiceWorkerRegistrationIdentifier identifier)
 {
-    send(Messages::WebSWServerConnection::AddServiceWorkerRegistrationInServer(identifier));
+    // FIXME: We should send the message to network process only if this is a new registration, once we correctly handle recovery upon network process crash.
+    WebProcess::singleton().addServiceWorkerRegistration(identifier);
+    send(Messages::WebSWServerConnection::AddServiceWorkerRegistrationInServer { identifier });
 }
 
 void WebSWClientConnection::removeServiceWorkerRegistrationInServer(ServiceWorkerRegistrationIdentifier identifier)
 {
-    send(Messages::WebSWServerConnection::RemoveServiceWorkerRegistrationInServer(identifier));
+    if (WebProcess::singleton().removeServiceWorkerRegistration(identifier))
+        send(Messages::WebSWServerConnection::RemoveServiceWorkerRegistrationInServer { identifier });
+}
+
+void WebSWClientConnection::scheduleUnregisterJobInServer(ServiceWorkerRegistrationIdentifier registrationIdentifier, WebCore::DocumentOrWorkerIdentifier documentIdentifier, CompletionHandler<void(ExceptionOr<bool>&&)>&& completionHandler)
+{
+    sendWithAsyncReply(Messages::WebSWServerConnection::ScheduleUnregisterJobInServer { ServiceWorkerJobIdentifier::generateThreadSafe(), registrationIdentifier, documentIdentifier }, [completionHandler = WTFMove(completionHandler)](auto&& result) mutable {
+        if (!result.has_value())
+            return completionHandler(result.error().toException());
+        completionHandler(result.value());
+    });
 }
 
 void WebSWClientConnection::postMessageToServiceWorker(ServiceWorkerIdentifier destinationIdentifier, MessageWithMessagePorts&& message, const ServiceWorkerOrClientIdentifier& sourceIdentifier)
 {
-    // FIXME: Temporarily pipe the SW postMessage messages via the UIProcess since this is where the MessagePort registry lives
-    // and this avoids races.
-    WebProcess::singleton().send(Messages::WebProcessPool::PostMessageToServiceWorker(destinationIdentifier, WTFMove(message), sourceIdentifier, serverConnectionIdentifier()), 0);
+    send(Messages::WebSWServerConnection::PostMessageToServiceWorker { destinationIdentifier, WTFMove(message), sourceIdentifier });
 }
 
 void WebSWClientConnection::registerServiceWorkerClient(const SecurityOrigin& topOrigin, const WebCore::ServiceWorkerClientData& data, const Optional<WebCore::ServiceWorkerRegistrationIdentifier>& controllingServiceWorkerRegistrationIdentifier, const String& userAgent)
@@ -105,7 +122,7 @@ void WebSWClientConnection::unregisterServiceWorkerClient(DocumentIdentifier con
 
 void WebSWClientConnection::didResolveRegistrationPromise(const ServiceWorkerRegistrationKey& key)
 {
-    send(Messages::WebSWServerConnection::DidResolveRegistrationPromise(key));
+    send(Messages::WebSWServerConnection::DidResolveRegistrationPromise { key });
 }
 
 bool WebSWClientConnection::mayHaveServiceWorkerRegisteredForOrigin(const SecurityOriginData& origin) const
@@ -116,9 +133,9 @@ bool WebSWClientConnection::mayHaveServiceWorkerRegisteredForOrigin(const Securi
     return m_swOriginTable->contains(origin);
 }
 
-void WebSWClientConnection::setSWOriginTableSharedMemory(const SharedMemory::Handle& handle)
+void WebSWClientConnection::setSWOriginTableSharedMemory(const SharedMemory::IPCHandle& ipcHandle)
 {
-    m_swOriginTable->setSharedMemory(handle);
+    m_swOriginTable->setSharedMemory(ipcHandle.handle);
 }
 
 void WebSWClientConnection::setSWOriginTableIsImported()
@@ -160,26 +177,34 @@ void WebSWClientConnection::matchRegistration(SecurityOriginData&& topOrigin, co
     });
 }
 
-void WebSWClientConnection::runOrDelayTaskForImport(WTF::Function<void()>&& task)
+void WebSWClientConnection::runOrDelayTaskForImport(Function<void()>&& task)
 {
-    if (m_swOriginTable->isImported())
+    if (m_swOriginTable->isImported()) {
         task();
-    else
-        m_tasksPendingOriginImport.append(WTFMove(task));
+        return;
+    }
+    m_tasksPendingOriginImport.append(WTFMove(task));
 }
 
-void WebSWClientConnection::whenRegistrationReady(const SecurityOrigin& topOrigin, const URL& clientURL, WhenRegistrationReadyCallback&& callback)
+void WebSWClientConnection::whenRegistrationReady(const SecurityOriginData& topOrigin, const URL& clientURL, WhenRegistrationReadyCallback&& callback)
 {
     uint64_t callbackID = ++m_previousCallbackIdentifier;
     m_ongoingRegistrationReadyTasks.add(callbackID, WTFMove(callback));
-    send(Messages::WebSWServerConnection::WhenRegistrationReady(callbackID, topOrigin.data(), clientURL));
+    send(Messages::WebSWServerConnection::WhenRegistrationReady(callbackID, topOrigin, clientURL));
 }
 
-void WebSWClientConnection::registrationReady(uint64_t callbackID, WebCore::ServiceWorkerRegistrationData&& registrationData)
+void WebSWClientConnection::registrationReady(uint64_t callbackID, ServiceWorkerRegistrationData&& registrationData)
 {
     ASSERT(registrationData.activeWorker);
     if (auto callback = m_ongoingRegistrationReadyTasks.take(callbackID))
         callback(WTFMove(registrationData));
+}
+
+void WebSWClientConnection::setDocumentIsControlled(DocumentIdentifier documentIdentifier, ServiceWorkerRegistrationData&& data, CompletionHandler<void(bool)>&& completionHandler)
+{
+    auto* documentLoader = DocumentLoader::fromTemporaryDocumentIdentifier(documentIdentifier);
+    bool result = documentLoader ? documentLoader->setControllingServiceWorkerRegistration(WTFMove(data)) : false;
+    completionHandler(result);
 }
 
 void WebSWClientConnection::getRegistrations(SecurityOriginData&& topOrigin, const URL& clientURL, GetRegistrationsCallback&& callback)
@@ -194,31 +219,16 @@ void WebSWClientConnection::getRegistrations(SecurityOriginData&& topOrigin, con
     runOrDelayTaskForImport([this, callback = WTFMove(callback), topOrigin = WTFMove(topOrigin), clientURL]() mutable {
         uint64_t callbackID = ++m_previousCallbackIdentifier;
         m_ongoingGetRegistrationsTasks.add(callbackID, WTFMove(callback));
-        send(Messages::WebSWServerConnection::GetRegistrations(callbackID, topOrigin, clientURL));
+        send(Messages::WebSWServerConnection::GetRegistrations { callbackID, topOrigin, clientURL });
     });
 }
 
-void WebSWClientConnection::startFetch(FetchIdentifier fetchIdentifier, ServiceWorkerRegistrationIdentifier serviceWorkerRegistrationIdentifier, const ResourceRequest& request, const FetchOptions& options, const String& referrer)
-{
-    send(Messages::WebSWServerConnection::StartFetch { serviceWorkerRegistrationIdentifier, fetchIdentifier, request, options, IPC::FormDataReference { request.httpBody() }, referrer });
-}
-
-void WebSWClientConnection::cancelFetch(FetchIdentifier fetchIdentifier, ServiceWorkerRegistrationIdentifier serviceWorkerRegistrationIdentifier)
-{
-    send(Messages::WebSWServerConnection::CancelFetch { serviceWorkerRegistrationIdentifier, fetchIdentifier });
-}
-
-void WebSWClientConnection::continueDidReceiveFetchResponse(FetchIdentifier fetchIdentifier, ServiceWorkerRegistrationIdentifier serviceWorkerRegistrationIdentifier)
-{
-    send(Messages::WebSWServerConnection::ContinueDidReceiveFetchResponse { serviceWorkerRegistrationIdentifier, fetchIdentifier });
-}
-
-void WebSWClientConnection::postMessageToServiceWorkerClient(DocumentIdentifier destinationContextIdentifier, MessageWithMessagePorts&& message, ServiceWorkerData&& source, const String& sourceOrigin)
-{
-    SWClientConnection::postMessageToServiceWorkerClient(destinationContextIdentifier, WTFMove(message), WTFMove(source), sourceOrigin);
-}
-
 void WebSWClientConnection::connectionToServerLost()
+{
+    clear();
+}
+
+void WebSWClientConnection::clear()
 {
     auto registrationTasks = WTFMove(m_ongoingMatchRegistrationTasks);
     for (auto& callback : registrationTasks.values())
@@ -228,12 +238,30 @@ void WebSWClientConnection::connectionToServerLost()
     for (auto& callback : getRegistrationTasks.values())
         callback({ });
 
+    m_ongoingRegistrationReadyTasks.clear();
+
     clearPendingJobs();
 }
 
-void WebSWClientConnection::syncTerminateWorker(ServiceWorkerIdentifier identifier)
+void WebSWClientConnection::terminateWorkerForTesting(ServiceWorkerIdentifier identifier, CompletionHandler<void()>&& callback)
 {
-    sendSync(Messages::WebSWServerConnection::SyncTerminateWorker(identifier), Messages::WebSWServerConnection::SyncTerminateWorker::Reply());
+    sendWithAsyncReply(Messages::WebSWServerConnection::TerminateWorkerFromClient { identifier }, WTFMove(callback));
+}
+
+void WebSWClientConnection::whenServiceWorkerIsTerminatedForTesting(ServiceWorkerIdentifier identifier, CompletionHandler<void()>&& callback)
+{
+    sendWithAsyncReply(Messages::WebSWServerConnection::WhenServiceWorkerIsTerminatedForTesting { identifier }, WTFMove(callback));
+}
+
+void WebSWClientConnection::updateThrottleState()
+{
+    m_isThrottleable = WebProcess::singleton().areAllPagesThrottleable();
+    send(Messages::WebSWServerConnection::SetThrottleState { m_isThrottleable });
+}
+
+void WebSWClientConnection::storeRegistrationsOnDiskForTesting(CompletionHandler<void()>&& callback)
+{
+    sendWithAsyncReply(Messages::WebSWServerConnection::StoreRegistrationsOnDisk { }, WTFMove(callback));
 }
 
 } // namespace WebKit

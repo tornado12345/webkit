@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2015 The ANGLE Project Authors. All rights reserved.
+// Copyright 2015 The ANGLE Project Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -12,7 +12,7 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 
-#include "OSPixmap.h"
+#include "util/OSPixmap.h"
 
 class X11Pixmap : public OSPixmap
 {
@@ -20,7 +20,10 @@ class X11Pixmap : public OSPixmap
     X11Pixmap();
     ~X11Pixmap() override;
 
-    bool initialize(EGLNativeDisplayType display, size_t width, size_t height, int depth) override;
+    bool initialize(EGLNativeDisplayType display,
+                    size_t width,
+                    size_t height,
+                    int nativeVisual) override;
 
     EGLNativePixmapType getNativePixmap() const override;
 
@@ -29,4 +32,4 @@ class X11Pixmap : public OSPixmap
     Display *mDisplay;
 };
 
-#endif // UTIL_X11_PIXMAP_H_
+#endif  // UTIL_X11_PIXMAP_H_

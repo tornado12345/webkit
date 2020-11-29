@@ -29,9 +29,10 @@
 #if PLATFORM(COCOA)
 
 #include "HEVCUtilitiesCocoa.h"
-#include "MediaCapabilitiesInfo.h"
+#include "MediaCapabilitiesDecodingInfo.h"
 #include "MediaDecodingConfiguration.h"
 #include "MediaPlayer.h"
+#include "VP9UtilitiesCocoa.h"
 
 #include "VideoToolboxSoftLink.h"
 
@@ -45,57 +46,89 @@ static CMVideoCodecType videoCodecTypeFromRFC4281Type(String type)
         return kCMVideoCodecType_H264;
     if (type.startsWith("hvc1") || type.startsWith("hev1"))
         return kCMVideoCodecType_HEVC;
+#if ENABLE(VP9)
+    if (type.startsWith("vp09"))
+        return kCMVideoCodecType_VP9;
+#endif
     return 0;
 }
 
-void createMediaPlayerDecodingConfigurationCocoa(MediaDecodingConfiguration& configuration, WTF::Function<void(MediaCapabilitiesInfo&&)>&& callback)
+void createMediaPlayerDecodingConfigurationCocoa(MediaDecodingConfiguration&& configuration, WTF::Function<void(MediaCapabilitiesDecodingInfo&&)>&& callback)
 {
-    MediaCapabilitiesInfo info;
+    MediaCapabilitiesDecodingInfo info;
+
     if (configuration.video) {
         auto& videoConfiguration = configuration.video.value();
         MediaEngineSupportParameters parameters { };
         parameters.type = ContentType(videoConfiguration.contentType);
         parameters.isMediaSource = configuration.type == MediaDecodingType::MediaSource;
-        if (MediaPlayer::supportsType(parameters) != MediaPlayer::IsSupported) {
-            callback({ });
+        if (MediaPlayer::supportsType(parameters) != MediaPlayer::SupportsType::IsSupported) {
+            callback({{ }, WTFMove(configuration)});
             return;
         }
-        info.supported = true;
 
         auto codecs = parameters.type.codecs();
         if (codecs.size() != 1) {
-            callback({ });
+            callback({{ }, WTFMove(configuration)});
             return;
         }
 
         info.supported = true;
         auto& codec = codecs[0];
         auto videoCodecType = videoCodecTypeFromRFC4281Type(codec);
-        if (!videoCodecType) {
-            callback({ });
+        if (!videoCodecType && !(codec.startsWith("dvh1") || codec.startsWith("dvhe"))) {
+            callback({{ }, WTFMove(configuration)});
             return;
         }
 
+        bool hdrSupported = videoConfiguration.colorGamut || videoConfiguration.hdrMetadataType || videoConfiguration.transferFunction;
+        bool alphaChannel = videoConfiguration.alphaChannel && videoConfiguration.alphaChannel.value();
+
         if (videoCodecType == kCMVideoCodecType_HEVC) {
             auto parameters = parseHEVCCodecParameters(codec);
-            if (!parameters || !validateHEVCParameters(parameters.value(), info)) {
-                callback({ });
+            if (!parameters || !validateHEVCParameters(parameters.value(), info, alphaChannel, hdrSupported)) {
+                callback({{ }, WTFMove(configuration)});
                 return;
             }
-        } else if (canLoad_VideoToolbox_VTIsHardwareDecodeSupported())
-            info.powerEfficient = VTIsHardwareDecodeSupported(videoCodecType);
+        } else if (codec.startsWith("dvh1") || codec.startsWith("dvhe")) {
+            auto parameters = parseDoViCodecParameters(codec);
+            if (!parameters || !validateDoViParameters(parameters.value(), info, alphaChannel, hdrSupported)) {
+                callback({{ }, WTFMove(configuration)});
+                return;
+            }
+#if ENABLE(VP9)
+        } else if (videoCodecType == kCMVideoCodecType_VP9) {
+            auto codecConfiguration = parseVPCodecParameters(codec);
+            if (!codecConfiguration || !validateVPParameters(*codecConfiguration, info, videoConfiguration)) {
+                callback({{ }, WTFMove(configuration)});
+                return;
+            }
+#endif
+        } else {
+            if (alphaChannel || hdrSupported) {
+                callback({{ }, WTFMove(configuration)});
+                return;
+            }
+
+            if (canLoad_VideoToolbox_VTIsHardwareDecodeSupported()) {
+                info.powerEfficient = VTIsHardwareDecodeSupported(videoCodecType);
+                info.smooth = true;
+            }
+        }
     }
 
     if (configuration.audio) {
         MediaEngineSupportParameters parameters { };
         parameters.type = ContentType(configuration.audio.value().contentType);
         parameters.isMediaSource = configuration.type == MediaDecodingType::MediaSource;
-        if (MediaPlayer::supportsType(parameters) != MediaPlayer::IsSupported) {
-            callback({ });
+        if (MediaPlayer::supportsType(parameters) != MediaPlayer::SupportsType::IsSupported) {
+            callback({{ }, WTFMove(configuration)});
             return;
         }
         info.supported = true;
     }
+
+    info.supportedConfiguration = WTFMove(configuration);
 
     callback(WTFMove(info));
 }

@@ -209,6 +209,18 @@ static id<OrientationProvider> gOrientationProvider;
     return (NSSelectionDirection)0;
 }
 
+- (BOOL)resignFirstResponder
+{
+    BOOL shouldResign = [super resignFirstResponder];
+    if (shouldResign && _responderView && WKViewResignFirstResponder([_responderView _viewRef])) {
+        _nextResponder = nil;
+        [_responderView release];
+        _responderView = nil;
+        return YES;
+    }
+    return NO;
+}
+
 - (BOOL)makeFirstResponder:(NSResponder *)aResponder
 {
     if (![aResponder isKindOfClass:[WAKView class]])
@@ -361,8 +373,10 @@ static id<OrientationProvider> gOrientationProvider;
     WebThreadRun(^{
         [self sendEvent:anEvent];
 
-        if (aContentChange)
-            *aContentChange = WKObservedContentChange();
+        if (aContentChange) {
+            // We always make the decision asynchronously. See EventHandler::mouseMoved.
+            *aContentChange = WKContentIndeterminateChange;
+        }
     });
 }
 

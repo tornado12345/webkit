@@ -23,17 +23,18 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
+#import "config.h"
 
 #if WK_HAVE_C_SPI
 
-#include "InjectedBundleTest.h"
+#import "InjectedBundleTest.h"
 
-#include "PlatformUtilities.h"
-#include <JavaScriptCore/JSRetainPtr.h>
-#include <WebKit/WKBundleFrame.h>
-#include <WebKit/WKBundlePage.h>
-#include <WebKit/WKBundlePagePrivate.h>
+#import "PlatformUtilities.h"
+#import <JavaScriptCore/JSRetainPtr.h>
+#import <WebKit/WKBundleFrame.h>
+#import <WebKit/WKBundlePage.h>
+#import <WebKit/WKBundlePagePrivate.h>
+#import <wtf/UniqueArray.h>
 
 namespace TestWebKitAPI {
 
@@ -70,7 +71,7 @@ public:
         auto resultString = adopt(JSValueToStringCopy(scriptContext, result, nullptr));
 
         auto bufferSize = JSStringGetMaximumUTF8CStringSize(resultString.get());
-        auto buffer = std::make_unique<char[]>(bufferSize);
+        auto buffer = makeUniqueArray<char>(bufferSize);
         JSStringGetUTF8CString(resultString.get(), buffer.get(), bufferSize);
 
         WKBundlePageSetUseDarkAppearance(m_page, true);

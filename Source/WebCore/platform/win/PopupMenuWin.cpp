@@ -49,7 +49,9 @@
 #include "ScrollbarThemeWin.h"
 #include "TextRun.h"
 #include "WebCoreInstanceHandle.h"
+#include <wtf/HexNumber.h>
 #include <wtf/WindowsExtras.h>
+#include <wtf/text/StringBuilder.h>
 
 #include <windows.h>
 #include <windowsx.h>
@@ -139,7 +141,7 @@ void PopupMenuWin::show(const IntRect& r, FrameView* view, int index)
 
     if (!m_scrollbar && visibleItems() < client()->listSize()) {
         // We need a scroll bar
-        m_scrollbar = client()->createScrollbar(*this, VerticalScrollbar, SmallScrollbar);
+        m_scrollbar = client()->createScrollbar(*this, VerticalScrollbar, ScrollbarControlSize::Small);
         m_scrollbar->styleChanged();
     }
 
@@ -354,7 +356,7 @@ void PopupMenuWin::calculatePositionAndSize(const IntRect& r, FrameView* v)
 
     if (naturalHeight > maxPopupHeight)
         // We need room for a scrollbar
-        popupWidth += ScrollbarTheme::theme().scrollbarThickness(SmallScrollbar);
+        popupWidth += ScrollbarTheme::theme().scrollbarThickness(ScrollbarControlSize::Small);
 
     // Add padding to align the popup text with the <select> text
     popupWidth += std::max<int>(0, client()->clientPaddingRight() - client()->clientInsetRight()) + std::max<int>(0, client()->clientPaddingLeft() - client()->clientInsetLeft());
@@ -641,7 +643,7 @@ void PopupMenuWin::paint(const IntRect& damageRect, HDC hdc)
 
         String itemText = client()->itemText(index);
 
-        TextRun textRun(itemText, 0, 0, AllowTrailingExpansion, itemStyle.textDirection(), itemStyle.hasTextDirectionOverride());
+        TextRun textRun(itemText, 0, 0, AllowLeftExpansion, itemStyle.textDirection(), itemStyle.hasTextDirectionOverride());
         context.setFillColor(optionTextColor);
 
         FontCascade itemFont = m_font;
@@ -679,14 +681,9 @@ void PopupMenuWin::paint(const IntRect& damageRect, HDC hdc)
     ::BitBlt(localDC, damageRect.x(), damageRect.y(), damageRect.width(), damageRect.height(), m_DC.get(), damageRect.x(), damageRect.y(), SRCCOPY);
 }
 
-int PopupMenuWin::scrollSize(ScrollbarOrientation orientation) const
+ScrollPosition PopupMenuWin::scrollPosition() const
 {
-    return ((orientation == VerticalScrollbar) && m_scrollbar) ? (m_scrollbar->totalSize() - m_scrollbar->visibleSize()) : 0;
-}
-
-int PopupMenuWin::scrollOffset(ScrollbarOrientation) const
-{
-    return m_scrollOffset;
+    return { 0, m_scrollOffset };
 }
 
 void PopupMenuWin::setScrollOffset(const IntPoint& offset)
@@ -892,9 +889,9 @@ LRESULT PopupMenuWin::wndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPa
                     focusLast();
                     break;
                 case VK_PRIOR:
-                    if (focusedIndex() != scrollOffset()) {
+                    if (focusedIndex() != m_scrollOffset) {
                         // Set the selection to the first visible item
-                        int firstVisibleItem = scrollOffset();
+                        int firstVisibleItem = m_scrollOffset;
                         up(focusedIndex() - firstVisibleItem);
                     } else {
                         // The first visible item is selected, so move the selection back one page
@@ -902,7 +899,7 @@ LRESULT PopupMenuWin::wndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPa
                     }
                     break;
                 case VK_NEXT: {
-                    int lastVisibleItem = scrollOffset() + visibleItems() - 1;
+                    int lastVisibleItem = m_scrollOffset + visibleItems() - 1;
                     if (focusedIndex() != lastVisibleItem) {
                         // Set the selection to the last visible item
                         down(lastVisibleItem - focusedIndex());
@@ -1085,6 +1082,11 @@ LRESULT PopupMenuWin::wndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPa
     }
 
     return lResult;
+}
+
+String PopupMenuWin::debugDescription() const
+{
+    return makeString("PopupMenuWin 0x", hex(reinterpret_cast<uintptr_t>(this), Lowercase));
 }
 
 AccessiblePopupMenu::AccessiblePopupMenu(const PopupMenuWin& popupMenu)

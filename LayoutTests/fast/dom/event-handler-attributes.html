@@ -64,6 +64,8 @@ const eventsInGlobalEventHandlers = [
     "seeked",
     "seeking",
     "select",
+    "selectionchange",
+    "selectstart",
     "stalled",
     "submit",
     "suspend",
@@ -72,7 +74,11 @@ const eventsInGlobalEventHandlers = [
     "volumechange",
     "waiting",
     "search",
-    "wheel"
+    "wheel",
+    "webkitanimationend",
+    "webkitanimationiteration",
+    "webkitanimationstart",
+    "webkittransitionend"
 ];
 
 const eventsInWindowEventHandlers = [
@@ -94,8 +100,7 @@ const elementAndDocumentEvents = [
     "beforepaste",
     "copy",
     "cut",
-    "paste",
-    "selectstart",
+    "paste"
 ];
 
 const elementAndWindowEvents = [
@@ -105,11 +110,7 @@ const elementAndWindowEvents = [
     "webkittransitionend"
 ];
 
-const uniqueWindowEvents = [
-];
-
 const uniqueDocumentEvents = [
-    "selectionchange",
     "readystatechange"
 ];
 
@@ -246,7 +247,7 @@ function arrayDifference(a, b)
     });
 }
 
-const windowEvents = arrayUnion(eventsInGlobalEventHandlers, eventsInWindowEventHandlers, elementAndWindowEvents, uniqueWindowEvents);
+const windowEvents = arrayUnion(eventsInGlobalEventHandlers, eventsInWindowEventHandlers, elementAndWindowEvents);
 const documentEvents = arrayUnion(eventsInGlobalEventHandlers, elementAndDocumentEvents, uniqueDocumentEvents);
 const elementEvents = arrayUnion(eventsInGlobalEventHandlers, elementAndDocumentEvents, elementAndWindowEvents, elementBodyAndFrameSetEvents, uniqueElementEvents);
 

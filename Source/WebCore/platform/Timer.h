@@ -57,7 +57,7 @@ public:
     WEBCORE_EXPORT void stop();
     bool isActive() const;
 
-    Seconds nextFireInterval() const;
+    WEBCORE_EXPORT Seconds nextFireInterval() const;
     Seconds nextUnalignedFireInterval() const;
     Seconds repeatInterval() const { return m_repeatInterval; }
 
@@ -96,7 +96,6 @@ private:
 
     MonotonicTime m_unalignedNextFireTime; // m_nextFireTime not considering alignment interval
     Seconds m_repeatInterval; // 0 if not repeating
-    bool m_wasDeleted { false };
 
     RefPtr<ThreadTimerHeapItem> m_heapItem;
     Ref<Thread> m_thread { Thread::current() };
@@ -195,5 +194,39 @@ private:
     Seconds m_delay;
     bool m_shouldRestartWhenTimerFires;
 };
+
+class DeferrableTaskTimer final : private TimerBase {
+    WTF_MAKE_FAST_ALLOCATED;
+public:
+    DeferrableTaskTimer() = default;
+
+    void doTask(Function<void()>&&, Seconds);
+    void cancel();
+    bool isActive() const { return TimerBase::isActive(); }
+
+private:
+    void fired() final;
+
+    Function<void()> m_function;
+};
+
+inline void DeferrableTaskTimer::fired()
+{
+    std::exchange(m_function, { })();
+}
+
+inline void DeferrableTaskTimer::doTask(Function<void()>&& function, Seconds delay)
+{
+    ASSERT(!isActive());
+    ASSERT(!m_function);
+    m_function = WTFMove(function);
+    startOneShot(delay);
+}
+
+inline void DeferrableTaskTimer::cancel()
+{
+    std::exchange(m_function, { });
+    stop();
+}
 
 }

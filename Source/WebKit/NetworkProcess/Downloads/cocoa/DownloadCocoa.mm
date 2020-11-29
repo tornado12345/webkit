@@ -31,6 +31,7 @@
 #import "WKDownloadProgress.h"
 #import <pal/spi/cf/CFNetworkSPI.h>
 #import <pal/spi/cocoa/NSProgressSPI.h>
+#import <wtf/BlockPtr.h>
 
 namespace WebKit {
 
@@ -48,8 +49,8 @@ void Download::resume(const IPC::DataReference& resumeData, const String& path, 
     auto& cocoaSession = static_cast<NetworkSessionCocoa&>(*networkSession);
     auto nsData = adoptNS([[NSData alloc] initWithBytes:resumeData.data() length:resumeData.size()]);
 
-    // FIXME: This is a temporary workaround for <rdar://problem/34745171>.
-#if (PLATFORM(IOS_FAMILY) && __IPHONE_OS_VERSION_MIN_REQUIRED >= 120000) || (PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 101400)
+    // FIXME: This is a temporary workaround for <rdar://problem/34745171>. Fixed in iOS 13 and macOS 10.15, but we still need to support macOS 10.14 for now.
+#if PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED < 101500
     static NSSet<Class> *plistClasses = nil;
     static dispatch_once_t onceToken;
 
@@ -70,28 +71,28 @@ void Download::resume(const IPC::DataReference& resumeData, const String& path, 
     NSData *updatedData = [NSPropertyListSerialization dataWithPropertyList:dictionary format:NSPropertyListXMLFormat_v1_0 options:0 error:nullptr];
 #endif
 
-    m_downloadTask = cocoaSession.downloadTaskWithResumeData(updatedData);
-    cocoaSession.addDownloadID(m_downloadTask.get().taskIdentifier, m_downloadID);
+    m_downloadTask = [cocoaSession.sessionWrapperForDownloads().session downloadTaskWithResumeData:updatedData];
+    auto taskIdentifier = [m_downloadTask taskIdentifier];
+    ASSERT(!cocoaSession.sessionWrapperForDownloads().downloadMap.contains(taskIdentifier));
+    cocoaSession.sessionWrapperForDownloads().downloadMap.add(taskIdentifier, m_downloadID);
     m_downloadTask.get()._pathToDownloadTaskFile = path;
 
     [m_downloadTask resume];
 }
     
-void Download::platformCancelNetworkLoad()
+void Download::platformCancelNetworkLoad(CompletionHandler<void(const IPC::DataReference&)>&& completionHandler)
 {
     ASSERT(m_downloadTask);
-    [m_downloadTask cancelByProducingResumeData:^(NSData *resumeData) {
-        if (resumeData && resumeData.bytes && resumeData.length)
-            didCancel(IPC::DataReference(reinterpret_cast<const uint8_t*>(resumeData.bytes), resumeData.length));
-        else
-            didCancel({ });
-    }];
+    [m_downloadTask cancelByProducingResumeData:makeBlockPtr([completionHandler = WTFMove(completionHandler)] (NSData *resumeData) mutable {
+        auto resumeDataReference = resumeData ? IPC::DataReference { static_cast<const uint8_t*>(resumeData.bytes), resumeData.length } : IPC::DataReference { };
+        completionHandler(resumeDataReference);
+    }).get()];
 }
 
 void Download::platformDestroyDownload()
 {
     if (m_progress)
-#if USE(NSPROGRESS_PUBLISHING_SPI)
+#if HAVE(NSPROGRESS_PUBLISHING_SPI)
         [m_progress _unpublish];
 #else
         [m_progress unpublish];
@@ -106,9 +107,11 @@ void Download::publishProgress(const URL& url, SandboxExtension::Handle&& sandbo
     auto sandboxExtension = SandboxExtension::create(WTFMove(sandboxExtensionHandle));
 
     ASSERT(sandboxExtension);
+    if (!sandboxExtension)
+        return;
 
-    m_progress = adoptNS([[WKDownloadProgress alloc] initWithDownloadTask:m_downloadTask.get() download:this URL:(NSURL *)url sandboxExtension:sandboxExtension]);
-#if USE(NSPROGRESS_PUBLISHING_SPI)
+    m_progress = adoptNS([[WKDownloadProgress alloc] initWithDownloadTask:m_downloadTask.get() download:*this URL:(NSURL *)url sandboxExtension:sandboxExtension]);
+#if HAVE(NSPROGRESS_PUBLISHING_SPI)
     [m_progress _publish];
 #else
     [m_progress publish];

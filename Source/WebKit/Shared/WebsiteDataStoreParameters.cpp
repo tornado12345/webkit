@@ -40,18 +40,21 @@ void WebsiteDataStoreParameters::encode(IPC::Encoder& encoder) const
     encoder << networkSessionParameters;
     encoder << uiProcessCookieStorageIdentifier;
     encoder << cookieStoragePathExtensionHandle;
-    encoder << pendingCookies;
 
 #if ENABLE(INDEXED_DATABASE)
     encoder << indexedDatabaseDirectory << indexedDatabaseDirectoryExtensionHandle;
-#if PLATFORM(IOS_FAMILY)
-    encoder << indexedDatabaseTempBlobDirectoryExtensionHandle;
-#endif
 #endif
 
 #if ENABLE(SERVICE_WORKER)
-    encoder << serviceWorkerRegistrationDirectory << serviceWorkerRegistrationDirectoryExtensionHandle;
+    encoder << serviceWorkerRegistrationDirectory << serviceWorkerRegistrationDirectoryExtensionHandle << serviceWorkerProcessTerminationDelayEnabled;
 #endif
+
+    encoder << localStorageDirectory << localStorageDirectoryExtensionHandle;
+
+    encoder << cacheStorageDirectory << cacheStorageDirectoryExtensionHandle;
+
+    encoder << perOriginStorageQuota;
+    encoder << perThirdPartyOriginStorageQuota;
 }
 
 Optional<WebsiteDataStoreParameters> WebsiteDataStoreParameters::decode(IPC::Decoder& decoder)
@@ -76,12 +79,6 @@ Optional<WebsiteDataStoreParameters> WebsiteDataStoreParameters::decode(IPC::Dec
         return WTF::nullopt;
     parameters.cookieStoragePathExtensionHandle = WTFMove(*cookieStoragePathExtensionHandle);
 
-    Optional<Vector<WebCore::Cookie>> pendingCookies;
-    decoder >> pendingCookies;
-    if (!pendingCookies)
-        return WTF::nullopt;
-    parameters.pendingCookies = WTFMove(*pendingCookies);
-
 #if ENABLE(INDEXED_DATABASE)
     Optional<String> indexedDatabaseDirectory;
     decoder >> indexedDatabaseDirectory;
@@ -94,14 +91,6 @@ Optional<WebsiteDataStoreParameters> WebsiteDataStoreParameters::decode(IPC::Dec
     if (!indexedDatabaseDirectoryExtensionHandle)
         return WTF::nullopt;
     parameters.indexedDatabaseDirectoryExtensionHandle = WTFMove(*indexedDatabaseDirectoryExtensionHandle);
-
-#if PLATFORM(IOS_FAMILY)
-    Optional<SandboxExtension::Handle> indexedDatabaseTempBlobDirectoryExtensionHandle;
-    decoder >> indexedDatabaseTempBlobDirectoryExtensionHandle;
-    if (!indexedDatabaseTempBlobDirectoryExtensionHandle)
-        return WTF::nullopt;
-    parameters.indexedDatabaseTempBlobDirectoryExtensionHandle = WTFMove(*indexedDatabaseTempBlobDirectoryExtensionHandle);
-#endif
 #endif
 
 #if ENABLE(SERVICE_WORKER)
@@ -116,25 +105,51 @@ Optional<WebsiteDataStoreParameters> WebsiteDataStoreParameters::decode(IPC::Dec
     if (!serviceWorkerRegistrationDirectoryExtensionHandle)
         return WTF::nullopt;
     parameters.serviceWorkerRegistrationDirectoryExtensionHandle = WTFMove(*serviceWorkerRegistrationDirectoryExtensionHandle);
-#endif
     
-    return WTFMove(parameters);
-}
+    Optional<bool> serviceWorkerProcessTerminationDelayEnabled;
+    decoder >> serviceWorkerProcessTerminationDelayEnabled;
+    if (!serviceWorkerProcessTerminationDelayEnabled)
+        return WTF::nullopt;
+    parameters.serviceWorkerProcessTerminationDelayEnabled = WTFMove(*serviceWorkerProcessTerminationDelayEnabled);
+#endif
 
-WebsiteDataStoreParameters WebsiteDataStoreParameters::privateSessionParameters(PAL::SessionID sessionID)
-{
-    ASSERT(sessionID.isEphemeral());
-    return { { }, { }, { }, NetworkSessionCreationParameters::privateSessionParameters(sessionID)
-#if ENABLE(INDEXED_DATABASE)
-        , { }, { }
-#if PLATFORM(IOS_FAMILY)
-        , { }
-#endif
-#endif
-#if ENABLE(SERVICE_WORKER)
-        , { }, { }
-#endif
-    };
+    Optional<String> localStorageDirectory;
+    decoder >> localStorageDirectory;
+    if (!localStorageDirectory)
+        return WTF::nullopt;
+    parameters.localStorageDirectory = WTFMove(*localStorageDirectory);
+
+    Optional<SandboxExtension::Handle> localStorageDirectoryExtensionHandle;
+    decoder >> localStorageDirectoryExtensionHandle;
+    if (!localStorageDirectoryExtensionHandle)
+        return WTF::nullopt;
+    parameters.localStorageDirectoryExtensionHandle = WTFMove(*localStorageDirectoryExtensionHandle);
+
+    Optional<String> cacheStorageDirectory;
+    decoder >> cacheStorageDirectory;
+    if (!cacheStorageDirectory)
+        return WTF::nullopt;
+    parameters.cacheStorageDirectory = WTFMove(*cacheStorageDirectory);
+
+    Optional<SandboxExtension::Handle> cacheStorageDirectoryExtensionHandle;
+    decoder >> cacheStorageDirectoryExtensionHandle;
+    if (!cacheStorageDirectoryExtensionHandle)
+        return WTF::nullopt;
+    parameters.cacheStorageDirectoryExtensionHandle = WTFMove(*cacheStorageDirectoryExtensionHandle);
+
+    Optional<uint64_t> perOriginStorageQuota;
+    decoder >> perOriginStorageQuota;
+    if (!perOriginStorageQuota)
+        return WTF::nullopt;
+    parameters.perOriginStorageQuota = *perOriginStorageQuota;
+
+    Optional<uint64_t> perThirdPartyOriginStorageQuota;
+    decoder >> perThirdPartyOriginStorageQuota;
+    if (!perThirdPartyOriginStorageQuota)
+        return WTF::nullopt;
+    parameters.perThirdPartyOriginStorageQuota = *perThirdPartyOriginStorageQuota;
+    
+    return parameters;
 }
 
 } // namespace WebKit

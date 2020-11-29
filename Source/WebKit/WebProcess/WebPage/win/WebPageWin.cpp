@@ -28,8 +28,8 @@
 #include "WebPage.h"
 
 #include "EditorState.h"
-#include "WebEvent.h"
 #include "WebFrame.h"
+#include "WebKeyboardEvent.h"
 #include "WebPageProxyMessages.h"
 #include "WebProcess.h"
 #include <WebCore/BackForwardController.h>
@@ -43,6 +43,7 @@
 #include <WebCore/NotImplemented.h>
 #include <WebCore/Page.h>
 #include <WebCore/PlatformKeyboardEvent.h>
+#include <WebCore/PointerCharacteristics.h>
 #include <WebCore/Settings.h>
 #include <WebCore/SharedBuffer.h>
 #include <WebCore/UserAgent.h>
@@ -63,7 +64,7 @@ void WebPage::platformDetach()
 {
 }
 
-void WebPage::platformEditorState(Frame& frame, EditorState& result, IncludePostLayoutDataHint shouldIncludePostLayoutData) const
+void WebPage::getPlatformEditorState(Frame&, EditorState&) const
 {
 }
 
@@ -73,9 +74,6 @@ bool WebPage::performDefaultBehaviorForKeyEvent(const WebKeyboardEvent& keyboard
         return false;
 
     switch (keyboardEvent.windowsVirtualKeyCode()) {
-    case VK_SPACE:
-        scroll(m_page.get(), keyboardEvent.shiftKey() ? ScrollUp : ScrollDown, ScrollByPage);
-        break;
     case VK_LEFT:
         scroll(m_page.get(), ScrollLeft, ScrollByLine);
         break;
@@ -113,12 +111,29 @@ bool WebPage::platformCanHandleRequest(const ResourceRequest&)
     return false;
 }
 
-String WebPage::platformUserAgent(const URL& url) const
+String WebPage::platformUserAgent(const URL&) const
 {
-    if (url.isNull() || !m_page->settings().needsSiteSpecificQuirks())
-        return String();
+    return { };
+}
 
-    return WebCore::standardUserAgentForURL(url);
+bool WebPage::hoverSupportedByPrimaryPointingDevice() const
+{
+    return true;
+}
+
+bool WebPage::hoverSupportedByAnyAvailablePointingDevice() const
+{
+    return true;
+}
+
+Optional<PointerCharacteristics> WebPage::pointerCharacteristicsOfPrimaryPointingDevice() const
+{
+    return PointerCharacteristics::Fine;
+}
+
+OptionSet<PointerCharacteristics> WebPage::pointerCharacteristicsOfAllAvailablePointingDevices() const
+{
+    return PointerCharacteristics::Fine;
 }
 
 static const unsigned CtrlKey = 1 << 0;
@@ -241,16 +256,16 @@ const char* WebPage::interpretKeyEvent(const WebCore::KeyboardEvent* evt)
     return mapKey ? keyPressCommandsMap->get(mapKey) : 0;
 }
 
-bool WebPage::handleEditingKeyboardEvent(WebCore::KeyboardEvent* event)
+bool WebPage::handleEditingKeyboardEvent(WebCore::KeyboardEvent& event)
 {
-    auto* frame = downcast<Node>(event->target())->document().frame();
+    auto* frame = downcast<Node>(event.target())->document().frame();
     ASSERT(frame);
 
-    auto* keyEvent = event->underlyingPlatformEvent();
+    auto* keyEvent = event.underlyingPlatformEvent();
     if (!keyEvent || keyEvent->isSystemKey()) // Do not treat this as text input if it's a system key event.
         return false;
 
-    auto command = frame->editor().command(interpretKeyEvent(event));
+    auto command = frame->editor().command(interpretKeyEvent(&event));
 
     if (keyEvent->type() == PlatformEvent::RawKeyDown) {
         // WebKit doesn't have enough information about mode to decide
@@ -259,17 +274,17 @@ bool WebPage::handleEditingKeyboardEvent(WebCore::KeyboardEvent* event)
         // handle them immediately (e.g. Tab that changes focus) or
         // let a keypress event be generated (e.g. Tab that inserts a
         // Tab character, or Enter).
-        return !command.isTextInsertion() && command.execute(event);
+        return !command.isTextInsertion() && command.execute(&event);
     }
 
-    if (command.execute(event))
+    if (command.execute(&event))
         return true;
 
     // Don't insert null or control characters as they can result in unexpected behaviour.
-    if (event->charCode() < ' ')
+    if (event.charCode() < ' ')
         return false;
 
-    return frame->editor().insertText(keyEvent->text(), event);
+    return frame->editor().insertText(keyEvent->text(), &event);
 }
 
 } // namespace WebKit

@@ -27,9 +27,12 @@
 
 #if ENABLE(WEBDRIVER_ACTIONS_API)
 
-#include "WebEvent.h"
+#include <WebCore/FrameIdentifier.h>
+#include <WebCore/IntPoint.h>
+#include <WebCore/IntSize.h>
 #include <wtf/CompletionHandler.h>
 #include <wtf/HashSet.h>
+#include <wtf/ListHashSet.h>
 #include <wtf/Optional.h>
 #include <wtf/RefCounted.h>
 #include <wtf/RunLoop.h>
@@ -40,6 +43,7 @@
 namespace Inspector { namespace Protocol { namespace Automation {
 enum class ErrorMessage;
 enum class KeyboardInteractionType;
+enum class MouseButton;
 enum class MouseInteraction;
 enum class MouseMoveOrigin;
 enum class VirtualKey;
@@ -54,9 +58,10 @@ class WebPageProxy;
 
 using KeyboardInteraction = Inspector::Protocol::Automation::KeyboardInteractionType;
 using VirtualKey = Inspector::Protocol::Automation::VirtualKey;
-using VirtualKeySet = HashSet<VirtualKey, WTF::IntHash<VirtualKey>, WTF::StrongEnumHashTraits<VirtualKey>>;
-using CharKey = char; // For WebDriver, this only needs to support ASCII characters on 102-key keyboard.
-using MouseButton = WebMouseEvent::Button;
+using VirtualKeyMap = HashMap<VirtualKey, VirtualKey, WTF::IntHash<VirtualKey>, WTF::StrongEnumHashTraits<VirtualKey>>;
+using CharKey = UChar32;
+using CharKeySet = ListHashSet<CharKey>;
+using MouseButton = Inspector::Protocol::Automation::MouseButton;
 using MouseInteraction = Inspector::Protocol::Automation::MouseInteraction;
 using MouseMoveOrigin = Inspector::Protocol::Automation::MouseMoveOrigin;
 
@@ -65,6 +70,7 @@ enum class SimulatedInputSourceType {
     Keyboard,
     Mouse,
     Touch,
+    Wheel,
 };
 
 enum class TouchInteraction {
@@ -74,12 +80,13 @@ enum class TouchInteraction {
 };
 
 struct SimulatedInputSourceState {
-    Optional<CharKey> pressedCharKey;
-    VirtualKeySet pressedVirtualKeys;
+    CharKeySet pressedCharKeys;
+    VirtualKeyMap pressedVirtualKeys;
     Optional<MouseButton> pressedMouseButton;
     Optional<MouseMoveOrigin> origin;
     Optional<String> nodeHandle;
     Optional<WebCore::IntPoint> location;
+    Optional<WebCore::IntSize> scrollDelta;
     Optional<Seconds> duration;
 
     static SimulatedInputSourceState emptyStateForSourceType(SimulatedInputSourceType);
@@ -124,7 +131,7 @@ public:
     public:
         virtual ~Client() { }
 #if ENABLE(WEBDRIVER_MOUSE_INTERACTIONS)
-        virtual void simulateMouseInteraction(WebPageProxy&, MouseInteraction, WebMouseEvent::Button, const WebCore::IntPoint& locationInView, AutomationCompletionHandler&&) = 0;
+        virtual void simulateMouseInteraction(WebPageProxy&, MouseInteraction, MouseButton, const WebCore::IntPoint& locationInView, AutomationCompletionHandler&&) = 0;
 #endif
 #if ENABLE(WEBDRIVER_TOUCH_INTERACTIONS)
         virtual void simulateTouchInteraction(WebPageProxy&, TouchInteraction, const WebCore::IntPoint& locationInView, Optional<Seconds> duration, AutomationCompletionHandler&&) = 0;
@@ -132,7 +139,10 @@ public:
 #if ENABLE(WEBDRIVER_KEYBOARD_INTERACTIONS)
         virtual void simulateKeyboardInteraction(WebPageProxy&, KeyboardInteraction, WTF::Variant<VirtualKey, CharKey>&&, AutomationCompletionHandler&&) = 0;
 #endif
-        virtual void viewportInViewCenterPointOfElement(WebPageProxy&, uint64_t frameID, const String& nodeHandle, Function<void (Optional<WebCore::IntPoint>, Optional<AutomationCommandError>)>&&) = 0;
+#if ENABLE(WEBDRIVER_WHEEL_INTERACTIONS)
+        virtual void simulateWheelInteraction(WebPageProxy&, const WebCore::IntPoint& locationInView, const WebCore::IntSize& delta, AutomationCompletionHandler&&) = 0;
+#endif
+        virtual void viewportInViewCenterPointOfElement(WebPageProxy&, Optional<WebCore::FrameIdentifier>, const String& nodeHandle, Function<void (Optional<WebCore::IntPoint>, Optional<AutomationCommandError>)>&&) = 0;
     };
 
     static Ref<SimulatedInputDispatcher> create(WebPageProxy& page, SimulatedInputDispatcher::Client& client)
@@ -142,7 +152,7 @@ public:
 
     ~SimulatedInputDispatcher();
 
-    void run(uint64_t frameID, Vector<SimulatedInputKeyFrame>&& keyFrames, HashSet<Ref<SimulatedInputSource>>& inputSources, AutomationCompletionHandler&&);
+    void run(Optional<WebCore::FrameIdentifier>, Vector<SimulatedInputKeyFrame>&& keyFrames, HashSet<Ref<SimulatedInputSource>>& inputSources, AutomationCompletionHandler&&);
     void cancel();
 
     bool isActive() const;
@@ -165,7 +175,7 @@ private:
     WebPageProxy& m_page;
     SimulatedInputDispatcher::Client& m_client;
 
-    Optional<uint64_t> m_frameID;
+    Optional<WebCore::FrameIdentifier> m_frameID;
     AutomationCompletionHandler m_runCompletionHandler;
     AutomationCompletionHandler m_keyFrameTransitionCompletionHandler;
     RunLoop::Timer<SimulatedInputDispatcher> m_keyFrameTransitionDurationTimer;

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2010-2020 Apple Inc. All rights reserved.
  * Copyright (C) 2010 Nokia Corporation and/or its subsidiary(-ies).
  *
  * Redistribution and use in source and binary forms, with or without
@@ -28,12 +28,21 @@
 
 #include <WebCore/ChromeClient.h>
 
+namespace WebCore {
+class HTMLImageElement;
+class RegistrableDomain;
+enum class StorageAccessPromptWasShown : bool;
+enum class StorageAccessWasGranted : bool;
+}
+
 namespace WebKit {
 
+class RemoteRenderingBackendProxy;
 class WebFrame;
 class WebPage;
 
 class WebChromeClient final : public WebCore::ChromeClient {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     WebChromeClient(WebPage&);
 
@@ -42,10 +51,10 @@ public:
 private:
     ~WebChromeClient();
 
-    void didInsertMenuElement(WebCore::HTMLMenuElement&);
-    void didRemoveMenuElement(WebCore::HTMLMenuElement&);
-    void didInsertMenuItemElement(WebCore::HTMLMenuItemElement&);
-    void didRemoveMenuItemElement(WebCore::HTMLMenuItemElement&);
+    void didInsertMenuElement(WebCore::HTMLMenuElement&) final;
+    void didRemoveMenuElement(WebCore::HTMLMenuElement&) final;
+    void didInsertMenuItemElement(WebCore::HTMLMenuItemElement&) final;
+    void didRemoveMenuItemElement(WebCore::HTMLMenuItemElement&) final;
 
     void chromeDestroyed() final;
     
@@ -67,7 +76,7 @@ private:
     // Frame wants to create the new Page.  Also, the newly created window
     // should not be shown to the user until the ChromeClient of the newly
     // created Page has its show method called.
-    WebCore::Page* createWindow(WebCore::Frame&, const WebCore::FrameLoadRequest&, const WebCore::WindowFeatures&, const WebCore::NavigationAction&) final;
+    WebCore::Page* createWindow(WebCore::Frame&, const WebCore::WindowFeatures&, const WebCore::NavigationAction&) final;
     void show() final;
     
     bool canRunModal() final;
@@ -103,6 +112,11 @@ private:
 
     WebCore::KeyboardUIMode keyboardUIMode() final;
 
+    bool hoverSupportedByPrimaryPointingDevice() const final;
+    bool hoverSupportedByAnyAvailablePointingDevice() const final;
+    Optional<WebCore::PointerCharacteristics> pointerCharacteristicsOfPrimaryPointingDevice() const final;
+    OptionSet<WebCore::PointerCharacteristics> pointerCharacteristicsOfAllAvailablePointingDevices() const final;
+
     // HostWindow member function finals.
     void invalidateRootView(const WebCore::IntRect&) final;
     void invalidateContentsAndRootView(const WebCore::IntRect&) final;
@@ -115,30 +129,24 @@ private:
     WebCore::IntPoint accessibilityScreenToRootView(const WebCore::IntPoint&) const final;
     WebCore::IntRect rootViewToAccessibilityScreen(const WebCore::IntRect&) const final;
 
+    void didFinishLoadingImageForElement(WebCore::HTMLImageElement&) final;
+
     PlatformPageClient platformPageClient() const final;
     void contentsSizeChanged(WebCore::Frame&, const WebCore::IntSize&) const final;
+    void intrinsicContentsSizeChanged(const WebCore::IntSize&) const final;
     void scrollRectIntoView(const WebCore::IntRect&) const final; // Currently only Mac has a non empty implementation.
 
     bool shouldUnavailablePluginMessageBeButton(WebCore::RenderEmbeddedObject::PluginUnavailabilityReason) const final;
     void unavailablePluginButtonClicked(WebCore::Element&, WebCore::RenderEmbeddedObject::PluginUnavailabilityReason) const final;
 
-    void mouseDidMoveOverElement(const WebCore::HitTestResult&, unsigned modifierFlags) final;
+    void mouseDidMoveOverElement(const WebCore::HitTestResult&, unsigned modifierFlags, const String& toolTip, WebCore::TextDirection) final;
 
-    void setToolTip(const String&, WebCore::TextDirection) final;
-    
     void print(WebCore::Frame&) final;
 
     void exceededDatabaseQuota(WebCore::Frame&, const String& databaseName, WebCore::DatabaseDetails) final;
 
     void reachedMaxAppCacheSize(int64_t spaceNeeded) final;
     void reachedApplicationCacheOriginQuota(WebCore::SecurityOrigin&, int64_t spaceNeeded) final;
-
-#if ENABLE(DASHBOARD_SUPPORT)
-    void annotatedRegionsChanged() final;
-#endif
-
-    bool shouldReplaceWithGeneratedFileForUpload(const String& path, String& generatedFilename) final;
-    String generateReplacementFile(const String& path) final;
     
 #if ENABLE(INPUT_TYPE_COLOR)
     std::unique_ptr<WebCore::ColorChooser> createColorChooser(WebCore::ColorChooserClient&, const WebCore::Color&) final;
@@ -146,6 +154,11 @@ private:
 
 #if ENABLE(DATALIST_ELEMENT)
     std::unique_ptr<WebCore::DataListSuggestionPicker> createDataListSuggestionPicker(WebCore::DataListSuggestionsClient&) final;
+    bool canShowDataListSuggestionLabels() const final;
+#endif
+
+#if ENABLE(DATE_AND_TIME_INPUT_TYPES)
+    std::unique_ptr<WebCore::DateTimeChooser> createDateTimeChooser(WebCore::DateTimeChooserClient&) final;
 #endif
 
 #if ENABLE(IOS_TOUCH_EVENTS)
@@ -155,7 +168,7 @@ private:
 #if PLATFORM(IOS_FAMILY)
     void didReceiveMobileDocType(bool) final;
     void setNeedsScrollNotifications(WebCore::Frame&, bool) final;
-    void observedContentChange(WebCore::Frame&) final;
+    void didFinishContentChangeObserving(WebCore::Frame&, WKContentChange) final;
     void notifyRevealedSelectionByScrollingFrame(WebCore::Frame&) final;
     bool isStopping() final;
 
@@ -176,9 +189,9 @@ private:
 
     Seconds eventThrottlingDelay() final;
 
-    void associateEditableImageWithAttachment(WebCore::GraphicsLayer::EmbeddedViewID, const String& attachmentID) final;
-    void didCreateEditableImage(WebCore::GraphicsLayer::EmbeddedViewID) final;
-    void didDestroyEditableImage(WebCore::GraphicsLayer::EmbeddedViewID) final;
+    bool shouldUseMouseEventForSelection(const WebCore::PlatformMouseEvent&) final;
+
+    bool showDataDetectorsUIForElement(const WebCore::Element&, const WebCore::Event&) final;
 #endif
 
 #if ENABLE(ORIENTATION_EVENTS)
@@ -187,11 +200,13 @@ private:
 
     void runOpenPanel(WebCore::Frame&, WebCore::FileChooser&) final;
     void showShareSheet(WebCore::ShareDataWithParsedURL&, WTF::CompletionHandler<void(bool)>&&) final;
+    void showContactPicker(const WebCore::ContactsRequestData&, WTF::CompletionHandler<void(Optional<Vector<WebCore::ContactInfo>>&&)>&&) final;
     void loadIconForFiles(const Vector<String>&, WebCore::FileIconLoader&) final;
 
-#if !PLATFORM(IOS_FAMILY)
     void setCursor(const WebCore::Cursor&) final;
     void setCursorHiddenUntilMouseMoves(bool) final;
+#if !HAVE(NSCURSOR) && !PLATFORM(GTK)
+    bool supportsSettingCursor() final { return false; }
 #endif
 
 #if ENABLE(POINTER_LOCK)
@@ -199,7 +214,7 @@ private:
     void requestPointerUnlock() final;
 #endif
 
-    void didAssociateFormControls(const Vector<RefPtr<WebCore::Element>>&) final;
+    void didAssociateFormControls(const Vector<RefPtr<WebCore::Element>>&, WebCore::Frame&) final;
     bool shouldNotifyOnFormChanges() final;
 
     bool selectItemWritingDirectionIsNatural() final;
@@ -211,10 +226,11 @@ private:
     void attachRootGraphicsLayer(WebCore::Frame&, WebCore::GraphicsLayer*) final;
     void attachViewOverlayGraphicsLayer(WebCore::GraphicsLayer*) final;
     void setNeedsOneShotDrawingSynchronization() final;
-    void scheduleCompositingLayerFlush() final;
-    bool adjustLayerFlushThrottling(WebCore::LayerFlushThrottleState::Flags) final;
+    void triggerRenderingUpdate() final;
 
-    void contentRuleListNotification(const URL&, const HashSet<std::pair<String, String>>&) final;
+    void contentRuleListNotification(const URL&, const WebCore::ContentRuleListResults&) final;
+
+    bool testProcessIncomingSyncMessagesWhenWaitingForSyncReply() final;
 
 #if PLATFORM(WIN)
     void setLastSetCursorToCurrentCursor() final { }
@@ -222,8 +238,13 @@ private:
     void AXFinishFrameLoad() final { }
 #endif
 
-#if USE(REQUEST_ANIMATION_FRAME_DISPLAY_MONITOR)
+    void animationDidFinishForElement(const WebCore::Element&) final;
+
     RefPtr<WebCore::DisplayRefreshMonitor> createDisplayRefreshMonitor(WebCore::PlatformDisplayID) const final;
+
+#if ENABLE(GPU_PROCESS)
+    RemoteRenderingBackendProxy& ensureRemoteRenderingBackendProxy() const;
+    std::unique_ptr<WebCore::ImageBuffer> createImageBuffer(const WebCore::FloatSize&, WebCore::RenderingMode, WebCore::RenderingPurpose, float resolutionScale, WebCore::ColorSpace) const final;
 #endif
 
     CompositingTriggerFlags allowedCompositingTriggers() const final
@@ -233,7 +254,7 @@ private:
             VideoTrigger |
             PluginTrigger|
             CanvasTrigger |
-#if PLATFORM(MAC) || PLATFORM(IOS_FAMILY)
+#if PLATFORM(COCOA) || USE(NICOSIA)
             ScrollableNonMainFrameTrigger |
 #endif
 #if PLATFORM(IOS_FAMILY)
@@ -243,22 +264,30 @@ private:
     }
 
     bool layerTreeStateIsFrozen() const final;
-    bool layerFlushThrottlingIsActive() const final;
 
 #if ENABLE(ASYNC_SCROLLING)
     RefPtr<WebCore::ScrollingCoordinator> createScrollingCoordinator(WebCore::Page&) const final;
 #endif
 
-#if (PLATFORM(IOS_FAMILY) && HAVE(AVKIT)) || (PLATFORM(MAC) && ENABLE(VIDEO_PRESENTATION_MODE))
+#if ENABLE(VIDEO_PRESENTATION_MODE)
+    void prepareForVideoFullscreen() final;
     bool supportsVideoFullscreen(WebCore::HTMLMediaElementEnums::VideoFullscreenMode) final;
     bool supportsVideoFullscreenStandby() final;
-    void setUpPlaybackControlsManager(WebCore::HTMLMediaElement&) final;
-    void clearPlaybackControlsManager() final;
+    void setMockVideoPresentationModeEnabled(bool) final;
     void enterVideoFullscreenForVideoElement(WebCore::HTMLVideoElement&, WebCore::HTMLMediaElementEnums::VideoFullscreenMode, bool standby) final;
     void exitVideoFullscreenForVideoElement(WebCore::HTMLVideoElement&) final;
+    void setUpPlaybackControlsManager(WebCore::HTMLMediaElement&) final;
+    void clearPlaybackControlsManager() final;
+    void playbackControlsMediaEngineChanged() final;
 #endif
 
-#if PLATFORM(MAC) && ENABLE(VIDEO_PRESENTATION_MODE)
+#if ENABLE(MEDIA_USAGE)
+    void addMediaUsageManagerSession(WebCore::MediaSessionIdentifier, const String&, const URL&) final;
+    void updateMediaUsageManagerSessionState(WebCore::MediaSessionIdentifier, const WebCore::MediaUsageInfo&) final;
+    void removeMediaUsageManagerSession(WebCore::MediaSessionIdentifier) final;
+#endif
+
+#if ENABLE(VIDEO_PRESENTATION_MODE)
     void exitVideoFullscreenToModeWithoutAnimation(WebCore::HTMLVideoElement&, WebCore::HTMLMediaElementEnums::VideoFullscreenMode) final;
 #endif
 
@@ -314,12 +343,6 @@ private:
     void isPlayingMediaDidChange(WebCore::MediaProducer::MediaStateFlags, uint64_t) final;
     void handleAutoplayEvent(WebCore::AutoplayEvent, OptionSet<WebCore::AutoplayEventFlags>) final;
 
-#if ENABLE(MEDIA_SESSION)
-    void hasMediaSessionWithActiveMediaElementsDidChange(bool) final;
-    void mediaSessionMetadataDidChange(const WebCore::MediaSessionMetadata&) final;
-    void focusedContentMediaElementDidChange(uint64_t) final;
-#endif
-
 #if ENABLE(WEB_CRYPTO)
     bool wrapCryptoKey(const Vector<uint8_t>&, Vector<uint8_t>&) const final;
     bool unwrapCryptoKey(const Vector<uint8_t>&, Vector<uint8_t>&) const final;
@@ -343,12 +366,13 @@ private:
     void inputElementDidResignStrongPasswordAppearance(WebCore::HTMLInputElement&) final;
 
 #if ENABLE(WIRELESS_PLAYBACK_TARGET) && !PLATFORM(IOS_FAMILY)
-    void addPlaybackTargetPickerClient(uint64_t /*contextId*/) final;
-    void removePlaybackTargetPickerClient(uint64_t /*contextId*/) final;
-    void showPlaybackTargetPicker(uint64_t contextId, const WebCore::IntPoint&, bool) final;
-    void playbackTargetPickerClientStateDidChange(uint64_t, WebCore::MediaProducer::MediaStateFlags) final;
+    void addPlaybackTargetPickerClient(WebCore::PlaybackTargetClientContextIdentifier) final;
+    void removePlaybackTargetPickerClient(WebCore::PlaybackTargetClientContextIdentifier) final;
+    void showPlaybackTargetPicker(WebCore::PlaybackTargetClientContextIdentifier, const WebCore::IntPoint&, bool) final;
+    void playbackTargetPickerClientStateDidChange(WebCore::PlaybackTargetClientContextIdentifier, WebCore::MediaProducer::MediaStateFlags) final;
     void setMockMediaPlaybackTargetPickerEnabled(bool) final;
     void setMockMediaPlaybackTargetPickerState(const String&, WebCore::MediaPlaybackTargetContext::State) final;
+    void mockMediaPlaybackTargetPickerDismissPopup() final;
 #endif
 
     void imageOrMediaDocumentSizeChanged(const WebCore::IntSize&) final;
@@ -362,19 +386,28 @@ private:
     void didInvalidateDocumentMarkerRects() final;
 
 #if ENABLE(RESOURCE_LOAD_STATISTICS)
-    void hasStorageAccess(String&& subFrameHost, String&& topFrameHost, uint64_t frameID, uint64_t pageID, WTF::CompletionHandler<void (bool)>&&) final;
-    void requestStorageAccess(String&& subFrameHost, String&& topFrameHost, uint64_t frameID, uint64_t pageID, WTF::CompletionHandler<void (bool)>&&) final;
+    void hasStorageAccess(WebCore::RegistrableDomain&& subFrameDomain, WebCore::RegistrableDomain&& topFrameDomain, WebCore::Frame&, WTF::CompletionHandler<void(bool)>&&) final;
+    void requestStorageAccess(WebCore::RegistrableDomain&& subFrameDomain, WebCore::RegistrableDomain&& topFrameDomain, WebCore::Frame&, WebCore::StorageAccessScope, WTF::CompletionHandler<void(WebCore::RequestStorageAccessResult)>&&) final;
 #endif
 
 #if ENABLE(DEVICE_ORIENTATION)
-    void shouldAllowDeviceOrientationAndMotionAccess(const WebCore::SecurityOrigin&, CompletionHandler<void(bool)>&&) final;
+    void shouldAllowDeviceOrientationAndMotionAccess(WebCore::Frame&, bool mayPrompt, CompletionHandler<void(WebCore::DeviceOrientationOrMotionPermissionState)>&&) final;
 #endif
 
-    String m_cachedToolTip;
-    mutable RefPtr<WebFrame> m_cachedFrameSetLargestFrame;
+    void configureLoggingChannel(const String&, WTFLogChannelState, WTFLogLevel) final;
+
+    bool userIsInteracting() const final;
+    void setUserIsInteracting(bool) final;
+
+#if ENABLE(WEB_AUTHN)
+    void setMockWebAuthenticationConfiguration(const WebCore::MockWebAuthenticationConfiguration&) final;
+#endif
+
     mutable bool m_cachedMainFrameHasHorizontalScrollbar { false };
     mutable bool m_cachedMainFrameHasVerticalScrollbar { false };
-
+#if ENABLE(GPU_PROCESS)
+    mutable std::unique_ptr<RemoteRenderingBackendProxy> m_remoteRenderingBackendProxy;
+#endif
     WebPage& m_page;
 };
 

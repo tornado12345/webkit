@@ -25,7 +25,7 @@
 
 #import <WebCore/AbstractPasteboard.h>
 
-#if TARGET_OS_IPHONE && __IPHONE_OS_VERSION_MIN_REQUIRED >= 110000
+#if TARGET_OS_IOS
 
 struct CGSize;
 
@@ -112,4 +112,4 @@ WEBCORE_EXPORT @interface WebItemProviderPasteboard : NSObject<AbstractPasteboar
 
 NS_ASSUME_NONNULL_END
 
-#endif // TARGET_OS_IPHONE && __IPHONE_OS_VERSION_MIN_REQUIRED >= 110000
+#endif // TARGET_OS_IOS

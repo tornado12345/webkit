@@ -26,6 +26,8 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import os
+
 
 class WebKitFinder(object):
     def __init__(self, filesystem):
@@ -42,7 +44,6 @@ class WebKitFinder(object):
         # (the chromium test bots, for example), might only check out subdirectories like
         # Tools/Scripts. This code will also work if there is no SCM system at all.
         if not self._webkit_base:
-            self._webkit_base = self._webkit_base
             module_path = self._filesystem.path_to_module(self.__module__)
             tools_index = module_path.rfind('Tools')
             assert tools_index != -1, "could not find location of this checkout from %s" % module_path
@@ -51,6 +52,10 @@ class WebKitFinder(object):
 
     def path_from_webkit_base(self, *comps):
         return self._filesystem.join(self.webkit_base(), *comps)
+
+    def path_from_webkit_outputdir(self, *comps):
+        base_path = os.environ['WEBKIT_OUTPUTDIR'] if 'WEBKIT_OUTPUTDIR' in os.environ else self.path_from_webkit_base('WebKitBuild')
+        return self._filesystem.join(base_path, *comps)
 
     def path_to_script(self, script_name):
         """Returns the relative path to the script from the top of the WebKit tree."""

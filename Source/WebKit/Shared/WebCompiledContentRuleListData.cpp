@@ -29,6 +29,8 @@
 #if ENABLE(CONTENT_EXTENSIONS)
 
 #include "ArgumentCoders.h"
+#include "DataReference.h"
+#include "SharedBufferDataReference.h"
 
 namespace WebKit {
 
@@ -36,7 +38,14 @@ void WebCompiledContentRuleListData::encode(IPC::Encoder& encoder) const
 {
     SharedMemory::Handle handle;
     data->createHandle(handle, SharedMemory::Protection::ReadOnly);
-    encoder << handle;
+    
+#if OS(DARWIN) || OS(WINDOWS)
+    // Exact data size is the last bytecode offset plus its size.
+    uint64_t dataSize = topURLFiltersBytecodeOffset + topURLFiltersBytecodeSize;
+#else
+    uint64_t dataSize = 0;
+#endif
+    encoder << SharedMemory::IPCHandle { WTFMove(handle), dataSize };
 
     encoder << conditionsApplyOnlyToDomainOffset;
     encoder << actionsOffset;
@@ -51,32 +60,68 @@ void WebCompiledContentRuleListData::encode(IPC::Encoder& encoder) const
 
 Optional<WebCompiledContentRuleListData> WebCompiledContentRuleListData::decode(IPC::Decoder& decoder)
 {
-    WebCompiledContentRuleListData compiledContentRuleListData;
-    SharedMemory::Handle handle;
-    if (!decoder.decode(handle))
+    SharedMemory::IPCHandle ipcHandle;
+    if (!decoder.decode(ipcHandle))
         return WTF::nullopt;
-    compiledContentRuleListData.data = SharedMemory::map(handle, SharedMemory::Protection::ReadOnly);
+    RefPtr<SharedMemory> data = SharedMemory::map(ipcHandle.handle, SharedMemory::Protection::ReadOnly);
 
-    if (!decoder.decode(compiledContentRuleListData.conditionsApplyOnlyToDomainOffset))
-        return WTF::nullopt;
-    if (!decoder.decode(compiledContentRuleListData.actionsOffset))
-        return WTF::nullopt;
-    if (!decoder.decode(compiledContentRuleListData.actionsSize))
-        return WTF::nullopt;
-    if (!decoder.decode(compiledContentRuleListData.filtersWithoutConditionsBytecodeOffset))
-        return WTF::nullopt;
-    if (!decoder.decode(compiledContentRuleListData.filtersWithoutConditionsBytecodeSize))
-        return WTF::nullopt;
-    if (!decoder.decode(compiledContentRuleListData.filtersWithConditionsBytecodeOffset))
-        return WTF::nullopt;
-    if (!decoder.decode(compiledContentRuleListData.filtersWithConditionsBytecodeSize))
-        return WTF::nullopt;
-    if (!decoder.decode(compiledContentRuleListData.topURLFiltersBytecodeOffset))
-        return WTF::nullopt;
-    if (!decoder.decode(compiledContentRuleListData.topURLFiltersBytecodeSize))
+    Optional<unsigned> conditionsApplyOnlyToDomainOffset;
+    decoder >> conditionsApplyOnlyToDomainOffset;
+    if (!conditionsApplyOnlyToDomainOffset)
         return WTF::nullopt;
 
-    return WTFMove(compiledContentRuleListData);
+    Optional<unsigned> actionsOffset;
+    decoder >> actionsOffset;
+    if (!actionsOffset)
+        return WTF::nullopt;
+
+    Optional<unsigned> actionsSize;
+    decoder >> actionsSize;
+    if (!actionsSize)
+        return WTF::nullopt;
+
+    Optional<unsigned> filtersWithoutConditionsBytecodeOffset;
+    decoder >> filtersWithoutConditionsBytecodeOffset;
+    if (!filtersWithoutConditionsBytecodeOffset)
+        return WTF::nullopt;
+
+    Optional<unsigned> filtersWithoutConditionsBytecodeSize;
+    decoder >> filtersWithoutConditionsBytecodeSize;
+    if (!filtersWithoutConditionsBytecodeSize)
+        return WTF::nullopt;
+
+    Optional<unsigned> filtersWithConditionsBytecodeOffset;
+    decoder >> filtersWithConditionsBytecodeOffset;
+    if (!filtersWithConditionsBytecodeOffset)
+        return WTF::nullopt;
+
+    Optional<unsigned> filtersWithConditionsBytecodeSize;
+    decoder >> filtersWithConditionsBytecodeSize;
+    if (!filtersWithConditionsBytecodeSize)
+        return WTF::nullopt;
+
+    Optional<unsigned> topURLFiltersBytecodeOffset;
+    decoder >> topURLFiltersBytecodeOffset;
+    if (!topURLFiltersBytecodeOffset)
+        return WTF::nullopt;
+
+    Optional<unsigned> topURLFiltersBytecodeSize;
+    decoder >> topURLFiltersBytecodeSize;
+    if (!topURLFiltersBytecodeSize)
+        return WTF::nullopt;
+
+    return {{
+        WTFMove(data),
+        WTFMove(*conditionsApplyOnlyToDomainOffset),
+        WTFMove(*actionsOffset),
+        WTFMove(*actionsSize),
+        WTFMove(*filtersWithoutConditionsBytecodeOffset),
+        WTFMove(*filtersWithoutConditionsBytecodeSize),
+        WTFMove(*filtersWithConditionsBytecodeOffset),
+        WTFMove(*filtersWithConditionsBytecodeSize),
+        WTFMove(*topURLFiltersBytecodeOffset),
+        WTFMove(*topURLFiltersBytecodeSize)
+    }};
 }
 
 } // namespace WebKit

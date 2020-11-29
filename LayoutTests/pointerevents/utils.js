@@ -12,24 +12,29 @@ function target_test(...args)
     let continutation = args[impliedOptions ? 0 : 1];
     let description = args[impliedOptions ? 1 : 2];
 
+    options.name = options.name || "div";
     options.x = options.x || 0;
     options.y = options.y || 0;
     options.width = options.width || "100%";
     options.height = options.height || "100%";
 
     async_test(test => {
-        const target = document.body.appendChild(document.createElement("div"));
-        target.setAttribute("style", `
-            position: absolute;
-            left: ${options.x};
-            top: ${options.y};
-            width: ${options.width};
-            height: ${options.height};
-        `);
-        test.add_cleanup(() => target.remove());
-
-        continutation(target, test);
+        continutation(makeTarget(test, options), test);
     }, description);
+}
+
+function makeTarget(test, options)
+{
+    const target = document.body.appendChild(document.createElement(options.name));
+    target.setAttribute("style", `
+        position: absolute;
+        left: ${options.x};
+        top: ${options.y};
+        width: ${options.width};
+        height: ${options.height};
+    `);
+    test.add_cleanup(() => target.remove());
+    return target;
 }
 
 class EventTracker
@@ -55,6 +60,8 @@ class EventTracker
             this._handlePointerEvent(event);
         else if (event instanceof MouseEvent)
             this._handleMouseEvent(event);
+        else if (event instanceof TouchEvent)
+            this._handleTouchEvent(event);
     }
 
     _handlePointerEvent(event)
@@ -67,7 +74,11 @@ class EventTracker
             type: event.type,
             x: event.clientX,
             y: event.clientY,
-            isPrimary: event.isPrimary
+            pressure: event.pressure,
+            isPrimary: event.isPrimary,
+            isTrusted: event.isTrusted,
+            button: event.button,
+            buttons: event.buttons
         });
     }
 
@@ -80,15 +91,20 @@ class EventTracker
         });
     }
 
+    _handleTouchEvent(event)
+    {
+        this.events.push({ type: event.type });
+    }
+
     assertMatchesEvents(expectedEvents)
     {
         assert_true(!!this.events.length, "Event tracker saw some events.");
-        assert_equals(expectedEvents.length, this.events.length, "Expected events and actual events have the same length.");
+        assert_equals(this.events.length, expectedEvents.length, "Expected events and actual events have the same length.");
         for (let i = 0; i < expectedEvents.length; ++i) {
             const expectedEvent = expectedEvents[i];
             const actualEvent = this.events[i];
             for (let property of Object.getOwnPropertyNames(expectedEvent))
-                assert_equals(expectedEvent[property], actualEvent[property], `Property ${property} matches for event at index ${i}.`);
+                assert_equals(actualEvent[property], expectedEvent[property], `Property ${property} matches for event at index ${i}.`);
         }
     }
 }
@@ -106,20 +122,30 @@ const ui = new (class UIController {
         return this.fingers[id] = new Finger(id);
     }
 
-    beginTouches(options)
-    {
-        return this._run(`uiController.touchDownAtPoint(${options.x}, ${options.y}, ${options.numberOfTouches || 1})`);
-    }
-
     swipe(from, to)
     {
-        const durationInSeconds = 0.5;
-        return this._run(`uiController.dragFromPointToPoint(${from.x}, ${from.y}, ${to.x}, ${to.y}, ${durationInSeconds})`);
+        const durationInSeconds = 0.1;
+        return new Promise(resolve => this._run('dragFromPointToPoint', `${from.x}, ${from.y}, ${to.x}, ${to.y}, ${durationInSeconds}`).then(() =>
+            setTimeout(resolve, durationInSeconds * 1000)
+        ));
     }
 
     tap(options)
     {
-        return this._run(`uiController.singleTapAtPoint(${options.x}, ${options.y})`);
+        return this._run('singleTapAtPoint', `${options.x}, ${options.y}`);
+    }
+
+    doubleTap(options)
+    {
+        return this._run('doubleTapAtPoint', `${options.x}, ${options.y}, 0`);
+    }
+
+    doubleTapToZoom(options)
+    {
+        const durationInSeconds = 0.35;
+        return new Promise(resolve => this._run('doubleTapAtPoint', `${options.x}, ${options.y}, 0`).then(() =>
+            setTimeout(resolve, durationInSeconds * 1000)
+        ));
     }
 
     pinchOut(options)
@@ -127,55 +153,30 @@ const ui = new (class UIController {
         options.x = options.x || 0;
         options.y = options.y || 0;
 
-        const startEvent = {
-            inputType : "hand",
-            timeOffset : 0,
-            touches : [
-                { inputType : "finger",
-                  phase : "moved",
-                  id : 1,
-                  x : options.x,
-                  y : options.y,
-                  pressure : 0
-                },
-                { inputType : "finger",
-                  phase : "moved",
-                  id : 2,
-                  x : (options.x + options.width) / options.scale,
-                  y : (options.y + options.height) / options.scale,
-                  pressure : 0
-                }
-            ]
-        };
+        const startPoint = { x: options.x + options.width, y: options.y + options.height };
+        const endPoint = { x: options.x + options.width * options.scale, y: options.y + options.height * options.scale };
 
-        const endEvent = {
-            inputType : "hand",
-            timeOffset : 0.5,
-            touches : [
-                { inputType : "finger",
-                  phase : "moved",
-                  id : 1,
-                  x : options.x,
-                  y : options.y,
-                  pressure : 0
-                },
-                { inputType : "finger",
-                  phase : "moved",
-                  id : 2,
-                  x : options.x + options.width,
-                  y : options.y + options.height,
-                  pressure : 0
-                }
-            ]
-        };
+        function step(factor)
+        {
+            return {
+                x: endPoint.x + (startPoint.x - endPoint.x) * (1 - factor),
+                y: endPoint.y + (startPoint.y - endPoint.y) * (1 - factor)
+            };
+        }
 
-        return this._runEvents([{
-            interpolate : "linear",
-            timestep: 0.1,
-            coordinateSpace : "content",
-            startEvent: startEvent,
-            endEvent: endEvent
-        }]);
+        const one = this.finger();
+        const two = this.finger();
+        return this.sequence([
+            one.begin({ x: options.x, y: options.y }),
+            two.begin(step(0)),
+            two.move(step(0.2)),
+            two.move(step(0.4)),
+            two.move(step(0.6)),
+            two.move(step(0.8)),
+            two.move(step(1)),
+            one.end(),
+            two.end()
+        ]);
     }
 
     sequence(touches)
@@ -212,25 +213,23 @@ const ui = new (class UIController {
         }));
     }
 
-    beginStylus(options)
+    tapStylus(options)
     {
         options.azimuthAngle = options.azimuthAngle || 0;
         options.altitudeAngle = options.altitudeAngle || 0;
         options.pressure = options.pressure || 0;
-        return this._run(`uiController.stylusDownAtPoint(${options.x}, ${options.y}, ${options.azimuthAngle}, ${options.altitudeAngle}, ${options.pressure})`);
+        return this._run('stylusTapAtPoint', `${options.x}, ${options.y}, ${options.azimuthAngle}, ${options.altitudeAngle}, ${options.pressure}`);
     }
 
     _runEvents(events)
     {
-        return this._run(`uiController.sendEventStream('${JSON.stringify({ events })}')`);
+        return this._run('sendEventStream', `'${JSON.stringify({ events })}'`);
     }
 
-    _run(command)
+    _run(command, args)
     {
-        return new Promise(resolve => testRunner.runUIScript(`(function() {
-            (function() { ${command} })();
-            uiController.uiScriptComplete();
-        })();`, resolve));
+        const script = `uiController.${command}(${args}, () => uiController.uiScriptComplete());`;
+        return new Promise(resolve => testRunner.runUIScript(script, resolve));
     }
 
 })();
@@ -260,14 +259,14 @@ class Finger
 
     stationary(options)
     {
-        return this._action("stationary", options.x || 0, options.y || 0);
+        return this._action("stationary", options.x || this._lastX, options.y || this._lastY, options.pressure || 0);
     }
 
-    _action(phase, x, y)
+    _action(phase, x, y, pressure = 0)
     {
         this._lastX = x;
         this._lastY = y;
-        return { inputType: "finger", id: this.id, phase, x, y };
+        return { inputType: "finger", id: this.id, phase, x, y, pressure };
     }
 
 }

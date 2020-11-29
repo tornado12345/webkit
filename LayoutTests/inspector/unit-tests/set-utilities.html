@@ -8,6 +8,112 @@ function test()
     let suite = InspectorTest.createSyncSuite("Set");
 
     suite.addTestCase({
+        name: "Set.prototype.find",
+        test() {
+            let set = new Set(["a", "b"]);
+            InspectorTest.expectEqual(set.find((item) => item === "b"), "b", "Set can find a item it holds.");
+            InspectorTest.expectEqual(set.find((item) => typeof item === "string"), "a", "Set finds the first item if the given predicate matches multiple items.");
+            InspectorTest.expectEqual(set.find((item) => typeof item === "number"), undefined, "Set returns 'undefined' when attempting to find an item if the given predicate doesn't match anything.");
+        },
+    });
+
+    suite.addTestCase({
+        name: "Set.prototype.pushAll",
+        test() {
+            function test(iterable) {
+                let set = new Set([1, 2]);
+
+                function stringify(object)
+                {
+                    let string = JSON.stringify(Array.from(object), function(key, value) {
+                        if (value instanceof Node)
+                            return "<" + value.localName + ">";
+                        return value;
+                    });
+                    return string.replace(/"(<[^>]*>)"/g, "$1");
+                }
+
+                let before = stringify(set);
+                set.addAll(iterable);
+                let after = stringify(set);
+
+                InspectorTest.log(before + " => " + after);
+            }
+
+            InspectorTest.log("Array:");
+            test(["a1", "a2"]);
+
+            InspectorTest.newline();
+
+            InspectorTest.log("Set:");
+            const set = new Set(["s1", "s2"]);
+            test(set);
+            test(set.entries());
+            test(set.keys());
+            test(set.values());
+
+            InspectorTest.newline();
+
+            InspectorTest.log("Map:");
+            const map = new Map([["m1k", "m1v"], ["m2k", "m2v"]]);
+            test(map);
+            test(map.entries());
+            test(map.keys());
+            test(map.values());
+
+            InspectorTest.newline();
+
+            InspectorTest.log("Object:");
+            const object = {
+                o1k: "o1v",
+                o2k: "o2v",
+            };
+            test(Object.entries(object));
+            test(Object.keys(object));
+            test(Object.values(object));
+
+            InspectorTest.newline();
+
+            InspectorTest.log("Generator:");
+            function* generator() {
+                yield "g1";
+                yield "g2";
+            }
+            test(generator());
+
+            InspectorTest.newline();
+
+            InspectorTest.log("Node:");
+            const node = document.createElement("div");
+            node.appendChild(document.createElement("n1"));
+            node.appendChild(document.createElement("n2"));
+            test(node.children);
+            test(node.querySelectorAll("*"));
+
+            InspectorTest.newline();
+
+            InspectorTest.log("Object (doesn't have [Symbol.iterator]):");
+            InspectorTest.expectException(() => {
+                test(object);
+            });
+        },
+    });
+
+    suite.addTestCase({
+        name: "Set.prototype.take",
+        test() {
+            const key = "key";
+
+            let set = new Set;
+            set.add(key);
+            InspectorTest.expectTrue(set.take(key), "Set can take `key`.");
+            InspectorTest.expectFalse(set.has(key), "Set no longer has `key`.");
+            InspectorTest.expectFalse(set.take(key), "Set can NOT take `key`.");
+            InspectorTest.expectFalse(set.take("DNE"), "Set can NOT take `DNE`, as it does NOT exist.");
+        }
+    });
+
+    suite.addTestCase({
         name: "Set.prototype.intersects",
         test() {
             function testTrue(a, b, message) {
@@ -122,11 +228,25 @@ function test()
         name: "Set.prototype.firstValue",
         test() {
             function testFirstValue(values) {
-                InspectorTest.expectEqual(new Set(values).firstValue, values[0], `Set with values [${values}] should have firstValue equal to ${values[0]}.`);
+                let expected = values[0];
+                InspectorTest.expectEqual(new Set(values).firstValue, expected, `Set with values [${values}] should have firstValue equal to ${expected}.`);
             }
 
             testFirstValue([]);
             testFirstValue([1, 2, 3]);
+        }
+    });
+
+    suite.addTestCase({
+        name: "Set.prototype.lastValue",
+        test() {
+            function testLastValue(values) {
+                let expected = values.lastValue;
+                InspectorTest.expectEqual(new Set(values).lastValue, expected, `Set with values [${values}] should have lastValue equal to ${expected}.`);
+            }
+
+            testLastValue([]);
+            testLastValue([1, 2, 3]);
         }
     });
 

@@ -36,33 +36,9 @@ void TestRunner::platformInitialize()
 {
 }
 
-void TestRunner::invalidateWaitToDumpWatchdogTimer()
-{
-    if (!m_waitToDumpWatchdogTimer)
-        return;
-
-    CFRunLoopTimerInvalidate(m_waitToDumpWatchdogTimer.get());
-    m_waitToDumpWatchdogTimer = nullptr;
-}
-
-static void waitUntilDoneWatchdogTimerFired(CFRunLoopTimerRef timer, void* info)
-{
-    InjectedBundle::singleton().testRunner()->waitToDumpWatchdogTimerFired();
-}
-
-void TestRunner::initializeWaitToDumpWatchdogTimerIfNeeded()
-{
-    if (m_waitToDumpWatchdogTimer)
-        return;
-
-    CFTimeInterval interval = m_timeout.seconds();
-    m_waitToDumpWatchdogTimer = adoptCF(CFRunLoopTimerCreate(kCFAllocatorDefault, CFAbsoluteTimeGetCurrent() + interval, 0, 0, 0, WTR::waitUntilDoneWatchdogTimerFired, NULL));
-    CFRunLoopAddTimer(CFRunLoopGetCurrent(), m_waitToDumpWatchdogTimer.get(), kCFRunLoopCommonModes);
-}
-
 JSRetainPtr<JSStringRef> TestRunner::pathToLocalResource(JSStringRef url)
 {
-    return JSStringRetain(url); // Do nothing on mac.
+    return url; // Do nothing on Cocoa.
 }
 
 JSRetainPtr<JSStringRef> TestRunner::inspectorTestStubURL()
@@ -70,16 +46,11 @@ JSRetainPtr<JSStringRef> TestRunner::inspectorTestStubURL()
 #if PLATFORM(IOS_FAMILY)
     return nullptr;
 #else
-    CFBundleRef inspectorBundle = CFBundleGetBundleWithIdentifier(CFSTR("com.apple.WebInspectorUI"));
+    auto inspectorBundle = CFBundleGetBundleWithIdentifier(CFSTR("com.apple.WebInspectorUI"));
     if (!inspectorBundle)
         return nullptr;
-
-    RetainPtr<CFURLRef> url = adoptCF(CFBundleCopyResourceURL(inspectorBundle, CFSTR("TestStub"), CFSTR("html"), NULL));
-    if (!url)
-        return nullptr;
-
-    CFStringRef urlString = CFURLGetString(url.get());
-    return adopt(JSStringCreateWithCFString(urlString));
+    auto resourceURL = adoptCF(CFBundleCopyResourceURL(inspectorBundle, CFSTR("TestStub"), CFSTR("html"), NULL));
+    return resourceURL ? adopt(JSStringCreateWithCFString(CFURLGetString(resourceURL.get()))) : nullptr;
 #endif
 }
 

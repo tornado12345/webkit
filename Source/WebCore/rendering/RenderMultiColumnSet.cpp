@@ -584,7 +584,7 @@ void RenderMultiColumnSet::paintColumnRules(PaintInfo& paintInfo, const LayoutPo
     const Color& ruleColor = blockStyle.visitedDependentColorWithColorFilter(CSSPropertyColumnRuleColor);
     bool ruleTransparent = blockStyle.columnRuleIsTransparent();
     BorderStyle ruleStyle = collapsedBorderStyle(blockStyle.columnRuleStyle());
-    LayoutUnit ruleThickness = blockStyle.columnRuleWidth();
+    LayoutUnit ruleThickness { blockStyle.columnRuleWidth() };
     LayoutUnit colGap = columnGap();
     bool renderRule = ruleStyle > BorderStyle::Hidden && !ruleTransparent;
     if (!renderRule)
@@ -964,6 +964,11 @@ LayoutPoint RenderMultiColumnSet::translateFragmentPointToFragmentedFlow(const L
     return logicalPoint;
 }
 
+Node* RenderMultiColumnSet::nodeForHitTest() const
+{
+    return document().documentElement();
+}
+
 void RenderMultiColumnSet::updateHitTestResult(HitTestResult& result, const LayoutPoint& point)
 {
     if (result.innerNode() || !parent()->isRenderView())
@@ -971,8 +976,7 @@ void RenderMultiColumnSet::updateHitTestResult(HitTestResult& result, const Layo
     
     // Note this does not work with column spans, but once we implement RenderPageSet, we can move this code
     // over there instead (and spans of course won't be allowed on pages).
-    Node* node = document().documentElement();
-    if (node) {
+    if (auto* node = nodeForHitTest()) {
         result.setInnerNode(node);
         if (!result.innerNonSharedNode())
             result.setInnerNonSharedNode(node);

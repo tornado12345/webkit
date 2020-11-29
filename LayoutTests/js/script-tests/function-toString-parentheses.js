@@ -47,10 +47,13 @@ function testLeftAssociativeSame(opA, opB)
     testKeepParentheses("a " + opA + " (b " + opB + " c)");
 }
 
-function testRightAssociativeSame(opA, opB)
+function testRightAssociativeSame(opA, opB, leftParensThrows = false)
 {
     testKeepParentheses("a " + opA + " b " + opB + " c");
-    testKeepParentheses("(a " + opA + " b) " + opB + " c");
+    if (leftParensThrows)
+        shouldThrow(`compileAndSerialize("(a ${opA} b) ${opB} c")`);
+    else
+        testKeepParentheses("(a " + opA + " b) " + opB + " c");
     testOptionalParentheses("a " + opA + " (b " + opB + " c)");
 }
 
@@ -99,12 +102,12 @@ var assignmentOperators = [ "=", "*=", "/=" , "%=", "+=", "-=", "<<=", ">>=", ">
 
 for (i = 0; i < assignmentOperators.length; ++i) {
     var op = assignmentOperators[i];
-    testRightAssociativeSame(op, op);
+    testRightAssociativeSame(op, op, true);
     if (i != 0)
-        testRightAssociativeSame("=", op);
+        testRightAssociativeSame("=", op, true);
     testLowerFirst(op, "+");
     shouldThrow("compileAndSerialize('a + b " + op + " c')");
-    testKeepParentheses("(a + b) " + op + " c");
+    shouldThrow("compileAndSerialize('(a + b) " + op + " c')");
     testKeepParentheses("a + (b " + op + " c)");
 }
 
@@ -115,7 +118,10 @@ for (i = 0; i < prefixOperators.length; ++i) {
     var op = prefixOperators[i] + prefixOperatorSpace[i];
     testKeepParentheses("" + op + "a + b");
     testOptionalParentheses("(" + op + "a) + b");
-    testKeepParentheses("" + op + "(a + b)");
+    if (prefixOperators[i] !== "++" && prefixOperators[i] !== "--")
+        testKeepParentheses("" + op + "(a + b)");
+    else
+        shouldThrow("compileAndSerialize('" + op + "(a + b)')");
     testKeepParentheses("!" + op + "a");
     testOptionalParentheses("!(" + op + "a)");
 }
@@ -123,11 +129,11 @@ for (i = 0; i < prefixOperators.length; ++i) {
 
 testKeepParentheses("!a++");
 testOptionalParentheses("!(a++)");
-testKeepParentheses("(!a)++");
+shouldThrow("compileAndSerialize('(!a)++')");
 
 testKeepParentheses("!a--");
 testOptionalParentheses("!(a--)");
-testKeepParentheses("(!a)--");
+shouldThrow("compileAndSerialize('(!a)--')");
 
 testKeepParentheses("(-1)[a]");
 testKeepParentheses("(-1)[a] = b");
@@ -182,9 +188,9 @@ testKeepParentheses("(1).a()");
 
 for (i = 0; i < assignmentOperators.length; ++i) {
     var op = assignmentOperators[i];
-    testKeepParentheses("(-1) " + op + " a");
-    testKeepParentheses("(- 0) " + op + " a");
-    testKeepParentheses("1 " + op + " a");
+    shouldThrow("compileAndSerialize('(-1) " + op + " a')");
+    shouldThrow("compileAndSerialize('(- 0) " + op + " a')");
+    shouldThrow("compileAndSerialize('1 " + op + " a')");
 }
 
 shouldBe("compileAndSerializeLeftmostTest('({ }).x')", "'({ }).x'");

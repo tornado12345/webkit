@@ -35,6 +35,7 @@
 #include "ViewSnapshotStore.h"
 #include "WebColorPickerGtk.h"
 #include "WebContextMenuProxyGtk.h"
+#include "WebDataListSuggestionsDropdownGtk.h"
 #include "WebEventFactory.h"
 #include "WebKitColorChooser.h"
 #include "WebKitPopupMenu.h"
@@ -64,11 +65,14 @@ PageClientImpl::PageClientImpl(GtkWidget* viewWidget)
 // PageClient's pure virtual functions
 std::unique_ptr<DrawingAreaProxy> PageClientImpl::createDrawingAreaProxy(WebProcessProxy& process)
 {
-    return std::make_unique<DrawingAreaProxyCoordinatedGraphics>(*webkitWebViewBaseGetPage(WEBKIT_WEB_VIEW_BASE(m_viewWidget)), process);
+    return makeUnique<DrawingAreaProxyCoordinatedGraphics>(*webkitWebViewBaseGetPage(WEBKIT_WEB_VIEW_BASE(m_viewWidget)), process);
 }
 
 void PageClientImpl::setViewNeedsDisplay(const WebCore::Region& region)
 {
+#if USE(GTK4)
+    gtk_widget_queue_draw(m_viewWidget);
+#else
     WebPageProxy* pageProxy = webkitWebViewBaseGetPage(WEBKIT_WEB_VIEW_BASE(m_viewWidget));
     ASSERT(pageProxy);
 
@@ -80,9 +84,10 @@ void PageClientImpl::setViewNeedsDisplay(const WebCore::Region& region)
     }
 
     gtk_widget_queue_draw_region(m_viewWidget, toCairoRegion(region).get());
+#endif
 }
 
-void PageClientImpl::requestScroll(const WebCore::FloatPoint&, const WebCore::IntPoint&, bool)
+void PageClientImpl::requestScroll(const WebCore::FloatPoint&, const WebCore::IntPoint&)
 {
     notImplemented();
 }
@@ -118,9 +123,14 @@ bool PageClientImpl::isViewInWindow()
     return webkitWebViewBaseIsInWindow(WEBKIT_WEB_VIEW_BASE(m_viewWidget));
 }
 
+void PageClientImpl::PageClientImpl::processWillSwap()
+{
+    webkitWebViewBaseWillSwapWebProcess(WEBKIT_WEB_VIEW_BASE(m_viewWidget));
+}
+
 void PageClientImpl::PageClientImpl::processDidExit()
 {
-    notImplemented();
+    webkitWebViewBaseDidExitWebProcess(WEBKIT_WEB_VIEW_BASE(m_viewWidget));
 }
 
 void PageClientImpl::didRelaunchProcess()
@@ -142,16 +152,29 @@ void PageClientImpl::setCursor(const WebCore::Cursor& cursor)
     // http://bugs.webkit.org/show_bug.cgi?id=16388
     // Setting the cursor may be an expensive operation in some backends,
     // so don't re-set the cursor if it's already set to the target value.
+#if USE(GTK4)
+    GdkCursor* currentCursor = gtk_widget_get_cursor(m_viewWidget);
+    GdkCursor* newCursor = cursor.platformCursor().get();
+    if (currentCursor != newCursor)
+        gtk_widget_set_cursor(m_viewWidget, newCursor);
+#else
     GdkWindow* window = gtk_widget_get_window(m_viewWidget);
     GdkCursor* currentCursor = gdk_window_get_cursor(window);
     GdkCursor* newCursor = cursor.platformCursor().get();
     if (currentCursor != newCursor)
         gdk_window_set_cursor(window, newCursor);
+#endif
 }
 
-void PageClientImpl::setCursorHiddenUntilMouseMoves(bool /* hiddenUntilMouseMoves */)
+void PageClientImpl::setCursorHiddenUntilMouseMoves(bool hiddenUntilMouseMoves)
 {
-    notImplemented();
+    if (!hiddenUntilMouseMoves)
+        return;
+
+    setCursor(WebCore::noneCursor());
+
+    // There's no need to set a timer to restore the cursor by hand. It will
+    // be automatically restored when the mouse moves.
 }
 
 void PageClientImpl::didChangeViewportProperties(const WebCore::ViewportAttributes&)
@@ -216,14 +239,16 @@ WebCore::IntRect PageClientImpl::rootViewToAccessibilityScreen(const WebCore::In
 
 void PageClientImpl::doneWithKeyEvent(const NativeWebKeyboardEvent& event, bool wasEventHandled)
 {
-    if (wasEventHandled)
-        return;
-    if (event.isFakeEventForComposition())
+    if (wasEventHandled || event.type() != WebEvent::Type::KeyDown || !event.nativeEvent())
         return;
 
     WebKitWebViewBase* webkitWebViewBase = WEBKIT_WEB_VIEW_BASE(m_viewWidget);
     webkitWebViewBaseForwardNextKeyEvent(webkitWebViewBase);
+#if USE(GTK4)
+    gdk_display_put_event(gtk_widget_get_display(m_viewWidget), event.nativeEvent());
+#else
     gtk_main_do_event(event.nativeEvent());
+#endif
 }
 
 RefPtr<WebPopupMenuProxy> PageClientImpl::createPopupMenuProxy(WebPageProxy& page)
@@ -244,6 +269,13 @@ RefPtr<WebColorPicker> PageClientImpl::createColorPicker(WebPageProxy* page, con
         return WebKitColorChooser::create(*page, color, rect);
     return WebColorPickerGtk::create(*page, color, rect);
 }
+
+#if ENABLE(DATALIST_ELEMENT)
+RefPtr<WebDataListSuggestionsDropdown> PageClientImpl::createDataListSuggestionsDropdown(WebPageProxy& page)
+{
+    return WebDataListSuggestionsDropdownGtk::create(m_viewWidget, page);
+}
+#endif
 
 void PageClientImpl::enterAcceleratedCompositingMode(const LayerTreeContext& layerTreeContext)
 {
@@ -277,9 +309,9 @@ void PageClientImpl::selectionDidChange()
         webkitWebViewSelectionDidChange(WEBKIT_WEB_VIEW(m_viewWidget));
 }
 
-RefPtr<ViewSnapshot> PageClientImpl::takeViewSnapshot()
+RefPtr<ViewSnapshot> PageClientImpl::takeViewSnapshot(Optional<WebCore::IntRect>&& clipRect)
 {
-    return webkitWebViewBaseTakeViewSnapshot(WEBKIT_WEB_VIEW_BASE(m_viewWidget));
+    return webkitWebViewBaseTakeViewSnapshot(WEBKIT_WEB_VIEW_BASE(m_viewWidget), WTFMove(clipRect));
 }
 
 void PageClientImpl::didChangeContentSize(const IntSize& size)
@@ -288,21 +320,21 @@ void PageClientImpl::didChangeContentSize(const IntSize& size)
 }
 
 #if ENABLE(DRAG_SUPPORT)
-void PageClientImpl::startDrag(Ref<SelectionData>&& selection, DragOperation dragOperation, RefPtr<ShareableBitmap>&& dragImage)
+void PageClientImpl::startDrag(SelectionData&& selection, OptionSet<DragOperation> dragOperationMask, RefPtr<ShareableBitmap>&& dragImage)
 {
-    WebKitWebViewBase* webView = WEBKIT_WEB_VIEW_BASE(m_viewWidget);
-    webkitWebViewBaseDragAndDropHandler(webView).startDrag(WTFMove(selection), dragOperation, WTFMove(dragImage));
+    webkitWebViewBaseStartDrag(WEBKIT_WEB_VIEW_BASE(m_viewWidget), WTFMove(selection), dragOperationMask, WTFMove(dragImage));
+}
 
-    // A drag starting should prevent a double-click from happening. This might
-    // happen if a drag is followed very quickly by another click (like in the WTR).
-    webkitWebViewBaseResetClickCounter(webView);
+void PageClientImpl::didPerformDragControllerAction()
+{
+    webkitWebViewBaseDidPerformDragControllerAction(WEBKIT_WEB_VIEW_BASE(m_viewWidget));
 }
 #endif
 
-void PageClientImpl::handleDownloadRequest(DownloadProxy* download)
+void PageClientImpl::handleDownloadRequest(DownloadProxy& download)
 {
     if (WEBKIT_IS_WEB_VIEW(m_viewWidget))
-        webkitWebViewHandleDownloadRequest(WEBKIT_WEB_VIEW(m_viewWidget), download);
+        webkitWebViewHandleDownloadRequest(WEBKIT_WEB_VIEW(m_viewWidget), &download);
 }
 
 void PageClientImpl::didCommitLoadForMainFrame(const String& /* mimeType */, bool /* useCustomContentProvider */ )
@@ -369,16 +401,17 @@ void PageClientImpl::beganExitFullScreen(const IntRect& /* initialFrame */, cons
 #if ENABLE(TOUCH_EVENTS)
 void PageClientImpl::doneWithTouchEvent(const NativeWebTouchEvent& event, bool wasEventHandled)
 {
+#if !USE(GTK4)
     const GdkEvent* touchEvent = event.nativeEvent();
+    if (!touchEvent)
+        return;
 
-#if HAVE(GTK_GESTURES)
     GestureController& gestureController = webkitWebViewBaseGestureController(WEBKIT_WEB_VIEW_BASE(m_viewWidget));
     if (wasEventHandled) {
         gestureController.reset();
         return;
     }
     wasEventHandled = gestureController.handleEvent(const_cast<GdkEvent*>(event.nativeEvent()));
-#endif
 
     if (wasEventHandled)
         return;
@@ -426,19 +459,25 @@ void PageClientImpl::doneWithTouchEvent(const NativeWebTouchEvent& event, bool w
     pointerEvent->any.send_event = TRUE;
 
     gtk_widget_event(m_viewWidget, pointerEvent.get());
+#endif
 }
 #endif // ENABLE(TOUCH_EVENTS)
 
 void PageClientImpl::wheelEventWasNotHandledByWebCore(const NativeWebWheelEvent& event)
 {
-    ViewGestureController& controller = webkitWebViewBaseViewGestureController(WEBKIT_WEB_VIEW_BASE(m_viewWidget));
-    if (controller.isSwipeGestureEnabled()) {
-        controller.wheelEventWasNotHandledByWebCore(&event.nativeEvent()->scroll);
+    if (!event.nativeEvent())
+        return;
+
+#if !USE(GTK4)
+    ViewGestureController* controller = webkitWebViewBaseViewGestureController(WEBKIT_WEB_VIEW_BASE(m_viewWidget));
+    if (controller && controller->isSwipeGestureEnabled()) {
+        controller->wheelEventWasNotHandledByWebCore(&event.nativeEvent()->scroll);
         return;
     }
 
     webkitWebViewBaseForwardNextWheelEvent(WEBKIT_WEB_VIEW_BASE(m_viewWidget));
     gtk_main_do_event(event.nativeEvent());
+#endif
 }
 
 void PageClientImpl::didFinishLoadingDataForCustomContentProvider(const String&, const IPC::DataReference&)
@@ -472,6 +511,9 @@ void PageClientImpl::didRemoveNavigationGestureSnapshot()
 
 void PageClientImpl::didStartProvisionalLoadForMainFrame()
 {
+    if (WEBKIT_IS_WEB_VIEW(m_viewWidget))
+        webkitWebViewWillStartLoad(WEBKIT_WEB_VIEW(m_viewWidget));
+
     webkitWebViewBaseDidStartProvisionalLoadForMainFrame(WEBKIT_WEB_VIEW_BASE(m_viewWidget));
 }
 
@@ -480,14 +522,14 @@ void PageClientImpl::didFirstVisuallyNonEmptyLayoutForMainFrame()
     webkitWebViewBaseDidFirstVisuallyNonEmptyLayoutForMainFrame(WEBKIT_WEB_VIEW_BASE(m_viewWidget));
 }
 
-void PageClientImpl::didFinishLoadForMainFrame()
+void PageClientImpl::didFinishNavigation(API::Navigation* navigation)
 {
-    webkitWebViewBaseDidFinishLoadForMainFrame(WEBKIT_WEB_VIEW_BASE(m_viewWidget));
+    webkitWebViewBaseDidFinishNavigation(WEBKIT_WEB_VIEW_BASE(m_viewWidget), navigation);
 }
 
-void PageClientImpl::didFailLoadForMainFrame()
+void PageClientImpl::didFailNavigation(API::Navigation* navigation)
 {
-    webkitWebViewBaseDidFailLoadForMainFrame(WEBKIT_WEB_VIEW_BASE(m_viewWidget));
+    webkitWebViewBaseDidFailNavigation(WEBKIT_WEB_VIEW_BASE(m_viewWidget), navigation);
 }
 
 void PageClientImpl::didSameDocumentNavigationForMainFrame(SameDocumentNavigationType type)
@@ -528,6 +570,64 @@ bool PageClientImpl::decidePolicyForInstallMissingMediaPluginsPermissionRequest(
 void PageClientImpl::requestDOMPasteAccess(const IntRect&, const String&, CompletionHandler<void(WebCore::DOMPasteAccessResponse)>&& completionHandler)
 {
     completionHandler(WebCore::DOMPasteAccessResponse::DeniedForGesture);
+}
+
+UserInterfaceLayoutDirection PageClientImpl::userInterfaceLayoutDirection()
+{
+    GtkTextDirection direction = gtk_widget_get_direction(m_viewWidget);
+    if (direction == GTK_TEXT_DIR_RTL)
+        return UserInterfaceLayoutDirection::RTL;
+
+    return UserInterfaceLayoutDirection::LTR;
+}
+
+bool PageClientImpl::effectiveAppearanceIsDark() const
+{
+    auto* settings = gtk_widget_get_settings(m_viewWidget);
+    gboolean preferDarkTheme;
+    g_object_get(settings, "gtk-application-prefer-dark-theme", &preferDarkTheme, nullptr);
+    if (preferDarkTheme)
+        return true;
+
+    if (auto* themeNameEnv = g_getenv("GTK_THEME"))
+        return g_str_has_suffix(themeNameEnv, "-dark") || g_str_has_suffix(themeNameEnv, "-Dark") || g_str_has_suffix(themeNameEnv, ":dark");
+
+    GUniqueOutPtr<char> themeName;
+    g_object_get(settings, "gtk-theme-name", &themeName.outPtr(), nullptr);
+    if (g_str_has_suffix(themeName.get(), "-dark") || (g_str_has_suffix(themeName.get(), "-Dark")))
+        return true;
+
+    return false;
+}
+
+#if USE(WPE_RENDERER)
+IPC::Attachment PageClientImpl::hostFileDescriptor()
+{
+    return webkitWebViewBaseRenderHostFileDescriptor(WEBKIT_WEB_VIEW_BASE(m_viewWidget));
+}
+#endif
+
+void PageClientImpl::didChangeWebPageID() const
+{
+    if (WEBKIT_IS_WEB_VIEW(m_viewWidget))
+        webkitWebViewDidChangePageID(WEBKIT_WEB_VIEW(m_viewWidget));
+}
+
+String PageClientImpl::themeName() const
+{
+    if (auto* themeNameEnv = g_getenv("GTK_THEME")) {
+        String name = String::fromUTF8(themeNameEnv);
+        if (name.endsWith("-dark") || name.endsWith("-Dark") || name.endsWith(":dark"))
+            return name.substring(0, name.length() - 5);
+        return name;
+    }
+
+    GUniqueOutPtr<char> themeNameSetting;
+    g_object_get(gtk_widget_get_settings(m_viewWidget), "gtk-theme-name", &themeNameSetting.outPtr(), nullptr);
+    String name = String::fromUTF8(themeNameSetting.get());
+    if (name.endsWith("-dark") || name.endsWith("-Dark"))
+        return name.substring(0, name.length() - 5);
+    return name;
 }
 
 } // namespace WebKit

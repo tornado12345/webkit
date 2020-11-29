@@ -33,6 +33,7 @@ namespace WebCore {
 class DeviceMotionData;
 
 class DeviceMotionEvent final : public Event, public DeviceOrientationOrMotionEvent {
+    WTF_MAKE_ISO_ALLOCATED(DeviceMotionEvent);
 public:
     virtual ~DeviceMotionEvent();
 
@@ -50,7 +51,7 @@ public:
         Optional<double> gamma;
     };
 
-    static Ref<DeviceMotionEvent> create(const AtomicString& eventType, DeviceMotionData* deviceMotionData)
+    static Ref<DeviceMotionEvent> create(const AtomString& eventType, DeviceMotionData* deviceMotionData)
     {
         return adoptRef(*new DeviceMotionEvent(eventType, deviceMotionData));
     }
@@ -65,11 +66,11 @@ public:
     Optional<RotationRate> rotationRate() const;
     Optional<double> interval() const;
 
-    void initDeviceMotionEvent(const AtomicString& type, bool bubbles, bool cancelable, Optional<Acceleration>&&, Optional<Acceleration>&&, Optional<RotationRate>&&, Optional<double>);
+    void initDeviceMotionEvent(const AtomString& type, bool bubbles, bool cancelable, Optional<Acceleration>&&, Optional<Acceleration>&&, Optional<RotationRate>&&, Optional<double>);
 
 private:
     DeviceMotionEvent();
-    DeviceMotionEvent(const AtomicString& eventType, DeviceMotionData*);
+    DeviceMotionEvent(const AtomString& eventType, DeviceMotionData*);
 
     EventInterface eventInterface() const override;
 

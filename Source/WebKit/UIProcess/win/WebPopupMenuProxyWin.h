@@ -33,6 +33,13 @@
 #include <WebCore/ScrollableArea.h>
 #include <WebCore/Scrollbar.h>
 
+#if USE(DIRECT2D)
+interface ID3D11Device1;
+interface ID3D11DeviceContext1;
+interface ID3D11RenderTargetView;
+interface IDXGISwapChain;
+#endif
+
 namespace WebKit {
 
 class WebView;
@@ -52,15 +59,16 @@ public:
 
     void hide() { hidePopupMenu(); }
 
+    String debugDescription() const final;
+
 private:
     WebPopupMenuProxyWin(WebView*, WebPopupMenuProxy::Client&);
 
     WebCore::Scrollbar* scrollbar() const { return m_scrollbar.get(); }
 
     // ScrollableArea
-    int scrollSize(WebCore::ScrollbarOrientation) const override;
+    WebCore::ScrollPosition scrollPosition() const override;
     void setScrollOffset(const WebCore::IntPoint&) override;
-    int scrollOffset(WebCore::ScrollbarOrientation) const override { return m_scrollOffset; }
 
     void invalidateScrollbarRect(WebCore::Scrollbar&, const WebCore::IntRect&) override;
     void invalidateScrollCornerRect(const WebCore::IntRect&) override { }
@@ -123,12 +131,23 @@ private:
     void incrementWheelDelta(int delta);
     void reduceWheelDelta(int delta);
 
+#if USE(DIRECT2D)
+    void setupSwapChain(const WebCore::IntSize&);
+    void configureBackingStore(const WebCore::IntSize&);
+#endif
+
     WebView* m_webView;
     Vector<WebPopupItem> m_items;
     PlatformPopupMenuData m_data;
     int m_newSelectedIndex { 0 };
 
     RefPtr<WebCore::Scrollbar> m_scrollbar;
+#if USE(DIRECT2D)
+    COMPtr<ID3D11Device1> m_d3dDevice;
+    COMPtr<ID3D11DeviceContext1> m_immediateContext;
+    COMPtr<ID3D11RenderTargetView> m_renderTargetView; 
+    COMPtr<IDXGISwapChain> m_swapChain;
+#endif
     GDIObject<HDC> m_DC;
     GDIObject<HBITMAP> m_bmp;
     HWND m_popup { nullptr };

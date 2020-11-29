@@ -27,7 +27,9 @@
 
 #include "APIObject.h"
 #include "DownloadID.h"
+#include "PolicyDecision.h"
 #include "ShareableBitmap.h"
+#include "TransactionID.h"
 #include "WKBase.h"
 #include "WebFrameLoaderClient.h"
 #include <JavaScriptCore/ConsoleTypes.h>
@@ -38,13 +40,10 @@
 #include <wtf/HashMap.h>
 #include <wtf/RefPtr.h>
 #include <wtf/RetainPtr.h>
+#include <wtf/WeakPtr.h>
 
 namespace API {
 class Array;
-}
-
-namespace PAL {
-class SessionID;
 }
 
 namespace WebCore {
@@ -65,33 +64,35 @@ class WebPage;
 struct FrameInfoData;
 struct WebsitePoliciesData;
 
-class WebFrame : public API::ObjectImpl<API::Object::Type::BundleFrame> {
+class WebFrame : public API::ObjectImpl<API::Object::Type::BundleFrame>, public CanMakeWeakPtr<WebFrame> {
 public:
-    static Ref<WebFrame> createWithCoreMainFrame(WebPage*, WebCore::Frame*);
+    static Ref<WebFrame> create() { return adoptRef(*new WebFrame); }
     static Ref<WebFrame> createSubframe(WebPage*, const String& frameName, WebCore::HTMLFrameOwnerElement*);
     ~WebFrame();
+
+    void initWithCoreMainFrame(WebPage&, WebCore::Frame&);
 
     // Called when the FrameLoaderClient (and therefore the WebCore::Frame) is being torn down.
     void invalidate();
 
     WebPage* page() const;
 
-    static WebFrame* fromCoreFrame(WebCore::Frame&);
+    static WebFrame* fromCoreFrame(const WebCore::Frame&);
     WebCore::Frame* coreFrame() const { return m_coreFrame; }
 
     FrameInfoData info() const;
-    uint64_t frameID() const { return m_frameID; }
+    WebCore::FrameIdentifier frameID() const { return m_frameID; }
 
     enum class ForNavigationAction { No, Yes };
     uint64_t setUpPolicyListener(WebCore::PolicyCheckIdentifier, WebCore::FramePolicyFunction&&, ForNavigationAction);
     void invalidatePolicyListener();
-    void didReceivePolicyDecision(uint64_t listenerID, WebCore::PolicyCheckIdentifier, WebCore::PolicyAction, uint64_t navigationID, DownloadID, Optional<WebsitePoliciesData>&&);
+    void didReceivePolicyDecision(uint64_t listenerID, PolicyDecision&&);
 
     uint64_t setUpWillSubmitFormListener(CompletionHandler<void()>&&);
     void continueWillSubmitForm(uint64_t);
 
     void startDownload(const WebCore::ResourceRequest&, const String& suggestedName = { });
-    void convertMainResourceLoadToDownload(WebCore::DocumentLoader*, PAL::SessionID, const WebCore::ResourceRequest&, const WebCore::ResourceResponse&);
+    void convertMainResourceLoadToDownload(WebCore::DocumentLoader*, const WebCore::ResourceRequest&, const WebCore::ResourceResponse&);
 
     void addConsoleMessage(MessageSource, MessageLevel, const String&, uint64_t requestID = 0);
 
@@ -149,15 +150,15 @@ public:
     void documentLoaderDetached(uint64_t navigationID);
 
     // Simple listener class used by plug-ins to know when frames finish or fail loading.
-    class LoadListener {
+    class LoadListener : public CanMakeWeakPtr<LoadListener> {
     public:
         virtual ~LoadListener() { }
 
         virtual void didFinishLoad(WebFrame*) = 0;
         virtual void didFailLoad(WebFrame*, bool wasCancelled) = 0;
     };
-    void setLoadListener(LoadListener* loadListener) { m_loadListener = loadListener; }
-    LoadListener* loadListener() const { return m_loadListener; }
+    void setLoadListener(LoadListener* loadListener) { m_loadListener = makeWeakPtr(loadListener); }
+    LoadListener* loadListener() const { return m_loadListener.get(); }
     
 #if PLATFORM(COCOA)
     typedef bool (*FrameFilterFunction)(WKBundleFrameRef, WKBundleFrameRef subframe, void* context);
@@ -167,13 +168,21 @@ public:
     RefPtr<ShareableBitmap> createSelectionSnapshot() const;
 
 #if PLATFORM(IOS_FAMILY)
-    uint64_t firstLayerTreeTransactionIDAfterDidCommitLoad() const { return m_firstLayerTreeTransactionIDAfterDidCommitLoad; }
-    void setFirstLayerTreeTransactionIDAfterDidCommitLoad(uint64_t transactionID) { m_firstLayerTreeTransactionIDAfterDidCommitLoad = transactionID; }
+    TransactionID firstLayerTreeTransactionIDAfterDidCommitLoad() const { return m_firstLayerTreeTransactionIDAfterDidCommitLoad; }
+    void setFirstLayerTreeTransactionIDAfterDidCommitLoad(TransactionID transactionID) { m_firstLayerTreeTransactionIDAfterDidCommitLoad = transactionID; }
+#endif
+
+    WebFrameLoaderClient* frameLoaderClient() const;
+
+#if ENABLE(APP_BOUND_DOMAINS)
+    bool shouldEnableInAppBrowserPrivacyProtections();
+    void setIsNavigatingToAppBoundDomain(Optional<NavigatingToAppBoundDomain> isNavigatingToAppBoundDomain) { m_isNavigatingToAppBoundDomain = isNavigatingToAppBoundDomain; };
+    Optional<NavigatingToAppBoundDomain> isNavigatingToAppBoundDomain() const { return m_isNavigatingToAppBoundDomain; }
+    Optional<NavigatingToAppBoundDomain> isTopFrameNavigatingToAppBoundDomain() const;
 #endif
 
 private:
-    static Ref<WebFrame> create(std::unique_ptr<WebFrameLoaderClient>);
-    explicit WebFrame(std::unique_ptr<WebFrameLoaderClient>);
+    WebFrame();
 
     WebCore::Frame* m_coreFrame { nullptr };
 
@@ -182,16 +191,17 @@ private:
     WebCore::FramePolicyFunction m_policyFunction;
     ForNavigationAction m_policyFunctionForNavigationAction { ForNavigationAction::No };
     HashMap<uint64_t, CompletionHandler<void()>> m_willSubmitFormCompletionHandlers;
-    DownloadID m_policyDownloadID { 0 };
+    Optional<DownloadID> m_policyDownloadID;
 
-    std::unique_ptr<WebFrameLoaderClient> m_frameLoaderClient;
-    LoadListener* m_loadListener { nullptr };
+    WeakPtr<LoadListener> m_loadListener;
     
-    uint64_t m_frameID { 0 };
+    WebCore::FrameIdentifier m_frameID;
 
 #if PLATFORM(IOS_FAMILY)
-    uint64_t m_firstLayerTreeTransactionIDAfterDidCommitLoad { 0 };
+    TransactionID m_firstLayerTreeTransactionIDAfterDidCommitLoad;
 #endif
+    Optional<NavigatingToAppBoundDomain> m_isNavigatingToAppBoundDomain;
+
 };
 
 } // namespace WebKit

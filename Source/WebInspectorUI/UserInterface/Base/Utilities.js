@@ -30,6 +30,13 @@ var ellipsis = "\u2026";
 var zeroWidthSpace = "\u200b";
 var multiplicationSign = "\u00d7";
 
+function xor(a, b)
+{
+    if (a)
+        return b ? false : a;
+    return b || false;
+}
+
 Object.defineProperty(Object, "shallowCopy",
 {
     value(object)
@@ -77,6 +84,19 @@ Object.defineProperty(Object, "shallowEqual",
         }
 
         return true;
+    }
+});
+
+Object.defineProperty(Object, "filter",
+{
+    value(object, callback)
+    {
+        let filtered = {};
+        for (let key in object) {
+            if (callback(key, object[key]))
+                filtered[key] = object[key];
+        }
+        return filtered;
     }
 });
 
@@ -133,6 +153,38 @@ Object.defineProperty(Map.prototype, "getOrInitialize",
     }
 });
 
+Object.defineProperty(Set.prototype, "find",
+{
+    value(predicate)
+    {
+        for (let item of this) {
+            if (predicate(item, this))
+                return item;
+        }
+        return undefined;
+    },
+});
+
+Object.defineProperty(Set.prototype, "addAll",
+{
+    value(iterable)
+    {
+        for (let item of iterable)
+            this.add(item);
+    },
+});
+
+Object.defineProperty(Set.prototype, "take",
+{
+    value(key)
+    {
+        let exists = this.has(key);
+        if (exists)
+            this.delete(key);
+        return exists;
+    }
+});
+
 Object.defineProperty(Set.prototype, "equals",
 {
     value(other)
@@ -163,6 +215,14 @@ Object.defineProperty(Set.prototype, "firstValue",
     get()
     {
         return this.values().next().value;
+    }
+});
+
+Object.defineProperty(Set.prototype, "lastValue",
+{
+    get()
+    {
+        return Array.from(this.values()).lastValue;
     }
 });
 
@@ -367,6 +427,14 @@ Object.defineProperty(Element.prototype, "totalOffsetTop",
     }
 });
 
+Object.defineProperty(Element.prototype, "totalOffsetBottom",
+{
+    get()
+    {
+        return this.getBoundingClientRect().bottom;
+    }
+});
+
 Object.defineProperty(Element.prototype, "removeChildren",
 {
     value()
@@ -422,6 +490,29 @@ Object.defineProperty(DocumentFragment.prototype, "createChild",
 {
     value: Element.prototype.createChild
 });
+
+(function() {
+    const fontSymbol = Symbol("font");
+
+    Object.defineProperty(HTMLInputElement.prototype, "autosize",
+    {
+        value(extra = 0)
+        {
+            extra += 6; // UserAgent styles add 1px padding and 2px border.
+            if (this.type === "number")
+                extra += 13; // Number input inner spin button width.
+            extra += 2; // Add extra pixels for the cursor.
+
+            WI.ImageUtilities.scratchCanvasContext2D((context) => {
+                this[fontSymbol] ||= window.getComputedStyle(this).font;
+
+                context.font = this[fontSymbol];
+                let textMetrics = context.measureText(this.value || this.placeholder);
+                this.style.setProperty("width", (textMetrics.width + extra) + "px");
+            });
+        },
+    });
+})();
 
 Object.defineProperty(Event.prototype, "stop",
 {
@@ -501,62 +592,86 @@ Object.defineProperty(Array, "shallowEqual",
 
 Object.defineProperty(Array, "diffArrays",
 {
-    value(initialArray, currentArray, onEach)
+    value(initialArray, currentArray, onEach, comparator)
     {
-        let initialSet = new Set(initialArray);
-        let currentSet = new Set(currentArray);
-        let indexInitial = 0;
-        let indexCurrent = 0;
-        let deltaInitial = 0;
-        let deltaCurrent = 0;
+        "use strict";
 
-        let i = 0;
-        while (true) {
-            if (indexInitial >= initialArray.length || indexCurrent >= currentArray.length)
-                break;
+        function defaultComparator(initial, current) {
+            return initial === current;
+        }
+        comparator = comparator || defaultComparator;
 
-            let initial = initialArray[indexInitial];
-            let current = currentArray[indexCurrent];
-
-            if (initial === current)
-                onEach(current, 0);
-            else if (currentSet.has(initial)) {
-                if (initialSet.has(current)) {
-                    // Moved.
-                    onEach(current, 0);
-                } else {
-                    // Added.
-                    onEach(current, 1);
-                    --i;
-                    ++deltaCurrent;
+        // Find the shortest prefix of matching items in both arrays.
+        //
+        //    initialArray = ["a", "b", "b", "c"]
+        //    currentArray = ["c", "b", "b", "a"]
+        //    findShortestEdit() // [1, 1]
+        //
+        function findShortestEdit() {
+            let deletionCount = initialArray.length;
+            let additionCount = currentArray.length;
+            let editCount = deletionCount + additionCount;
+            for (let i = 0; i < initialArray.length; ++i) {
+                if (i > editCount) {
+                    // Break since any possible edits at this point are going to be longer than the one already found.
+                    break;
                 }
-            } else {
-                // Removed.
-                onEach(initial, -1);
-                if (!initialSet.has(current)) {
-                    // Added.
-                    onEach(current, 1);
-                } else {
-                    --i;
-                    ++deltaInitial;
+
+                for (let j = 0; j < currentArray.length; ++j) {
+                    let newEditCount = i + j;
+                    if (newEditCount > editCount) {
+                        // Break since any possible edits at this point are going to be longer than the one already found.
+                        break;
+                    }
+
+                    if (comparator(initialArray[i], currentArray[j])) {
+                        // A candidate for the shortest edit found.
+                        if (newEditCount < editCount) {
+                            editCount = newEditCount;
+                            deletionCount = i;
+                            additionCount = j;
+                        }
+                        break;
+                    }
                 }
             }
-
-            ++i;
-            indexInitial = i + deltaInitial;
-            indexCurrent = i + deltaCurrent;
+            return [deletionCount, additionCount];
         }
 
-        for (let i = indexInitial; i < initialArray.length; ++i) {
-            // Removed.
-            onEach(initialArray[i], -1);
+        function commonPrefixLength(listA, listB) {
+            let shorterListLength = Math.min(listA.length, listB.length);
+            let i = 0;
+            while (i < shorterListLength) {
+                if (!comparator(listA[i], listB[i]))
+                    break;
+                ++i;
+            }
+            return i;
         }
 
-        for (let i = indexCurrent; i < currentArray.length; ++i) {
-            // Added.
-            onEach(currentArray[i], 1);
+        function fireOnEach(count, diffAction, array) {
+            for (let i = 0; i < count; ++i)
+                onEach(array[i], diffAction);
         }
 
+        while (initialArray.length || currentArray.length) {
+            // Remove common prefix.
+            let prefixLength = commonPrefixLength(initialArray, currentArray);
+            if (prefixLength) {
+                fireOnEach(prefixLength, 0, currentArray);
+                initialArray = initialArray.slice(prefixLength);
+                currentArray = currentArray.slice(prefixLength);
+            }
+
+            if (!initialArray.length && !currentArray.length)
+                break;
+
+            let [deletionCount, additionCount] = findShortestEdit();
+            fireOnEach(deletionCount, -1, initialArray);
+            fireOnEach(additionCount, 1, currentArray);
+            initialArray = initialArray.slice(deletionCount);
+            currentArray = currentArray.slice(additionCount);
+        }
     }
 });
 
@@ -585,9 +700,10 @@ Object.defineProperty(Array.prototype, "remove",
         for (let i = 0; i < this.length; ++i) {
             if (this[i] === value) {
                 this.splice(i, 1);
-                return;
+                return true;
             }
         }
+        return false;
     }
 });
 
@@ -625,15 +741,13 @@ Object.defineProperty(Array.prototype, "insertAtIndex",
     }
 });
 
-Object.defineProperty(Array.prototype, "keySet",
+Object.defineProperty(Array.prototype, "pushAll",
 {
-    value()
+    value(iterable)
     {
-        let keys = Object.create(null);
-        for (var i = 0; i < this.length; ++i)
-            keys[this[i]] = true;
-        return keys;
-    }
+        for (let item of iterable)
+            this.push(item);
+    },
 });
 
 Object.defineProperty(Array.prototype, "partition",
@@ -666,6 +780,18 @@ Object.defineProperty(String.prototype, "isUpperCase",
     value()
     {
         return String(this) === this.toUpperCase();
+    }
+});
+
+Object.defineProperty(String.prototype, "isJSON",
+{
+    value(predicate)
+    {
+        try {
+            let json = JSON.parse(this);
+            return !predicate || predicate(json);
+        } catch { }
+        return false;
     }
 });
 
@@ -1127,6 +1253,25 @@ Object.defineProperty(Math, "roundTo",
     }
 });
 
+// https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/Matrix_math_for_the_web#Multiplying_a_matrix_and_a_point
+Object.defineProperty(Math, "multiplyMatrixByVector",
+{
+    value(matrix, vector)
+    {
+        let height = matrix.length;
+        let width = matrix[0].length;
+        console.assert(width === vector.length);
+
+        let result = Array(width).fill(0);
+        for (let i = 0; i < width; ++i) {
+            for (let rowIndex = 0; rowIndex < height; ++rowIndex)
+                result[i] += vector[rowIndex] * matrix[i][rowIndex];
+        }
+
+        return result;
+    }
+});
+
 Object.defineProperty(Number, "constrain",
 {
     value(num, min, max)
@@ -1209,12 +1354,12 @@ Object.defineProperty(Number, "secondsToString",
 
 Object.defineProperty(Number, "bytesToString",
 {
-    value(bytes, higherResolution)
+    value(bytes, higherResolution, bytesThreshold)
     {
-        if (higherResolution === undefined)
-            higherResolution = true;
+        higherResolution ??= true;
+        bytesThreshold ??= 1024;
 
-        if (Math.abs(bytes) < 1024)
+        if (Math.abs(bytes) < bytesThreshold)
             return WI.UIString("%.0f B").format(bytes);
 
         let kilobytes = bytes / 1024;
@@ -1245,13 +1390,13 @@ Object.defineProperty(Number, "abbreviate",
         if (num < 1000)
             return num.toLocaleString();
 
-        if (num < 1000000)
+        if (num < 1_000_000)
             return WI.UIString("%.1fK").format(Math.round(num / 100) / 10);
 
-        if (num < 1000000000)
-            return WI.UIString("%.1fM").format(Math.round(num / 100000) / 10);
+        if (num < 1_000_000_000)
+            return WI.UIString("%.1fM").format(Math.round(num / 100_000) / 10);
 
-        return WI.UIString("%.1fB").format(Math.round(num / 100000000) / 10);
+        return WI.UIString("%.1fB").format(Math.round(num / 100_000_000) / 10);
     }
 });
 
@@ -1510,6 +1655,11 @@ function appendWebInspectorConsoleEvaluationSourceURL(string)
     return "\n//# sourceURL=__WebInspectorConsoleEvaluation__\n" + string;
 }
 
+function isWebInspectorBootstrapScript(url)
+{
+    return url === WI.NetworkManager.bootstrapScriptURL;
+}
+
 function isWebInspectorInternalScript(url)
 {
     return url === "__WebInspectorInternal__";
@@ -1574,7 +1724,7 @@ function isTextLikelyMinified(content)
     if (startRatio < autoFormatWhitespaceRatio)
         return true;
 
-    let endRatio = whitespaceRatio(content, content.length - autoFormatMaxCharactersToCheck, content.length)
+    let endRatio = whitespaceRatio(content, content.length - autoFormatMaxCharactersToCheck, content.length);
     if (endRatio < autoFormatWhitespaceRatio)
         return true;
 
@@ -1583,7 +1733,7 @@ function isTextLikelyMinified(content)
 
 function doubleQuotedString(str)
 {
-    return "\"" + str.replace(/\\/g, "\\\\").replace(/"/g, "\\\"") + "\"";
+    return JSON.stringify(str);
 }
 
 function insertionIndexForObjectInListSortedByFunction(object, list, comparator, insertionIndexAfter)
@@ -1598,41 +1748,4 @@ function insertionIndexForObjectInListSortedByFunction(object, list, comparator,
 function insertObjectIntoSortedArray(object, array, comparator)
 {
     array.splice(insertionIndexForObjectInListSortedByFunction(object, array, comparator), 0, object);
-}
-
-function decodeBase64ToBlob(base64Data, mimeType)
-{
-    mimeType = mimeType || "";
-
-    const sliceSize = 1024;
-    var byteCharacters = atob(base64Data);
-    var bytesLength = byteCharacters.length;
-    var slicesCount = Math.ceil(bytesLength / sliceSize);
-    var byteArrays = new Array(slicesCount);
-
-    for (var sliceIndex = 0; sliceIndex < slicesCount; ++sliceIndex) {
-        var begin = sliceIndex * sliceSize;
-        var end = Math.min(begin + sliceSize, bytesLength);
-
-        var bytes = new Array(end - begin);
-        for (var offset = begin, i = 0; offset < end; ++i, ++offset)
-            bytes[i] = byteCharacters[offset].charCodeAt(0);
-
-        byteArrays[sliceIndex] = new Uint8Array(bytes);
-    }
-
-    return new Blob(byteArrays, {type: mimeType});
-}
-
-function textToBlob(text, mimeType)
-{
-    return new Blob([text], {type: mimeType});
-}
-
-function blobAsText(blob, callback)
-{
-    console.assert(blob instanceof Blob);
-    let fileReader = new FileReader;
-    fileReader.addEventListener("loadend", () => { callback(fileReader.result); });
-    fileReader.readAsText(blob);
 }

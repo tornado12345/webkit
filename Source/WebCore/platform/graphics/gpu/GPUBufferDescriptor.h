@@ -32,8 +32,13 @@
 namespace WebCore {
 
 struct GPUBufferDescriptor {
-    unsigned long size;
+    uint64_t size;
     GPUBufferUsageFlags usage;
+};
+
+enum class GPUBufferMappedOption {
+    IsMapped,
+    NotMapped
 };
 
 } // namespace WebCore

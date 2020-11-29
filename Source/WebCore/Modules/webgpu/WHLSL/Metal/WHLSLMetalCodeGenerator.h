@@ -25,13 +25,12 @@
 
 #pragma once
 
-#if ENABLE(WEBGPU)
+#if ENABLE(WHLSL_COMPILER)
 
-#include "WHLSLMappedBindings.h"
+#include "WHLSLMangledNames.h"
 #include "WHLSLPipelineDescriptor.h"
 #include "WHLSLSemanticMatcher.h"
-#include <wtf/Variant.h>
-#include <wtf/text/WTFString.h>
+#include <wtf/text/StringBuilder.h>
 
 namespace WebCore {
 
@@ -42,16 +41,16 @@ class Program;
 namespace Metal {
 
 struct RenderMetalCode {
-    String metalSource;
-    MappedBindGroups vertexMappedBindGroups;
-    MappedBindGroups fragmentMappedBindGroups;
+    StringBuilder metalSource;
+    MangledFunctionName mangledVertexEntryPointName;
+    MangledFunctionName mangledFragmentEntryPointName;
 };
 // Can't fail. Any failure checks need to be done earlier, in the backend-agnostic part of the compiler.
 RenderMetalCode generateMetalCode(Program&, MatchedRenderSemantics&& matchedSemantics, Layout&);
 
 struct ComputeMetalCode {
-    String metalSource;
-    MappedBindGroups bindGroups;
+    StringBuilder metalSource;
+    MangledFunctionName mangledEntryPointName;
 };
 // Can't fail. Any failure checks need to be done earlier, in the backend-agnostic part of the compiler.
 ComputeMetalCode generateMetalCode(Program&, MatchedComputeSemantics&& matchedSemantics, Layout&);
@@ -62,4 +61,4 @@ ComputeMetalCode generateMetalCode(Program&, MatchedComputeSemantics&& matchedSe
 
 }
 
-#endif
+#endif // ENABLE(WHLSL_COMPILER)

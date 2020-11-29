@@ -32,20 +32,21 @@
 #include "AudioNodeInput.h"
 #include "AudioNodeOutput.h"
 #include "AudioUtilities.h"
+#include "AudioWorklet.h"
+#include "AudioWorkletGlobalScope.h"
+#include "AudioWorkletMessagingProxy.h"
+#include "AudioWorkletThread.h"
 #include "DenormalDisabler.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
     
-AudioDestinationNode::AudioDestinationNode(AudioContext& context, float sampleRate)
-    : AudioNode(context, sampleRate)
-    , m_currentSampleFrame(0)
-    , m_isSilent(true)
-    , m_isEffectivelyPlayingAudio(false)
-    , m_muted(false)
+WTF_MAKE_ISO_ALLOCATED_IMPL(AudioDestinationNode);
+
+AudioDestinationNode::AudioDestinationNode(BaseAudioContext& context)
+    : AudioNode(context, NodeTypeDestination)
 {
-    addInput(std::make_unique<AudioNodeInput>(this));
-    
-    setNodeType(NodeTypeDestination);
+    addInput();
 }
 
 AudioDestinationNode::~AudioDestinationNode()
@@ -53,7 +54,7 @@ AudioDestinationNode::~AudioDestinationNode()
     uninitialize();
 }
 
-void AudioDestinationNode::render(AudioBus*, AudioBus* destinationBus, size_t numberOfFrames)
+void AudioDestinationNode::render(AudioBus*, AudioBus* destinationBus, size_t numberOfFrames, const AudioIOPosition& outputPosition)
 {
     // We don't want denormals slowing down any of the audio processing
     // since they can very seriously hurt performance.
@@ -76,7 +77,13 @@ void AudioDestinationNode::render(AudioBus*, AudioBus* destinationBus, size_t nu
     }
 
     // Let the context take care of any business at the start of each render quantum.
-    context().handlePreRenderTasks();
+    context().handlePreRenderTasks(outputPosition);
+
+    RefPtr<AudioWorkletGlobalScope> workletGlobalScope;
+    if (auto* audioWorkletProxy = context().audioWorklet().proxy())
+        workletGlobalScope = audioWorkletProxy->workletThread().globalScope();
+    if (workletGlobalScope)
+        workletGlobalScope->handlePreRenderTasks();
 
     // This will cause the node(s) connected to us to process, which in turn will pull on their input(s),
     // all the way backwards through the rendering graph.
@@ -97,6 +104,9 @@ void AudioDestinationNode::render(AudioBus*, AudioBus* destinationBus, size_t nu
     
     // Advance current sample-frame.
     m_currentSampleFrame += numberOfFrames;
+
+    if (workletGlobalScope)
+        workletGlobalScope->handlePostRenderTasks(m_currentSampleFrame);
 
     setIsSilent(destinationBus->isSilent());
 

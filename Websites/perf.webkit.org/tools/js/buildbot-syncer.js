@@ -15,25 +15,27 @@ class BuildbotBuildEntry {
         assert.equal(syncer.builderID(), rawData['builderid']);
 
         this._syncer = syncer;
-        this._buildbotBuildRequestId = rawData['buildrequestid']
+        this._buildbotBuildRequestId = rawData['buildrequestid'];
         this._hasFinished = rawData['complete'];
         this._isPending = 'claimed' in rawData && !rawData['claimed'];
         this._isInProgress = !this._isPending && !this._hasFinished;
-        this._buildNumber = rawData['number'];
+        this._buildTag = rawData['number'];
         this._workerName = rawData['properties'] && rawData['properties']['workername'] ? rawData['properties']['workername'][0] : null;
         this._buildRequestId = rawData['properties'] && rawData['properties'][syncer._buildRequestPropertyName]
             ? rawData['properties'][syncer._buildRequestPropertyName][0] : null;
+        this._statusDescription = rawData['state_string'] && rawData['results'] !== 0 ? rawData['state_string'] : null;
     }
 
     syncer() { return this._syncer; }
-    buildNumber() { return this._buildNumber; }
+    buildTag() { return this._buildTag; }
     slaveName() { return this._workerName; }
     workerName() { return this._workerName; }
     buildRequestId() { return this._buildRequestId; }
     isPending() { return this._isPending; }
     isInProgress() { return this._isInProgress; }
     hasFinished() { return this._hasFinished; }
-    url() { return this.isPending() ? this._syncer.urlForPendingBuild(this._buildbotBuildRequestId) : this._syncer.urlForBuildNumber(this._buildNumber); }
+    statusDescription() { return this._statusDescription; }
+    url() { return this.isPending() ? this._syncer.urlForPendingBuild(this._buildbotBuildRequestId) : this._syncer.urlForBuildSerial(this._buildTag); }
 
     buildRequestStatusIfUpdateIsNeeded(request)
     {
@@ -212,7 +214,7 @@ class BuildbotSyncer {
     pathForRecentBuilds(count) { return `/api/v2/builders/${this._builderID}/builds?limit=${count}&order=-number&property=*`; }
     pathForForceBuild(schedulerName) { return `/api/v2/forceschedulers/${schedulerName}`; }
 
-    urlForBuildNumber(number) { return this._remote.url(`/#/builders/${this._builderID}/builds/${number}`); }
+    urlForBuildSerial(serail) { return this._remote.url(`/#/builders/${this._builderID}/builds/${serail}`); }
     urlForPendingBuild(buildRequestId) { return this._remote.url(`/#/buildrequests/${buildRequestId}`); }
 
     _propertiesForBuildRequest(buildRequest, requestsInGroup)
@@ -242,6 +244,7 @@ class BuildbotSyncer {
             properties[propertyName] = propertiesTemplate[propertyName];
 
         const repositoryGroupTemplate = buildRequest.isBuild() ? repositoryGroupConfiguration.buildPropertiesTemplate : repositoryGroupConfiguration.testPropertiesTemplate;
+        assert(!buildRequest.isBuild() || repositoryGroupTemplate, 'Repository group template cannot be null for build type build request');
         for (let propertyName in repositoryGroupTemplate) {
             let value = repositoryGroupTemplate[propertyName];
             const type = typeof(value) == 'object' ? value.type : 'string';
@@ -464,10 +467,10 @@ class BuildbotSyncer {
 
         let buildPropertiesTemplate = null;
         if ('buildProperties' in group) {
-            assert(patchAcceptingRepositoryList.size, `Repository group "${name}" specifies the properties for building but does not accept any patches`);
             assert(group.acceptsRoots, `Repository group "${name}" specifies the properties for building but does not accept roots in testing`);
             const revisionRepositories = new Set;
             const patchRepositories = new Set;
+            let hasOwnedRevisions = false;
             buildPropertiesTemplate = this._parseRepositoryGroupPropertyTemplate('build', name, group.buildProperties, (type, value, condition) => {
                 assert(type != 'roots', `Repository group "${name}" specifies roots in the properties for building`);
                 let repository = null;
@@ -482,6 +485,7 @@ class BuildbotSyncer {
                     revisionRepositories.add(repository);
                     return {type, repository};
                 case 'ownedRevisions':
+                    hasOwnedRevisions = true;
                     return {type, ownerRepository: resolveRepository(value)};
                 case 'ifRepositorySet':
                     assert(condition, 'condition must set if type is "ifRepositorySet"');
@@ -489,6 +493,7 @@ class BuildbotSyncer {
                 }
                 return null;
             });
+            assert(patchAcceptingRepositoryList.size || hasOwnedRevisions, `Repository group "${name}" specifies the properties for building but does not accept any patches or need to build owned components`);
             for (const repository of patchRepositories)
                 assert(revisionRepositories.has(repository), `Repository group "${name}" specifies a patch for "${repository.name()}" but does not specify a revision`);
             assert.equal(patchAcceptingRepositoryList.size, patchRepositories.size,

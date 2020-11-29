@@ -23,7 +23,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
+#import "config.h"
 
 #import "APICast.h"
 #import "Completion.h"
@@ -60,7 +60,7 @@
 
 - (void)ensureWrapperMap
 {
-    if (!toJS([self JSGlobalContextRef])->lexicalGlobalObject()->wrapperMap()) {
+    if (!toJS([self JSGlobalContextRef])->wrapperMap()) {
         // The map will be retained by the GlobalObject in initialization.
         [[[JSWrapperMap alloc] initWithGlobalContextRef:[self JSGlobalContextRef]] release];
     }
@@ -118,37 +118,73 @@
 
 - (JSValue *)evaluateJSScript:(JSScript *)script
 {
-    JSC::ExecState* exec = toJS(m_context);
-    JSC::VM& vm = exec->vm();
+    JSC::JSGlobalObject* globalObject = toJS(m_context);
+    JSC::VM& vm = globalObject->vm();
     JSC::JSLockHolder locker(vm);
 
     if (script.type == kJSScriptTypeProgram) {
         JSValueRef exceptionValue = nullptr;
-        JSValueRef result = JSEvaluateScriptInternal(locker, exec, m_context, nullptr, [script jsSourceCode]->sourceCode(), &exceptionValue);
+        JSC::SourceCode sourceCode = [script sourceCode];
+        JSValueRef result = JSEvaluateScriptInternal(locker, m_context, nullptr, sourceCode, &exceptionValue);
 
         if (exceptionValue)
             return [self valueFromNotifyException:exceptionValue];
         return [JSValue valueWithJSValueRef:result inContext:self];
     }
 
-    auto* globalObject = JSC::jsDynamicCast<JSC::JSAPIGlobalObject*>(vm, exec->lexicalGlobalObject());
-    if (!globalObject)
+    auto* apiGlobalObject = JSC::jsDynamicCast<JSC::JSAPIGlobalObject*>(vm, globalObject);
+    if (!apiGlobalObject)
         return [JSValue valueWithNewPromiseRejectedWithReason:[JSValue valueWithNewErrorFromMessage:@"Context does not support module loading" inContext:self] inContext:self];
 
     auto scope = DECLARE_CATCH_SCOPE(vm);
-    JSC::JSValue result = globalObject->loadAndEvaluateJSScriptModule(locker, script);
+    JSC::JSValue result = apiGlobalObject->loadAndEvaluateJSScriptModule(locker, script);
     if (scope.exception()) {
-        JSValueRef exceptionValue = toRef(exec, scope.exception()->value());
+        JSValueRef exceptionValue = toRef(apiGlobalObject, scope.exception()->value());
         scope.clearException();
         return [JSValue valueWithNewPromiseRejectedWithReason:[JSValue valueWithJSValueRef:exceptionValue inContext:self] inContext:self];
     }
     return [JSValue valueWithJSValueRef:toRef(vm, result) inContext:self];
 }
 
+- (JSValue *)dependencyIdentifiersForModuleJSScript:(JSScript *)script
+{
+    JSC::JSGlobalObject* globalObject = toJS(m_context);
+    JSC::VM& vm = globalObject->vm();
+    JSC::JSLockHolder locker(vm);
+
+    if (script.type != kJSScriptTypeModule) {
+        self.exceptionHandler(self, [JSValue valueWithNewErrorFromMessage:@"script is not a module" inContext:self]);
+        return [JSValue valueWithUndefinedInContext:self];
+    }
+
+    auto scope = DECLARE_CATCH_SCOPE(vm);
+    JSC::JSArray* result = globalObject->moduleLoader()->dependencyKeysIfEvaluated(globalObject, JSC::jsString(vm, [[script sourceURL] absoluteString]));
+    if (scope.exception()) {
+        JSValueRef exceptionValue = toRef(globalObject, scope.exception()->value());
+        scope.clearException();
+        return [self valueFromNotifyException:exceptionValue];
+    }
+
+    if (!result) {
+        self.exceptionHandler(self, [JSValue valueWithNewErrorFromMessage:@"script has not run in context or was not evaluated successfully" inContext:self]);
+        return [JSValue valueWithUndefinedInContext:self];
+    }
+    return [JSValue valueWithJSValueRef:toRef(vm, result) inContext:self];
+}
+
+- (void)_setITMLDebuggableType
+{
+    JSC::JSGlobalObject* globalObject = toJS(m_context);
+    JSC::VM& vm = globalObject->vm();
+    JSC::JSLockHolder locker(vm);
+
+    globalObject->setIsITML();
+}
+
 - (void)setException:(JSValue *)value
 {
-    JSC::ExecState* exec = toJS(m_context);
-    JSC::VM& vm = exec->vm();
+    JSC::JSGlobalObject* globalObject = toJS(m_context);
+    JSC::VM& vm = globalObject->vm();
     JSC::JSLockHolder locker(vm);
     if (value)
         m_exception.set(vm, toJS(JSValueToObject(m_context, valueInternalValue(value), 0)));
@@ -205,10 +241,10 @@
     if (!entry->currentArguments) {
         JSContext *context = [JSContext currentContext];
         size_t count = entry->argumentCount;
-        JSValue * argumentArray[count];
-        for (size_t i =0; i < count; ++i)
-            argumentArray[i] = [JSValue valueWithJSValueRef:entry->arguments[i] inContext:context];
-        entry->currentArguments = [[NSArray alloc] initWithObjects:argumentArray count:count];
+        NSMutableArray *arguments = [[NSMutableArray alloc] initWithCapacity:count];
+        for (size_t i = 0; i < count; ++i)
+            [arguments setObject:[JSValue valueWithJSValueRef:entry->arguments[i] inContext:context] atIndexedSubscript:i];
+        entry->currentArguments = arguments;
     }
 
     return entry->currentArguments;
@@ -297,7 +333,7 @@
     if (!self)
         return nil;
 
-    JSC::JSGlobalObject* globalObject = toJS(context)->lexicalGlobalObject();
+    JSC::JSGlobalObject* globalObject = toJS(context);
     m_virtualMachine = [[JSVirtualMachine virtualMachineWithContextGroupRef:toRef(&globalObject->vm())] retain];
     ASSERT(m_virtualMachine);
     m_context = JSGlobalContextRetain(context);
@@ -357,7 +393,7 @@
 
 - (JSWrapperMap *)wrapperMap
 {
-    return toJS(m_context)->lexicalGlobalObject()->wrapperMap();
+    return toJS(m_context)->wrapperMap();
 }
 
 - (JSValue *)wrapperForJSObject:(JSValueRef)value

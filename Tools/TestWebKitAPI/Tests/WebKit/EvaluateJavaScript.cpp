@@ -51,11 +51,33 @@ static void didRunJavaScript(WKSerializedScriptValueRef resultSerializedScriptVa
 
 TEST(WebKit, EvaluateJavaScriptThatThrowsAnException)
 {
-    WKRetainPtr<WKContextRef> context(AdoptWK, WKContextCreateWithConfiguration(nullptr));
+    WKRetainPtr<WKContextRef> context = adoptWK(WKContextCreateWithConfiguration(nullptr));
     PlatformWebView webView(context.get());
 
-    WKRetainPtr<WKStringRef> javaScriptString(AdoptWK, WKStringCreateWithUTF8CString("throw 'Hello'"));
+    WKRetainPtr<WKStringRef> javaScriptString = adoptWK(WKStringCreateWithUTF8CString("throw 'Hello'"));
     WKPageRunJavaScriptInMainFrame(webView.page(), javaScriptString.get(), reinterpret_cast<void*>(0x1234578), didRunJavaScript);
+
+    Util::run(&testDone);
+}
+
+static void didCreateBlob(WKSerializedScriptValueRef serializedScriptValue, WKErrorRef error, void* context)
+{
+    EXPECT_NOT_NULL(serializedScriptValue);
+    JSGlobalContextRef jsContext = JSGlobalContextCreate(0);
+    EXPECT_NOT_NULL(jsContext);
+    auto jsValue = WKSerializedScriptValueDeserialize(serializedScriptValue, jsContext, 0);
+    EXPECT_NOT_NULL(jsValue);
+
+    testDone = true;
+}
+
+TEST(WebKit, EvaluateJavaScriptThatCreatesBlob)
+{
+    WKRetainPtr<WKContextRef> context = adoptWK(WKContextCreateWithConfiguration(nullptr));
+    PlatformWebView webView(context.get());
+
+    WKRetainPtr<WKStringRef> javaScriptString = adoptWK(WKStringCreateWithUTF8CString("new Blob(['this is a test blob'])"));
+    WKPageRunJavaScriptInMainFrame(webView.page(), javaScriptString.get(), 0, didCreateBlob);
 
     Util::run(&testDone);
 }

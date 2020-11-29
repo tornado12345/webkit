@@ -36,12 +36,9 @@ namespace WebCore {
 
 struct SameSizeAsFontCascadeDescription {
     Vector<void*> vector;
-#if ENABLE(VARIATION_FONTS)
     Vector<void*> vector2;
-#else
-    char c;
-#endif
-    AtomicString string;
+    AtomString string;
+    AtomString string2;
     int16_t fontSelectionRequest[3];
     float size;
     unsigned bitfields1;
@@ -61,20 +58,6 @@ FontCascadeDescription::FontCascadeDescription()
     , m_isSpecifiedFont(false)
 {
 }
-
-#if !USE_PLATFORM_SYSTEM_FALLBACK_LIST
-
-unsigned FontCascadeDescription::effectiveFamilyCount() const
-{
-    return familyCount();
-}
-
-FontFamilySpecification FontCascadeDescription::effectiveFamilyAt(unsigned i) const
-{
-    return familyAt(i);
-}
-
-#endif
 
 FontSelectionValue FontCascadeDescription::lighterWeight(FontSelectionValue weight)
 {
@@ -118,7 +101,7 @@ bool FontCascadeDescription::familiesEqualForTextAutoSizing(const FontCascadeDes
 
 #endif // ENABLE(TEXT_AUTOSIZING)
 
-bool FontCascadeDescription::familyNamesAreEqual(const AtomicString& family1, const AtomicString& family2)
+bool FontCascadeDescription::familyNamesAreEqual(const AtomString& family1, const AtomString& family2)
 {
 #if PLATFORM(COCOA)
     if (family1.startsWith('.'))
@@ -127,7 +110,7 @@ bool FontCascadeDescription::familyNamesAreEqual(const AtomicString& family1, co
     return ASCIICaseInsensitiveHash::equal(family1, family2);
 }
 
-unsigned FontCascadeDescription::familyNameHash(const AtomicString& family)
+unsigned FontCascadeDescription::familyNameHash(const AtomString& family)
 {
 #if PLATFORM(COCOA)
     if (family.startsWith('.'))

@@ -22,8 +22,9 @@
 
 import re
 
+from webkitcorepy import Version
+
 from webkitpy.common.memoized import memoized
-from webkitpy.common.version import Version
 
 
 PUBLIC_TABLE = 'public'
@@ -60,10 +61,12 @@ class VersionNameMap(object):
                 'Sierra': Version(10, 12),
                 'High Sierra': Version(10, 13),
                 'Mojave': Version(10, 14),
+                'Catalina': Version(10, 15),
+                'Big Sur': Version(11, 0),
             },
-            'ios': self._automap_to_major_version('iOS', minimum=Version(10), maximum=Version(12)),
-            'tvos': self._automap_to_major_version('tvOS', minimum=Version(10), maximum=Version(12)),
-            'watchos': self._automap_to_major_version('watchOS', minimum=Version(1), maximum=Version(5)),
+            'ios': self._automap_to_major_version('iOS', minimum=Version(10), maximum=Version(14)),
+            'tvos': self._automap_to_major_version('tvOS', minimum=Version(10), maximum=Version(14)),
+            'watchos': self._automap_to_major_version('watchOS', minimum=Version(1), maximum=Version(7)),
             'win': {
                 'Win10': Version(10),
                 '8.1': Version(6, 3),
@@ -81,17 +84,21 @@ class VersionNameMap(object):
         # wincairo uses the same versions as Windows
         self.mapping[PUBLIC_TABLE]['wincairo'] = self.mapping[PUBLIC_TABLE]['win']
 
+        # FTW uses the same versions as Windows
+        self.mapping[PUBLIC_TABLE]['ftw'] = self.mapping[PUBLIC_TABLE]['win']
+
+
     @classmethod
     def _automap_to_major_version(cls, prefix, minimum=Version(1), maximum=Version(1)):
         result = {}
         assert minimum <= maximum
-        for i in xrange((maximum.major + 1) - minimum.major):
+        for i in range((maximum.major + 1) - minimum.major):
             result['{} {}'.format(prefix, str(Version(minimum.major + i)))] = Version(minimum.major + i)
         return result
 
     def to_name(self, version, platform=None, table=PUBLIC_TABLE):
         closest_match = (None, None)
-        for os_name, os_version in self.mapping_for_platform(platform, table).iteritems():
+        for os_name, os_version in self.mapping_for_platform(platform, table).items():
             if version == os_version:
                 return os_name
             elif version in os_version:
@@ -121,16 +128,16 @@ class VersionNameMap(object):
 
     def from_name(self, name):
         # Exact match
-        for _, map in self.mapping.iteritems():
-            for os_name, os_map in map.iteritems():
+        for _, map in self.mapping.items():
+            for os_name, os_map in map.items():
                 if name in os_map:
                     return (os_name, os_map[name])
 
         # It's not an exact match, let's try unifying formatting
         unformatted = self.strip_name_formatting(name)
-        for _, map in self.mapping.iteritems():
-            for os_name, os_map in map.iteritems():
-                for version_name, version in os_map.iteritems():
+        for _, map in self.mapping.items():
+            for os_name, os_map in map.items():
+                for version_name, version in os_map.items():
                     if self.strip_name_formatting(version_name) == unformatted:
                         return (os_name, version)
         return (None, None)

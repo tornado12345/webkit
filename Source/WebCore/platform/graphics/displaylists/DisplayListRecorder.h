@@ -33,12 +33,14 @@
 
 namespace WebCore {
 
+enum class AlphaPremultiplication : uint8_t;
 class FloatPoint;
 class FloatRect;
 class GlyphBuffer;
 class FloatPoint;
 class Font;
 class Image;
+class ImageData;
 
 struct GraphicsContextState;
 struct ImagePaintingOptions;
@@ -51,10 +53,22 @@ class Recorder : public GraphicsContextImpl {
     WTF_MAKE_FAST_ALLOCATED;
     WTF_MAKE_NONCOPYABLE(Recorder);
 public:
-    Recorder(GraphicsContext&, DisplayList&, const GraphicsContextState&, const FloatRect& initialClip, const AffineTransform&);
-    virtual ~Recorder();
+    class Delegate;
+    WEBCORE_EXPORT Recorder(GraphicsContext&, DisplayList&, const GraphicsContextState&, const FloatRect& initialClip, const AffineTransform&, Delegate* = nullptr);
+    WEBCORE_EXPORT virtual ~Recorder();
+
+    WEBCORE_EXPORT void putImageData(AlphaPremultiplication inputFormat, const ImageData&, const IntRect& srcRect, const IntPoint& destPoint, AlphaPremultiplication destFormat);
 
     size_t itemCount() const { return m_displayList.itemCount(); }
+
+    void appendItemAndUpdateExtent(Ref<DrawingItem>&&);
+
+    class Delegate {
+    public:
+        virtual ~Delegate() { }
+        virtual bool lockRemoteImageBuffer(WebCore::ImageBuffer&) { return false; }
+        virtual void willAppendItem(const Item&) { };
+    };
 
 private:
     bool hasPlatformContext() const override { return false; }
@@ -91,10 +105,10 @@ private:
     ImageDrawResult drawImage(Image&, const FloatRect& destination, const FloatRect& source, const ImagePaintingOptions&) override;
     ImageDrawResult drawTiledImage(Image&, const FloatRect& destination, const FloatPoint& source, const FloatSize& tileSize, const FloatSize& spacing, const ImagePaintingOptions&) override;
     ImageDrawResult drawTiledImage(Image&, const FloatRect& destination, const FloatRect& source, const FloatSize& tileScaleFactor, Image::TileRule hRule, Image::TileRule vRule, const ImagePaintingOptions&) override;
-#if USE(CG) || USE(CAIRO)
-    void drawNativeImage(const NativeImagePtr&, const FloatSize& selfSize, const FloatRect& destRect, const FloatRect& srcRect, CompositeOperator, BlendMode, ImageOrientation) override;
-#endif
-    void drawPattern(Image&, const FloatRect& destRect, const FloatRect& srcRect, const AffineTransform&, const FloatPoint& phase, const FloatSize& spacing, CompositeOperator, BlendMode = BlendMode::Normal) override;
+
+    bool drawImageBuffer(WebCore::ImageBuffer&, const FloatRect& destination, const FloatRect& source, const ImagePaintingOptions&) override;
+    void drawNativeImage(const NativeImagePtr&, const FloatSize& selfSize, const FloatRect& destRect, const FloatRect& srcRect, const ImagePaintingOptions&) override;
+    void drawPattern(Image&, const FloatRect& destRect, const FloatRect& srcRect, const AffineTransform&, const FloatPoint& phase, const FloatSize& spacing, const ImagePaintingOptions&) override;
 
     void drawRect(const FloatRect&, float borderThickness) override;
     void drawLine(const FloatPoint&, const FloatPoint&) override;
@@ -124,14 +138,20 @@ private:
     void clipOut(const Path&) override;
     void clipPath(const Path&, WindRule) override;
     IntRect clipBounds() override;
-    void clipToImageBuffer(ImageBuffer&, const FloatRect&) override;
+    void clipToImageBuffer(WebCore::ImageBuffer&, const FloatRect&) override;
+    void clipToDrawingCommands(const FloatRect& destination, ColorSpace, Function<void(GraphicsContext&)>&&) override;
+    void paintFrameForMedia(MediaPlayer&, const FloatRect& destination) override;
+    bool canPaintFrameForMedia() const override { return true; }
     
     void applyDeviceScaleFactor(float) override;
 
     FloatRect roundToDevicePixels(const FloatRect&, GraphicsContext::RoundingMode) override;
 
-    Item& appendItem(Ref<Item>&&);
+    template<typename ItemType>
+    ItemType& appendItem(Ref<ItemType>&&);
     void willAppendItem(const Item&);
+
+    void appendStateChangeItem(const GraphicsContextStateChange&, GraphicsContextState::StateChangeFlags);
 
     FloatRect extentFromLocalBounds(const FloatRect&) const;
     void updateItemExtent(DrawingItem&) const;
@@ -145,7 +165,6 @@ private:
         GraphicsContextStateChange stateChange;
         GraphicsContextState lastDrawingState;
         bool wasUsedForDrawing { false };
-        size_t saveItemIndex { 0 };
         
         ContextState(const GraphicsContextState& state, const AffineTransform& transform, const FloatRect& clip)
             : ctm(transform)
@@ -154,11 +173,10 @@ private:
         {
         }
         
-        ContextState cloneForSave(size_t saveIndex) const
+        ContextState cloneForSave() const
         {
             ContextState state(lastDrawingState, ctm, clipBounds);
             state.stateChange = stateChange;
-            state.saveItemIndex = saveIndex;
             return state;
         }
 
@@ -166,12 +184,14 @@ private:
         void rotate(float angleInRadians);
         void scale(const FloatSize&);
         void concatCTM(const AffineTransform&);
+        void setCTM(const AffineTransform&);
     };
     
     const ContextState& currentState() const;
     ContextState& currentState();
 
     DisplayList& m_displayList;
+    Delegate* m_delegate;
 
     Vector<ContextState, 32> m_stateStack;
 };

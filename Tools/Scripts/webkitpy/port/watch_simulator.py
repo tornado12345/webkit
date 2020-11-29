@@ -22,8 +22,9 @@
 
 import logging
 
+from webkitcorepy import Version
+
 from webkitpy.common.memoized import memoized
-from webkitpy.common.version import Version
 from webkitpy.port.config import apple_additions
 from webkitpy.port.watch import WatchPort
 from webkitpy.xcode.device_type import DeviceType
@@ -86,9 +87,6 @@ class WatchSimulatorPort(WatchPort):
 
     def reset_preferences(self):
         SimulatedDeviceManager.tear_down(self.host)
-
-    def nm_command(self):
-        return self.xcrun_find('nm')
 
     @property
     @memoized

@@ -35,6 +35,7 @@
 #import "WebNodeHighlighter.h"
 #import "WebViewInternal.h"
 #import <WebCore/CertificateInfo.h>
+#import <WebCore/FloatRect.h>
 #import <WebCore/InspectorController.h>
 #import <WebCore/NotImplemented.h>
 #import <WebCore/Page.h>
@@ -122,14 +123,18 @@ WebInspectorFrontendClient::WebInspectorFrontendClient(WebView* inspectedWebView
 
 void WebInspectorFrontendClient::attachAvailabilityChanged(bool) { }
 void WebInspectorFrontendClient::frontendLoaded() { }
-String WebInspectorFrontendClient::localizedStringsURL() { return String(); }
+String WebInspectorFrontendClient::localizedStringsURL() const { return String(); }
 void WebInspectorFrontendClient::bringToFront() { }
 void WebInspectorFrontendClient::closeWindow() { }
 void WebInspectorFrontendClient::reopen() { }
+void WebInspectorFrontendClient::resetState() { }
+void WebInspectorFrontendClient::setForcedAppearance(InspectorFrontendClient::Appearance) { }
+bool WebInspectorFrontendClient::supportsDockSide(DockSide) { return false; }
 void WebInspectorFrontendClient::attachWindow(DockSide) { }
 void WebInspectorFrontendClient::detachWindow() { }
 void WebInspectorFrontendClient::setAttachedWindowHeight(unsigned) { }
 void WebInspectorFrontendClient::setAttachedWindowWidth(unsigned) { }
+void WebInspectorFrontendClient::setSheetRect(const FloatRect&) { }
 void WebInspectorFrontendClient::startWindowDrag() { }
 void WebInspectorFrontendClient::inspectedURLChanged(const String&) { }
 void WebInspectorFrontendClient::showCertificate(const CertificateInfo&) { }

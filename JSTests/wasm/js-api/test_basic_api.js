@@ -78,7 +78,7 @@ for (const c in constructorProperties) {
         for (const invalid of invalidInstanceImports)
             assert.throws(() => new WebAssembly[c](new WebAssembly.Module(emptyModuleArray), invalid), TypeError, `second argument to WebAssembly.Instance must be undefined or an Object (evaluating 'new WebAssembly[c](new WebAssembly.Module(emptyModuleArray), invalid)')`);
         assert.isNotUndef(instance.exports);
-        checkAccessorOwnPropertyDescriptor(WebAssembly.Instance.prototype, "exports", { configurable: true, enumerable: false });
+        checkAccessorOwnPropertyDescriptor(WebAssembly.Instance.prototype, "exports", { configurable: true, enumerable: true });
         assert.throws(() => WebAssembly.Instance.prototype.exports = undefined, TypeError, `Attempted to assign to readonly property.`);
         assert.throws(() => WebAssembly.Instance.prototype.exports, TypeError, `expected |this| value to be an instance of WebAssembly.Instance`);
         assert.isUndef(instance.exports.__proto__);
@@ -93,9 +93,9 @@ for (const c in constructorProperties) {
         new WebAssembly.Memory({initial: 20});
         break;
     case "Table":
-        new WebAssembly.Table({initial: 20, element: "anyfunc"});
-        new WebAssembly.Table({initial: 20, maximum: 20, element: "anyfunc"});
-        new WebAssembly.Table({initial: 20, maximum: 25, element: "anyfunc"});
+        new WebAssembly.Table({initial: 20, element: "funcref"});
+        new WebAssembly.Table({initial: 20, maximum: 20, element: "funcref"});
+        new WebAssembly.Table({initial: 20, maximum: 25, element: "funcref"});
         break;
     case "CompileError":
     case "LinkError":

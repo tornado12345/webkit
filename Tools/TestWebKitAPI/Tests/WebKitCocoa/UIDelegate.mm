@@ -36,14 +36,13 @@
 #import <WebKit/WKPreferencesPrivate.h>
 #import <WebKit/WKRetainPtr.h>
 #import <WebKit/WKUIDelegatePrivate.h>
-#import <WebKit/WKWebViewPrivate.h>
+#import <WebKit/WKWebViewPrivateForTesting.h>
 #import <WebKit/_WKHitTestResult.h>
 #import <wtf/RetainPtr.h>
 #import <wtf/Vector.h>
 
 #if PLATFORM(MAC)
 #import <Carbon/Carbon.h>
-#import <wtf/mac/AppKitCompatibilityDeclarations.h>
 #endif
 
 static bool done;
@@ -192,6 +191,7 @@ TEST(WebKit, InjectedBundleNodeHandleIsSelectElement)
     auto webView = adoptNS([[TestWKWebView alloc] initWithFrame:CGRectMake(0, 0, 800, 600) configuration:configuration]);
     auto delegate = adoptNS([[InjectedBundleNodeHandleIsSelectElementDelegate alloc] init]);
     [webView setUIDelegate:delegate.get()];
+    [webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"about:blank"]]];
     TestWebKitAPI::Util::run(&done);
 }
 
@@ -426,6 +426,52 @@ TEST(WebKit, PrintFrame)
     TestWebKitAPI::Util::run(&drawFooterCalled);
 }
 
+TEST(WebKit, PrintPreview)
+{
+    auto webView = adoptNS([[TestWKWebView alloc] initWithFrame:NSMakeRect(0, 0, 800, 600)]);
+    auto delegate = adoptNS([[PrintDelegate alloc] init]);
+    [webView setUIDelegate:delegate.get()];
+    [webView loadHTMLString:@"<head><title>test_title</title></head><body onload='print()'>hello world!</body>" baseURL:[NSURL URLWithString:@"http://example.com/"]];
+    TestWebKitAPI::Util::run(&done);
+
+    NSPrintOperation *operation = [webView _printOperationWithPrintInfo:[NSPrintInfo sharedPrintInfo]];
+    NSPrintOperation.currentOperation = operation;
+    auto previewView = [operation view];
+    [webView _close];
+    [previewView drawRect:CGRectMake(0, 0, 10, 10)];
+}
+
+@interface PrintDelegateWithCompletionHandler : NSObject <WKUIDelegatePrivate>
+- (void)waitForPrintFrameCall;
+@end
+
+@implementation PrintDelegateWithCompletionHandler {
+    bool _done;
+}
+
+- (void)_webView:(WKWebView *)webView printFrame:(_WKFrameHandle *)frame completionHandler:(void (^)(void))completionHandler
+{
+    completionHandler();
+    _done = true;
+}
+
+- (void)waitForPrintFrameCall
+{
+    while (!_done)
+        TestWebKitAPI::Util::spinRunLoop();
+}
+
+@end
+
+TEST(WebKit, PrintWithCompletionHandler)
+{
+    auto webView = adoptNS([WKWebView new]);
+    auto delegate = adoptNS([PrintDelegateWithCompletionHandler new]);
+    [webView setUIDelegate:delegate.get()];
+    [webView loadHTMLString:@"<head><title>test_title</title></head><body onload='print()'>hello world!</body>" baseURL:[NSURL URLWithString:@"http://example.com/"]];
+    [delegate waitForPrintFrameCall];
+}
+
 @interface NotificationDelegate : NSObject <WKUIDelegatePrivate> {
     bool _allowNotifications;
 }
@@ -468,11 +514,11 @@ TEST(WebKit, NotificationPermission)
     NSString *html = @"<script>Notification.requestPermission(function(p){alert('permission '+p)})</script>";
     auto webView = adoptNS([[WKWebView alloc] init]);
     [webView setUIDelegate:[[[NotificationDelegate alloc] initWithAllowNotifications:YES] autorelease]];
-    [webView loadHTMLString:html baseURL:[NSURL URLWithString:@"http://example.org"]];
+    [webView loadHTMLString:html baseURL:[NSURL URLWithString:@"https://example.org"]];
     TestWebKitAPI::Util::run(&done);
     done = false;
     [webView setUIDelegate:[[[NotificationDelegate alloc] initWithAllowNotifications:NO] autorelease]];
-    [webView loadHTMLString:html baseURL:[NSURL URLWithString:@"http://example.com"]];
+    [webView loadHTMLString:html baseURL:[NSURL URLWithString:@"https://example.com"]];
     TestWebKitAPI::Util::run(&done);
 }
 
@@ -594,6 +640,7 @@ TEST(WebKit, ClickAutoFillButton)
     auto webView = adoptNS([[TestWKWebView alloc] initWithFrame:CGRectMake(0, 0, 800, 600) configuration:configuration]);
     auto delegate = adoptNS([[AutoFillDelegate alloc] init]);
     [webView setUIDelegate:delegate.get()];
+    [webView evaluateJavaScript:@"" completionHandler: nil]; // Ensure the WebProcess and injected bundle are running.
     TestWebKitAPI::Util::run(&readyForClick);
     NSPoint buttonLocation = NSMakePoint(130, 575);
     [webView mouseDownAtPoint:buttonLocation simulatePressure:NO];
@@ -633,6 +680,7 @@ static void testDidResignInputElementStrongPasswordAppearanceAfterEvaluatingJava
     auto webView = adoptNS([[TestWKWebView alloc] initWithFrame:CGRectMake(0, 0, 800, 600) configuration:configuration]);
     auto delegate = adoptNS([[DidResignInputElementStrongPasswordAppearanceDelegate alloc] init]);
     [webView setUIDelegate:delegate.get()];
+    [webView evaluateJavaScript:@"" completionHandler:nil]; // Make sure WebProcess and injected bundle are running.
     TestWebKitAPI::Util::run(&readytoResign);
     [webView evaluateJavaScript:script completionHandler:nil];
     TestWebKitAPI::Util::run(&done);
@@ -674,6 +722,7 @@ TEST(WebKit, AutoFillAvailable)
     auto webView = adoptNS([[TestWKWebView alloc] initWithFrame:CGRectMake(0, 0, 800, 600) configuration:configuration]);
     auto delegate = adoptNS([[AutoFillAvailableDelegate alloc] init]);
     [webView setUIDelegate:delegate.get()];
+    [webView evaluateJavaScript:@"" completionHandler: nil]; // Ensure the WebProcess and injected bundle are running.
     TestWebKitAPI::Util::run(&done);
 }
 
@@ -698,6 +747,7 @@ TEST(WebKit, InjectedBundleNodeHandleIsTextField)
     auto webView = adoptNS([[TestWKWebView alloc] initWithFrame:CGRectMake(0, 0, 800, 600) configuration:configuration]);
     auto delegate = adoptNS([[InjectedBundleNodeHandleIsTextFieldDelegate alloc] init]);
     [webView setUIDelegate:delegate.get()];
+    [webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"about:blank"]]];
     TestWebKitAPI::Util::run(&done);
 }
 
@@ -759,23 +809,28 @@ static void synthesizeTab(NSWindow *window, NSView *view, bool withShiftDown)
     [view keyUp:tabEvent(window, NSEventTypeKeyUp, withShiftDown ? NSEventModifierFlagShift : 0)];
 }
 
-static _WKFocusDirection takenDirection;
-
 @interface FocusDelegate : NSObject <WKUIDelegatePrivate>
+@property (nonatomic) _WKFocusDirection takenDirection;
+@property (nonatomic) BOOL useShiftTab;
 @end
 
-@implementation FocusDelegate
+@implementation FocusDelegate {
+@package
+    bool _done;
+    bool _didSendKeyEvent;
+}
 
 - (void)_webView:(WKWebView *)webView takeFocus:(_WKFocusDirection)direction
 {
-    takenDirection = direction;
-    done = true;
+    _takenDirection = direction;
+    _done = true;
 }
 
 - (void)webView:(WKWebView *)webView runJavaScriptAlertPanelWithMessage:(NSString *)message initiatedByFrame:(WKFrameInfo *)frame completionHandler:(void (^)(void))completionHandler
 {
     completionHandler();
-    synthesizeTab([webView window], webView, true);
+    _didSendKeyEvent = true;
+    synthesizeTab([webView window], webView, _useShiftTab);
 }
 
 @end
@@ -784,12 +839,71 @@ TEST(WebKit, Focus)
 {
     auto webView = adoptNS([[WKWebView alloc] initWithFrame:CGRectMake(0, 0, 800, 600)]);
     auto delegate = adoptNS([[FocusDelegate alloc] init]);
+    [delegate setUseShiftTab:YES];
     [webView setUIDelegate:delegate.get()];
     NSString *html = @"<script>function loaded() { document.getElementById('in').focus(); alert('ready'); }</script>"
     "<body onload='loaded()'><input type='text' id='in'></body>";
     [webView loadHTMLString:html baseURL:[NSURL URLWithString:@"http://example.com/"]];
-    TestWebKitAPI::Util::run(&done);
-    ASSERT_EQ(takenDirection, _WKFocusDirectionBackward);
+    TestWebKitAPI::Util::run(&delegate->_done);
+    ASSERT_EQ([delegate takenDirection], _WKFocusDirectionBackward);
+}
+
+TEST(WebKit, ShiftTabTakesFocusFromEditableWebView)
+{
+    auto webView = adoptNS([[WKWebView alloc] initWithFrame:CGRectMake(0, 0, 800, 600)]);
+    [webView _setEditable:YES];
+
+    auto delegate = adoptNS([[FocusDelegate alloc] init]);
+    [delegate setUseShiftTab:YES];
+    [webView setUIDelegate:delegate.get()];
+    NSString *html = @"<script>function loaded() { document.body.focus(); alert('ready'); }</script>"
+    "<body onload='loaded()'></body>";
+    [webView loadHTMLString:html baseURL:[NSURL URLWithString:@"http://example.com/"]];
+    TestWebKitAPI::Util::run(&delegate->_done);
+    ASSERT_EQ([delegate takenDirection], _WKFocusDirectionBackward);
+}
+
+TEST(WebKit, ShiftTabDoesNotTakeFocusFromEditableWebViewWhenPreventingKeyPress)
+{
+    auto webView = adoptNS([[TestWKWebView alloc] initWithFrame:CGRectMake(0, 0, 800, 600)]);
+    [webView _setEditable:YES];
+
+    auto delegate = adoptNS([[FocusDelegate alloc] init]);
+    [delegate setUseShiftTab:YES];
+    [webView setUIDelegate:delegate.get()];
+    NSString *markup = @"<script>"
+        "    function loaded() {"
+        "        document.body.focus();"
+        "        document.body.addEventListener('keypress', e => e.preventDefault());"
+        "        document.body.addEventListener('keyup', () => webkit.messageHandlers.testHandler.postMessage('keyup'));"
+        "        alert('ready');"
+        "    }"
+        "</script>"
+        "<body onload='loaded()'></body>";
+
+    __block bool handledKeyUp = false;
+    [webView performAfterReceivingMessage:@"keyup" action:^{
+        handledKeyUp = true;
+    }];
+    [webView synchronouslyLoadHTMLString:markup];
+
+    TestWebKitAPI::Util::run(&handledKeyUp);
+    EXPECT_FALSE(delegate->_done);
+}
+
+TEST(WebKit, TabDoesNotTakeFocusFromEditableWebView)
+{
+    auto webView = adoptNS([[TestWKWebView alloc] initWithFrame:CGRectMake(0, 0, 800, 600)]);
+    [webView _setEditable:YES];
+
+    auto delegate = adoptNS([[FocusDelegate alloc] init]);
+    [webView setUIDelegate:delegate.get()];
+    NSString *html = @"<script>function loaded() { document.body.focus(); alert('ready'); }</script>"
+    "<body onload='loaded()'></body>";
+    [webView loadHTMLString:html baseURL:[NSURL URLWithString:@"http://example.com/"]];
+    TestWebKitAPI::Util::run(&delegate->_didSendKeyEvent);
+    EXPECT_WK_STREQ("\t", [webView stringByEvaluatingJavaScript:@"document.body.textContent"]);
+    ASSERT_FALSE(delegate->_done);
 }
 
 #define MOUSE_EVENT_CAUSES_DOWNLOAD 0

@@ -26,8 +26,10 @@
 #include "config.h"
 #include "DeviceOrientationOrMotionEvent.h"
 
+#include "DOMWindow.h"
+#include "DeviceOrientationAndMotionAccessController.h"
 #include "Document.h"
-#include "UserGestureIndicator.h"
+#include "JSDOMPromiseDeferred.h"
 
 namespace WebCore {
 
@@ -38,17 +40,16 @@ void DeviceOrientationOrMotionEvent::requestPermission(Document& document, Permi
     if (!window)
         return promise.reject(Exception { InvalidStateError, "No browsing context"_s });
 
-    if (!UserGestureIndicator::processingUserGesture())
-        return promise.reject(Exception { NotAllowedError, "Calling requestPermission() requires a user gesture"_s });
-
     String errorMessage;
     if (!window->isAllowedToUseDeviceMotionOrientation(errorMessage)) {
         document.addConsoleMessage(MessageSource::JS, MessageLevel::Warning, makeString("Call to requestPermission() failed, reason: ", errorMessage, "."));
         return promise.resolve(PermissionState::Denied);
     }
 
-    document.deviceOrientationAndMotionAccessController().shouldAllowAccess([promise = WTFMove(promise)](bool granted) mutable {
-        promise.resolve(granted ? PermissionState::Granted : PermissionState::Denied);
+    document.deviceOrientationAndMotionAccessController().shouldAllowAccess([promise = WTFMove(promise)](PermissionState permissionState) mutable {
+        if (permissionState == PermissionState::Prompt)
+            return promise.reject(Exception { NotAllowedError, "Requesting device orientation or motion access requires a user gesture to prompt"_s });
+        promise.resolve(permissionState);
     });
 }
 #endif

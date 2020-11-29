@@ -33,6 +33,7 @@
 #import <WebCore/PageGroup.h>
 #import <WebCore/SecurityOrigin.h>
 #import <WebCore/SecurityOriginData.h>
+#import <wtf/cocoa/VectorCocoa.h>
 
 using namespace WebCore;
 
@@ -59,17 +60,9 @@ NSString * const WebStorageDidModifyOriginNotification = @"WebStorageDidModifyOr
 
 - (NSArray *)origins
 {
-    auto coreOrigins = WebKit::StorageTracker::tracker().origins();
-
-    NSMutableArray *webOrigins = [[NSMutableArray alloc] initWithCapacity:coreOrigins.size()];
-
-    for (auto& origin : coreOrigins) {
-        WebSecurityOrigin *webOrigin = [[WebSecurityOrigin alloc] _initWithWebCoreSecurityOrigin:origin.securityOrigin().ptr()];
-        [webOrigins addObject:webOrigin];
-        [webOrigin release];
-    }
-
-    return [webOrigins autorelease];
+    return createNSArray(WebKit::StorageTracker::tracker().origins(), [] (auto& origin) {
+        return adoptNS([[WebSecurityOrigin alloc] _initWithWebCoreSecurityOrigin:origin.securityOrigin().ptr()]);
+    }).autorelease();
 }
 
 - (void)deleteAllOrigins
@@ -139,8 +132,7 @@ void WebKitInitializeStorageIfNecessary()
     WebKit::StorageTracker::initializeTracker(storagePath, WebStorageTrackerClient::sharedWebStorageTrackerClient());
 
 #if PLATFORM(IOS_FAMILY)
-    if (linkedOnOrAfter(SDKVersion::FirstToExcludeLocalStorageFromBackup))
-        [[NSURL fileURLWithPath:storagePath] setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:nil];
+    [[NSURL fileURLWithPath:storagePath] setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:nil];
 #endif
 
     initialized = YES;

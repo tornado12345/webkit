@@ -35,8 +35,16 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
 
         this.element.classList.add("cpu");
 
-        this._statisticsData = null;
         this._sectionLimit = CPUTimelineView.defaultSectionLimit;
+
+        this._statisticsData = null;
+        this._secondsPerPixelInLayout = undefined;
+        this._visibleRecordsInLayout = [];
+        this._discontinuitiesInLayout = [];
+
+        this._stickingOverlay = false;
+        this._overlayRecord = null;
+        this._overlayTime = NaN;
 
         timeline.addEventListener(WI.Timeline.Event.RecordAdded, this._cpuTimelineRecordAdded, this);
     }
@@ -46,25 +54,29 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
     static displayNameForSampleType(type)
     {
         switch (type) {
-        case WI.CPUTimelineView.SampleType.Script:
-            return WI.UIString("Script");
-        case WI.CPUTimelineView.SampleType.Layout:
-            return WI.UIString("Layout");
-        case WI.CPUTimelineView.SampleType.Paint:
-            return WI.UIString("Paint");
-        case WI.CPUTimelineView.SampleType.Style:
-            return WI.UIString("Style Resolution");
+        case CPUTimelineView.SampleType.JavaScript:
+            return WI.UIString("JavaScript");
+        case CPUTimelineView.SampleType.Layout:
+            return WI.repeatedUIString.timelineRecordLayout();
+        case CPUTimelineView.SampleType.Paint:
+            return WI.repeatedUIString.timelineRecordPaint();
+        case CPUTimelineView.SampleType.Style:
+            return WI.UIString("Styles");
         }
         console.error("Unknown sample type", type);
     }
 
-    static get cpuUsageViewHeight() { return 150; }
+    static get cpuUsageViewHeight() { return 135; }
     static get threadCPUUsageViewHeight() { return 65; }
     static get indicatorViewHeight() { return 15; }
 
     static get lowEnergyThreshold() { return 3; }
-    static get mediumEnergyThreshold() { return 50; }
-    static get highEnergyThreshold() { return 150; }
+    static get mediumEnergyThreshold() { return 30; }
+    static get highEnergyThreshold() { return 100; }
+
+    static get lowEnergyGraphBoundary() { return 10; }
+    static get mediumEnergyGraphBoundary() { return 70; }
+    static get highEnergyGraphBoundary() { return 100; }
 
     static get defaultSectionLimit() { return 5; }
 
@@ -124,10 +136,15 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
 
         this._removeWorkerThreadViews();
 
-        this._mainThreadWorkIndicatorView.clear();
+        this._sectionLimit = CPUTimelineView.defaultSectionLimit;
 
         this._statisticsData = null;
-        this._sectionLimit = CPUTimelineView.defaultSectionLimit;
+        this._secondsPerPixelInLayout = undefined;
+        this._visibleRecordsInLayout = [];
+        this._discontinuitiesInLayout = [];
+
+        this._stickingOverlay = false;
+        this._hideGraphOverlay();
     }
 
     // Protected
@@ -141,7 +158,7 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
 
     initialLayout()
     {
-        this.element.style.setProperty("--cpu-usage-stacked-view-height", CPUTimelineView.cpuUsageViewHeight + "px");
+        this.element.style.setProperty("--cpu-usage-combined-view-height", CPUTimelineView.cpuUsageViewHeight + "px");
         this.element.style.setProperty("--cpu-usage-view-height", CPUTimelineView.threadCPUUsageViewHeight + "px");
         this.element.style.setProperty("--cpu-usage-indicator-view-height", CPUTimelineView.indicatorViewHeight + "px");
 
@@ -174,7 +191,6 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
             swatchElement.classList.add("swatch", sampleType);
 
             let valueContainer = rowElement.appendChild(document.createElement("div"));
-            valueContainer.classList.add("value");
 
             let labelElement = valueContainer.appendChild(document.createElement("div"));
             labelElement.classList.add("label");
@@ -195,10 +211,10 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
         this._breakdownLegendElement = breakdownChartContainerElement.appendChild(document.createElement("div"));
         this._breakdownLegendElement.classList.add("legend");
 
-        this._breakdownLegendScriptElement = appendLegendRow(this._breakdownLegendElement, WI.CPUTimelineView.SampleType.Script);
-        this._breakdownLegendLayoutElement = appendLegendRow(this._breakdownLegendElement, WI.CPUTimelineView.SampleType.Layout);
-        this._breakdownLegendPaintElement = appendLegendRow(this._breakdownLegendElement, WI.CPUTimelineView.SampleType.Paint);
-        this._breakdownLegendStyleElement = appendLegendRow(this._breakdownLegendElement, WI.CPUTimelineView.SampleType.Style);
+        this._breakdownLegendScriptElement = appendLegendRow(this._breakdownLegendElement, CPUTimelineView.SampleType.JavaScript);
+        this._breakdownLegendLayoutElement = appendLegendRow(this._breakdownLegendElement, CPUTimelineView.SampleType.Layout);
+        this._breakdownLegendPaintElement = appendLegendRow(this._breakdownLegendElement, CPUTimelineView.SampleType.Paint);
+        this._breakdownLegendStyleElement = appendLegendRow(this._breakdownLegendElement, CPUTimelineView.SampleType.Style);
 
         let dividerElement = overviewElement.appendChild(document.createElement("div"));
         dividerElement.classList.add("divider");
@@ -209,7 +225,7 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
         let energyChartElement = energyContainerElement.parentElement;
         let energySubtitleElement = energyChartElement.firstChild;
         let energyInfoElement = energySubtitleElement.appendChild(document.createElement("span"));
-        energyInfoElement.className = "info";
+        energyInfoElement.classList.add("info", WI.Popover.IgnoreAutoDismissClassName);
         energyInfoElement.textContent = "?";
 
         this._energyInfoPopover = null;
@@ -249,9 +265,9 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
             height: 110,
             strokeWidth: 20,
             segments: [
-                {className: "low", limit: 10},
-                {className: "medium", limit: 80},
-                {className: "high", limit: 100},
+                {className: "low", limit: CPUTimelineView.lowEnergyGraphBoundary},
+                {className: "medium", limit: CPUTimelineView.mediumEnergyGraphBoundary},
+                {className: "high", limit: CPUTimelineView.highEnergyGraphBoundary},
             ]
         });
         this.addSubview(this._energyChart);
@@ -287,15 +303,11 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
         detailsSubtitleElement.classList.add("subtitle");
         detailsSubtitleElement.textContent = WI.UIString("CPU Usage");
 
-        this._cpuUsageView = new WI.CPUUsageStackedView(WI.UIString("Total"));
+        this._cpuUsageView = new WI.CPUUsageCombinedView(WI.UIString("Total"));
         this.addSubview(this._cpuUsageView);
         detailsContainerElement.appendChild(this._cpuUsageView.element);
 
-        this._mainThreadWorkIndicatorView = new WI.CPUUsageIndicatorView;
-        this.addSubview(this._mainThreadWorkIndicatorView);
-        detailsContainerElement.appendChild(this._mainThreadWorkIndicatorView.element);
-
-        this._mainThreadWorkIndicatorView.chart.element.addEventListener("click", this._handleIndicatorClick.bind(this));
+        this._cpuUsageView.rangeChart.element.addEventListener("click", this._handleIndicatorClick.bind(this));
 
         this._threadsDetailsElement = detailsContainerElement.appendChild(document.createElement("details"));
         this._threadsDetailsElement.open = WI.settings.cpuTimelineThreadDetailsExpanded.value;
@@ -315,12 +327,10 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
         this._threadsDetailsElement.appendChild(this._mainThreadUsageView.element);
 
         this._webkitThreadUsageView = new WI.CPUUsageView(WI.UIString("WebKit Threads"));
-        this._webkitThreadUsageView.element.classList.add("non-main-thread");
         this.addSubview(this._webkitThreadUsageView);
         this._threadsDetailsElement.appendChild(this._webkitThreadUsageView.element);
 
         this._unknownThreadUsageView = new WI.CPUUsageView(WI.UIString("Other Threads"));
-        this._unknownThreadUsageView.element.classList.add("non-main-thread");
         this.addSubview(this._unknownThreadUsageView);
         this._threadsDetailsElement.appendChild(this._unknownThreadUsageView.element);
 
@@ -341,6 +351,11 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
         this._statisticsTable = statisticsContainerElement.appendChild(document.createElement("table"));
         this._statisticsRows = [];
 
+        {
+            let {headerCell, numberCell} = this._createTableRow(this._statisticsTable);
+            headerCell.textContent = WI.UIString("Network Requests:");
+            this._networkRequestsNumberElement = numberCell;
+        }
         {
             let {headerCell, numberCell} = this._createTableRow(this._statisticsTable);
             headerCell.textContent = WI.UIString("Script Entries:");
@@ -398,7 +413,11 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
 
         this._clearSources();
 
+        this.element.addEventListener("click", this._handleGraphClick.bind(this));
         this.element.addEventListener("mousemove", this._handleGraphMouseMove.bind(this));
+
+        this._overlayMarker = new WI.TimelineMarker(-1, WI.TimelineMarker.Type.TimeStamp);
+        this._timelineRuler.addMarker(this._overlayMarker);
     }
 
     layout()
@@ -426,13 +445,18 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
         let discontinuities = this._recording.discontinuitiesInTimeRange(graphStartTime, visibleEndTime);
         let originalDiscontinuities = discontinuities.slice();
 
-        // Don't include the record before the graph start if the graph start is within a gap.
-        let includeRecordBeforeStart = !discontinuities.length || discontinuities[0].startTime > graphStartTime;
-        let visibleRecords = this.representedObject.recordsInTimeRange(graphStartTime, visibleEndTime, includeRecordBeforeStart);
+        let visibleRecords = this.representedObject.recordsInTimeRange(graphStartTime, visibleEndTime, {
+            includeRecordBeforeStart: !discontinuities.length || discontinuities[0].startTime > graphStartTime,
+            includeRecordAfterEnd: true,
+        });
         if (!visibleRecords.length || (visibleRecords.length === 1 && visibleRecords[0].endTime < graphStartTime)) {
             this.clear();
             return;
         }
+
+        this._secondsPerPixelInLayout = secondsPerPixel;
+        this._visibleRecordsInLayout = visibleRecords;
+        this._discontinuitiesInLayout = discontinuities.slice();
 
         this._statisticsData = this._computeStatisticsData(graphStartTime, visibleEndTime);
         this._layoutBreakdownChart();
@@ -446,6 +470,7 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
         let mainThreadMax = -Infinity;
         let webkitThreadMax = -Infinity;
         let unknownThreadMax = -Infinity;
+        let workerMax = -Infinity;
 
         let min = Infinity;
         let mainThreadMin = Infinity;
@@ -458,13 +483,13 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
         let unknownThreadAverage = 0;
 
         for (let record of visibleRecords) {
-            let time = record.startTime;
+            let time = record.timestamp;
             let {usage, mainThreadUsage, workerThreadUsage, webkitThreadUsage, unknownThreadUsage} = record;
 
-            if (discontinuities.length && discontinuities[0].endTime < time) {
+            if (discontinuities.length && discontinuities[0].endTime <= time) {
                 let startDiscontinuity = discontinuities.shift();
                 let endDiscontinuity = startDiscontinuity;
-                while (discontinuities.length && discontinuities[0].endTime < time)
+                while (discontinuities.length && discontinuities[0].endTime <= time)
                     endDiscontinuity = discontinuities.shift();
 
                 if (dataPoints.length) {
@@ -563,13 +588,22 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
         webkitThreadAverage /= visibleRecords.length;
         unknownThreadAverage /= visibleRecords.length;
 
-        for (let [workerId, workerData] of workersDataMap)
+        for (let [workerId, workerData] of workersDataMap) {
             workerData.average = workerData.average / workerData.recordsCount;
+            if (workerData.max > workerMax)
+                workerMax = workerData.max;
+        }
 
         // If the graph end time is inside a gap, the last data point should
         // only be extended to the start of the discontinuity.
         if (discontinuities.length)
             visibleEndTime = discontinuities[0].startTime;
+
+        function bestThreadLayoutMax(value) {
+            if (value > 100)
+                return Math.ceil(value);
+            return (Math.floor(value / 25) + 1) * 25;
+        }
 
         function removeGreaterThan(arr, max) {
             return arr.filter((x) => x <= max);
@@ -607,11 +641,7 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
             }
         }
 
-        // Layout all graphs to the same time scale. The maximum value is
-        // the maximum total CPU usage across all threads.
-        let layoutMax = max;
-
-        function layoutView(view, property, graphHeight, {dataPoints, min, max, average}) {
+        function layoutView(view, property, graphHeight, layoutMax, {dataPoints, min, max, average}) {
             if (min === Infinity)
                 min = 0;
             if (max === -Infinity)
@@ -670,12 +700,17 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
             }
         }
 
-        layoutView(this._cpuUsageView, null, CPUTimelineView.cpuUsageViewHeight, {dataPoints, min, max, average});
+        // Layout the combined graph to the maximum total CPU usage.
+        // Layout all the thread graphs to the same time scale, the maximum across threads / thread groups.
+        this._layoutMax = max;
+        this._threadLayoutMax = bestThreadLayoutMax(Math.max(mainThreadMax, webkitThreadMax, unknownThreadMax, workerMax));
+
+        layoutView(this._cpuUsageView, null, CPUTimelineView.cpuUsageViewHeight, this._layoutMax, {dataPoints, min, max, average});
 
         if (this._threadsDetailsElement.open) {
-            layoutView(this._mainThreadUsageView, "mainThreadUsage", CPUTimelineView.threadCPUUsageViewHeight, {dataPoints, min: mainThreadMin, max: mainThreadMax, average: mainThreadAverage});
-            layoutView(this._webkitThreadUsageView, "webkitThreadUsage", CPUTimelineView.threadCPUUsageViewHeight, {dataPoints, min: webkitThreadMin, max: webkitThreadMax, average: webkitThreadAverage});
-            layoutView(this._unknownThreadUsageView, "unknownThreadUsage", CPUTimelineView.threadCPUUsageViewHeight, {dataPoints, min: unknownThreadMin, max: unknownThreadMax, average: unknownThreadAverage});
+            layoutView(this._mainThreadUsageView, "mainThreadUsage", CPUTimelineView.threadCPUUsageViewHeight, this._threadLayoutMax, {dataPoints, min: mainThreadMin, max: mainThreadMax, average: mainThreadAverage});
+            layoutView(this._webkitThreadUsageView, "webkitThreadUsage", CPUTimelineView.threadCPUUsageViewHeight, this._threadLayoutMax, {dataPoints, min: webkitThreadMin, max: webkitThreadMax, average: webkitThreadAverage});
+            layoutView(this._unknownThreadUsageView, "unknownThreadUsage", CPUTimelineView.threadCPUUsageViewHeight, this._threadLayoutMax, {dataPoints, min: unknownThreadMin, max: unknownThreadMax, average: unknownThreadAverage});
 
             this._removeWorkerThreadViews();
 
@@ -684,11 +719,12 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
                 let displayName = worker ? worker.displayName : WI.UIString("Worker Thread");
                 let workerView = new WI.CPUUsageView(displayName);
                 workerView.element.classList.add("worker-thread");
+                workerView.__workerId = workerId;
                 this.addSubview(workerView);
                 this._threadsDetailsElement.insertBefore(workerView.element, this._webkitThreadUsageView.element);
                 this._workerViews.push(workerView);
 
-                layoutView(workerView, "usage", CPUTimelineView.threadCPUUsageViewHeight, {dataPoints: workerData.dataPoints, min: workerData.min, max: workerData.max, average: workerData.average});
+                layoutView(workerView, "usage", CPUTimelineView.threadCPUUsageViewHeight, this._threadLayoutMax, {dataPoints: workerData.dataPoints, min: workerData.min, max: workerData.max, average: workerData.average});
             }
         }
 
@@ -698,9 +734,11 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
 
         let graphWidth = (graphEndTime - graphStartTime) / secondsPerPixel;
         let size = new WI.Size(graphWidth, CPUTimelineView.indicatorViewHeight);
-        this._mainThreadWorkIndicatorView.updateChart(this._statisticsData.samples, size, visibleEndTime, xScaleIndicatorRange);
+        this._cpuUsageView.updateMainThreadIndicator(this._statisticsData.samples, size, visibleEndTime, xScaleIndicatorRange);
 
         this._layoutEnergyChart(average, visibleDuration);
+
+        this._updateGraphOverlay();
     }
 
     // Private
@@ -754,6 +792,7 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
 
         this._clearStatistics();
 
+        this._networkRequestsNumberElement.textContent = statistics.networkRequests;
         this._scriptEntriesNumberElement.textContent = statistics.scriptEntries;
 
         let createFilterElement = (type, name) => {
@@ -1065,29 +1104,24 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
 
         this._clearEnergyImpactText();
 
-        if (average === 0) {
-             // Zero. (0% CPU, mapped to 0)
-            this._energyImpactLabelElement.textContent = WI.UIString("Low");
-            this._energyImpactLabelElement.classList.add("low");
-            this._energyChart.value = 0;
-        } else if (average <= CPUTimelineView.lowEnergyThreshold) {
+        if (average <= CPUTimelineView.lowEnergyThreshold) {
             // Low. (<=3% CPU, mapped to 0-10)
-            this._energyImpactLabelElement.textContent = WI.UIString("Low");
+            this._energyImpactLabelElement.textContent = WI.UIString("Low", "Low @ Timeline Energy Impact", "Energy Impact: Low");
             this._energyImpactLabelElement.classList.add("low");
-            this._energyChart.value = mapWithBias(average, 0, CPUTimelineView.lowEnergyThreshold, 0, 10, 0.85);
+            this._energyChart.value = mapWithBias(average, 0, CPUTimelineView.lowEnergyThreshold, 0, CPUTimelineView.lowEnergyGraphBoundary, 0.85);
         } else if (average <= CPUTimelineView. mediumEnergyThreshold) {
-            // Medium (3%-90% CPU, mapped to 10-80)
-            this._energyImpactLabelElement.textContent = WI.UIString("Medium");
+            // Medium (3%-30% CPU, mapped to 10-70)
+            this._energyImpactLabelElement.textContent = WI.UIString("Medium", "Medium @ Timeline Energy Impact", "Energy Impact: Medium")
             this._energyImpactLabelElement.classList.add("medium");
-            this._energyChart.value = mapWithBias(average, CPUTimelineView.lowEnergyThreshold, CPUTimelineView.mediumEnergyThreshold, 10, 80, 0.6);
+            this._energyChart.value = mapWithBias(average, CPUTimelineView.lowEnergyThreshold, CPUTimelineView.mediumEnergyThreshold, CPUTimelineView.lowEnergyGraphBoundary, CPUTimelineView.mediumEnergyGraphBoundary, 0.6);
         } else if (average < CPUTimelineView. highEnergyThreshold) {
-            // High. (50-150% CPU, mapped to 80-100)
-            this._energyImpactLabelElement.textContent = WI.UIString("High");
+            // High. (30%-100% CPU, mapped to 70-100)
+            this._energyImpactLabelElement.textContent = WI.UIString("High", "High @ Timeline Energy Impact", "Energy Impact: High")
             this._energyImpactLabelElement.classList.add("high");
-            this._energyChart.value = mapWithBias(average, CPUTimelineView.mediumEnergyThreshold, CPUTimelineView.highEnergyThreshold, 80, 100, 0.9);
+            this._energyChart.value = mapWithBias(average, CPUTimelineView.mediumEnergyThreshold, CPUTimelineView.highEnergyThreshold, CPUTimelineView.mediumEnergyGraphBoundary, CPUTimelineView.highEnergyGraphBoundary, 0.9);
         } else {
-            // Very High. (>150% CPU, mapped to 100)
-            this._energyImpactLabelElement.textContent = WI.UIString("Very High");
+            // Very High. (>100% CPU, mapped to 100)
+            this._energyImpactLabelElement.textContent = WI.UIString("Very High", "Very High @ Timeline Energy Impact", "Energy Impact: Very High")
             this._energyImpactLabelElement.classList.add("high");
             this._energyChart.value = 100;
         }
@@ -1097,10 +1131,10 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
         this._energyImpactNumberElement.textContent = WI.UIString("Average CPU: %s").format(Number.percentageString(average / 100));
 
         if (visibleDuration < 5)
-            this._energyImpactDurationElement.textContent = WI.UIString("Duration: %s").format(WI.UIString("Short"));
+            this._energyImpactDurationElement.textContent = WI.UIString("Duration: Short");
         else {
-            let durationDisplayString = Math.floor(visibleDuration) + "s";
-            this._energyImpactDurationElement.textContent = WI.UIString("Duration: %s").format(durationDisplayString);
+            let durationDisplayString = Math.floor(visibleDuration);
+            this._energyImpactDurationElement.textContent = WI.UIString("Duration: %ss", "The duration of the Timeline recording in seconds (s).").format(durationDisplayString);
         }
     }
 
@@ -1123,8 +1157,6 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
         // with the data available to the frontend and is quite accurate for most
         // Main Thread activity.
 
-        const includeRecordBeforeStart = true;
-
         function incrementTypeCount(map, key) {
             let entry = map.get(key);
             if (entry)
@@ -1145,7 +1177,7 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
         let possibleRepeatingTimers = new Set;
 
         let scriptTimeline = this._recording.timelineForRecordType(WI.TimelineRecord.Type.Script);
-        let scriptRecords = scriptTimeline ? scriptTimeline.recordsInTimeRange(startTime, endTime, includeRecordBeforeStart) : [];
+        let scriptRecords = scriptTimeline ? scriptTimeline.recordsInTimeRange(startTime, endTime, {includeRecordBeforeStart: true}) : [];
         scriptRecords = scriptRecords.filter((record) => {
             // Return true for event types that define script entries/exits.
             // Return false for events with no time ranges or if they are contained in other events.
@@ -1211,7 +1243,7 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
         });
 
         let layoutTimeline = this._recording.timelineForRecordType(WI.TimelineRecord.Type.Layout);
-        let layoutRecords = layoutTimeline ? layoutTimeline.recordsInTimeRange(startTime, endTime, includeRecordBeforeStart) : [];
+        let layoutRecords = layoutTimeline ? layoutTimeline.recordsInTimeRange(startTime, endTime, {includeRecordBeforeStart: true}) : [];
         layoutRecords = layoutRecords.filter((record) => {
             switch (record.eventType) {
             case WI.LayoutTimelineRecord.EventType.RecalculateStyles:
@@ -1233,6 +1265,10 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
             }
         });
 
+        let networkTimeline = this._recording.timelineForRecordType(WI.TimelineRecord.Type.Network);
+        let networkRecords = networkTimeline ? networkTimeline.recordsInTimeRange(startTime, endTime) : [];
+        let networkRequests = networkRecords.length;
+
         let millisecondStartTime = Math.round(startTime * 1000);
         let millisecondEndTime = Math.round(endTime * 1000);
         let millisecondDuration = millisecondEndTime - millisecondStartTime;
@@ -1248,7 +1284,6 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
                 if (recordEnd < millisecondStartTime)
                     continue;
 
-                let offset = recordStart - millisecondStartTime;
                 recordStart = Math.max(recordStart, millisecondStartTime);
                 recordEnd = Math.min(recordEnd, millisecondEndTime);
 
@@ -1259,19 +1294,19 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
         }
 
         markRecordEntries(scriptRecords, (record) => {
-            return WI.CPUTimelineView.SampleType.Script;
+            return CPUTimelineView.SampleType.JavaScript;
         });
 
         markRecordEntries(layoutRecords, (record) => {
             switch (record.eventType) {
             case WI.LayoutTimelineRecord.EventType.RecalculateStyles:
-                return WI.CPUTimelineView.SampleType.Style;
+                return CPUTimelineView.SampleType.Style;
             case WI.LayoutTimelineRecord.EventType.ForcedLayout:
             case WI.LayoutTimelineRecord.EventType.Layout:
-                return WI.CPUTimelineView.SampleType.Layout;
+                return CPUTimelineView.SampleType.Layout;
             case WI.LayoutTimelineRecord.EventType.Paint:
             case WI.LayoutTimelineRecord.EventType.Composite:
-                return WI.CPUTimelineView.SampleType.Paint;
+                return CPUTimelineView.SampleType.Paint;
             }
         });
 
@@ -1285,16 +1320,16 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
             case undefined:
                 samplesIdle++;
                 break;
-            case WI.CPUTimelineView.SampleType.Script:
+            case CPUTimelineView.SampleType.JavaScript:
                 samplesScript++;
                 break;
-            case WI.CPUTimelineView.SampleType.Layout:
+            case CPUTimelineView.SampleType.Layout:
                 samplesLayout++;
                 break;
-            case WI.CPUTimelineView.SampleType.Paint:
+            case CPUTimelineView.SampleType.Paint:
                 samplesPaint++;
                 break;
-            case WI.CPUTimelineView.SampleType.Style:
+            case CPUTimelineView.SampleType.Style:
                 samplesStyle++;
                 break;
             }
@@ -1308,6 +1343,7 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
             samplesPaint,
             samplesStyle,
             scriptEntries,
+            networkRequests,
             timerTypes,
             eventTypes,
             observerTypes,
@@ -1378,7 +1414,7 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
                 this._layoutStatisticsAndSources();
             });
             return span;
-        }
+        };
 
         this._sourcesFilterRow.hidden = false;
         this._sourcesFilterLabelElement.removeChildren();
@@ -1432,6 +1468,7 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
 
     _clearStatistics()
     {
+        this._networkRequestsNumberElement.textContent = emDash;
         this._scriptEntriesNumberElement.textContent = emDash;
 
         for (let row of this._statisticsRows)
@@ -1488,11 +1525,11 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
         if (!chartElement)
             return NaN;
 
-        let chartRect = chartElement.getBoundingClientRect();
-        let position = event.pageX - chartRect.left;
+        let rect = chartElement.getBoundingClientRect();
+        let position = event.pageX - rect.left;
 
         if (WI.resolvedLayoutDirection() === WI.LayoutDirection.RTL)
-            return chartRect.width - position;
+            return rect.width - position;
         return position;
     }
 
@@ -1529,7 +1566,7 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
     _attemptSelectIndicatatorTimelineRecord(startTime, endTime)
     {
         let layoutTimeline = this._recording.timelineForRecordType(WI.TimelineRecord.Type.Layout);
-        let layoutRecords = layoutTimeline ? layoutTimeline.recordsOverlappingTimeRange(startTime, endTime) : [];
+        let layoutRecords = layoutTimeline ? layoutTimeline.recordsInTimeRange(startTime, endTime, {includeRecordBeforeStart: true}) : [];
         layoutRecords = layoutRecords.filter((record) => {
             switch (record.eventType) {
             case WI.LayoutTimelineRecord.EventType.RecalculateStyles:
@@ -1553,7 +1590,7 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
         }
 
         let scriptTimeline = this._recording.timelineForRecordType(WI.TimelineRecord.Type.Script);
-        let scriptRecords = scriptTimeline ? scriptTimeline.recordsOverlappingTimeRange(startTime, endTime) : [];
+        let scriptRecords = scriptTimeline ? scriptTimeline.recordsInTimeRange(startTime, endTime, {includeRecordBeforeStart: true}) : [];
         scriptRecords = scriptRecords.filter((record) => {
             switch (record.eventType) {
             case WI.ScriptTimelineRecord.EventType.ScriptEvaluated:
@@ -1591,10 +1628,23 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
         this.dispatchEventToListeners(WI.TimelineView.Event.RecordWasSelected, {record});
     }
 
+    _handleGraphClick(event)
+    {
+        let mousePosition = this._graphPositionForMouseEvent(event);
+        if (isNaN(mousePosition))
+            return;
+
+        this._stickingOverlay = !this._stickingOverlay;
+
+        if (!this._stickingOverlay)
+            this._handleGraphMouseMove(event);
+    }
+
     _handleGraphMouseMove(event)
     {
         let mousePosition = this._graphPositionForMouseEvent(event);
         if (isNaN(mousePosition)) {
+            this._hideGraphOverlay();
             this.dispatchEventToListeners(WI.TimelineView.Event.ScannerHide);
             return;
         }
@@ -1602,7 +1652,161 @@ WI.CPUTimelineView = class CPUTimelineView extends WI.TimelineView
         let secondsPerPixel = this._timelineRuler.secondsPerPixel;
         let time = this.startTime + (mousePosition * secondsPerPixel);
 
+        if (!this._stickingOverlay)
+            this._showGraphOverlayNearTo(time);
+
         this.dispatchEventToListeners(WI.TimelineView.Event.ScannerShow, {time});
+    }
+
+    _showGraphOverlayNearTo(time)
+    {
+        let nearestRecord = null;
+        let nearestDistance = Infinity;
+
+        // Find the nearest record to the time.
+        for (let record of this._visibleRecordsInLayout) {
+            let distance = Math.abs(time - record.timestamp);
+            if (distance < nearestDistance) {
+                nearestRecord = record;
+                nearestDistance = distance;
+            }
+        }
+
+        if (!nearestRecord) {
+            this._hideGraphOverlay();
+            return;
+        }
+
+        let bestTime = nearestRecord.timestamp;
+
+        // Snap to a discontinuity if closer.
+        for (let {startTime, endTime} of this._discontinuitiesInLayout) {
+            let distance = Math.abs(time - startTime);
+            if (distance < nearestDistance) {
+                nearestDistance = distance;
+                bestTime = startTime;
+            }
+            distance = Math.abs(time - endTime);
+            if (distance < nearestDistance) {
+                nearestDistance = distance;
+                bestTime = endTime;
+            }
+        }
+
+        // Snap to end time if closer.
+        let visibleEndTime = Math.min(this.endTime, this.currentTime);
+        let distance = Math.abs(time - visibleEndTime);
+        if (distance < nearestDistance) {
+            nearestDistance = distance;
+            bestTime = visibleEndTime;
+        }
+
+        let graphStartTime = this.startTime;
+        let adjustedTime = Number.constrain(bestTime, graphStartTime, visibleEndTime);
+        this._showGraphOverlay(nearestRecord, adjustedTime);
+    }
+
+    _updateGraphOverlay()
+    {
+        if (!this._overlayRecord)
+            return;
+
+        this._showGraphOverlay(this._overlayRecord, this._overlayTime, true);
+    }
+
+    _showGraphOverlay(record, time, force)
+    {
+        if (!force && record === this._overlayRecord && time === this._overlayTime)
+            return;
+
+        this._overlayRecord = record;
+        this._overlayTime = time;
+
+        let secondsPerPixel = this._secondsPerPixelInLayout;
+        let graphStartTime = this.startTime;
+
+        this._overlayMarker.time = time + (secondsPerPixel / 2);
+
+        function xScale(time) {
+            return (time - graphStartTime) / secondsPerPixel;
+        }
+
+        let x = xScale(time);
+
+        let {mainThreadUsage, workerThreadUsage, webkitThreadUsage, unknownThreadUsage, workersData} = record;
+
+        function addOverlayPoint(view, graphHeight, layoutMax, value) {
+            if (!value)
+                return;
+
+            let graphMax = layoutMax * 1.05;
+
+            function yScale(value) {
+                return graphHeight - ((value / graphMax) * graphHeight);
+            }
+
+            view.chart.addPointMarker(x, yScale(value));
+            view.chart.needsLayout();
+        }
+
+        this._clearOverlayMarkers();
+
+        this._cpuUsageView.updateLegend(record);
+        addOverlayPoint(this._cpuUsageView, CPUTimelineView.cpuUsageViewHeight, this._layoutMax, mainThreadUsage);
+        addOverlayPoint(this._cpuUsageView, CPUTimelineView.cpuUsageViewHeight, this._layoutMax, mainThreadUsage + workerThreadUsage);
+        addOverlayPoint(this._cpuUsageView, CPUTimelineView.cpuUsageViewHeight, this._layoutMax, mainThreadUsage + workerThreadUsage + webkitThreadUsage + unknownThreadUsage);
+
+        if (this._threadsDetailsElement.open) {
+            this._mainThreadUsageView.updateLegend(mainThreadUsage);
+            addOverlayPoint(this._mainThreadUsageView, CPUTimelineView.threadCPUUsageViewHeight, this._threadLayoutMax, mainThreadUsage);
+
+            this._webkitThreadUsageView.updateLegend(webkitThreadUsage);
+            addOverlayPoint(this._webkitThreadUsageView, CPUTimelineView.threadCPUUsageViewHeight, this._threadLayoutMax, webkitThreadUsage);
+
+            this._unknownThreadUsageView.updateLegend(unknownThreadUsage);
+            addOverlayPoint(this._unknownThreadUsageView, CPUTimelineView.threadCPUUsageViewHeight, this._threadLayoutMax, unknownThreadUsage);
+
+            for (let workerView of this._workerViews)
+                workerView.updateLegend(NaN);
+
+            if (workersData) {
+                for (let {targetId, usage} of workersData) {
+                    let workerView = this._workerViews.find((x) => x.__workerId === targetId);
+                    if (workerView) {
+                        workerView.updateLegend(usage);
+                        addOverlayPoint(workerView, CPUTimelineView.threadCPUUsageViewHeight, this._threadLayoutMax, usage);
+                    }
+                }
+            }
+        }
+    }
+
+    _clearOverlayMarkers()
+    {
+        function clearGraphOverlayElement(view) {
+            view.clearLegend();
+            view.chart.clearPointMarkers();
+            view.chart.needsLayout();
+        }
+
+        clearGraphOverlayElement(this._cpuUsageView);
+        clearGraphOverlayElement(this._mainThreadUsageView);
+        clearGraphOverlayElement(this._webkitThreadUsageView);
+        clearGraphOverlayElement(this._unknownThreadUsageView);
+
+        for (let workerView of this._workerViews)
+            clearGraphOverlayElement(workerView);
+    }
+
+    _hideGraphOverlay()
+    {
+        if (this._stickingOverlay)
+            return;
+
+        this._overlayRecord = null;
+        this._overlayTime = NaN;
+        this._overlayMarker.time = -1;
+        this._clearOverlayMarkers();
     }
 };
 
@@ -1612,7 +1816,7 @@ WI.CPUTimelineView.LayoutReason = {
 
 // NOTE: UI follows this order.
 WI.CPUTimelineView.SampleType = {
-    Script: "sample-type-script",
+    JavaScript: "sample-type-javascript",
     Layout: "sample-type-layout",
     Paint: "sample-type-paint",
     Style: "sample-type-style",

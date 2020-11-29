@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2010-2020 Apple Inc. All rights reserved.
  * Copyright (C) 2011 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -47,6 +47,7 @@
 #import <mach/mach_vm.h>
 #import <mach/vm_statistics.h>
 #import <objc/runtime.h>
+#import <pal/spi/cf/CFNetworkSPI.h>
 #import <pal/spi/cg/CoreGraphicsSPI.h>
 #import <pal/spi/cocoa/LaunchServicesSPI.h>
 #import <pal/spi/mac/HIToolboxSPI.h>
@@ -55,6 +56,7 @@
 #import <sysexits.h>
 #import <wtf/HashSet.h>
 #import <wtf/NeverDestroyed.h>
+#import <wtf/cocoa/VectorCocoa.h>
 
 const CFStringRef kLSPlugInBundleIdentifierKey = CFSTR("LSPlugInBundleIdentifierKey");
 
@@ -255,12 +257,7 @@ static void replacedNSConcreteTask_launch(NSTask *self, SEL _cmd)
 {
     String launchPath = self.launchPath;
 
-    Vector<String> arguments;
-    arguments.reserveInitialCapacity(self.arguments.count);
-    for (NSString *argument in self.arguments)
-        arguments.uncheckedAppend(argument);
-
-    if (PluginProcess::singleton().launchProcess(launchPath, arguments))
+    if (PluginProcess::singleton().launchProcess(launchPath, makeVector<String>(self.arguments)))
         return;
 
     NSConcreteTask_launch(self, _cmd);
@@ -270,15 +267,9 @@ static NSRunningApplication *(*NSWorkspace_launchApplicationAtURL_options_config
 
 static NSRunningApplication *replacedNSWorkspace_launchApplicationAtURL_options_configuration_error(NSWorkspace *self, SEL _cmd, NSURL *url, NSWorkspaceLaunchOptions options, NSDictionary *configuration, NSError **error)
 {
-    Vector<String> arguments;
-    if (NSArray *argumentsArray = [configuration objectForKey:NSWorkspaceLaunchConfigurationArguments]) {
-        if ([argumentsArray isKindOfClass:[NSArray array]]) {
-            for (NSString *argument in argumentsArray) {
-                if ([argument isKindOfClass:[NSString class]])
-                    arguments.append(argument);
-            }
-        }
-    }
+    ALLOW_DEPRECATED_DECLARATIONS_BEGIN
+    auto arguments = makeVector<String>([configuration objectForKey:NSWorkspaceLaunchConfigurationArguments]);
+    ALLOW_DEPRECATED_DECLARATIONS_END
 
     if (PluginProcess::singleton().launchApplicationAtURL(URL(url).string(), arguments)) {
         if (error)
@@ -306,6 +297,7 @@ static void initializeCocoaOverrides()
     NSConcreteTask_launch = reinterpret_cast<void (*)(NSTask *, SEL)>(method_setImplementation(launchMethod, reinterpret_cast<IMP>(replacedNSConcreteTask_launch)));
 
     // Override -[NSWorkspace launchApplicationAtURL:options:configuration:error:]
+    // FIXME: Are these deprecation allowances necessary?
     Method launchApplicationAtURLOptionsConfigurationErrorMethod = class_getInstanceMethod(objc_getClass("NSWorkspace"), @selector(launchApplicationAtURL:options:configuration:error:));
     NSWorkspace_launchApplicationAtURL_options_configuration_error = reinterpret_cast<NSRunningApplication *(*)(NSWorkspace *, SEL, NSURL *, NSWorkspaceLaunchOptions, NSDictionary *, NSError **)>(method_setImplementation(launchApplicationAtURLOptionsConfigurationErrorMethod, reinterpret_cast<IMP>(replacedNSWorkspace_launchApplicationAtURL_options_configuration_error)));
 
@@ -392,7 +384,7 @@ static void muteAudio(void)
 void PluginProcess::platformInitializePluginProcess(PluginProcessCreationParameters&& parameters)
 {
     m_compositingRenderServerPort = WTFMove(parameters.acceleratedCompositingPort);
-    if (parameters.processType == PluginProcessTypeSnapshot)
+    if (parameters.processType == PluginProcessType::Snapshot)
         muteAudio();
 
     [NSURLCache setSharedURLCache:adoptNS([[NSURLCache alloc]
@@ -400,9 +392,11 @@ void PluginProcess::platformInitializePluginProcess(PluginProcessCreationParamet
         diskCapacity:pluginDiskCacheSize
         diskPath:m_nsurlCacheDirectory]).get()];
 
-#if PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 101400
     // Disable Dark Mode in the plugin process to avoid rendering issues.
     [NSApp setAppearance:[NSAppearance appearanceNamed:NSAppearanceNameAqua]];
+
+#if HAVE(APP_SSO) || PLATFORM(MACCATALYST)
+    [NSURLSession _disableAppSSO];
 #endif
 }
 
@@ -473,9 +467,6 @@ void PluginProcess::initializeSandbox(const AuxiliaryProcessInitializationParame
         WTFLogAlways("PluginProcess: couldn't create NSURL cache directory '%s'\n", cacheDirectory);
         exit(EX_OSERR);
     }
-
-    if (PluginInfoStore::shouldAllowPluginToRunUnsandboxed(m_pluginBundleIdentifier))
-        return;
 
     bool parentIsSandboxed = parameters.connectionIdentifier.xpcConnection && connectedProcessIsSandboxed(parameters.connectionIdentifier.xpcConnection.get());
 

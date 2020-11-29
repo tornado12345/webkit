@@ -31,53 +31,57 @@
 #include "WebProcess.h"
 #include "WebProcessProxyMessages.h"
 #include <WebCore/SQLiteDatabaseTracker.h>
-#include <wtf/MainThread.h>
 
 namespace WebKit {
 using namespace WebCore;
 
-WebSQLiteDatabaseTracker::WebSQLiteDatabaseTracker(WebProcess& process)
-    : m_process(process)
-    , m_processType(AuxiliaryProcess::ProcessType::WebContent)
-    , m_hysteresis([this](PAL::HysteresisState state) { hysteresisUpdated(state); })
+WebSQLiteDatabaseTracker::WebSQLiteDatabaseTracker(IsHoldingLockedFilesHandler&& isHoldingLockedFilesHandler)
+    : m_isHoldingLockedFilesHandler(WTFMove(isHoldingLockedFilesHandler))
+    , m_hysteresis([this](PAL::HysteresisState state) { setIsHoldingLockedFiles(state == PAL::HysteresisState::Started); })
 {
+    ASSERT(RunLoop::isMain());
     SQLiteDatabaseTracker::setClient(this);
 }
 
-WebSQLiteDatabaseTracker::WebSQLiteDatabaseTracker(NetworkProcess& process)
-    : m_process(process)
-    , m_processType(AuxiliaryProcess::ProcessType::Network)
-    , m_hysteresis([this](PAL::HysteresisState state) { hysteresisUpdated(state); })
+WebSQLiteDatabaseTracker::~WebSQLiteDatabaseTracker()
 {
-    SQLiteDatabaseTracker::setClient(this);
+    ASSERT(RunLoop::isMain());
+    SQLiteDatabaseTracker::setClient(nullptr);
+
+    if (m_hysteresis.state() == PAL::HysteresisState::Started)
+        setIsHoldingLockedFiles(false);
+}
+
+void WebSQLiteDatabaseTracker::setIsSuspended(bool isSuspended)
+{
+    ASSERT(RunLoop::isMain());
+    m_isSuspended = isSuspended;
 }
 
 void WebSQLiteDatabaseTracker::willBeginFirstTransaction()
 {
-    callOnMainThread([this] {
-        m_hysteresis.start();
+    RunLoop::main().dispatch([weakThis = makeWeakPtr(*this)] {
+        if (weakThis)
+            weakThis->m_hysteresis.start();
     });
 }
 
 void WebSQLiteDatabaseTracker::didFinishLastTransaction()
 {
-    callOnMainThread([this] {
-        m_hysteresis.stop();
+    RunLoop::main().dispatch([weakThis = makeWeakPtr(*this)] {
+        if (weakThis)
+            weakThis->m_hysteresis.stop();
     });
 }
 
-void WebSQLiteDatabaseTracker::hysteresisUpdated(PAL::HysteresisState state)
+void WebSQLiteDatabaseTracker::setIsHoldingLockedFiles(bool isHoldingLockedFiles)
 {
-    switch (m_processType) {
-    case AuxiliaryProcess::ProcessType::WebContent:
-        m_process.parentProcessConnection()->send(Messages::WebProcessProxy::SetIsHoldingLockedFiles(state == PAL::HysteresisState::Started), 0);
-        break;
-    case AuxiliaryProcess::ProcessType::Network:
-        m_process.parentProcessConnection()->send(Messages::NetworkProcessProxy::SetIsHoldingLockedFiles(state == PAL::HysteresisState::Started), 0);
-        break;
-    default:
-        ASSERT_NOT_REACHED();
-    }
+    ASSERT(RunLoop::isMain());
+
+    if (m_isSuspended)
+        return;
+
+    m_isHoldingLockedFilesHandler(isHoldingLockedFiles);
 }
 
 } // namespace WebKit

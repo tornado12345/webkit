@@ -41,8 +41,14 @@ WI.Timeline = class Timeline extends WI.Object
         if (type === WI.TimelineRecord.Type.Network)
             return new WI.NetworkTimeline(type);
 
+        if (type === WI.TimelineRecord.Type.CPU)
+            return new WI.CPUTimeline(type);
+
         if (type === WI.TimelineRecord.Type.Memory)
             return new WI.MemoryTimeline(type);
+
+        if (type === WI.TimelineRecord.Type.Media)
+            return new WI.MediaTimeline(type);
 
         return new WI.Timeline(type);
     }
@@ -66,7 +72,7 @@ WI.Timeline = class Timeline extends WI.Object
         }
     }
 
-    addRecord(record)
+    addRecord(record, options = {})
     {
         if (record.updatesDynamically)
             record.addEventListener(WI.TimelineRecord.Event.Updated, this._recordUpdated, this);
@@ -111,20 +117,9 @@ WI.Timeline = class Timeline extends WI.Object
         return (before < after) ? recordBefore : recordAfter;
     }
 
-    recordsOverlappingTimeRange(startTime, endTime)
+    recordsInTimeRange(startTime, endTime, {includeRecordBeforeStart, includeRecordAfterEnd} = {})
     {
         let lowerIndex = this._records.lowerBound(startTime, (time, record) => time - record.endTime);
-        let upperIndex = this._records.upperBound(endTime, (time, record) => time - record.startTime);
-
-        return this._records.slice(lowerIndex, upperIndex);
-    }
-
-    recordsInTimeRange(startTime, endTime, includeRecordBeforeStart)
-    {
-        let lowerIndex = this._records.lowerBound(startTime, (time, record) => time - record.startTime);
-        let upperIndex = this._records.upperBound(endTime, (time, record) => time - record.startTime);
-
-        // Include the record right before the start time.
         if (includeRecordBeforeStart && lowerIndex > 0) {
             lowerIndex--;
 
@@ -137,6 +132,10 @@ WI.Timeline = class Timeline extends WI.Object
             }
         }
 
+        let upperIndex = this._records.upperBound(endTime, (time, record) => time - record.startTime);
+        if (includeRecordAfterEnd && upperIndex < this._records.length)
+            ++upperIndex;
+
         return this._records.slice(lowerIndex, upperIndex);
     }
 
@@ -144,15 +143,22 @@ WI.Timeline = class Timeline extends WI.Object
 
     _updateTimesIfNeeded(record)
     {
-        var changed = false;
+        let changed = false;
 
-        if (isNaN(this._startTime) || record.startTime < this._startTime) {
-            this._startTime = record.startTime;
+        // Some records adjust their start time / end time to values that may be before
+        // or after the bounds the recording actually ran. Use the unadjusted times for
+        // the Timeline's bounds. Otherwise we may extend the timeline graphs to a time
+        // that was conceptually before / after the user started / stopping recording.
+        let recordStartTime = record.unadjustedStartTime;
+        let recordEndTime = record.unadjustedEndTime;
+
+        if (isNaN(this._startTime) || recordStartTime < this._startTime) {
+            this._startTime = recordStartTime;
             changed = true;
         }
 
-        if (isNaN(this._endTime) || this._endTime < record.endTime) {
-            this._endTime = record.endTime;
+        if (isNaN(this._endTime) || this._endTime < recordEndTime) {
+            this._endTime = recordEndTime;
             changed = true;
         }
 

@@ -25,57 +25,54 @@
 
 #pragma once
 
-#include "ClientOrigin.h"
 #include <wtf/CompletionHandler.h>
 #include <wtf/Deque.h>
+#include <wtf/HashMap.h>
 #include <wtf/HashSet.h>
 #include <wtf/WeakPtr.h>
+#include <wtf/WorkQueue.h>
 
 namespace WebCore {
 
-class StorageQuotaUser;
-
-class StorageQuotaManager : public CanMakeWeakPtr<StorageQuotaManager> {
+class StorageQuotaManager : public ThreadSafeRefCounted<StorageQuotaManager>, public CanMakeWeakPtr<StorageQuotaManager> {
     WTF_MAKE_FAST_ALLOCATED;
 public:
-    using SpaceIncreaseRequester = WTF::Function<void(uint64_t quota, uint64_t currentSpace, uint64_t spaceIncrease, CompletionHandler<void(Optional<uint64_t>)>&&)>;
-    StorageQuotaManager(uint64_t quota, SpaceIncreaseRequester&& spaceIncreaseRequester)
-        : m_quota(quota)
-        , m_spaceIncreaseRequester(WTFMove(spaceIncreaseRequester))
-    {
-    }
-    WEBCORE_EXPORT ~StorageQuotaManager();
+    using UsageGetter = Function<uint64_t()>;
+    using QuotaIncreaseRequester = Function<void(uint64_t currentQuota, uint64_t currentUsage, uint64_t requestedIncrease, CompletionHandler<void(Optional<uint64_t>)>&&)>;
+    WEBCORE_EXPORT static Ref<StorageQuotaManager> create(uint64_t quota, UsageGetter&&, QuotaIncreaseRequester&&);
 
-    void addUser(StorageQuotaUser& user)
-    {
-        ASSERT(!m_users.contains(&user));
-        m_users.add(&user);
-    }
-
-    void removeUser(StorageQuotaUser& user)
-    {
-        ASSERT(m_users.contains(&user));
-        m_users.remove(&user);
-    }
+    static constexpr uint64_t defaultThirdPartyQuotaFromPerOriginQuota(uint64_t quota) { return quota / 10; }
+    static constexpr uint64_t defaultQuota() { return 1000 * MB; }
+    static constexpr uint64_t defaultThirdPartyQuota() { return defaultThirdPartyQuotaFromPerOriginQuota(defaultQuota()); }
 
     enum class Decision { Deny, Grant };
     using RequestCallback = CompletionHandler<void(Decision)>;
-    WEBCORE_EXPORT void requestSpace(uint64_t, RequestCallback&&);
+    WEBCORE_EXPORT void requestSpaceOnMainThread(uint64_t, RequestCallback&&);
+    WEBCORE_EXPORT Decision requestSpaceOnBackgroundThread(uint64_t);
+
+    WEBCORE_EXPORT void resetQuotaUpdatedBasedOnUsageForTesting();
+    WEBCORE_EXPORT void resetQuotaForTesting();
 
 private:
-    uint64_t spaceUsage() const;
-    void askForMoreSpace(uint64_t spaceUsage, uint64_t spaceIncrease);
-    void processPendingRequests(Optional<uint64_t>);
+    StorageQuotaManager(uint64_t quota, UsageGetter&&, QuotaIncreaseRequester&&);
+    bool tryGrantRequest(uint64_t);
 
+    void updateQuotaBasedOnUsage();
+
+    Lock m_quotaCountDownLock;
+    uint64_t m_quotaCountDown { 0 };
     uint64_t m_quota { 0 };
-    SpaceIncreaseRequester m_spaceIncreaseRequester;
-    HashSet<const StorageQuotaUser*> m_users;
+    uint64_t m_usage { 0 };
 
-    struct PendingRequest {
-        uint64_t spaceIncrease;
-        RequestCallback callback;
-    };
-    Deque<PendingRequest> m_pendingRequests;
+    UsageGetter m_usageGetter;
+    QuotaIncreaseRequester m_quotaIncreaseRequester;
+
+    Ref<WorkQueue> m_workQueue;
+
+    bool m_quotaUpdatedBasedOnUsage { false };
+
+    // Test only.
+    uint64_t m_initialQuota { 0 };
 };
 
 } // namespace WebCore

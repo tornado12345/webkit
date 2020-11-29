@@ -41,13 +41,14 @@
 #import "NotImplemented.h"
 #import "PlatformLayer.h"
 #import "RealtimeMediaSourceSettings.h"
+#import "RealtimeVideoSource.h"
 #import "RealtimeVideoUtilities.h"
 #import <QuartzCore/CALayer.h>
 #import <QuartzCore/CATransaction.h>
 #import <objc/runtime.h>
 
-#import <pal/cf/CoreMediaSoftLink.h>
 #import "CoreVideoSoftLink.h"
+#import <pal/cf/CoreMediaSoftLink.h>
 
 namespace WebCore {
 using namespace PAL;
@@ -58,19 +59,26 @@ CaptureSourceOrError MockRealtimeVideoSource::create(String&& deviceID, String&&
     auto device = MockRealtimeMediaSourceCenter::mockDeviceWithPersistentID(deviceID);
     ASSERT(device);
     if (!device)
-        return { };
+        return { "No mock camera device"_s };
 #endif
 
     auto source = adoptRef(*new MockRealtimeVideoSourceMac(WTFMove(deviceID), WTFMove(name), WTFMove(hashSalt)));
-    // FIXME: We should report error messages
-    if (constraints && source->applyConstraints(*constraints))
-        return { };
+    if (constraints) {
+        if (auto error = source->applyConstraints(*constraints))
+            return WTFMove(error->message);
+    }
 
-    return CaptureSourceOrError(WTFMove(source));
+    return CaptureSourceOrError(RealtimeVideoSource::create(WTFMove(source)));
+}
+
+Ref<MockRealtimeVideoSource> MockRealtimeVideoSourceMac::createForMockDisplayCapturer(String&& deviceID, String&& name, String&& hashSalt)
+{
+    return adoptRef(*new MockRealtimeVideoSourceMac(WTFMove(deviceID), WTFMove(name), WTFMove(hashSalt)));
 }
 
 MockRealtimeVideoSourceMac::MockRealtimeVideoSourceMac(String&& deviceID, String&& name, String&& hashSalt)
     : MockRealtimeVideoSource(WTFMove(deviceID), WTFMove(name), WTFMove(hashSalt))
+    , m_workQueue(WorkQueue::create("MockRealtimeVideoSource Render Queue", WorkQueue::Type::Serial, WorkQueue::QOS::UserInteractive))
 {
 }
 
@@ -84,39 +92,13 @@ void MockRealtimeVideoSourceMac::updateSampleBuffer()
         m_imageTransferSession = ImageTransferSessionVT::create(preferedPixelBufferFormat());
 
     auto sampleTime = MediaTime::createWithDouble((elapsedTime() + 100_ms).seconds());
-    auto sampleBuffer = m_imageTransferSession->createMediaSample(imageBuffer->copyImage()->nativeImage().get(), sampleTime, size(), m_deviceOrientation);
+    auto sampleBuffer = m_imageTransferSession->createMediaSample(imageBuffer->copyImage()->nativeImage().get(), sampleTime, size(), sampleRotation());
     if (!sampleBuffer)
         return;
 
-    // We use m_deviceOrientation to emulate sensor orientation
-    dispatchMediaSampleToObservers(*sampleBuffer);
-}
-
-void MockRealtimeVideoSourceMac::orientationChanged(int orientation)
-{
-    // FIXME: Do something with m_deviceOrientation. See bug 169822.
-    switch (orientation) {
-    case 0:
-        m_deviceOrientation = MediaSample::VideoRotation::None;
-        break;
-    case 90:
-        m_deviceOrientation = MediaSample::VideoRotation::Right;
-        break;
-    case -90:
-        m_deviceOrientation = MediaSample::VideoRotation::Left;
-        break;
-    case 180:
-        m_deviceOrientation = MediaSample::VideoRotation::UpsideDown;
-        break;
-    default:
-        return;
-    }
-}
-
-void MockRealtimeVideoSourceMac::monitorOrientation(OrientationNotifier& notifier)
-{
-    notifier.addObserver(*this);
-    orientationChanged(notifier.orientation());
+    m_workQueue->dispatch([this, protectedThis = makeRef(*this), sampleBuffer = WTFMove(sampleBuffer)]() mutable {
+        dispatchMediaSampleToObservers(*sampleBuffer);
+    });
 }
 
 } // namespace WebCore

@@ -26,20 +26,24 @@
 #pragma once
 
 #include "APIObject.h"
+#include "ContentWorldShared.h"
 #include "MessageReceiver.h"
 #include "UserContentControllerIdentifier.h"
+#include "WebPageProxyIdentifier.h"
+#include "WebUserContentControllerProxyMessages.h"
+#include <WebCore/PageIdentifier.h>
 #include <wtf/Forward.h>
 #include <wtf/HashCountedSet.h>
 #include <wtf/HashMap.h>
-#include <wtf/HashSet.h>
 #include <wtf/Ref.h>
 #include <wtf/RefCounted.h>
+#include <wtf/WeakHashSet.h>
 #include <wtf/text/StringHash.h>
 
 namespace API {
 class Array;
 class ContentRuleList;
-class UserContentWorld;
+class ContentWorld;
 class UserScript;
 class UserStyleSheet;
 }
@@ -58,7 +62,9 @@ class NetworkProcessProxy;
 class WebProcessProxy;
 class WebScriptMessageHandler;
 struct FrameInfoData;
+class WebCompiledContentRuleListData;
 struct WebPageCreationParameters;
+struct UserContentControllerParameters;
 enum class InjectUserScriptImmediately : bool;
 
 class WebUserContentControllerProxy : public API::ObjectImpl<API::Object::Type::UserContentController>, private IPC::MessageReceiver {
@@ -72,60 +78,61 @@ public:
 
     static WebUserContentControllerProxy* get(UserContentControllerIdentifier);
 
-    void addProcess(WebProcessProxy&, WebPageCreationParameters&);
+    UserContentControllerParameters parameters() const;
+
+    void addProcess(WebProcessProxy&);
     void removeProcess(WebProcessProxy&);
 
     API::Array& userScripts() { return m_userScripts.get(); }
     void addUserScript(API::UserScript&, InjectUserScriptImmediately);
     void removeUserScript(API::UserScript&);
-    void removeAllUserScripts(API::UserContentWorld&);
+    void removeAllUserScripts(API::ContentWorld&);
     void removeAllUserScripts();
 
     API::Array& userStyleSheets() { return m_userStyleSheets.get(); }
     void addUserStyleSheet(API::UserStyleSheet&);
     void removeUserStyleSheet(API::UserStyleSheet&);
-    void removeAllUserStyleSheets(API::UserContentWorld&);
+    void removeAllUserStyleSheets(API::ContentWorld&);
     void removeAllUserStyleSheets();
-
-    void removeAllUserContent(API::UserContentWorld&);
 
     // Returns false if there was a name conflict.
     bool addUserScriptMessageHandler(WebScriptMessageHandler&);
-    void removeUserMessageHandlerForName(const String&, API::UserContentWorld&);
-    void removeAllUserMessageHandlers(API::UserContentWorld&);
+    void removeUserMessageHandlerForName(const String&, API::ContentWorld&);
+    void removeAllUserMessageHandlers(API::ContentWorld&);
+    void removeAllUserMessageHandlers();
 
 #if ENABLE(CONTENT_EXTENSIONS)
-    void addNetworkProcess(NetworkProcessProxy& proxy) { m_networkProcesses.add(&proxy); }
-    void removeNetworkProcess(NetworkProcessProxy& proxy) { m_networkProcesses.remove(&proxy); }
+    void addNetworkProcess(NetworkProcessProxy&);
+    void removeNetworkProcess(NetworkProcessProxy&);
 
     void addContentRuleList(API::ContentRuleList&);
     void removeContentRuleList(const String&);
     void removeAllContentRuleLists();
     const HashMap<String, RefPtr<API::ContentRuleList>>& contentExtensionRules() { return m_contentRuleLists; }
+    Vector<std::pair<String, WebCompiledContentRuleListData>> contentRuleListData() const;
 #endif
 
     UserContentControllerIdentifier identifier() const { return m_identifier; }
+
+    void contentWorldDestroyed(API::ContentWorld&);
 
 private:
     // IPC::MessageReceiver.
     void didReceiveMessage(IPC::Connection&, IPC::Decoder&) override;
 
-    void didPostMessage(IPC::Connection&, uint64_t pageID, const FrameInfoData&, uint64_t messageHandlerID, const IPC::DataReference&);
+    void didPostMessage(WebPageProxyIdentifier, FrameInfoData&&, uint64_t messageHandlerID, const IPC::DataReference&, Messages::WebUserContentControllerProxy::DidPostMessage::AsyncReply&&);
 
-    void addUserContentWorldUse(API::UserContentWorld&);
-    void removeUserContentWorldUses(API::UserContentWorld&, unsigned numberOfUsesToRemove);
-    void removeUserContentWorldUses(HashCountedSet<RefPtr<API::UserContentWorld>>&);
-    bool shouldSendRemoveUserContentWorldsMessage(API::UserContentWorld&, unsigned numberOfUsesToRemove);
+    void addContentWorld(API::ContentWorld&);
 
     UserContentControllerIdentifier m_identifier;
-    HashSet<WebProcessProxy*> m_processes;
+    WeakHashSet<WebProcessProxy> m_processes;
     Ref<API::Array> m_userScripts;
     Ref<API::Array> m_userStyleSheets;
     HashMap<uint64_t, RefPtr<WebScriptMessageHandler>> m_scriptMessageHandlers;
-    HashCountedSet<RefPtr<API::UserContentWorld>> m_userContentWorlds;
+    HashSet<ContentWorldIdentifier> m_associatedContentWorlds;
 
 #if ENABLE(CONTENT_EXTENSIONS)
-    HashSet<NetworkProcessProxy*> m_networkProcesses;
+    WeakHashSet<NetworkProcessProxy> m_networkProcesses;
     HashMap<String, RefPtr<API::ContentRuleList>> m_contentRuleLists;
 #endif
 };

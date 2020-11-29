@@ -2,19 +2,20 @@
 
 import json
 import logging
-import shutil
-import signal
-import subprocess
 import sys
-import tempfile
-import time
-import types
 import os
-import urlparse
 
-from benchmark_builder import BenchmarkBuilder
-from benchmark_results import BenchmarkResults
-from browser_driver.browser_driver_factory import BrowserDriverFactory
+from webkitpy.benchmark_runner.benchmark_builder import BenchmarkBuilder
+from webkitpy.benchmark_runner.benchmark_results import BenchmarkResults
+from webkitpy.benchmark_runner.browser_driver.browser_driver_factory import BrowserDriverFactory
+
+
+if sys.version_info > (3, 0):
+    def istext(a):
+        return isinstance(a, bytes) or isinstance(a, str)
+else:
+    def istext(a):
+        return isinstance(a, str) or isinstance(a, unicode)
 
 
 _log = logging.getLogger(__name__)
@@ -23,7 +24,7 @@ _log = logging.getLogger(__name__)
 class BenchmarkRunner(object):
     name = 'benchmark_runner'
 
-    def __init__(self, plan_file, local_copy, count_override, build_dir, output_file, platform, browser, browser_path, scale_unit=True, show_iteration_values=False, device_id=None):
+    def __init__(self, plan_file, local_copy, count_override, build_dir, output_file, platform, browser, browser_path, scale_unit=True, show_iteration_values=False, device_id=None, diagnose_dir=None):
         try:
             plan_file = self._find_plan_file(plan_file)
             with open(plan_file, 'r') as fp:
@@ -38,6 +39,7 @@ class BenchmarkRunner(object):
                 self._browser_driver = BrowserDriverFactory.create(platform, browser)
                 self._browser_path = browser_path
                 self._build_dir = os.path.abspath(build_dir) if build_dir else None
+                self._diagnose_dir = os.path.abspath(diagnose_dir) if diagnose_dir else None
                 self._output_file = output_file
                 self._scale_unit = scale_unit
                 self._show_iteration_values = show_iteration_values
@@ -77,32 +79,36 @@ class BenchmarkRunner(object):
     def _run_benchmark(self, count, web_root):
         results = []
         debug_outputs = []
-        for iteration in xrange(1, count + 1):
-            _log.info('Start the iteration {current_iteration} of {iterations} for current benchmark'.format(current_iteration=iteration, iterations=count))
-            try:
-                self._browser_driver.prepare_env(self._config)
+        try:
+            self._browser_driver.prepare_initial_env(self._config)
+            for iteration in range(1, count + 1):
+                _log.info('Start the iteration {current_iteration} of {iterations} for current benchmark'.format(current_iteration=iteration, iterations=count))
+                try:
+                    self._browser_driver.prepare_env(self._config)
 
-                if 'entry_point' in self._plan:
-                    result = self._run_one_test(web_root, self._plan['entry_point'])
-                    debug_outputs.append(result.pop('debugOutput', None))
-                    assert(result)
-                    results.append(result)
-                elif 'test_files' in self._plan:
-                    run_result = {}
-                    for test in self._plan['test_files']:
-                        result = self._run_one_test(web_root, test)
-                        assert(result)
-                        run_result = self._merge(run_result, result)
+                    if 'entry_point' in self._plan:
+                        result = self._run_one_test(web_root, self._plan['entry_point'])
                         debug_outputs.append(result.pop('debugOutput', None))
+                        assert(result)
+                        results.append(result)
+                    elif 'test_files' in self._plan:
+                        run_result = {}
+                        for test in self._plan['test_files']:
+                            result = self._run_one_test(web_root, test)
+                            assert(result)
+                            run_result = self._merge(run_result, result)
+                            debug_outputs.append(result.pop('debugOutput', None))
 
-                    results.append(run_result)
-                else:
-                    raise Exception('Plan does not contain entry_point or test_files')
+                        results.append(run_result)
+                    else:
+                        raise Exception('Plan does not contain entry_point or test_files')
 
-            finally:
-                self._browser_driver.restore_env()
+                finally:
+                    self._browser_driver.restore_env()
 
-            _log.info('End the iteration {current_iteration} of {iterations} for current benchmark'.format(current_iteration=iteration, iterations=count))
+                _log.info('End the iteration {current_iteration} of {iterations} for current benchmark'.format(current_iteration=iteration, iterations=count))
+        finally:
+            self._browser_driver.restore_env_after_all_testing()
 
         results = self._wrap(results)
         output_file = self._output_file if self._output_file else self._plan['output_file']
@@ -139,16 +145,16 @@ class BenchmarkRunner(object):
         assert(isinstance(a, type(b)))
         arg_type = type(a)
         # special handle for list type, and should be handle before equal check
-        if arg_type == types.ListType and len(a) and (type(a[0]) == types.StringType or type(a[0]) == types.UnicodeType):
+        if arg_type == list and len(a) and istext(a[0]):
             return a
-        if arg_type == types.DictType:
+        if arg_type == dict:
             result = {}
-            for key, value in a.items():
+            for key, value in list(a.items()):
                 if key in b:
                     result[key] = cls._merge(value, b[key])
                 else:
                     result[key] = value
-            for key, value in b.items():
+            for key, value in list(b.items()):
                 if key not in result:
                     result[key] = value
             return result

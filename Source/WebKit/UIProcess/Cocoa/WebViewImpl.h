@@ -27,17 +27,20 @@
 
 #if PLATFORM(MAC)
 
+#include "PDFPluginIdentifier.h"
 #include "PluginComplexTextInputState.h"
 #include "ShareableBitmap.h"
-#include "WKDragDestinationAction.h"
 #include "WKLayoutMode.h"
 #include "_WKOverlayScrollbarStyle.h"
+#include <WebCore/DOMPasteAccess.h>
 #include <WebCore/FocusDirection.h>
 #include <WebCore/ScrollTypes.h>
 #include <WebCore/TextIndicatorWindow.h>
 #include <WebCore/UserInterfaceLayoutDirection.h>
+#include <WebKit/WKDragDestinationAction.h>
 #include <pal/spi/cocoa/AVKitSPI.h>
 #include <wtf/BlockPtr.h>
+#include <wtf/CompletionHandler.h>
 #include <wtf/RetainPtr.h>
 #include <wtf/WeakObjCPtr.h>
 #include <wtf/WeakPtr.h>
@@ -47,10 +50,12 @@ using _WKRectEdge = NSUInteger;
 
 OBJC_CLASS NSAccessibilityRemoteUIElement;
 OBJC_CLASS NSImmediateActionGestureRecognizer;
+OBJC_CLASS NSMenu;
 OBJC_CLASS NSTextInputContext;
 OBJC_CLASS NSView;
 OBJC_CLASS WKAccessibilitySettingsObserver;
 OBJC_CLASS WKBrowsingContextController;
+OBJC_CLASS WKDOMPasteMenuDelegate;
 OBJC_CLASS WKEditorUndoTarget;
 OBJC_CLASS WKFullScreenWindowController;
 OBJC_CLASS WKImmediateActionController;
@@ -71,6 +76,10 @@ OBJC_CLASS NSPopoverTouchBarItem;
 OBJC_CLASS WKTextTouchBarItemController;
 OBJC_CLASS WebPlaybackControlsManager;
 #endif // HAVE(TOUCH_BAR)
+
+#if ENABLE(UI_PROCESS_PDF_HUD)
+OBJC_CLASS WKPDFHUDView;
+#endif
 
 namespace API {
 class HitTestResult;
@@ -114,6 +123,8 @@ struct ShareDataWithParsedURL;
 - (void)_web_didPerformDragOperation:(BOOL)handled;
 #endif
 
+- (void)_web_grantDOMPasteAccess;
+
 @optional
 - (void)_web_didAddMediaControlsManager:(id)controlsManager;
 - (void)_web_didRemoveMediaControlsManager;
@@ -140,6 +151,7 @@ class WebEditCommandProxy;
 class WebFrameProxy;
 class WebPageProxy;
 class WebProcessPool;
+class WebProcessProxy;
 struct ColorSpaceData;
 struct WebHitTestResultData;
 
@@ -183,6 +195,14 @@ public:
     void viewWillStartLiveResize();
     void viewDidEndLiveResize();
 
+#if ENABLE(UI_PROCESS_PDF_HUD)
+    void createPDFHUD(PDFPluginIdentifier, const WebCore::IntRect&);
+    void updatePDFHUDLocation(PDFPluginIdentifier, const WebCore::IntRect&);
+    void removePDFHUD(PDFPluginIdentifier);
+    void removeAllPDFHUDs();
+    NSSet *pdfHUDs();
+#endif
+
     void renewGState();
     void setFrameSize(CGSize);
     void disableFrameSizeUpdates();
@@ -217,6 +237,8 @@ public:
 
     void setMinimumSizeForAutoLayout(CGSize);
     CGSize minimumSizeForAutoLayout() const;
+    void setSizeToContentAutoSizeMaximumSize(CGSize);
+    CGSize sizeToContentAutoSizeMaximumSize() const;
     void setShouldExpandToViewHeightForAutoLayout(bool);
     bool shouldExpandToViewHeightForAutoLayout() const;
     void setIntrinsicContentSize(CGSize);
@@ -248,6 +270,7 @@ public:
     void windowDidChangeScreen();
     void windowDidChangeLayerHosting();
     void windowDidChangeOcclusionState();
+    void screenDidChangeColorSpace();
     bool shouldDelayWindowOrderingForEvent(NSEvent *);
     bool windowResizeMouseLocationIsInVisibleScrollerThumb(CGPoint);
 
@@ -289,7 +312,7 @@ public:
     bool windowOcclusionDetectionEnabled() const { return m_windowOcclusionDetectionEnabled; }
 
     void prepareForMoveToWindow(NSWindow *targetWindow, WTF::Function<void()>&& completionHandler);
-    NSWindow *targetWindowForMovePreparation() const { return m_targetWindowForMovePreparation; }
+    NSWindow *targetWindowForMovePreparation() const { return m_targetWindowForMovePreparation.get(); }
 
     void updateSecureInputState();
     void resetSecureInputState();
@@ -343,6 +366,8 @@ public:
     void showGuessPanel(id);
     void checkSpelling();
     void changeSpelling(id);
+
+    void setContinuousSpellCheckingEnabled(bool);
     void toggleContinuousSpellChecking();
 
     bool isGrammarCheckingEnabled();
@@ -419,6 +444,7 @@ public:
     NSString *stringForToolTip(NSToolTipTag tag);
     void toolTipChanged(const String& oldToolTip, const String& newToolTip);
 
+    void enterAcceleratedCompositingWithRootLayer(CALayer *);
     void setAcceleratedCompositingRootLayer(CALayer *);
     CALayer *acceleratedCompositingRootLayer() const { return m_rootLayer.get(); }
 
@@ -559,9 +585,6 @@ public:
 
     void handleAcceptedCandidate(NSTextCheckingResult *acceptedCandidate);
 
-    void doAfterProcessingAllPendingMouseEvents(dispatch_block_t action);
-    void didFinishProcessingAllPendingMouseEvents();
-
 #if HAVE(TOUCH_BAR)
     NSTouchBar *makeTouchBar();
     void updateTouchBar();
@@ -572,11 +595,7 @@ public:
     void togglePictureInPicture();
     void updateMediaPlaybackControlsManager();
 
-#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 101300
     AVTouchBarScrubber *mediaPlaybackControlsView() const;
-#else
-    AVFunctionBarScrubber *mediaPlaybackControlsView() const;
-#endif
 #endif
     NSTouchBar *textTouchBar() const;
     void dismissTextTouchBarPopoverItemWithIdentifier(NSString *);
@@ -598,8 +617,14 @@ public:
 
     void effectiveAppearanceDidChange();
     bool effectiveAppearanceIsDark();
+    bool effectiveUserInterfaceLevelIsElevated();
 
     void takeFocus(WebCore::FocusDirection);
+    void clearPromisedDragImage();
+
+    void requestDOMPasteAccess(const WebCore::IntRect&, const String& originIdentifier, CompletionHandler<void(WebCore::DOMPasteAccessResponse)>&&);
+    void handleDOMPasteRequestWithResult(WebCore::DOMPasteAccessResponse);
+    NSMenu *domPasteMenu() const { return m_domPasteMenu.get(); }
 
 private:
 #if HAVE(TOUCH_BAR)
@@ -608,7 +633,7 @@ private:
     void updateMediaTouchBar();
 
     bool useMediaPlaybackControlsView() const;
-    bool isRichlyEditable() const;
+    bool isRichlyEditableForTouchBar() const;
 
     bool m_clientWantsMediaPlaybackControlsView { false };
     bool m_canCreateTouchBars { false };
@@ -628,13 +653,8 @@ private:
     RetainPtr<NSCustomTouchBarItem> m_exitFullScreenButton;
 
 #if ENABLE(WEB_PLAYBACK_CONTROLS_MANAGER)
-#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 101300
     RetainPtr<AVTouchBarPlaybackControlsProvider> m_mediaTouchBarProvider;
     RetainPtr<AVTouchBarScrubber> m_mediaPlaybackControlsView;
-#else
-    RetainPtr<AVFunctionBarPlaybackControlsProvider> m_mediaTouchBarProvider;
-    RetainPtr<AVFunctionBarScrubber> m_mediaPlaybackControlsView;
-#endif
 #endif // ENABLE(WEB_PLAYBACK_CONTROLS_MANAGER)
 #endif // HAVE(TOUCH_BAR)
 
@@ -657,6 +677,9 @@ private:
     Vector<WebCore::KeypressCommand> collectKeyboardLayoutCommandsForEvent(NSEvent *);
     void interpretKeyEvent(NSEvent *, void(^completionHandler)(BOOL handled, const Vector<WebCore::KeypressCommand>&));
 
+    void nativeMouseEventHandler(NSEvent *);
+    void nativeMouseEventHandlerInternal(NSEvent *);
+    
     void mouseMovedInternal(NSEvent *);
     void mouseDownInternal(NSEvent *);
     void mouseUpInternal(NSEvent *);
@@ -669,6 +692,8 @@ private:
 
     void handleRequestedCandidates(NSInteger sequenceNumber, NSArray<NSTextCheckingResult *> *candidates);
     void flushPendingMouseEventCallbacks();
+
+    void viewWillMoveToWindowImpl(NSWindow *);
 
 #if ENABLE(DRAG_SUPPORT)
     void sendDragEndToPage(CGPoint endPoint, NSDragOperation);
@@ -717,7 +742,11 @@ private:
 #if ENABLE(FULLSCREEN_API)
     RetainPtr<WKFullScreenWindowController> m_fullScreenWindowController;
 #endif
-    
+
+#if ENABLE(UI_PROCESS_PDF_HUD)
+    HashMap<WebKit::PDFPluginIdentifier, RetainPtr<WKPDFHUDView>> _pdfHUDViews;
+#endif
+
     RetainPtr<WKShareSheet> _shareSheet;
 
     RetainPtr<WKWindowVisibilityObserver> m_windowVisibilityObserver;
@@ -725,7 +754,7 @@ private:
 
     bool m_shouldDeferViewInWindowChanges { false };
     bool m_viewInWindowChangeWasDeferred { false };
-    NSWindow *m_targetWindowForMovePreparation { nullptr };
+    RetainPtr<NSWindow> m_targetWindowForMovePreparation;
 
     id m_flagsChangedEventMonitor { nullptr };
 
@@ -785,7 +814,6 @@ private:
     // that has been already sent to WebCore.
     RetainPtr<NSEvent> m_keyDownEventBeingResent;
     Vector<WebCore::KeypressCommand>* m_collectedKeypressCommands { nullptr };
-    Vector<BlockPtr<void()>> m_callbackHandlersAfterProcessingPendingMouseEvents;
 
     String m_lastStringForCandidateRequest;
     NSInteger m_lastCandidateRequestSequenceNumber;
@@ -800,6 +828,9 @@ private:
     NSInteger m_initialNumberOfValidItemsForDrop { 0 };
 #endif
 
+    RetainPtr<NSMenu> m_domPasteMenu;
+    RetainPtr<WKDOMPasteMenuDelegate> m_domPasteMenuDelegate;
+    CompletionHandler<void(WebCore::DOMPasteAccessResponse)> m_domPasteRequestHandler;
 };
     
 } // namespace WebKit

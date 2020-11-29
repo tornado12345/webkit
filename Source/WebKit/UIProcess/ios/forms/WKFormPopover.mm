@@ -75,6 +75,7 @@ ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     WKContentView *_view;
 
     BOOL _isRotating;
+    BOOL _isPreservingFocus;
     CGPoint _presentationPoint;
     RetainPtr<UIPopoverController> _popoverController;
     id <WKRotatingPopoverDelegate> _dismissionDelegate;
@@ -132,26 +133,30 @@ ALLOW_DEPRECATED_DECLARATIONS_BEGIN
 
 - (void)presentPopoverAnimated:(BOOL)animated
 {
-    UIPopoverArrowDirection directions = [self popoverArrowDirections];
-
-    BOOL presentWithPoint = !CGPointEqualToPoint(self.presentationPoint, CGPointZero);
-    if (presentWithPoint) {
-        CGFloat scale = [_view page]->pageScaleFactor();
-        [_popoverController presentPopoverFromRect:CGRectIntegral(CGRectMake(self.presentationPoint.x * scale, self.presentationPoint.y * scale, 1, 1))
-                                            inView:_view
-                          permittedArrowDirections:directions
-                                          animated:animated];
-    } else {
-        CGRect boundingBoxOfDOMNode = _view.focusedElementInformation.elementRect;
-        [_popoverController presentPopoverFromRect:CGRectIntegral(boundingBoxOfDOMNode)
-                                            inView:_view
-                          permittedArrowDirections:directions
-                                          animated:animated];
+    auto directions = [self popoverArrowDirections];
+    CGRect presentationRect;
+    if (CGPointEqualToPoint(self.presentationPoint, CGPointZero))
+        presentationRect = _view.focusedElementInformation.interactionRect;
+    else {
+        auto scale = _view.page->pageScaleFactor();
+        presentationRect = CGRectMake(self.presentationPoint.x * scale, self.presentationPoint.y * scale, 1, 1);
     }
+
+    if (!CGRectIntersectsRect(presentationRect, _view.bounds))
+        return;
+
+#if PLATFORM(MACCATALYST)
+    [_view startRelinquishingFirstResponderToFocusedElement];
+#endif
+    [_popoverController presentPopoverFromRect:CGRectIntegral(presentationRect) inView:_view permittedArrowDirections:directions animated:animated];
 }
 
 - (void)dismissPopoverAnimated:(BOOL)animated
 {
+#if PLATFORM(MACCATALYST)
+    [_view stopRelinquishingFirstResponderToFocusedElement];
+#endif
+
     [_popoverController dismissPopoverAnimated:animated];
 }
 
@@ -167,9 +172,9 @@ ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     [self presentPopoverAnimated:NO];
 }
 
-IGNORE_WARNINGS_BEGIN("deprecated-implementations")
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 - (void)popoverControllerDidDismissPopover:(UIPopoverController *)popoverController
-IGNORE_WARNINGS_END
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 {
     if (_isRotating)
         return;

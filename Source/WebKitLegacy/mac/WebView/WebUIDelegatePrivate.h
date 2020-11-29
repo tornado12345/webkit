@@ -45,7 +45,7 @@
 #endif
 #endif
 
-#if TARGET_OS_IPHONE && __IPHONE_OS_VERSION_MIN_REQUIRED >= 110000
+#if TARGET_OS_IOS
 @protocol UIDropSession;
 #endif
 
@@ -203,6 +203,7 @@ extern NSString *WebConsoleMessageErrorMessageLevel;
 - (NSView *)webView:(WebView *)webView plugInViewWithArguments:(NSDictionary *)arguments;
 
 #if ENABLE_DASHBOARD_SUPPORT
+// FIXME: Remove this method once it is verified no one is dependent on it.
 // regions is an dictionary whose keys are regions label and values are arrays of WebDashboardRegions.
 - (void)webView:(WebView *)webView dashboardRegionsChanged:(NSDictionary *)regions;
 #endif
@@ -246,9 +247,6 @@ extern NSString *WebConsoleMessageErrorMessageLevel;
 - (void)webView:(WebView *)sender exceededApplicationCacheOriginQuotaForSecurityOrigin:(WebSecurityOrigin *)origin totalSpaceNeeded:(NSUInteger)totalSpaceNeeded;
 
 - (WebView *)webView:(WebView *)sender createWebViewWithRequest:(NSURLRequest *)request windowFeatures:(NSDictionary *)features;
-
-- (BOOL)webView:(WebView *)sender shouldReplaceUploadFile:(NSString *)path usingGeneratedFilename:(NSString **)filename;
-- (NSString *)webView:(WebView *)sender generateReplacementFile:(NSString *)path;
 
 /*!
     @method webView:decidePolicyForGeolocationRequestFromOrigin:frame:listener:
@@ -300,8 +298,9 @@ extern NSString *WebConsoleMessageErrorMessageLevel;
 - (void)webViewSupportedOrientationsUpdated:(WebView *)sender;
 
 - (BOOL)webViewCanCheckGeolocationAuthorizationStatus:(WebView *)sender;
+#endif
 
-#if __IPHONE_OS_VERSION_MIN_REQUIRED >= 110000
+#if TARGET_OS_IOS
 /*!
  @method webView:dragDestinationActionMaskForSession:
  @param sender The WebView sending the delegate method
@@ -309,7 +308,6 @@ extern NSString *WebConsoleMessageErrorMessageLevel;
  @abstract May be implemented to adjust which destination actions are allowed upon dropping the given session.
  */
 - (WebDragDestinationAction)webView:(WebView *)sender dragDestinationActionMaskForSession:(id <UIDropSession>)session;
-#endif
 #endif
 
 - (NSData *)webCryptoMasterKeyForWebView:(WebView *)sender;

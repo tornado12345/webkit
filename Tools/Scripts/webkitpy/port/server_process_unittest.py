@@ -1,4 +1,5 @@
 # Copyright (C) 2011 Google Inc. All rights reserved.
+# Copyright (C) 2011-2019 Apple Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are
@@ -34,7 +35,6 @@ from webkitpy.port.factory import PortFactory
 from webkitpy.port import server_process
 from webkitpy.common.system.systemhost import SystemHost
 from webkitpy.common.system.systemhost_mock import MockSystemHost
-from webkitpy.common.system.outputcapture import OutputCapture
 
 
 class TrivialMockPort(object):
@@ -43,10 +43,13 @@ class TrivialMockPort(object):
         self.host.executive.kill_process = lambda x: None
         self.host.executive.kill_process = lambda x: None
 
+    def architecture(self):
+        return self.host.platform.architecture()
+
     def results_directory(self):
         return "/mock-results"
 
-    def check_for_leaks(self, process_name, process_pid):
+    def check_for_leaks(self, process_name, process_id):
         pass
 
     def process_kill_time(self):
@@ -98,15 +101,17 @@ class FakeServerProcess(server_process.ServerProcess):
 
 
 class TestServerProcess(unittest.TestCase):
+    stderr_print = 'print >>sys.stderr, "stderr"' if sys.version_info < (3, 0) else 'print("stderr", file=sys.stderr)'
+
     def serial_test_basic(self):
         # Give -u switch to force stdout and stderr to be unbuffered for Windows
-        cmd = [sys.executable, '-uc', 'import sys; print "stdout"; print >>sys.stderr, "stderr"; sys.stdin.readline();']
+        cmd = [sys.executable, '-uc', 'import sys; print("stdout"); print("again"); {}; sys.stdin.readline();'.format(self.stderr_print)]
         host = SystemHost()
         factory = PortFactory(host)
         port = factory.get()
         now = time.time()
         proc = server_process.ServerProcess(port, 'python', cmd)
-        proc.write('')
+        proc.write(b'')
 
         self.assertEqual(proc.poll(), None)
         self.assertFalse(proc.has_crashed())
@@ -117,53 +122,59 @@ class TestServerProcess(unittest.TestCase):
         self.assertEqual(line, None)
 
         line = proc.read_stdout_line(now + 1.0)
-        self.assertEqual(line.strip(), "stdout")
+        self.assertEqual(line.strip(), b"stdout")
+
+        self.assertTrue(proc.has_available_stdout())
 
         line = proc.read_stderr_line(now + 1.0)
-        self.assertEqual(line.strip(), "stderr")
+        self.assertEqual(line.strip(), b"stderr")
 
-        proc.write('End\n')
+        line = proc.read_stdout_line(now + 1.0)
+        self.assertEqual(line.strip(), b"again")
+        self.assertFalse(proc.has_available_stdout())
+
+        proc.write(b'End\n')
         time.sleep(0.1)  # Give process a moment to close.
         self.assertEqual(proc.poll(), 0)
 
         proc.stop(0)
 
     def serial_test_read_after_process_exits(self):
-        cmd = [sys.executable, '-c', 'import sys; print "stdout"; print >>sys.stderr, "stderr";']
+        cmd = [sys.executable, '-uc', 'import sys; print("stdout"); {};'.format(self.stderr_print)]
         host = SystemHost()
         factory = PortFactory(host)
         port = factory.get()
         now = time.time()
         proc = server_process.ServerProcess(port, 'python', cmd)
-        proc.write('')
+        proc.write(b'')
         time.sleep(0.1)  # Give process a moment to close.
 
         line = proc.read_stdout_line(now + 1.0)
-        self.assertEqual(line.strip(), "stdout")
+        self.assertEqual(line.strip(), b"stdout")
 
         line = proc.read_stderr_line(now + 1.0)
-        self.assertEqual(line.strip(), "stderr")
+        self.assertEqual(line.strip(), b"stderr")
 
         proc.stop(0)
 
     def serial_test_process_crashing(self):
         # Give -u switch to force stdout to be unbuffered for Windows
-        cmd = [sys.executable, '-uc', 'import sys; print "stdout 1"; print "stdout 2"; print "stdout 3"; sys.stdin.readline(); sys.exit(1);']
+        cmd = [sys.executable, '-uc', 'import sys; print("stdout 1"); print("stdout 2"); print("stdout 3"); sys.stdin.readline(); sys.exit(1);']
         host = SystemHost()
         factory = PortFactory(host)
         port = factory.get()
         now = time.time()
         proc = server_process.ServerProcess(port, 'python', cmd)
-        proc.write('')
+        proc.write(b'')
 
         line = proc.read_stdout_line(now + 1.0)
-        self.assertEqual(line.strip(), 'stdout 1')
+        self.assertEqual(line.strip(), b'stdout 1')
 
-        proc.write('End\n')
+        proc.write(b'End\n')
         time.sleep(0.1)  # Give process a moment to close.
 
         line = proc.read_stdout_line(now + 1.0)
-        self.assertEqual(line.strip(), 'stdout 2')
+        self.assertEqual(line.strip(), b'stdout 2')
 
         self.assertEqual(True, proc.has_crashed())
 
@@ -173,18 +184,17 @@ class TestServerProcess(unittest.TestCase):
         proc.stop(0)
 
     def serial_test_process_crashing_no_data(self):
-        cmd = [sys.executable, '-c',
-               'import sys; sys.stdin.readline(); sys.exit(1);']
+        cmd = [sys.executable, '-uc', 'import sys; sys.stdin.readline(); sys.exit(1);']
         host = SystemHost()
         factory = PortFactory(host)
         port = factory.get()
         now = time.time()
         proc = server_process.ServerProcess(port, 'python', cmd)
-        proc.write('')
+        proc.write(b'')
 
         self.assertEqual(False, proc.has_crashed())
 
-        proc.write('End\n')
+        proc.write(b'End\n')
         time.sleep(0.1)  # Give process a moment to close.
 
         line = proc.read_stdout_line(now + 1.0)

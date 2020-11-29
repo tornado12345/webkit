@@ -44,7 +44,7 @@ TEST(WebKit, WKPreferencesBasic)
 
 TEST(WebKit, WKPreferencesDefaults)
 {
-#if PLATFORM(GTK)
+#if PLATFORM(GTK) || PLATFORM(PLAYSTATION)
     static const char* expectedStandardFontFamily = "Times";
     static const char* expectedFixedFontFamily = "Courier New";
     static const char* expectedSerifFontFamily = "Times";
@@ -90,14 +90,16 @@ TEST(WebKit, WKPreferencesDefaults)
     EXPECT_WK_STREQ(expectedFantasyFontFamily, adoptWK(WKPreferencesCopyFantasyFontFamily(preference)));
     EXPECT_WK_STREQ(expectedPictographFontFamily, adoptWK(WKPreferencesCopyPictographFontFamily(preference)));
     EXPECT_EQ(0u, WKPreferencesGetMinimumFontSize(preference));
+    ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     EXPECT_FALSE(WKPreferencesGetPrivateBrowsingEnabled(preference));
+    ALLOW_DEPRECATED_DECLARATIONS_END
     EXPECT_FALSE(WKPreferencesGetDeveloperExtrasEnabled(preference));
     EXPECT_TRUE(WKPreferencesGetTextAreasAreResizable(preference));
 
     EXPECT_TRUE(WKPreferencesGetAcceleratedCompositingEnabled(preference));
     EXPECT_FALSE(WKPreferencesGetCompositingBordersVisible(preference));
     EXPECT_FALSE(WKPreferencesGetCompositingRepaintCountersVisible(preference));
-    EXPECT_FALSE(WKPreferencesGetNeedsSiteSpecificQuirks(preference));
+    EXPECT_TRUE(WKPreferencesGetNeedsSiteSpecificQuirks(preference));
     EXPECT_EQ(kWKAllowAllStorage, WKPreferencesGetStorageBlockingPolicy(preference));
     EXPECT_FALSE(WKPreferencesGetTextAutosizingEnabled(preference));
 
@@ -106,12 +108,12 @@ TEST(WebKit, WKPreferencesDefaults)
 
 TEST(WebKit, WKPreferencesCopying)
 {
-    WKRetainPtr<WKStringRef> identifier(AdoptWK, WKStringCreateWithUTF8CString("identifier"));
+    WKRetainPtr<WKStringRef> identifier = adoptWK(WKStringCreateWithUTF8CString("identifier"));
 
-    WKRetainPtr<WKPreferencesRef> preferences(AdoptWK, WKPreferencesCreateWithIdentifier(identifier.get()));
+    WKRetainPtr<WKPreferencesRef> preferences = adoptWK(WKPreferencesCreateWithIdentifier(identifier.get()));
     WKPreferencesSetDefaultFontSize(preferences.get(), 36);
 
-    WKRetainPtr<WKPreferencesRef> copy(AdoptWK, WKPreferencesCreateCopy(preferences.get()));
+    WKRetainPtr<WKPreferencesRef> copy = adoptWK(WKPreferencesCreateCopy(preferences.get()));
 
     WKPreferencesSetDefaultFontSize(preferences.get(), 24);
     EXPECT_EQ(24u, WKPreferencesGetDefaultFontSize(preferences.get()));

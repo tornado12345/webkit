@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,6 +30,7 @@
 #import "XPCServiceEntryPoint.h"
 #import <WebCore/ProcessIdentifier.h>
 #import <wtf/cocoa/Entitlements.h>
+#import <wtf/spi/darwin/SandboxSPI.h>
 
 namespace WebKit {
 using namespace WebCore;
@@ -40,14 +41,15 @@ XPCServiceInitializerDelegate::~XPCServiceInitializerDelegate()
 
 bool XPCServiceInitializerDelegate::checkEntitlements()
 {
-#if PLATFORM(MAC)
-    if (!isClientSandboxed())
-        return true;
-
-    // FIXME: Once we're 100% sure that a process can't access the network we can get rid of this requirement for all processes.
-    if (!hasEntitlement("com.apple.security.network.client")) {
-        NSLog(@"Application does not have the 'com.apple.security.network.client' entitlement.");
-        return false;
+#if PLATFORM(MAC) || PLATFORM(MACCATALYST)
+    if (isClientSandboxed()) {
+        audit_token_t auditToken = { };
+        xpc_connection_get_audit_token(m_connection.get(), &auditToken);
+        if (auto rc = sandbox_check_by_audit_token(auditToken, "mach-lookup", static_cast<enum sandbox_filter_type>(SANDBOX_FILTER_GLOBAL_NAME | SANDBOX_CHECK_NO_REPORT), "com.apple.nsurlsessiond")) {
+            // FIXME (rdar://problem/54178641): This requirement is too strict, it should be possible to load file:// resources without network access.
+            NSLog(@"Application does not have permission to communicate with network resources. rc=%d : errno=%d", rc, errno);
+            return false;
+        }
     }
 #endif
 #if PLATFORM(IOS_FAMILY)
@@ -118,16 +120,15 @@ bool XPCServiceInitializerDelegate::getExtraInitializationData(HashMap<String, S
 #if ENABLE(SERVICE_WORKER)
     String serviceWorkerProcess = xpc_dictionary_get_string(extraDataInitializationDataObject, "service-worker-process");
     if (!serviceWorkerProcess.isEmpty())
-        extraInitializationData.add("service-worker-process"_s, serviceWorkerProcess);
+        extraInitializationData.add("service-worker-process"_s, WTFMove(serviceWorkerProcess));
+    String registrableDomain = xpc_dictionary_get_string(extraDataInitializationDataObject, "registrable-domain");
+    if (!registrableDomain.isEmpty())
+        extraInitializationData.add("registrable-domain"_s, WTFMove(registrableDomain));
 #endif
 
     String isPrewarmedProcess = xpc_dictionary_get_string(extraDataInitializationDataObject, "is-prewarmed");
     if (!isPrewarmedProcess.isEmpty())
         extraInitializationData.add("is-prewarmed"_s, isPrewarmedProcess);
-
-    String securityOrigin = xpc_dictionary_get_string(extraDataInitializationDataObject, "security-origin");
-    if (!securityOrigin.isEmpty())
-        extraInitializationData.add("security-origin"_s, securityOrigin);
 
     if (!isClientSandboxed()) {
         String userDirectorySuffix = xpc_dictionary_get_string(extraDataInitializationDataObject, "user-directory-suffix");

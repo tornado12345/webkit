@@ -28,30 +28,46 @@
 
 #import "NetworkProcess.h"
 #import "NetworkSession.h"
+#import <WebCore/HTTPCookieAcceptPolicy.h>
 #import <WebCore/NetworkStorageSession.h>
 #import <pal/spi/cf/CFNetworkSPI.h>
+#import <wtf/CallbackAggregator.h>
 #import <wtf/ProcessPrivilege.h>
 
 namespace WebKit {
 using namespace WebCore;
 
-void WebCookieManager::platformSetHTTPCookieAcceptPolicy(HTTPCookieAcceptPolicy policy)
+static CFHTTPCookieStorageAcceptPolicy toCFHTTPCookieStorageAcceptPolicy(HTTPCookieAcceptPolicy policy)
+{
+    switch (policy) {
+    case HTTPCookieAcceptPolicy::AlwaysAccept:
+        return CFHTTPCookieStorageAcceptPolicyAlways;
+    case HTTPCookieAcceptPolicy::Never:
+        return CFHTTPCookieStorageAcceptPolicyNever;
+    case HTTPCookieAcceptPolicy::OnlyFromMainDocumentDomain:
+        return CFHTTPCookieStorageAcceptPolicyOnlyFromMainDocumentDomain;
+    case HTTPCookieAcceptPolicy::ExclusivelyFromMainDocumentDomain:
+        return CFHTTPCookieStorageAcceptPolicyExclusivelyFromMainDocumentDomain;
+    }
+    ASSERT_NOT_REACHED();
+
+    return CFHTTPCookieStorageAcceptPolicyAlways;
+}
+
+void WebCookieManager::platformSetHTTPCookieAcceptPolicy(HTTPCookieAcceptPolicy policy, CompletionHandler<void()>&& completionHandler)
 {
     ASSERT(hasProcessPrivilege(ProcessPrivilege::CanAccessRawCookies));
 
+    auto callbackAggregator = CallbackAggregator::create(WTFMove(completionHandler));
     [[NSHTTPCookieStorage sharedHTTPCookieStorage] setCookieAcceptPolicy:static_cast<NSHTTPCookieAcceptPolicy>(policy)];
+    saveCookies([NSHTTPCookieStorage sharedHTTPCookieStorage], [callbackAggregator] { });
 
     m_process.forEachNetworkStorageSession([&] (const auto& networkStorageSession) {
         if (auto cookieStorage = networkStorageSession.cookieStorage())
-            CFHTTPCookieStorageSetCookieAcceptPolicy(cookieStorage.get(), policy);
+            CFHTTPCookieStorageSetCookieAcceptPolicy(cookieStorage.get(), toCFHTTPCookieStorageAcceptPolicy(policy));
+        if (auto *storage = networkStorageSession.nsCookieStorage())
+            saveCookies(storage, [callbackAggregator] { });
     });
-}
-
-HTTPCookieAcceptPolicy WebCookieManager::platformGetHTTPCookieAcceptPolicy()
-{
-    ASSERT(hasProcessPrivilege(ProcessPrivilege::CanAccessRawCookies));
-
-    return [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookieAcceptPolicy];
 }
 
 } // namespace WebKit

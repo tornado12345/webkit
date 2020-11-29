@@ -76,8 +76,6 @@ public:
 #if PLATFORM(IOS_FAMILY)
     void absoluteQuadsForSelection(Vector<FloatQuad>& quads) const override;
 #endif
-
-    void updateDragState(bool dragOn) final;
     
     LayoutSize offsetForInFlowPositionedInline(const RenderBox* child) const;
 
@@ -108,6 +106,8 @@ private:
     LayoutRect culledInlineVisualOverflowBoundingBox() const;
     InlineBox* culledInlineFirstLineBox() const;
     InlineBox* culledInlineLastLineBox() const;
+
+    void absoluteQuadsIgnoringContinuation(const FloatRect&, Vector<FloatQuad>&, bool* wasFixed) const override;
 
     template<typename GeneratorContext>
     void generateLineBoxRects(GeneratorContext& yield) const;
@@ -150,10 +150,6 @@ private:
     void updateHitTestResult(HitTestResult&, const LayoutPoint&) final;
 
     void imageChanged(WrappedImagePtr, const IntRect* = 0) final;
-
-#if ENABLE(DASHBOARD_SUPPORT)
-    void addAnnotatedRegions(Vector<AnnotatedRegionValue>&) final;
-#endif
 
     void paintOutlineForLine(GraphicsContext&, const LayoutPoint&, const LayoutRect& prevLine, const LayoutRect& thisLine, const LayoutRect& nextLine, const Color&);
 

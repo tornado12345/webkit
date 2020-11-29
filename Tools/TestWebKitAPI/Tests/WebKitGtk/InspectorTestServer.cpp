@@ -24,8 +24,9 @@
 
 #include "config.h"
 
-#include <gtk/gtk.h>
+#include <WebCore/GtkVersioning.h>
 #include <webkit2/webkit2.h>
+#include <wtf/glib/GRefPtr.h>
 
 int main(int argc, char** argv)
 {
@@ -37,9 +38,17 @@ int main(int argc, char** argv)
     WebKitWebView* webView = WEBKIT_WEB_VIEW(webkit_web_view_new());
     webkit_settings_set_enable_developer_extras(webkit_web_view_get_settings(webView), TRUE);
     webkit_web_view_load_html(webView,
-        "<html><body><p>WebKitGTK+ Inspector Test Server</p></body></html>",
+        "<html><body><p>WebKitGTK Inspector Test Server</p></body></html>",
         "http://127.0.0.1:2999/");
 
+#if USE(GTK4)
+    GtkWidget* window = gtk_window_new();
+    gtk_window_set_child(GTK_WINDOW(window), GTK_WIDGET(webView));
+    gtk_widget_show(window);
+
+    GRefPtr<GMainLoop> loop = adoptGRef(g_main_loop_new(nullptr, TRUE));
+    g_main_loop_run(loop.get());
+#else
     GtkWidget* window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_container_add(GTK_CONTAINER(window), GTK_WIDGET(webView));
     gtk_widget_show_all(window);
@@ -47,4 +56,5 @@ int main(int argc, char** argv)
     g_signal_connect(window, "delete-event", G_CALLBACK(gtk_main_quit), 0);
 
     gtk_main();
+#endif
 }

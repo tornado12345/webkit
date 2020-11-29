@@ -57,6 +57,9 @@
 #define IDD_AUTH                        176
 #define IDM_DEBUG_INFO_LAYER            177
 #define IDD_PROXY                       178
+#define IDD_SERVER_TRUST                179
+#define IDR_ACCELERATORS_PRE            180
+#define IDB_TOOLBAR                     181
 #define IDC_EMPTY_URL_CACHE             1000
 #define IDC_RETURN_FREE_MEMORY          1001
 #define IDC_EMPTY_WEBCORE_CACHE         1002
@@ -118,19 +121,24 @@
 #define IDC_PROXY_CUSTOM                1059
 #define IDC_PROXY_EXCLUDE               1060
 #define IDC_PROXY_DISABLE               1061
+#define IDC_SERVER_TRUST_TEXT           1062
 #define IDM_NEW_WEBKIT_WINDOW           32776
 #define IDM_NEW_WEBKITLEGACY_WINDOW     32777
 #define IDM_PROXY_SETTINGS              32778
+#define IDM_RELOAD                      32779
+#define IDM_CLOSE_WINDOW                32780
+#define IDM_GO_HOME                     32781
+#define IDM_SET_DEFAULT_URL             32782
 #define IDC_STATIC                      -1
 
 // Next default values for new objects
-//
+// 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NO_MFC                     1
-#define _APS_NEXT_RESOURCE_VALUE        179
-#define _APS_NEXT_COMMAND_VALUE         32779
-#define _APS_NEXT_CONTROL_VALUE         1062
+#define _APS_NEXT_RESOURCE_VALUE        182
+#define _APS_NEXT_COMMAND_VALUE         32783
+#define _APS_NEXT_CONTROL_VALUE         1063
 #define _APS_NEXT_SYMED_VALUE           110
 #endif
 #endif

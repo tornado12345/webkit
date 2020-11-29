@@ -29,7 +29,9 @@
 #include "DataReference.h"
 #include "FrameInfoData.h"
 #include "NavigationActionData.h"
+#include "ProcessThrottler.h"
 #include "WebBackForwardListItem.h"
+#include "WebContentMode.h"
 #include <WebCore/AdClickAttribution.h>
 #include <WebCore/ProcessIdentifier.h>
 #include <WebCore/ResourceRequest.h>
@@ -68,9 +70,9 @@ public:
 class Navigation : public ObjectImpl<Object::Type::Navigation> {
     WTF_MAKE_NONCOPYABLE(Navigation);
 public:
-    static Ref<Navigation> create(WebKit::WebNavigationState& state)
+    static Ref<Navigation> create(WebKit::WebNavigationState& state, WebKit::WebBackForwardListItem* currentAndTargetItem)
     {
-        return adoptRef(*new Navigation(state));
+        return adoptRef(*new Navigation(state, currentAndTargetItem));
     }
 
     static Ref<Navigation> create(WebKit::WebNavigationState& state, WebKit::WebBackForwardListItem& targetItem, WebKit::WebBackForwardListItem* fromItem, WebCore::FrameLoadType backForwardFrameLoadType)
@@ -102,6 +104,7 @@ public:
     WebKit::WebBackForwardListItem* targetItem() const { return m_targetItem.get(); }
     WebKit::WebBackForwardListItem* fromItem() const { return m_fromItem.get(); }
     Optional<WebCore::FrameLoadType> backForwardFrameLoadType() const { return m_backForwardFrameLoadType; }
+    WebKit::WebBackForwardListItem* reloadItem() const { return m_reloadItem.get(); }
 
     void appendRedirectionURL(const WTF::URL&);
     Vector<WTF::URL> takeRedirectChain() { return WTFMove(m_redirectChain); }
@@ -141,6 +144,9 @@ public:
     void setDestinationFrameSecurityOrigin(const WebCore::SecurityOriginData& origin) { m_destinationFrameSecurityOrigin = origin; }
     const WebCore::SecurityOriginData& destinationFrameSecurityOrigin() const { return m_destinationFrameSecurityOrigin; }
 
+    void setEffectiveContentMode(WebKit::WebContentMode mode) { m_effectiveContentMode = mode; }
+    WebKit::WebContentMode effectiveContentMode() const { return m_effectiveContentMode; }
+
 #if !LOG_DISABLED
     const char* loggingString() const;
 #endif
@@ -149,8 +155,14 @@ public:
 
     const Optional<WebCore::AdClickAttribution>& adClickAttribution() const { return m_lastNavigationAction.adClickAttribution; }
 
+    void setClientNavigationActivity(WebKit::ProcessThrottler::ActivityVariant&& activity) { m_clientNavigationActivity = WTFMove(activity); }
+
+    void setIsLoadedWithNavigationShared(bool value) { m_isLoadedWithNavigationShared = value; }
+    bool isLoadedWithNavigationShared() const { return m_isLoadedWithNavigationShared; }
+
 private:
     explicit Navigation(WebKit::WebNavigationState&);
+    Navigation(WebKit::WebNavigationState&, WebKit::WebBackForwardListItem*);
     Navigation(WebKit::WebNavigationState&, WebCore::ResourceRequest&&, WebKit::WebBackForwardListItem* fromItem);
     Navigation(WebKit::WebNavigationState&, WebKit::WebBackForwardListItem& targetItem, WebKit::WebBackForwardListItem* fromItem, WebCore::FrameLoadType);
     Navigation(WebKit::WebNavigationState&, std::unique_ptr<SubstituteData>&&);
@@ -163,12 +175,16 @@ private:
 
     RefPtr<WebKit::WebBackForwardListItem> m_targetItem;
     RefPtr<WebKit::WebBackForwardListItem> m_fromItem;
+    RefPtr<WebKit::WebBackForwardListItem> m_reloadItem;
     Optional<WebCore::FrameLoadType> m_backForwardFrameLoadType;
     std::unique_ptr<SubstituteData> m_substituteData;
     WebKit::NavigationActionData m_lastNavigationAction;
     WebKit::FrameInfoData m_originatingFrameInfo;
     WebCore::SecurityOriginData m_destinationFrameSecurityOrigin;
     bool m_userContentExtensionsEnabled { true };
+    WebKit::WebContentMode m_effectiveContentMode { WebKit::WebContentMode::Recommended };
+    WebKit::ProcessThrottler::TimedActivity m_clientNavigationActivity;
+    bool m_isLoadedWithNavigationShared { false };
 };
 
 } // namespace API

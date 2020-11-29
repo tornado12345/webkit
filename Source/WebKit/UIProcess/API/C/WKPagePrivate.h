@@ -126,6 +126,7 @@ enum {
     kWKMediaNoneMuted = 0,
     kWKMediaAudioMuted = 1 << 0,
     kWKMediaCaptureDevicesMuted = 1 << 1,
+    kWKMediaScreenCaptureMuted = 1 << 2,
 };
 typedef uint32_t WKMediaMutedState;
 WK_EXPORT void WKPageSetMuted(WKPageRef page, WKMediaMutedState muted);
@@ -150,26 +151,12 @@ enum {
 };
 typedef uint32_t WKMediaState;
 
-
 WK_EXPORT WKMediaState WKPageGetMediaState(WKPageRef page);
-
-enum {
-    kWKMediaEventTypePlayPause,
-    kWKMediaEventTypeTrackNext,
-    kWKMediaEventTypeTrackPrevious
-};
-typedef uint32_t WKMediaEventType;
-
-WK_EXPORT bool WKPageHasMediaSessionWithActiveMediaElements(WKPageRef page);
-WK_EXPORT void WKPageHandleMediaEvent(WKPageRef page, WKMediaEventType event);
 
 WK_EXPORT void WKPageLoadURLWithShouldOpenExternalURLsPolicy(WKPageRef page, WKURLRef url, bool shouldOpenExternalURLs);
 
 typedef void (*WKPagePostPresentationUpdateFunction)(WKErrorRef, void*);
 WK_EXPORT void WKPageCallAfterNextPresentationUpdate(WKPageRef page, void* context, WKPagePostPresentationUpdateFunction function);
-
-WK_EXPORT bool WKPageGetResourceCachingDisabled(WKPageRef page);
-WK_EXPORT void WKPageSetResourceCachingDisabled(WKPageRef page, bool disabled);
 
 WK_EXPORT void WKPageRestoreFromSessionStateWithoutNavigation(WKPageRef page, WKTypeRef sessionState);
 
@@ -186,6 +173,23 @@ typedef void (*WKPageDumpAdClickAttributionFunction)(WKStringRef adClickAttribut
 WK_EXPORT void WKPageDumpAdClickAttribution(WKPageRef, WKPageDumpAdClickAttributionFunction, void* callbackContext);
 typedef void (*WKPageClearAdClickAttributionFunction)(void* functionContext);
 WK_EXPORT void WKPageClearAdClickAttribution(WKPageRef, WKPageClearAdClickAttributionFunction, void* callbackContext);
+typedef void (*WKPageSetAdClickAttributionOverrideTimerForTestingFunction)(void* functionContext);
+WK_EXPORT void WKPageSetAdClickAttributionOverrideTimerForTesting(WKPageRef page, bool value, WKPageSetAdClickAttributionOverrideTimerForTestingFunction callback, void* callbackContext);
+typedef void (*WKPageSetAdClickAttributionConversionURLForTestingFunction)(void* functionContext);
+WK_EXPORT void WKPageSetAdClickAttributionConversionURLForTesting(WKPageRef page, WKURLRef urlString, WKPageSetAdClickAttributionConversionURLForTestingFunction callback, void* callbackContext);
+typedef void (*WKPageMarkAdClickAttributionsAsExpiredForTestingFunction)(void* functionContext);
+WK_EXPORT void WKPageMarkAdClickAttributionsAsExpiredForTesting(WKPageRef page, WKPageMarkAdClickAttributionsAsExpiredForTestingFunction callback, void* callbackContext);
+
+WK_EXPORT void WKPageSetMockCameraOrientation(WKPageRef page, uint64_t orientation);
+WK_EXPORT bool WKPageIsMockRealtimeMediaSourceCenterEnabled(WKPageRef page);
+
+typedef void (*WKPageLoadedSubresourceDomainsFunction)(WKArrayRef domains, void* functionContext);
+WK_EXPORT void WKPageLoadedSubresourceDomains(WKPageRef page, WKPageLoadedSubresourceDomainsFunction callback, void* callbackContext);
+WK_EXPORT void WKPageClearLoadedSubresourceDomains(WKPageRef page);
+
+WK_EXPORT void WKPageSetMediaCaptureReportingDelayForTesting(WKPageRef page, double delay);
+
+WK_EXPORT void WKPageDispatchActivityStateUpdateForTesting(WKPageRef page);
 
 #ifdef __cplusplus
 }

@@ -13,7 +13,7 @@ function loadAndTriggerInspector(url) {
 }
 
 function triggerNetworkLoad() {
-    loadAndTriggerInspector("/resources/square100.png");
+    loadAndTriggerInspector("/resources/square20.jpg");
 }
 
 function test()
@@ -33,14 +33,11 @@ function test()
     addResourceSizeTest(suite, {
         name: "Resource.Size.DiskCache.Basic",
         description: "Sizes of a disk cached image resource with no validation",
-        url: "/resources/square100.png",
+        url: "/resources/square20.jpg",
         statusCode: 200,
         compressed: false,
         responseSource: WI.Resource.ResponseSource.DiskCache,
         headers: false,
-        requestBodyTransferSize: 0,
-        responseBodyTransferSize: 0,
-        size: 12940,
     });
 
     suite.runTestCasesAndFinish();

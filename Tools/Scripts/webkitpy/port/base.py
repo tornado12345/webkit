@@ -1,5 +1,5 @@
 # Copyright (C) 2010 Google Inc. All rights reserved.
-# Copyright (C) 2013 Apple Inc. All rights reserved.
+# Copyright (C) 2013-2019 Apple Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are
@@ -30,21 +30,22 @@
 """Abstract base class of Port-specific entry points for the layout tests
 test infrastructure (the Port and Driver classes)."""
 
+import argparse
 import difflib
-import itertools
 import json
 import logging
 import os
-import operator
 import optparse
 import re
 import sys
 
 from collections import OrderedDict
 from functools import partial
+from webkitcorepy import string_utils, decorators
 
 from webkitpy.common import find_files
 from webkitpy.common import read_checksum_from_png
+from webkitpy.common.checkout.scm.detection import SCMDetector
 from webkitpy.common.memoized import memoized
 from webkitpy.common.prettypatch import PrettyPatch
 from webkitpy.common.system import path, pemfile
@@ -102,18 +103,10 @@ class Port(object):
         # These are default values that should be overridden in a subclasses.
         self._os_version = None
 
-        # FIXME: This can be removed once default architectures for GTK and EFL EWS bots are set.
-        self.did_override_architecture = False
-
         # FIXME: Ideally we'd have a package-wide way to get a
         # well-formed options object that had all of the necessary
         # options defined on it.
         self._options = options or optparse.Values()
-
-        if self.get_option('architecture'):
-            self.did_override_architecture = True
-        else:
-            self.set_option('architecture', self.DEFAULT_ARCHITECTURE)
 
         if self._name and '-wk2' in self._name:
             self._options.webkit_test_runner = True
@@ -143,21 +136,24 @@ class Port(object):
         self._jhbuild_wrapper = []
         self._layout_tests_dir = hasattr(options, 'layout_tests_dir') and options.layout_tests_dir and self._filesystem.abspath(options.layout_tests_dir)
         self._w3c_resource_files = None
+        self._display_server = None
 
     def target_host(self, worker_number=None):
         return self.host
 
     def architecture(self):
-        return self.get_option('architecture')
+        return self.get_option('architecture') or self.DEFAULT_ARCHITECTURE
 
     def set_architecture(self, arch):
-        self.did_override_architecture = True
         self.set_option('architecture', arch)
 
     def additional_drt_flag(self):
         return []
 
     def supports_per_test_timeout(self):
+        return True
+
+    def supports_layout_tests(self):
         return True
 
     def default_pixel_tests(self):
@@ -223,7 +219,7 @@ class Port(object):
         search_paths.append(self.name())
         if self.name() != self.port_name:
             search_paths.append(self.port_name)
-        return map(self._webkit_baseline_path, search_paths)
+        return list(map(self._webkit_baseline_path, search_paths))
 
     @memoized
     def _compare_baseline(self):
@@ -241,13 +237,8 @@ class Port(object):
             return False
         if self.get_option('install') and not self._check_driver():
             return False
-        if self.get_option('install') and not self._check_port_build():
-            return False
         if not self.check_image_diff():
-            if self.get_option('build'):
-                return self._build_image_diff()
-            else:
-                return False
+            return self._build_image_diff()
         return True
 
     def check_api_test_build(self, canonicalized_binaries=None):
@@ -255,10 +246,8 @@ class Port(object):
             canonicalized_binaries = self.path_to_api_test_binaries().keys()
         if not self._root_was_set and self.get_option('build') and not self._build_api_tests(wtf_only=(canonicalized_binaries == ['TestWTF'])):
             return False
-        if self.get_option('install') and not self._check_port_build():
-            return False
 
-        for binary, path in self.path_to_api_test_binaries().iteritems():
+        for binary, path in self.path_to_api_test_binaries().items():
             if binary not in canonicalized_binaries:
                 continue
             if not self._filesystem.exists(path):
@@ -267,23 +256,13 @@ class Port(object):
         return True
 
     def environment_for_api_tests(self):
-        build_root_path = str(self._build_path())
-        return {
-            'DYLD_LIBRARY_PATH': build_root_path,
-            '__XPC_DYLD_LIBRARY_PATH': build_root_path,
-            'DYLD_FRAMEWORK_PATH': build_root_path,
-            '__XPC_DYLD_FRAMEWORK_PATH': build_root_path,
-        }
+        return self.setup_environ_for_server()
 
     def _check_driver(self):
         driver_path = self._path_to_driver()
         if not self._filesystem.exists(driver_path):
             _log.error("%s was not found at %s" % (self.driver_name(), driver_path))
             return False
-        return True
-
-    def _check_port_build(self):
-        # Ports can override this method to do additional checks.
         return True
 
     def check_sys_deps(self):
@@ -350,16 +329,8 @@ class Port(object):
     def diff_text(self, expected_text, actual_text, expected_filename, actual_filename):
         """Returns a string containing the diff of the two text strings
         in 'unified diff' format."""
-
-        # The filenames show up in the diff output, make sure they're
-        # raw bytes and not unicode, so that they don't trigger join()
-        # trying to decode the input.
-        def to_raw_bytes(string_value):
-            if isinstance(string_value, unicode):
-                return string_value.encode('utf-8')
-            return string_value
-        expected_filename = to_raw_bytes(expected_filename)
-        actual_filename = to_raw_bytes(actual_filename)
+        expected_filename = string_utils.decode(string_utils.encode(expected_filename), target_type=str)
+        actual_filename = string_utils.decode(string_utils.encode(actual_filename), target_type=str)
         diff = difflib.unified_diff(expected_text.splitlines(True),
                                     actual_text.splitlines(True),
                                     expected_filename,
@@ -368,10 +339,10 @@ class Port(object):
         for line in diff:
             result += line
             if not line.endswith('\n'):
-                result += '\n\ No newline at end of file\n'
+                result += '\n No newline at end of file\n'
         return result
 
-    def check_for_leaks(self, process_name, process_pid):
+    def check_for_leaks(self, process_name, process_id):
         # Subclasses should check for leaks in the running process
         # and print any necessary warnings if leaks are found.
         # FIXME: We should consider moving much of this logic into
@@ -520,7 +491,7 @@ class Port(object):
             baseline_path = self.expected_filename(test_name, '.webarchive', device_type=device_type)
             if not self._filesystem.exists(baseline_path):
                 return None
-        text = self._filesystem.read_binary_file(baseline_path)
+        text = string_utils.decode(self._filesystem.read_binary_file(baseline_path), target_type=str)
         return text.replace("\r\n", "\n")
 
     def _get_reftest_list(self, test_name):
@@ -774,7 +745,7 @@ class Port(object):
             if not match:
                 _log.error("Syntax error at line %d in %s: %s" % (line_number + 1, filename, line))
             else:
-                platform_names = filter(lambda token: token, match.group('platforms').lower().split(' ')) if match.group('platforms') else []
+                platform_names = list(filter(lambda token: token, match.group('platforms').lower().split(' '))) if match.group('platforms') else []
                 test_name = match.group('test')
                 if test_name and (not platform_names or self.port_name in platform_names or self._name in platform_names):
                     tests_to_skip.append(test_name)
@@ -822,7 +793,14 @@ class Port(object):
         return self.get_option(name) == value
 
     def set_option_default(self, name, default_value):
-        return self._options.ensure_value(name, default_value)
+        if isinstance(self._options, argparse.Namespace):
+            if not hasattr(self._options, name):
+                setattr(self._options, name, default_value)
+                return True
+            elif not self.get_option(name):
+                self.set_option(name, default_value)
+        else:
+            return self._options.ensure_value(name, default_value)
 
     @memoized
     def path_to_generic_test_expectations_file(self):
@@ -863,9 +841,6 @@ class Port(object):
     def bindings_results_directory(self):
         return self._build_path()
 
-    def api_results_directory(self):
-        return self._build_path()
-
     def results_directory(self):
         """Absolute path to the place to store the test results (uses --results-directory)."""
         if not self._results_directory:
@@ -884,12 +859,6 @@ class Port(object):
         # Results are store relative to the built products to make it easy
         # to have multiple copies of webkit checked out and built.
         return self._build_path('layout-test-results')
-
-    def wpt_metadata_directory(self):
-        return self._build_path('web-platform-tests-metadata')
-
-    def wpt_manifest_file(self):
-        return self._build_path('web-platform-tests-manifest.json')
 
     def setup_test_run(self, device_type=None):
         """Perform port-specific work at the beginning of a test run."""
@@ -924,6 +893,7 @@ class Port(object):
             'LANG',
             'LD_LIBRARY_PATH',
             'TERM',
+            'TZ',
             'XDG_DATA_DIRS',
             'XDG_RUNTIME_DIR',
 
@@ -932,6 +902,8 @@ class Port(object):
             'DYLD_LIBRARY_PATH',
             '__XPC_DYLD_FRAMEWORK_PATH',
             '__XPC_DYLD_LIBRARY_PATH',
+            'JSC_useKernTCSM',
+            '__XPC_JSC_useKernTCSM',
 
             # CYGWIN:
             'HOMEDRIVE',
@@ -958,6 +930,9 @@ class Port(object):
             [name, value] = string_variable.split('=', 1)
             clean_env[name] = value
 
+        # FIXME: Some tests fail if the time zone is not set to US/Pacific (<https://webkit.org/b/186612>)
+        clean_env['TZ'] = 'US/Pacific'
+
         return clean_env
 
     def _clear_global_caches_and_temporary_files(self):
@@ -965,9 +940,9 @@ class Port(object):
 
     @staticmethod
     def _append_value_colon_separated(env, name, value):
-        assert ":" not in value
+        assert os.pathsep not in value
         if name in env and env[name]:
-            env[name] = env[name] + ":" + value
+            env[name] = env[name] + os.pathsep + value
         else:
             env[name] = value
 
@@ -980,7 +955,7 @@ class Port(object):
         """Return a newly created Driver subclass for starting/stopping the test driver."""
         return driver.DriverProxy(self, worker_number, self._driver_class(), pixel_tests=self.get_option('pixel_tests'), no_timeout=no_timeout)
 
-    def start_helper(self, pixel_tests=False):
+    def start_helper(self, pixel_tests=False, prefer_integrated_gpu=False):
         """If a port needs to reconfigure graphics settings or do other
         things to ensure a known test configuration, it should override this
         method."""
@@ -1067,7 +1042,7 @@ class Port(object):
         self._web_platform_test_server.start()
 
     def web_platform_test_server_doc_root(self):
-        return web_platform_test_server.doc_root(self) + self.TEST_PATH_SEPARATOR
+        return web_platform_test_server.doc_root(self).replace('\\', self.TEST_PATH_SEPARATOR) + self.TEST_PATH_SEPARATOR
 
     def web_platform_test_server_base_http_url(self):
         return web_platform_test_server.base_http_url(self)
@@ -1224,6 +1199,12 @@ class Port(object):
     def allowed_hosts(self):
         return self.get_option("allowed_host", [])
 
+    def internal_feature(self):
+        return self.get_option("internal_feature", [])
+
+    def experimental_feature(self):
+        return self.get_option("experimental_feature", [])
+
     def default_configuration(self):
         return self._config.default_configuration()
 
@@ -1245,7 +1226,7 @@ class Port(object):
         This is needed only by ports that use the apache_http_server module."""
         # The Apache binary path can vary depending on OS and distribution
         # See http://wiki.apache.org/httpd/DistrosDefaultLayout
-        for path in ["/usr/sbin/httpd", "/usr/sbin/apache2", "/app/bin/httpd"]:
+        for path in ["/usr/sbin/httpd", "/usr/sbin/apache2", "/usr/bin/httpd"]:
             if self._filesystem.exists(path):
                 return path
         _log.error("Could not find apache. Not installed or unknown path.")
@@ -1272,7 +1253,7 @@ class Port(object):
         return self._filesystem.exists('/etc/arch-release')
 
     def _is_flatpak(self):
-        return self._filesystem.exists('/usr/manifest.json')
+        return self._filesystem.exists('/.flatpak-info')
 
     def _apache_version(self):
         config = self._executive.run_command([self._path_to_apache(), '-v'])
@@ -1280,7 +1261,7 @@ class Port(object):
 
     def _debian_php_version(self):
         prefix = "/usr/lib/apache2/modules/"
-        for version in ("7.0", "7.1", "7.2", "7.3"):
+        for version in ("7.0", "7.1", "7.2", "7.3", "7.4"):
             if self._filesystem.exists("%s/libphp%s.so" % (prefix, version)):
                 return "-php%s" % version
         _log.error("No libphp7.x.so found in %s" % prefix)
@@ -1296,12 +1277,20 @@ class Port(object):
             return "-php7"
         return ""
 
+    def _win_php_version(self):
+        root = os.environ.get('XAMPP_ROOT', 'C:\\xampp')
+        prefix = self._filesystem.join(root, 'php')
+        for version in ('5', '7'):
+            conf = self._filesystem.join(prefix, "php{}ts.dll".format(version))
+            if self._filesystem.exists(conf):
+                return "-php{}".format(version)
+        _log.error("No php?ts.dll found in {}".format(prefix))
+        return ""
+
     # We pass sys_platform into this method to make it easy to unit test.
     def _apache_config_file_name_for_platform(self, sys_platform):
-        if sys_platform == 'cygwin':
-            return 'apache' + self._apache_version() + '-httpd-win.conf'
-        if sys_platform == 'win32':
-            return 'win-httpd-' + self._apache_version() + '-php7.conf'
+        if sys_platform in ['cygwin', 'win32']:
+            return 'win-httpd-' + self._apache_version() + self._win_php_version() + '.conf'
         if sys_platform == 'darwin':
             return 'apache' + self._apache_version() + self._darwin_php_version() + '-httpd.conf'
         if sys_platform.startswith('linux'):
@@ -1382,11 +1371,28 @@ class Port(object):
         This is likely only used by start/stop_helper()."""
         return None
 
+    def _path_to_default_image_diff(self):
+        """Returns the full path to the default ImageDiff binary, or None if it is not available."""
+        return self._build_path('ImageDiff')
+
+    def run_minibrowser(self, args):
+        # FIXME: Migrate to webkitpy based run-minibrowser. https://bugs.webkit.org/show_bug.cgi?id=213464
+        miniBrowser = self.path_to_script("old-run-minibrowser")
+        args.append(self._config.flag_for_configuration(self.get_option('configuration')))
+        args.append("--%s" % self.get_option('platform'))
+        return self._executive.run_command([miniBrowser] + args, stdout=None, cwd=self.webkit_base(), return_stderr=False, decode_output=False, ignore_errors=True)
+
+    @decorators.Memoize()
     def _path_to_image_diff(self):
         """Returns the full path to the image_diff binary, or None if it is not available.
 
         This is likely used only by diff_image()"""
-        return self._build_path('ImageDiff')
+        default_image_diff = self._path_to_default_image_diff()
+        if self._filesystem.exists(default_image_diff):
+            return default_image_diff
+        built_image_diff = self._filesystem.join(self._config.build_directory(self.get_option('configuration'), for_host=True), 'ImageDiff')
+        _log.debug('ImageDiff not found at {}, using {} instead'.format(default_image_diff, built_image_diff))
+        return built_image_diff
 
     API_TEST_BINARY_NAMES = ['TestWTF', 'TestWebKitAPI']
 
@@ -1459,14 +1465,8 @@ class Port(object):
         # --pixel-test-directory is not specified.
         return True
 
-    def _should_use_flatpak(self):
-        suffix = ""
-        if self.port_name:
-            suffix = self.port_name.upper()
-        return self._filesystem.exists(self.path_from_webkit_base('WebKitBuild', suffix, "FlatpakTree"))
-
     def _in_flatpak_sandbox(self):
-        return os.path.exists("/usr/manifest.json")
+        return self._filesystem.exists("/.flatpak-info")
 
     def _should_use_jhbuild(self):
         if self._in_flatpak_sandbox():
@@ -1500,7 +1500,7 @@ class Port(object):
         if args:
             run_script_command.extend(args)
         output = self._executive.run_command(run_script_command, cwd=self.webkit_base(), decode_output=decode_output, env=env)
-        _log.debug('Output of %s:\n%s' % (run_script_command, output.encode('utf-8') if decode_output else output))
+        _log.debug('Output of %s:\n%s' % (run_script_command, string_utils.encode(output, target_type=str) if decode_output else output))
         return output
 
     def _build_driver(self):
@@ -1532,6 +1532,7 @@ class Port(object):
         env = environment.to_dictionary()
         try:
             self._run_script("build-imagediff", env=env)
+            self._path_to_image_diff.clear()
         except ScriptError as e:
             _log.error(e.message_with_output(output_limit=None))
             return False
@@ -1556,64 +1557,7 @@ class Port(object):
                 dirs_to_skip.append('platform/%s' % basename)
         return dirs_to_skip
 
-    def _runtime_feature_list(self):
-        """If a port makes certain features available only through runtime flags, it can override this routine to indicate which ones are available."""
-        return None
-
-    def nm_command(self):
-        return 'nm'
-
-    def _modules_to_search_for_symbols(self):
-        path = self._path_to_webcore_library()
-        if path:
-            return [path]
-        return []
-
-    def _symbols_string(self):
-        symbols = ''
-        for path_to_module in self._modules_to_search_for_symbols():
-            try:
-                symbols += self._executive.run_command([self.nm_command(), path_to_module], ignore_errors=True)
-            except OSError as e:
-                _log.warn("Failed to run nm: %s.  Can't determine supported features correctly." % e)
-        return symbols
-
-    # Ports which use run-time feature detection should define this method and return
-    # a dictionary mapping from Feature Names to skipped directoires.  NRWT will
-    # run DumpRenderTree --print-supported-features and parse the output.
-    # If the Feature Names are not found in the output, the corresponding directories
-    # will be skipped.
-    def _missing_feature_to_skipped_tests(self):
-        """Return the supported feature dictionary. Keys are feature names and values
-        are the lists of directories to skip if the feature name is not matched."""
-        # FIXME: This list matches WebKitWin and should be moved onto the Win port.
-        return {
-            "Accelerated Compositing": ["compositing"],
-            "3D Rendering": ["animations/3d", "transforms/3d"],
-        }
-
-    def _has_test_in_directories(self, directory_lists, test_list):
-        if not test_list:
-            return False
-
-        directories = itertools.chain.from_iterable(directory_lists)
-        for directory, test in itertools.product(directories, test_list):
-            if test.startswith(directory):
-                return True
-        return False
-
     def _skipped_tests_for_unsupported_features(self, test_list):
-        # Only check the runtime feature list of there are tests in the test_list that might get skipped.
-        # This is a performance optimization to avoid the subprocess call to DRT.
-        # If the port supports runtime feature detection, disable any tests
-        # for features missing from the runtime feature list.
-        # If _runtime_feature_list returns a non-None value, then prefer
-        # runtime feature detection over static feature detection.
-        if self._has_test_in_directories(self._missing_feature_to_skipped_tests().values(), test_list):
-            supported_feature_list = self._runtime_feature_list()
-            if supported_feature_list is not None:
-                return reduce(operator.add, [directories for feature, directories in self._missing_feature_to_skipped_tests().items() if feature not in supported_feature_list])
-
         return []
 
     def _wk2_port_name(self):
@@ -1634,3 +1578,60 @@ class Port(object):
         # This is overridden by ports that need to do work in the parent process after a worker subprocess is spawned,
         # such as closing file descriptors that were implicitly cloned to the worker.
         pass
+
+    def configuration_for_upload(self, host=None):
+        from webkitpy.results.upload import Upload
+
+        configuration = self.test_configuration()
+        host = self.host or host
+
+        if self.get_option('guard_malloc'):
+            style = 'guard-malloc'
+        elif self._config.asan:
+            style = 'asan'
+        else:
+            style = configuration.build_type
+
+        return Upload.create_configuration(
+            platform=host.platform.os_name,
+            version=str(host.platform.os_version),
+            version_name=host.platform.os_version_name(INTERNAL_TABLE) or host.platform.os_version_name(),
+            architecture=configuration.architecture,
+            style=style,
+            sdk=host.platform.build_version(),
+            flavor=self.get_option('result_report_flavor'),
+            model=self.get_option('model'),
+        )
+
+    @memoized
+    def commits_for_upload(self):
+        from webkitpy.results.upload import Upload
+
+        self.host.initialize_scm()
+        repos = {}
+        if port_config.apple_additions() and getattr(port_config.apple_additions(), 'repos', False):
+            repos = port_config.apple_additions().repos()
+        repos['webkit'] = self.host.scm().checkout_root
+        commits = []
+        for repo_id, path in repos.items():
+            scm = SCMDetector(self._filesystem, self._executive).detect_scm_system(path)
+
+            # If using git-svn for WebKit, prefer the SVN branch/revision.
+            svn_revision = scm.svn_revision(path)
+            if repo_id == 'webkit' and svn_revision:
+                used_revision = svn_revision
+            else:
+                used_revision = scm.native_revision(path)
+
+            svn_branch = scm.svn_branch(path)
+            if repo_id == 'webkit' and svn_branch:
+                used_branch = svn_branch
+            else:
+                used_branch = scm.native_branch(path)
+
+            commits.append(Upload.create_commit(
+                repository_id=repo_id,
+                id=used_revision,
+                branch=used_branch,
+            ))
+        return commits

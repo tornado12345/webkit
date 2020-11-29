@@ -40,8 +40,10 @@
 #import <WebCore/RunLoopObserver.h>
 #import <WebCore/TextIndicatorWindow.h>
 #import <WebCore/ValidationBubble.h>
+#import <WebCore/WebCoreJITOperations.h>
 #import <wtf/MainThread.h>
 #import <wtf/RunLoop.h>
+#import <wtf/SetForScope.h>
 
 #if PLATFORM(IOS_FAMILY)
 #import "WebGeolocationProviderIOS.h"
@@ -96,7 +98,7 @@ LayerFlushController::LayerFlushController(WebView* webView)
 WebViewLayerFlushScheduler::WebViewLayerFlushScheduler(LayerFlushController* flushController)
     : m_flushController(flushController)
 {
-    m_runLoopObserver = std::make_unique<WebCore::RunLoopObserver>(static_cast<CFIndex>(WebCore::RunLoopObserver::WellKnownRunLoopOrders::LayerFlush), [this]() {
+    m_runLoopObserver = makeUnique<WebCore::RunLoopObserver>(static_cast<CFIndex>(WebCore::RunLoopObserver::WellKnownRunLoopOrders::LayerFlush), [this]() {
         this->layerFlushCallback();
     });
 }
@@ -107,6 +109,9 @@ WebViewLayerFlushScheduler::~WebViewLayerFlushScheduler()
 
 void WebViewLayerFlushScheduler::schedule()
 {
+    if (m_insideCallback)
+        m_rescheduledInsideCallback = true;
+
     m_runLoopObserver->schedule(currentRunLoop());
 }
 
@@ -119,7 +124,11 @@ void WebViewLayerFlushScheduler::layerFlushCallback()
 {
     @autoreleasepool {
         RefPtr<LayerFlushController> protector = m_flushController;
-        if (m_flushController->flushLayers())
+
+        SetForScope<bool> insideCallbackScope(m_insideCallback, true);
+        m_rescheduledInsideCallback = false;
+
+        if (m_flushController->flushLayers() && !m_rescheduledInsideCallback)
             invalidate();
     }
 }
@@ -167,9 +176,9 @@ void WebViewLayerFlushScheduler::layerFlushCallback()
 + (void)initialize
 {
 #if !PLATFORM(IOS_FAMILY)
-    JSC::initializeThreading();
-    WTF::initializeMainThreadToProcessMainThread();
-    RunLoop::initializeMainRunLoop();
+    JSC::initialize();
+    WTF::initializeMainThread();
+    WebCore::populateJITOperations();
 #endif
 }
 
@@ -198,10 +207,6 @@ void WebViewLayerFlushScheduler::layerFlushCallback()
     // The default value should be synchronized with WebCore/page/Settings.cpp.
     validationMessageTimerMagnification = 50;
 
-#if ENABLE(DASHBOARD_SUPPORT)
-    dashboardBehaviorAllowWheelScrolling = YES;
-#endif
-
 #if PLATFORM(IOS_FAMILY)
     isStopping = NO;
     _geolocationProvider = [WebGeolocationProviderIOS sharedGeolocationProvider];
@@ -211,9 +216,7 @@ void WebViewLayerFlushScheduler::layerFlushCallback()
 
     pluginDatabaseClientCount++;
 
-#if USE(DICTATION_ALTERNATIVES)
-    m_alternativeTextUIController = std::make_unique<WebCore::AlternativeTextUIController>();
-#endif
+    m_alternativeTextUIController = makeUnique<WebCore::AlternativeTextUIController>();
 
     return self;
 }

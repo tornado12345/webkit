@@ -165,12 +165,8 @@ WI.TreeElement = class TreeElement extends WI.Object
             this._childrenListNode.hidden = this._hidden;
 
         if (this.treeOutline) {
-            if (this.treeOutline.virtualized) {
-                let focusedTreeElement = null;
-                if (!this._hidden && this.selected)
-                    focusedTreeElement = this;
-                this.treeOutline.updateVirtualizedElementsDebouncer.delayForTime(0, focusedTreeElement);
-            }
+            if (this.treeOutline.virtualized)
+                this.treeOutline.updateVirtualizedElementsDebouncer.delayForFrame();
 
             this.treeOutline.dispatchEventToListeners(WI.TreeOutline.Event.ElementVisibilityDidChange, {element: this});
         }
@@ -186,6 +182,22 @@ WI.TreeElement = class TreeElement extends WI.Object
         this._shouldRefreshChildren = x;
         if (x && this.expanded)
             this.expand();
+    }
+
+    get previousSelectableSibling()
+    {
+        let treeElement = this.previousSibling;
+        while (treeElement && !treeElement.selectable)
+            treeElement = treeElement.previousSibling;
+        return treeElement;
+    }
+
+    get nextSelectableSibling()
+    {
+        let treeElement = this.nextSibling;
+        while (treeElement && !treeElement.selectable)
+            treeElement = treeElement.nextSibling;
+        return treeElement;
     }
 
     canSelectOnMouseDown(event)
@@ -244,6 +256,7 @@ WI.TreeElement = class TreeElement extends WI.Object
             this._setListItemNodeContent();
             this._listItemNode.title = this._tooltip ? this._tooltip : "";
             this._listItemNode.hidden = this.hidden;
+            this._listItemNode.role = "treeitem";
 
             if (this.hasChildren)
                 this._listItemNode.classList.add("parent");
@@ -269,9 +282,6 @@ WI.TreeElement = class TreeElement extends WI.Object
                 this.parent._childrenListNode.insertBefore(this._childrenListNode, this._listItemNode.nextSibling);
         }
 
-        if (this.treeOutline && this.treeOutline.virtualized)
-            this.treeOutline.updateVirtualizedElementsDebouncer.delayForTime(0);
-
         if (this.selected)
             this.select();
         if (this.expanded)
@@ -286,40 +296,36 @@ WI.TreeElement = class TreeElement extends WI.Object
             this._listItemNode.parentNode.removeChild(this._listItemNode);
         if (this._childrenListNode && this._childrenListNode.parentNode)
             this._childrenListNode.parentNode.removeChild(this._childrenListNode);
-
-        if (this.treeOutline && this.treeOutline.virtualized)
-            this.treeOutline.updateVirtualizedElementsDebouncer.delayForTime(0);
     }
 
     static treeElementToggled(event)
     {
         let element = event.currentTarget;
-        if (!element || !element.treeElement)
+        if (!element)
             return;
 
         let treeElement = element.treeElement;
-        if (!treeElement.treeOutline.selectable) {
-            treeElement.treeOutline.dispatchEventToListeners(WI.TreeOutline.Event.ElementClicked, {treeElement});
+        if (!treeElement)
             return;
-        }
 
         let toggleOnClick = treeElement.toggleOnClick && !treeElement.selectable;
-        let isInTriangle = treeElement.isEventWithinDisclosureTriangle(event);
-        if (!toggleOnClick && !isInTriangle)
-            return;
-
-        if (treeElement.expanded) {
-            if (event.altKey)
-                treeElement.collapseRecursively();
-            else
-                treeElement.collapse();
-        } else {
-            if (event.altKey)
-                treeElement.expandRecursively();
-            else
-                treeElement.expand();
+        if (toggleOnClick || treeElement.isEventWithinDisclosureTriangle(event)) {
+            if (treeElement.expanded) {
+                if (event.altKey)
+                    treeElement.collapseRecursively();
+                else
+                    treeElement.collapse();
+            } else {
+                if (event.altKey)
+                    treeElement.expandRecursively();
+                else
+                    treeElement.expand();
+            }
+            event.stopPropagation();
         }
-        event.stopPropagation();
+
+        if (!treeElement.treeOutline.selectable)
+            treeElement.treeOutline.dispatchEventToListeners(WI.TreeOutline.Event.ElementClicked, {treeElement});
     }
 
     static treeElementDoubleClicked(event)
@@ -342,10 +348,14 @@ WI.TreeElement = class TreeElement extends WI.Object
 
     collapse()
     {
-        if (this._listItemNode)
+        if (this._listItemNode) {
             this._listItemNode.classList.remove("expanded");
-        if (this._childrenListNode)
+            this._listItemNode.ariaExpanded = false;
+        }
+        if (this._childrenListNode) {
             this._childrenListNode.classList.remove("expanded");
+            this._childrenListNode.ariaExpanded = false;
+        }
 
         this.expanded = false;
         if (this.treeOutline)
@@ -354,8 +364,9 @@ WI.TreeElement = class TreeElement extends WI.Object
         if (this.oncollapse)
             this.oncollapse(this);
 
-        if (this.treeOutline && this.treeOutline.virtualized) {
-            this.treeOutline.updateVirtualizedElementsDebouncer.delayForTime(0, this);
+        if (this.treeOutline) {
+            if (this.treeOutline.virtualized)
+                this.treeOutline.updateVirtualizedElementsDebouncer.delayForFrame();
 
             this.treeOutline.dispatchEventToListeners(WI.TreeOutline.Event.ElementDisclosureDidChanged, {element: this});
         }
@@ -396,6 +407,7 @@ WI.TreeElement = class TreeElement extends WI.Object
             this._childrenListNode.parentTreeElement = this;
             this._childrenListNode.classList.add("children");
             this._childrenListNode.hidden = this.hidden;
+            this._childrenListNode.role = "group";
 
             this.onpopulate();
 
@@ -411,18 +423,23 @@ WI.TreeElement = class TreeElement extends WI.Object
 
         if (this._listItemNode) {
             this._listItemNode.classList.add("expanded");
+            this._listItemNode.ariaExpanded = true;
+
             if (this._childrenListNode && this._childrenListNode.parentNode !== this._listItemNode.parentNode)
                 this.parent._childrenListNode.insertBefore(this._childrenListNode, this._listItemNode.nextSibling);
         }
 
-        if (this._childrenListNode)
+        if (this._childrenListNode) {
             this._childrenListNode.classList.add("expanded");
+            this._childrenListNode.ariaExpanded = true;
+        }
 
         if (this.onexpand)
             this.onexpand(this);
 
-        if (this.treeOutline && this.treeOutline.virtualized) {
-            this.treeOutline.updateVirtualizedElementsDebouncer.delayForTime(0, this);
+        if (this.treeOutline) {
+            if (this.treeOutline.virtualized)
+                this.treeOutline.updateVirtualizedElementsDebouncer.delayForFrame();
 
             this.treeOutline.dispatchEventToListeners(WI.TreeOutline.Event.ElementDisclosureDidChanged, {element: this});
         }
@@ -479,6 +496,9 @@ WI.TreeElement = class TreeElement extends WI.Object
 
         if (this.onreveal)
             this.onreveal(this);
+
+        if (this.treeOutline)
+            this.treeOutline.dispatchEventToListeners(WI.TreeOutline.Event.ElementRevealed, {element: this});
     }
 
     revealed(ignoreHidden)
@@ -500,22 +520,30 @@ WI.TreeElement = class TreeElement extends WI.Object
 
     select(omitFocus, selectedByUser, suppressNotification)
     {
-        if (!this.treeOutline || !this.selectable)
+        let treeOutline = this.treeOutline;
+        if (!treeOutline || !this.selectable)
             return;
+
+        if (!omitFocus)
+            this.focus();
+        else if (treeOutline.element.contains(document.activeElement)) {
+            // When treeOutline has focus, focus on the newly selected treeElement.
+            this.focus();
+        }
 
         if (this.selected && !this.treeOutline.allowsRepeatSelection)
             return;
 
-        if (!omitFocus)
-            this.treeOutline._childrenListNode.focus();
-
         // Focusing on another node may detach "this" from tree.
-        let treeOutline = this.treeOutline;
+        treeOutline = this.treeOutline;
         if (!treeOutline)
             return;
 
         this.selected = true;
         treeOutline.selectTreeElementInternal(this, suppressNotification, selectedByUser);
+
+        if (this._listItemNode)
+            this._listItemNode.ariaSelected = true;
     }
 
     revealAndSelect(omitFocus, selectedByUser, suppressNotification)
@@ -532,7 +560,29 @@ WI.TreeElement = class TreeElement extends WI.Object
         this.selected = false;
         this.treeOutline.selectTreeElementInternal(null, suppressNotification);
 
+        if (this._listItemNode) {
+            this.unfocus();
+            this._listItemNode.ariaSelected = false;
+        }
+
         return true;
+    }
+
+    focus()
+    {
+        if (!this._listItemNode)
+            return;
+
+        this._listItemNode.tabIndex = 0;
+        this._listItemNode.focus();
+    }
+
+    unfocus()
+    {
+        if (!this._listItemNode)
+            return;
+
+        this._listItemNode.removeAttribute("tabIndex");
     }
 
     onpopulate()
@@ -605,7 +655,7 @@ WI.TreeElement = class TreeElement extends WI.Object
         // FIXME: We should not use getComputedStyle(). For that we need to get rid of using ::before for disclosure triangle. (http://webk.it/74446)
         let computedStyle = window.getComputedStyle(this._listItemNode);
         let start = 0;
-        if (WI.resolvedLayoutDirection() === WI.LayoutDirection.RTL)
+        if (computedStyle.direction === WI.LayoutDirection.RTL)
             start += this._listItemNode.totalOffsetRight - computedStyle.getPropertyCSSValue("padding-right").getFloatValue(CSSPrimitiveValue.CSS_PX) - this.arrowToggleWidth;
         else
             start += this._listItemNode.totalOffsetLeft + computedStyle.getPropertyCSSValue("padding-left").getFloatValue(CSSPrimitiveValue.CSS_PX);

@@ -26,9 +26,15 @@
 #include "config.h"
 #include "Plugin.h"
 
+#include "LayerTreeContext.h"
+#include "PluginController.h"
 #include "WebCoreArgumentCoders.h"
 #include <WebCore/IntPoint.h>
 #include <wtf/SetForScope.h>
+
+#if PLATFORM(COCOA)
+#include "LayerHostingContext.h"
+#endif
 
 namespace WebKit {
 using namespace WebCore;
@@ -42,7 +48,7 @@ void Plugin::Parameters::encode(IPC::Encoder& encoder) const
     encoder << isFullFramePlugin;
     encoder << shouldUseManualLoader;
 #if PLATFORM(COCOA)
-    encoder.encodeEnum(layerHostingMode);
+    encoder << layerHostingMode;
 #endif
 }
 
@@ -64,7 +70,7 @@ bool Plugin::Parameters::decode(IPC::Decoder& decoder, Parameters& parameters)
     if (!decoder.decode(parameters.shouldUseManualLoader))
         return false;
 #if PLATFORM(COCOA)
-    if (!decoder.decodeEnum(parameters.layerHostingMode))
+    if (!decoder.decode(parameters.layerHostingMode))
         return false;
 #endif
     if (parameters.names.size() != parameters.values.size()) {
@@ -77,20 +83,16 @@ bool Plugin::Parameters::decode(IPC::Decoder& decoder, Parameters& parameters)
 
 Plugin::Plugin(PluginType type)
     : m_type(type)
-    , m_pluginController(0)
 {
 }
 
-Plugin::~Plugin()
-{
-}
+Plugin::~Plugin() = default;
 
-bool Plugin::initialize(PluginController* pluginController, const Parameters& parameters)
+bool Plugin::initialize(PluginController& pluginController, const Parameters& parameters)
 {
     ASSERT(!m_pluginController);
-    ASSERT(pluginController);
 
-    m_pluginController = pluginController;
+    m_pluginController = makeWeakPtr(pluginController);
 
     return initialize(parameters);
 }
@@ -113,6 +115,16 @@ IntPoint Plugin::convertToRootView(const IntPoint&) const
 {
     ASSERT_NOT_REACHED();
     return IntPoint();
+}
+
+PluginController* Plugin::controller()
+{
+    return m_pluginController.get();
+}
+
+const PluginController* Plugin::controller() const
+{
+    return m_pluginController.get();
 }
 
 } // namespace WebKit

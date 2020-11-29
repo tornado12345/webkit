@@ -29,13 +29,6 @@
 #endif // PLATFORM(MAC)
 #import <wtf/SoftLinking.h>
 
-SOFT_LINK_PRIVATE_FRAMEWORK(Reveal)
-SOFT_LINK_PRIVATE_FRAMEWORK(RevealCore)
-SOFT_LINK_CLASS_OPTIONAL(Reveal, RVPresenter)
-SOFT_LINK_CLASS_OPTIONAL(Reveal, RVPresentingContext)
-SOFT_LINK_CLASS_OPTIONAL(RevealCore, RVItem)
-SOFT_LINK_CLASS_OPTIONAL(RevealCore, RVSelection)
-
 #if ENABLE(REVEAL)
 
 #if USE(APPLE_INTERNAL_SDK)
@@ -54,6 +47,7 @@ SOFT_LINK_CLASS_OPTIONAL(RevealCore, RVSelection)
 
 @interface RVItem : NSObject <NSSecureCoding>
 - (instancetype)initWithText:(NSString *)text selectedRange:(NSRange)selectedRange NS_DESIGNATED_INITIALIZER;
+@property (readonly, nonatomic) NSRange highlightRange;
 @end
 
 @interface RVSelection : NSObject
@@ -63,8 +57,8 @@ SOFT_LINK_CLASS_OPTIONAL(RevealCore, RVSelection)
 #if PLATFORM(MAC)
 @interface RVPresentingContext : NSObject
 - (instancetype)initWithPointerLocationInView:(NSPoint)pointerLocationInView inView:(NSView *)view highlightDelegate:(id<RVPresenterHighlightDelegate>)highlightDelegate;
+@property (readonly) NSArray <NSValue *> * itemRectsInView;
 @end
-#endif
 
 @protocol RVPresenterHighlightDelegate <NSObject>
 @required
@@ -73,6 +67,7 @@ SOFT_LINK_CLASS_OPTIONAL(RevealCore, RVSelection)
 - (void)revealContext:(RVPresentingContext *)context stopHighlightingItem:(RVItem *)item;
 - (void)revealContext:(RVPresentingContext *)context drawRectsForItem:(RVItem *)item;
 @end
+#endif
 
 @interface RVDocumentContext : NSObject < NSSecureCoding >
 @end
@@ -80,8 +75,8 @@ SOFT_LINK_CLASS_OPTIONAL(RevealCore, RVSelection)
 @interface RVPresenter : NSObject
 #if PLATFORM(MAC)
 - (id<NSImmediateActionAnimationController>)animationControllerForItem:(RVItem *)item documentContext:(RVDocumentContext *)documentContext presentingContext:(RVPresentingContext *)presentingContext options:(NSDictionary *)options;
-#endif // PLATFORM(MAC)
 - (BOOL)revealItem:(RVItem *)item documentContext:(RVDocumentContext *)documentContext presentingContext:(RVPresentingContext *)presentingContext options:(NSDictionary *)options;
+#endif // PLATFORM(MAC)
 @end
 
 #endif // !USE(APPLE_INTERNAL_SDK)

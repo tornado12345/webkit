@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,7 +26,7 @@
 
 #pragma once
 
-#if PLATFORM(IOS_FAMILY) || (PLATFORM(MAC) && ENABLE(VIDEO_PRESENTATION_MODE))
+#if ENABLE(VIDEO_PRESENTATION_MODE)
 
 #include "AudioSession.h"
 #include "FloatRect.h"
@@ -34,6 +34,7 @@
 #include "MediaPlayerEnums.h"
 #include "PlaybackSessionModel.h"
 #include <wtf/CompletionHandler.h>
+#include <wtf/WeakPtr.h>
 
 #if PLATFORM(IOS_FAMILY)
 OBJC_CLASS AVPlayerViewController;
@@ -44,7 +45,7 @@ namespace WebCore {
 
 class VideoFullscreenModelClient;
 
-class VideoFullscreenModel {
+class VideoFullscreenModel : public CanMakeWeakPtr<VideoFullscreenModel> {
 public:
     virtual ~VideoFullscreenModel() { };
     virtual void addClient(VideoFullscreenModelClient&) = 0;
@@ -75,16 +76,16 @@ public:
 class VideoFullscreenModelClient {
 public:
     virtual ~VideoFullscreenModelClient() = default;
-    virtual void hasVideoChanged(bool) { };
-    virtual void videoDimensionsChanged(const FloatSize&) { };
+    virtual void hasVideoChanged(bool) { }
+    virtual void videoDimensionsChanged(const FloatSize&) { }
     virtual void willEnterPictureInPicture() { }
     virtual void didEnterPictureInPicture() { }
     virtual void failedToEnterPictureInPicture() { }
+    virtual void prepareToExitPictureInPicture() { }
     virtual void willExitPictureInPicture() { }
     virtual void didExitPictureInPicture() { }
+    virtual void modelDestroyed() { }
 };
-
-WEBCORE_EXPORT bool supportsPictureInPicture();
     
 }
 

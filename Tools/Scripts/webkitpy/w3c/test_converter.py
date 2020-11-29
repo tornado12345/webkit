@@ -30,22 +30,33 @@
 import json
 import logging
 import re
+import sys
 
 from webkitpy.common.host import Host
 from webkitpy.common.webkit_finder import WebKitFinder
-from HTMLParser import HTMLParser
+
+if sys.version_info > (3, 0):
+    from html.parser import HTMLParser
+else:
+    from HTMLParser import HTMLParser
 
 _log = logging.getLogger(__name__)
 
 
-def convert_for_webkit(new_path, filename, reference_support_info, host=Host(), convert_test_harness_links=True):
+def convert_for_webkit(new_path, filename, reference_support_info, host=Host(), convert_test_harness_links=True, webkit_test_runner_options=''):
     """ Converts a file's |contents| so it will function correctly in its |new_path| in Webkit.
 
     Returns the list of modified properties and the modified text if the file was modifed, None otherwise."""
-    contents = host.filesystem.read_binary_file(filename)
-    converter = _W3CTestConverter(new_path, filename, reference_support_info, host, convert_test_harness_links)
+    contents = host.filesystem.read_text_file(filename)
+
+    # WebKit does not have a www test domain.
+    contents = contents.replace('{{domains[www]}}', '{{hosts[alt][]}}')
+
+    converter = _W3CTestConverter(new_path, filename, reference_support_info, host, convert_test_harness_links, webkit_test_runner_options)
     if filename.endswith('.css'):
         return converter.add_webkit_prefix_to_unprefixed_properties_and_values(contents)
+    elif filename.endswith('.js'):
+        return ([], [], contents)
     else:
         converter.feed(contents)
         converter.close()
@@ -53,7 +64,7 @@ def convert_for_webkit(new_path, filename, reference_support_info, host=Host(), 
 
 
 class _W3CTestConverter(HTMLParser):
-    def __init__(self, new_path, filename, reference_support_info, host=Host(), convert_test_harness_links=True):
+    def __init__(self, new_path, filename, reference_support_info, host=Host(), convert_test_harness_links=True, webkit_test_runner_options=''):
         HTMLParser.__init__(self)
 
         self._host = host
@@ -67,6 +78,8 @@ class _W3CTestConverter(HTMLParser):
         self.style_data = []
         self.filename = filename
         self.reference_support_info = reference_support_info
+        self.webkit_test_runner_options = webkit_test_runner_options
+        self.has_started = False
 
         resources_path = self.path_from_webkit_root('LayoutTests', 'resources')
         resources_relpath = self._filesystem.relpath(resources_path, new_path)
@@ -99,7 +112,7 @@ class _W3CTestConverter(HTMLParser):
             return []
         properties = json.loads(contents)['properties']
         property_names = []
-        for property_name, property_dict in properties.iteritems():
+        for property_name, property_dict in properties.items():
             property_names.append(property_name)
             if 'codegen-properties' in property_dict:
                 codegen_options = property_dict['codegen-properties']
@@ -170,11 +183,11 @@ class _W3CTestConverter(HTMLParser):
         """ Searches |text| for instances of files in reference_support_info and updates the relative path to be correct for the new ref file location"""
         converted = text
         for path in self.reference_support_info['files']:
-            if text.find(path) != -1:
+            if converted.find(path) != -1:
                 # FIXME: This doesn't handle an edge case where simply removing the relative path doesn't work.
                 # See http://webkit.org/b/135677 for details.
-                new_path = re.sub(self.reference_support_info['reference_relpath'], '', path, 1)
-                converted = re.sub(path, new_path, text)
+                new_path = re.sub(re.escape(self.reference_support_info['reference_relpath']), '', path, 1)
+                converted = re.sub(re.escape(path), new_path, converted)
 
         return converted
 
@@ -206,19 +219,33 @@ class _W3CTestConverter(HTMLParser):
                 new_style = self.convert_style_data(attr[1])
                 converted = re.sub(re.escape(attr[1]), new_style, converted)
 
+        # Convert relative paths
         src_tags = ('script', 'style', 'img', 'frame', 'iframe', 'input', 'layer', 'textarea', 'video', 'audio')
-        if tag in src_tags and self.reference_support_info is not None and  self.reference_support_info != {}:
-            for attr_name, attr_value in attrs:
-                if attr_name == 'src':
-                    new_path = self.convert_reference_relpaths(attr_value)
-                    converted = re.sub(re.escape(attr_value), new_path, converted)
-
+        if self.reference_support_info is not None and self.reference_support_info != {}:
+            if tag in src_tags:
+                for attr_name, attr_value in attrs:
+                    if attr_name == 'src':
+                        new_path = self.convert_reference_relpaths(attr_value)
+                        converted = re.sub(re.escape(attr_value), new_path, converted)
+            if tag == 'link':
+                for attr_name, attr_value in attrs:
+                    if attr_name == 'href':
+                        new_path = self.convert_reference_relpaths(attr_value)
+                        converted = re.sub(re.escape(attr_value), new_path, converted)
         self.converted_data.append(converted)
+
+    def add_webkit_test_runner_options_if_needed(self):
+        if self.has_started:
+            return
+        self.has_started = True
+        if self.webkit_test_runner_options:
+            self.converted_data[-1] = self.converted_data[-1] + self.webkit_test_runner_options
 
     def handle_starttag(self, tag, attrs):
         if tag == 'style':
             self.in_style_tag = True
         self.convert_attributes_if_needed(tag, attrs)
+        self.add_webkit_test_runner_options_if_needed()
 
     def handle_endtag(self, tag):
         if tag == 'style':
@@ -243,10 +270,13 @@ class _W3CTestConverter(HTMLParser):
         self.converted_data.extend(['&#', name, ';'])
 
     def handle_comment(self, data):
-        self.converted_data.extend(['<!-- ', data, ' -->'])
+        self.converted_data.extend(['<!--', data, '-->'])
+        self.add_webkit_test_runner_options_if_needed()
 
     def handle_decl(self, decl):
         self.converted_data.extend(['<!', decl, '>'])
+        self.add_webkit_test_runner_options_if_needed()
 
     def handle_pi(self, data):
         self.converted_data.extend(['<?', data, '>'])
+        self.add_webkit_test_runner_options_if_needed()

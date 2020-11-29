@@ -58,15 +58,6 @@ AccessibilityUIElement::AccessibilityUIElement(PlatformUIElement element)
 {
 }
 
-AccessibilityUIElement::AccessibilityUIElement(const AccessibilityUIElement& other)
-    : m_element(other.m_element)
-{
-}
-
-AccessibilityUIElement::~AccessibilityUIElement()
-{
-}
-
 bool AccessibilityUIElement::isEqual(AccessibilityUIElement* otherElement)
 {
     COMPtr<IAccessibleComparable> comparable = comparableObject(m_element.get());
@@ -758,6 +749,10 @@ void AccessibilityUIElement::press()
     m_element->accDoDefaultAction(self());
 }
 
+void AccessibilityUIElement::dismiss()
+{
+}
+
 AccessibilityUIElement AccessibilityUIElement::disclosedRowAtIndex(unsigned index)
 {
     return { nullptr };
@@ -905,6 +900,11 @@ bool AccessibilityUIElement::hasPopup() const
 {
     DWORD state = accessibilityState(m_element);
     return (state & STATE_SYSTEM_HASPOPUP) == STATE_SYSTEM_HASPOPUP;
+}
+
+JSRetainPtr<JSStringRef> AccessibilityUIElement::popupValue() const
+{
+    return createEmptyJSString();
 }
 
 void AccessibilityUIElement::takeFocus()

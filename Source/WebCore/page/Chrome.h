@@ -44,7 +44,6 @@ class DateTimeChooserClient;
 class FileChooser;
 class FileIconLoader;
 class FloatRect;
-class FrameLoadRequest;
 class Element;
 class Frame;
 class Geolocation;
@@ -58,6 +57,8 @@ class PopupMenuClient;
 class PopupOpeningObserver;
 class SearchPopupMenu;
 
+struct ContactInfo;
+struct ContactsRequestData;
 struct DateTimeChooserParameters;
 struct ShareDataWithParsedURL;
 struct ViewportArguments;
@@ -83,10 +84,10 @@ public:
     void setCursor(const Cursor&) override;
     void setCursorHiddenUntilMouseMoves(bool) override;
 
-    void scheduleAnimation() override { }
+    std::unique_ptr<ImageBuffer> createImageBuffer(const FloatSize&, RenderingMode, RenderingPurpose, float resolutionScale, ColorSpace) const override;
 
     PlatformDisplayID displayID() const override;
-    void windowScreenDidChange(PlatformDisplayID) override;
+    void windowScreenDidChange(PlatformDisplayID, Optional<unsigned>) override;
 
     FloatSize screenSize() const override;
     FloatSize availableScreenSize() const override;
@@ -110,7 +111,7 @@ public:
     void focusedElementChanged(Element*) const;
     void focusedFrameChanged(Frame*) const;
 
-    WEBCORE_EXPORT Page* createWindow(Frame&, const FrameLoadRequest&, const WindowFeatures&, const NavigationAction&) const;
+    WEBCORE_EXPORT Page* createWindow(Frame&, const WindowFeatures&, const NavigationAction&) const;
     WEBCORE_EXPORT void show() const;
 
     bool canRunModal() const;
@@ -142,8 +143,6 @@ public:
 
     void mouseDidMoveOverElement(const HitTestResult&, unsigned modifierFlags);
 
-    void setToolTip(const HitTestResult&);
-
     WEBCORE_EXPORT bool print(Frame&);
 
     WEBCORE_EXPORT void enableSuddenTermination();
@@ -157,8 +156,13 @@ public:
     std::unique_ptr<DataListSuggestionPicker> createDataListSuggestionPicker(DataListSuggestionsClient&);
 #endif
 
+#if ENABLE(DATE_AND_TIME_INPUT_TYPES)
+    std::unique_ptr<DateTimeChooser> createDateTimeChooser(DateTimeChooserClient&);
+#endif
+
     void runOpenPanel(Frame&, FileChooser&);
     void showShareSheet(ShareDataWithParsedURL&, CompletionHandler<void(bool)>&&);
+    void showContactPicker(const ContactsRequestData&, CompletionHandler<void(Optional<Vector<ContactInfo>>&&)>&&);
     void loadIconForFiles(const Vector<String>&, FileIconLoader&);
 
     void dispatchDisabledAdaptationsDidChange(const OptionSet<DisabledAdaptations>&) const;
@@ -188,9 +192,10 @@ public:
 private:
     void notifyPopupOpeningObservers() const;
 
+    void getToolTip(const HitTestResult&, String&, TextDirection&);
+
     Page& m_page;
     ChromeClient& m_client;
-    PlatformDisplayID m_displayID { 0 };
     Vector<PopupOpeningObserver*> m_popupOpeningObservers;
 #if PLATFORM(IOS_FAMILY)
     bool m_isDispatchViewportDataDidChangeSuppressed { false };

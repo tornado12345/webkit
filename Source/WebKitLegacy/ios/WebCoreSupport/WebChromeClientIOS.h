@@ -28,6 +28,7 @@
 #import "WebChromeClient.h"
 
 class WebChromeClientIOS final : public WebChromeClient {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     WebChromeClientIOS(WebView* webView)
         : WebChromeClient(webView)
@@ -49,13 +50,21 @@ private:
     void runOpenPanel(WebCore::Frame&, WebCore::FileChooser&) final;
     void showShareSheet(WebCore::ShareDataWithParsedURL&, CompletionHandler<void(bool)>&&) final;
 
+    bool hoverSupportedByPrimaryPointingDevice() const final { return false; }
+    bool hoverSupportedByAnyAvailablePointingDevice() const final { return false; }
+    Optional<WebCore::PointerCharacteristics> pointerCharacteristicsOfPrimaryPointingDevice() const final { return WebCore::PointerCharacteristics::Coarse; }
+    OptionSet<WebCore::PointerCharacteristics> pointerCharacteristicsOfAllAvailablePointingDevices() const final { return WebCore::PointerCharacteristics::Coarse; }
+
+    void setCursor(const WebCore::Cursor&) final { }
+    void setCursorHiddenUntilMouseMoves(bool) final { }
+
 #if ENABLE(TOUCH_EVENTS)
     void didPreventDefaultForEvent() final;
 #endif
 
     void didReceiveMobileDocType(bool) final;
     void setNeedsScrollNotifications(WebCore::Frame&, bool) final;
-    void observedContentChange(WebCore::Frame&) final;
+    void didFinishContentChangeObserving(WebCore::Frame&, WKContentChange) final;
     WebCore::FloatSize screenSize() const final;
     WebCore::FloatSize availableScreenSize() const final;
     WebCore::FloatSize overrideScreenSize() const final;
@@ -92,6 +101,8 @@ private:
     void focusedElementChanged(WebCore::Element*) final;
     void showPlaybackTargetPicker(bool hasVideo, WebCore::RouteSharingPolicy, const String&) final;
     RefPtr<WebCore::Icon> createIconForFiles(const Vector<String>& filenames) final;
+
+    bool showDataDetectorsUIForElement(const WebCore::Element&, const WebCore::Event&) final { return false; }
 
 #if ENABLE(ORIENTATION_EVENTS)
     int deviceOrientation() const final;

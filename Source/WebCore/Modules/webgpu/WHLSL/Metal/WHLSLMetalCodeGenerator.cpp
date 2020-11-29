@@ -26,10 +26,11 @@
 #include "config.h"
 #include "WHLSLMetalCodeGenerator.h"
 
-#if ENABLE(WEBGPU)
+#if ENABLE(WHLSL_COMPILER)
 
 #include "WHLSLFunctionWriter.h"
 #include "WHLSLTypeNamer.h"
+#include <wtf/DataLog.h>
 #include <wtf/text/StringBuilder.h>
 
 namespace WebCore {
@@ -38,40 +39,108 @@ namespace WHLSL {
 
 namespace Metal {
 
-static String generateMetalCodeShared(String&& metalTypes, String&& metalFunctions)
-{
-    StringBuilder stringBuilder;
-    stringBuilder.append("#include <metal_stdlib>\n");
-    stringBuilder.append("#include <metal_atomic>\n");
-    stringBuilder.append("#include <metal_math>\n");
-    stringBuilder.append("#include <metal_relational>\n");
-    stringBuilder.append("#include <metal_compute>\n");
-    stringBuilder.append("#include <metal_texture>\n");
-    stringBuilder.append("\n");
-    stringBuilder.append("using namespace metal;\n"); // FIXME: Probably should qualify all calls to built-in functions, instead of using this line.
-    stringBuilder.append("\n");
+static constexpr bool dumpMetalCode = false;
 
-    stringBuilder.append(WTFMove(metalTypes));
-    stringBuilder.append(WTFMove(metalFunctions));
-    return stringBuilder.toString();
+static StringView metalCodePrologue()
+{
+    return StringView {
+        "#include <metal_stdlib>\n"
+        "#include <metal_atomic>\n"
+        "#include <metal_math>\n"
+        "#include <metal_relational>\n"
+        "#include <metal_compute>\n"
+        "#include <metal_texture>\n"
+        "\n"
+        "using namespace metal;\n"
+        "\n"
+        "template <typename T, int Cols, int Rows>\n"
+        "struct WSLMatrix\n"
+        "{\n"
+        "    vec<T, Rows> columns[Cols];\n"
+        "    private:\n"
+        "    public:\n"
+        "    inline WSLMatrix() thread = default;\n"
+        "    inline WSLMatrix() constant = default;\n"
+        "    inline WSLMatrix(const thread WSLMatrix<T, Cols, Rows> &that) thread = default;\n"
+        "    inline WSLMatrix(const device WSLMatrix<T, Cols, Rows> &that) thread = default;\n"
+        "    inline WSLMatrix(const constant WSLMatrix<T, Cols, Rows> &that) thread = default;\n"
+        "    inline WSLMatrix(const threadgroup WSLMatrix<T, Cols, Rows> &that) thread = default;\n"
+        "    inline WSLMatrix(const thread WSLMatrix<T, Cols, Rows> &that) constant = default;\n"
+        "    inline WSLMatrix(const device WSLMatrix<T, Cols, Rows> &that) constant = default;\n"
+        "    inline WSLMatrix(const constant WSLMatrix<T, Cols, Rows> &that) constant = default;\n"
+        "    inline WSLMatrix(const threadgroup WSLMatrix<T, Cols, Rows> &that) constant = default;\n"
+        "    public:\n"
+        "    inline thread vec<T, Rows> &operator[](int r) thread\n"
+        "    {\n"
+        "        return columns[r];\n"
+        "    }\n"
+        "    inline device vec<T, Rows> &operator[](int r) device\n"
+        "    {\n"
+        "        return columns[r];\n"
+        "    }\n"
+        "    inline threadgroup vec<T, Rows> &operator[](int r) threadgroup\n"
+        "    {\n"
+        "        return columns[r];\n"
+        "    }\n"
+        "    inline const thread vec<T, Rows> &operator[](int r) const thread\n"
+        "    {\n"
+        "        return columns[r];\n"
+        "    }\n"
+        "    inline const device vec<T, Rows> &operator[](int r) const device\n"
+        "    {\n"
+        "        return columns[r];\n"
+        "    }\n"
+        "    inline const constant vec<T, Rows> &operator[](int r) const constant\n"
+        "    {\n"
+        "        return columns[r];\n"
+        "    }\n"
+        "    inline const threadgroup vec<T, Rows> &operator[](int r) const threadgroup\n"
+        "    {\n"
+        "        return columns[r];\n"
+        "    }\n"
+        "};\n"
+
+
+    };
+
+}
+
+static void dumpMetalCodeIfNeeded(StringBuilder& stringBuilder)
+{
+    if (dumpMetalCode) {
+        dataLogLn("Generated Metal code: ");
+        dataLogLn(stringBuilder.toString());
+    }
 }
 
 RenderMetalCode generateMetalCode(Program& program, MatchedRenderSemantics&& matchedSemantics, Layout& layout)
 {
+    StringBuilder stringBuilder;
+    stringBuilder.append(metalCodePrologue());
+
     TypeNamer typeNamer(program);
-    auto metalTypes = typeNamer.metalTypes();
-    auto metalFunctions = Metal::metalFunctions(program, typeNamer, WTFMove(matchedSemantics), layout);
-    auto metalCode = generateMetalCodeShared(WTFMove(metalTypes), WTFMove(metalFunctions.metalSource));
-    return { WTFMove(metalCode), WTFMove(metalFunctions.vertexMappedBindGroups), WTFMove(metalFunctions.fragmentMappedBindGroups) };
+    typeNamer.emitMetalTypes(stringBuilder);
+    
+    auto metalFunctionEntryPoints = Metal::emitMetalFunctions(stringBuilder, program, typeNamer, WTFMove(matchedSemantics), layout);
+
+    dumpMetalCodeIfNeeded(stringBuilder);
+
+    return { WTFMove(stringBuilder), WTFMove(metalFunctionEntryPoints.mangledVertexEntryPointName), WTFMove(metalFunctionEntryPoints.mangledFragmentEntryPointName) };
 }
 
 ComputeMetalCode generateMetalCode(Program& program, MatchedComputeSemantics&& matchedSemantics, Layout& layout)
 {
+    StringBuilder stringBuilder;
+    stringBuilder.append(metalCodePrologue());
+
     TypeNamer typeNamer(program);
-    auto metalTypes = typeNamer.metalTypes();
-    auto metalFunctions = Metal::metalFunctions(program, typeNamer, WTFMove(matchedSemantics), layout);
-    auto metalCode = generateMetalCodeShared(WTFMove(metalTypes), WTFMove(metalFunctions.metalSource));
-    return { WTFMove(metalCode), WTFMove(metalFunctions.mappedBindGroups) };
+    typeNamer.emitMetalTypes(stringBuilder);
+
+    auto metalFunctionEntryPoints = Metal::emitMetalFunctions(stringBuilder, program, typeNamer, WTFMove(matchedSemantics), layout);
+
+    dumpMetalCodeIfNeeded(stringBuilder);
+
+    return { WTFMove(stringBuilder), WTFMove(metalFunctionEntryPoints.mangledEntryPointName) };
 }
 
 }
@@ -80,4 +149,4 @@ ComputeMetalCode generateMetalCode(Program& program, MatchedComputeSemantics&& m
 
 }
 
-#endif
+#endif // ENABLE(WHLSL_COMPILER)

@@ -43,6 +43,7 @@ namespace WebCore {
 // (and synchronization would be slow).
 
 class JSCallbackData {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     enum class CallbackType { Function, Object, FunctionOrObject };
 
@@ -65,14 +66,14 @@ protected:
 
 private:
     JSC::Weak<JSDOMGlobalObject> m_globalObject;
-#ifndef NDEBUG
+#if ASSERT_ENABLED
     Ref<Thread> m_thread { Thread::current() };
 #endif
 };
 
 class JSCallbackDataStrong : public JSCallbackData {
 public:
-    JSCallbackDataStrong(JSC::JSObject* callback, JSDOMGlobalObject* globalObject, void*)
+    JSCallbackDataStrong(JSC::JSObject* callback, JSDOMGlobalObject* globalObject, void* = nullptr)
         : JSCallbackData(globalObject)
         , m_callback(globalObject->vm(), callback)
     {

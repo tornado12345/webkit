@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2008, 2010, 2014 Apple Inc. All rights reserved.
+ * Copyright (C) 2006-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -157,7 +157,7 @@ void ImageDocument::finishedParsing()
         if (data && loader()->isLoadingMultipartContent())
             data = data->copy();
 
-        cachedImage.finishLoading(data.get());
+        cachedImage.finishLoading(data.get(), { });
         cachedImage.finish();
 
         // Report the natural image size in the page title, regardless of zoom level.
@@ -197,7 +197,7 @@ void ImageDocumentParser::finish()
 }
 
 ImageDocument::ImageDocument(Frame& frame, const URL& url)
-    : HTMLDocument(&frame, url, ImageDocumentClass)
+    : HTMLDocument(&frame, frame.settings(), url, ImageDocumentClass)
     , m_imageElement(nullptr)
     , m_imageSizeIsKnown(false)
 #if !PLATFORM(IOS_FAMILY)
@@ -220,7 +220,7 @@ void ImageDocument::createDocumentStructure()
     appendChild(rootElement);
     rootElement->insertedByParser();
 
-    frame()->injectUserScripts(InjectAtDocumentStart);
+    frame()->injectUserScripts(UserScriptInjectionTime::DocumentStart);
 
     // We need a <head> so that the call to setTitle() later on actually has an <head> to append to <title> to.
     auto head = HTMLHeadElement::create(*this);
@@ -397,6 +397,9 @@ void ImageDocument::imageClicked(int x, int y)
         restoreImageSize();
 
         updateLayout();
+
+        if (!view())
+            return;
 
         float scale = this->scale();
 

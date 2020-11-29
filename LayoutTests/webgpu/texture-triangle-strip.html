@@ -19,72 +19,55 @@ const textureBindingNum = 0;
 const samplerBindingNum = 1;
 
 const shaderCode = `
-#include <metal_stdlib>
-    
-using namespace metal;
-
-struct VertexIn
-{
-    float4 position [[attribute(${positionAttributeNum})]];
-    float2 texCoords [[attribute(${texCoordsAttributeNum})]];
-};
-
 struct VertexOut
 {
-    float4 position [[position]];
-    float2 texCoords;
+    float4 position : SV_Position;
+    float2 texCoords : attribute(0);
 };
 
-vertex VertexOut vertex_main(VertexIn vertexIn [[stage_in]])
-{
+vertex VertexOut vertex_main(float4 position : attribute(${positionAttributeNum}), float2 texCoords : attribute(${texCoordsAttributeNum})) {
     VertexOut vOut;
-    vOut.position = vertexIn.position;
-    vOut.texCoords = vertexIn.texCoords;
+    vOut.position = position;
+    vOut.texCoords = texCoords;
     return vOut;
 }
 
 struct TextureSampler
 {
-    texture2d<float> t [[id(${textureBindingNum})]];
-    sampler s [[id(${samplerBindingNum})]];
+    Texture2D<float4> t : register(t${textureBindingNum}, space${bindGroupIndex});
+    sampler s : register(s${samplerBindingNum}, space${bindGroupIndex});
 };
 
-fragment float4 fragment_main(VertexOut v [[stage_in]], const device TextureSampler& args [[buffer(${bindGroupIndex})]])
+fragment float4 fragment_main(float2 texCoords : attribute(0), TextureSampler textureSampler) : SV_Target 0
 {
-    return args.t.sample(args.s, v.texCoords);
+    return Sample(textureSampler.t, textureSampler.s, texCoords);
 }
 `
 
-function createInputStateDescriptor() {
-    return {
-        indexFormat: WebGPUIndexFormat.UINT32,
-        attributes: [{
-            shaderLocation: positionAttributeNum,
-            inputSlot: positionBufferIndex,
-            offset: 0,
-            format: WebGPUVertexFormat.FLOAT_R32_G32_B32_A32
-        }, {
-            shaderLocation: texCoordsAttributeNum,
-            inputSlot: texCoordsBufferIndex,
-            offset: 0,
-            format: WebGPUVertexFormat.FLOAT_R32_G32
-        }],
-        inputs: [{
-            inputSlot: positionBufferIndex,
-            stride: 4 * 4,
-            stepMode: WebGPUInputStepMode.VERTEX
-        }, {
-            inputSlot: texCoordsBufferIndex,
-            stride: 4 * 2,
-            stepMode: WebGPUInputStepMode.VERTEX
+function createVertexInputDescriptor() {
+    var bufferDescriptors = [];
+    bufferDescriptors[positionBufferIndex] = {
+        stride: 4 * 4,
+        attributeSet: [{
+            format: "float4",
+            shaderLocation: positionAttributeNum
         }]
-    }
+    };
+    bufferDescriptors[texCoordsBufferIndex] = {
+        stride: 4 * 2,
+        attributeSet: [{
+            format: "float2",
+            shaderLocation: texCoordsAttributeNum
+        }]
+    };
+
+    return { vertexBuffers: bufferDescriptors };
 }
 
-async function test() {
-    const device = await getBasicDevice();
-    const canvas = document.querySelector("canvas");
-    const context = createBasicContext(canvas, device);
+const canvas = document.querySelector("canvas");
+
+async function test(device) {
+    const swapChain = createBasicSwapChain(canvas, device);
     // FIXME: Replace with non-MSL shaders.
     const shaderModule = device.createShaderModule({ code: shaderCode });
 
@@ -95,8 +78,7 @@ async function test() {
         1, 1, 0, 1, 
         1, -1, 0, 1
     ]);
-    const positionBuffer = device.createBuffer({ size: positionArray.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.TRANSFER_DST });
-    positionBuffer.setSubData(0, positionArray.buffer);
+    const positionBuffer = createBufferWithData(device, { size: positionArray.byteLength, usage: GPUBufferUsage.VERTEX }, positionArray.buffer);
 
     const texCoordsArray = new Float32Array([
         // float2 texCoords
@@ -105,10 +87,9 @@ async function test() {
         1, 0,
         1, 1
     ]);
-    const textureCoordBuffer = device.createBuffer({ size: texCoordsArray.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.TRANSFER_DST });
-    textureCoordBuffer.setSubData(0, texCoordsArray.buffer);
+    const textureCoordBuffer = createBufferWithData(device, { size: texCoordsArray.byteLength, usage: GPUBufferUsage.VERTEX }, texCoordsArray.buffer);
 
-    const inputStateDescriptor = createInputStateDescriptor();
+    const vertexInputDescriptor = createVertexInputDescriptor();
 
     // Load texture image
     const image = new Image();
@@ -128,10 +109,9 @@ async function test() {
 
     const textureBufferDescriptor = {
         size: imageData.data.length,
-        usage: GPUBufferUsage.TRANSFER_SRC | GPUBufferUsage.TRANSFER_DST
+        usage: GPUBufferUsage.COPY_SRC
     };
-    const textureBuffer = device.createBuffer(textureBufferDescriptor);
-    textureBuffer.setSubData(0, imageData.data.buffer);
+    const textureBuffer = createBufferWithData(device, textureBufferDescriptor, imageData.data.buffer);
 
     // Create GPUTexture
     const textureSize = {
@@ -142,24 +122,20 @@ async function test() {
 
     const textureDescriptor = {
         size: { width: image.width, height: image.height, depth: 1 },
-        arrayLayerCount: 1,
-        mipLevelCount: 1,
-        sampleCount: 1,
-        dimension: "2d",
-        format: "r8g8b8a8-unorm",
-        usage: GPUTextureUsage.TRANSFER_DST | GPUTextureUsage.SAMPLED
+        format: "rgba8unorm",
+        usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.SAMPLED
     };
     const texture = device.createTexture(textureDescriptor);
 
     // Bind texture and a sampler to pipeline
     const textureLayoutBinding = { 
         binding: textureBindingNum, 
-        visibility: GPUShaderStageBit.FRAGMENT, 
+        visibility: GPUShaderStage.FRAGMENT, 
         type: "sampled-texture" 
     };
     const samplerLayoutBinding = {
         binding: samplerBindingNum,
-        visibility: GPUShaderStageBit.FRAGMENT,
+        visibility: GPUShaderStage.FRAGMENT,
         type: "sampler"
     };
 
@@ -171,7 +147,7 @@ async function test() {
 
     const textureBinding = { 
         binding: textureBindingNum, 
-        resource: texture.createDefaultTextureView() 
+        resource: texture.createDefaultView() 
     };
     const samplerBinding = {
         binding: samplerBindingNum,
@@ -185,23 +161,17 @@ async function test() {
     const bindGroup = device.createBindGroup(bindGroupDescriptor);
 
     // Pipeline and render
-    const pipeline = createBasicPipeline(shaderModule, device, pipelineLayout, inputStateDescriptor);
-    const commandBuffer = device.createCommandBuffer();
+    const pipeline = createBasicPipeline(shaderModule, device, null, pipelineLayout, vertexInputDescriptor);
+    const commandEncoder = device.createCommandEncoder();
 
     const bufferCopyView = {
         buffer: textureBuffer,
-        offset: 0,
         rowPitch: image.width * 4,
         imageHeight: 0
     };
-    const textureCopyView = {
-        texture: texture,
-        mipLevel: 0,
-        arrayLayer: 0,
-        origin: { x: 0, y: 0, z: 0 }
-    };
-    commandBuffer.copyBufferToTexture(bufferCopyView, textureCopyView, textureSize);
-    const passEncoder = beginBasicRenderPass(context, commandBuffer);
+    const textureCopyView = { texture: texture };
+    commandEncoder.copyBufferToTexture(bufferCopyView, textureCopyView, textureSize);
+    const passEncoder = beginBasicRenderPass(swapChain, commandEncoder);
     passEncoder.setPipeline(pipeline);
     passEncoder.setBindGroup(bindGroupIndex, bindGroup);
     passEncoder.setVertexBuffers(positionBufferIndex, [positionBuffer, textureCoordBuffer], [0, 0]);
@@ -209,15 +179,23 @@ async function test() {
     passEncoder.endPass();
 
     const queue = device.getQueue();
-    queue.submit([commandBuffer]);
+    queue.submit([commandEncoder.finish()]);
     positionBuffer.destroy();
     textureCoordBuffer.destroy();
     texture.destroy();
-    context.present();
-
-    if (window.testRunner)
-        testRunner.notifyDone();
 }
 
-test();
+getBasicDevice().then(function(device) {
+    test(device).then(function() {
+        if (window.testRunner)
+            testRunner.notifyDone();
+    }, function() {
+        if (window.testRunner)
+            testRunner.notifyDone();
+    });
+}, function() {
+    drawGreenAndBlueCheckerboardInSoftware(canvas);
+    if (window.testRunner)
+        testRunner.notifyDone();
+});
 </script>

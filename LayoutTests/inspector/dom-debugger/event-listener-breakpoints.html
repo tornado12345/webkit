@@ -2,6 +2,7 @@
 <html>
 <head>
 <script src="../../http/tests/inspector/resources/inspector-test.js"></script>
+<script src="../debugger/resources/breakpoint-options-utilities.js"></script>
 <script src="../debugger/resources/log-active-stack-trace.js"></script>
 <script src="resources/event-breakpoint-utilities.js"></script>
 <script>
@@ -58,7 +59,7 @@ function test() {
                     resolve();
                 });
 
-                InspectorTest.EventBreakpoint.addBreakpoint(WI.EventBreakpoint.Type.Listener, eventName)
+                InspectorTest.EventBreakpoint.createBreakpoint(WI.EventBreakpoint.Type.Listener, {eventName})
                 .then(InspectorTest.EventBreakpoint.awaitEvent("body", eventName))
                 .catch(reject);
             },
@@ -69,9 +70,9 @@ function test() {
             name: `DOMDebugger.Event.Listener.AddDisabledBreakpoint "${eventName}"`,
             description: "Check that debugger does not pause for disabled breakpoints.",
             test(resolve, reject) {
-                InspectorTest.EventBreakpoint.failOnPause(resolve, reject, WI.DebuggerManager.PauseReason.EventListener, eventName, "Should not pause for disabled breakpoint.");
+                InspectorTest.EventBreakpoint.failOnPause(resolve, reject, WI.DebuggerManager.PauseReason.Listener, eventName, "Should not pause for disabled breakpoint.");
 
-                InspectorTest.EventBreakpoint.addBreakpoint(WI.EventBreakpoint.Type.Listener, eventName)
+                InspectorTest.EventBreakpoint.createBreakpoint(WI.EventBreakpoint.Type.Listener, {eventName})
                 .then(InspectorTest.EventBreakpoint.disableBreakpoint)
                 .then(InspectorTest.EventBreakpoint.awaitEvent("body", eventName))
                 .catch(reject);
@@ -83,9 +84,9 @@ function test() {
             name: `DOMDebugger.Event.Listener.RemoveBreakpoint "${eventName}"`,
             description: "Check that debugger does not pause for removed breakpoint.",
             test(resolve, reject) {
-                InspectorTest.EventBreakpoint.failOnPause(resolve, reject, WI.DebuggerManager.PauseReason.EventListener, eventName, "Should not pause for removed breakpoint.");
+                InspectorTest.EventBreakpoint.failOnPause(resolve, reject, WI.DebuggerManager.PauseReason.Listener, eventName, "Should not pause for removed breakpoint.");
 
-                InspectorTest.EventBreakpoint.addBreakpoint(WI.EventBreakpoint.Type.Listener, eventName)
+                InspectorTest.EventBreakpoint.createBreakpoint(WI.EventBreakpoint.Type.Listener, {eventName})
                 .then(InspectorTest.EventBreakpoint.removeBreakpoint)
                 .then(InspectorTest.EventBreakpoint.awaitEvent("body", eventName))
                 .catch(reject);
@@ -97,9 +98,9 @@ function test() {
             name: `DOMDebugger.Event.Listener.RemoveDisabledBreakpoint "${eventName}"`,
             description: "Check that a disabled breakpoint can be removed.",
             test(resolve, reject) {
-                InspectorTest.EventBreakpoint.failOnPause(resolve, reject, WI.DebuggerManager.PauseReason.EventListener, eventName, "Should not pause for removed disabled breakpoint.");
+                InspectorTest.EventBreakpoint.failOnPause(resolve, reject, WI.DebuggerManager.PauseReason.Listener, eventName, "Should not pause for removed disabled breakpoint.");
 
-                InspectorTest.EventBreakpoint.addBreakpoint(WI.EventBreakpoint.Type.Listener, eventName)
+                InspectorTest.EventBreakpoint.createBreakpoint(WI.EventBreakpoint.Type.Listener, {eventName})
                 .then(InspectorTest.EventBreakpoint.disableBreakpoint)
                 .then(InspectorTest.EventBreakpoint.removeBreakpoint)
                 .then(InspectorTest.EventBreakpoint.awaitEvent("body", eventName))
@@ -111,6 +112,42 @@ function test() {
 
     addTestCasesForEventName("click");
     addTestCasesForEventName("custom");
+
+    suite.addTestCase({
+        name: `DOMDebugger.Event.Listener.AllEventsBreakpoint`,
+        description: "Check that the all events breakpoint pauses for every event.",
+        test(resolve, reject) {
+            let pauseCount = 0;
+
+            let listener = WI.debuggerManager.addEventListener(WI.DebuggerManager.Event.Paused, (event) => {
+                ++pauseCount;
+
+                InspectorTest.pass("Should pause before event handler is run.");
+                logActiveStackTrace();
+
+                WI.debuggerManager.resume()
+                .catch(reject);
+            });
+
+            InspectorTest.EventBreakpoint.createBreakpoint(WI.EventBreakpoint.Type.Listener)
+            .then(() => {
+                InspectorTest.log("Firing \"click\" on body...");
+                return InspectorTest.evaluateInPage(`trigger_click()`);
+            })
+            .then(() => {
+                InspectorTest.log("Firing \"custom\" on body...");
+                return InspectorTest.evaluateInPage(`trigger_custom()`);
+            })
+            .then(() => {
+                InspectorTest.expectEqual(pauseCount, 2, "Should have paused twice.");
+                InspectorTest.assert(!WI.debuggerManager.paused, "Should not be paused.");
+
+                WI.debuggerManager.removeEventListener(WI.DebuggerManager.Event.Paused, listener);
+            })
+            .then(resolve, reject);
+        },
+        teardown: InspectorTest.EventBreakpoint.teardown,
+    });
 
     suite.addTestCase({
         name: `DOMDebugger.Event.Listener.AddMultipleBreakpoints`,
@@ -137,7 +174,7 @@ function test() {
                 resolve();
             });
 
-            InspectorTest.EventBreakpoint.addBreakpoint(WI.EventBreakpoint.Type.Listener, "click")
+            InspectorTest.EventBreakpoint.createBreakpoint(WI.EventBreakpoint.Type.Listener, {eventName: "click"})
             .then(() => {
                 InspectorTest.log("Firing \"click\" on div#x...");
                 return InspectorTest.evaluateInPage(`clickX()`);
@@ -175,7 +212,7 @@ function test() {
                 .then(resolve, reject);
             });
 
-            InspectorTest.EventBreakpoint.addBreakpoint(WI.EventBreakpoint.Type.Listener, "click")
+            InspectorTest.EventBreakpoint.createBreakpoint(WI.EventBreakpoint.Type.Listener, {eventName: "click"})
             .then(() => {
                 InspectorTest.log("Firing \"click\" on div#x...");
                 return InspectorTest.evaluateInPage(`clickX()`);
@@ -183,6 +220,18 @@ function test() {
             .catch(reject);
         },
         teardown: InspectorTest.EventBreakpoint.teardown,
+    });
+
+    InspectorTest.BreakpointOptions.addTestCases(suite, {
+        createBreakpoint() {
+            return InspectorTest.EventBreakpoint.createBreakpoint(WI.EventBreakpoint.Type.Listener, {eventName: "click"});
+        },
+        triggerBreakpoint() {
+            return Promise.all([
+                InspectorTest.awaitEvent("TestPage-click"),
+                InspectorTest.evaluateInPage(`trigger_click()`),
+            ]);
+        },
     });
 
     suite.runTestCasesAndFinish();

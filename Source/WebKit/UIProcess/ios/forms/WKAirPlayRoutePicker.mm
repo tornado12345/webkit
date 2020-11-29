@@ -34,7 +34,8 @@
 #import <wtf/RetainPtr.h>
 #import <wtf/SoftLinking.h>
 
-#if __IPHONE_OS_VERSION_MIN_REQUIRED < 110000 || PLATFORM(WATCHOS) || PLATFORM(APPLETV)
+#if PLATFORM(WATCHOS) || PLATFORM(APPLETV)
+#import "UserInterfaceIdiom.h"
 #import "WKContentView.h"
 #import "WKContentViewInteraction.h"
 #import "WebPageProxy.h"
@@ -73,9 +74,9 @@ using namespace WebKit;
     [super dealloc];
 }
 
-IGNORE_WARNINGS_BEGIN("deprecated-implementations")
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 - (void)popoverControllerDidDismissPopover:(UIPopoverController *)popoverController
-IGNORE_WARNINGS_END
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 {
     if (popoverController != _popoverController)
         return;
@@ -153,7 +154,7 @@ IGNORE_WARNINGS_END
     [_routingController setDiscoveryMode:MPRouteDiscoveryModeDetailed];
 
     MPAVItemType itemType = hasVideo ? MPAVItemTypeVideo : MPAVItemTypeAudio;
-    if (currentUserInterfaceIdiomIsPad())
+    if (currentUserInterfaceIdiomIsPadOrMac())
         [self showAirPlayPickerIPad:itemType fromRect:elementRect];
     else
         [self showAirPlayPickerIPhone:itemType];
@@ -178,8 +179,9 @@ SOFT_LINK_CLASS(MediaPlayer, MPMediaControlsViewController)
 
 enum {
     WKAirPlayRoutePickerRouteSharingPolicyDefault = 0,
-    WKAirPlayRoutePickerRouteSharingPolicyLongForm = 1,
+    WKAirPlayRoutePickerRouteSharingPolicyLongFormAudio = 1,
     WKAirPlayRoutePickerRouteSharingPolicyIndependent = 2,
+    WKAirPlayRoutePickerRouteSharingPolicyLongFormVideo = 3,
 };
 typedef NSInteger WKAirPlayRoutePickerRouteSharingPolicy;
 
@@ -201,9 +203,9 @@ typedef NSInteger WKAirPlayRoutePickerRouteSharingPolicy;
 - (void)showFromView:(UIView *)view routeSharingPolicy:(WebCore::RouteSharingPolicy)routeSharingPolicy routingContextUID:(NSString *)routingContextUID hasVideo:(BOOL)hasVideo
 {
     static_assert(static_cast<size_t>(WebCore::RouteSharingPolicy::Default) == static_cast<size_t>(WKAirPlayRoutePickerRouteSharingPolicyDefault), "RouteSharingPolicy::Default is not WKAirPlayRoutePickerRouteSharingPolicyDefault as expected");
-    static_assert(static_cast<size_t>(WebCore::RouteSharingPolicy::LongForm) == static_cast<size_t>(WKAirPlayRoutePickerRouteSharingPolicyLongForm), "RouteSharingPolicy::LongForm is not WKAirPlayRoutePickerRouteSharingPolicyLongForm as expected");
+    static_assert(static_cast<size_t>(WebCore::RouteSharingPolicy::LongFormAudio) == static_cast<size_t>(WKAirPlayRoutePickerRouteSharingPolicyLongFormAudio), "RouteSharingPolicy::LongFormAudio is not WKAirPlayRoutePickerRouteSharingPolicyLongFormAudio as expected");
     static_assert(static_cast<size_t>(WebCore::RouteSharingPolicy::Independent) == static_cast<size_t>(WKAirPlayRoutePickerRouteSharingPolicyIndependent), "RouteSharingPolicy::Independent is not WKAirPlayRoutePickerRouteSharingPolicyIndependent as expected");
-
+    static_assert(static_cast<size_t>(WebCore::RouteSharingPolicy::LongFormVideo) == static_cast<size_t>(WKAirPlayRoutePickerRouteSharingPolicyLongFormVideo), "RouteSharingPolicy::LongFormVideo is not WKAirPlayRoutePickerRouteSharingPolicyLongFormVideo as expected");
     if (_actionSheet)
         return;
 

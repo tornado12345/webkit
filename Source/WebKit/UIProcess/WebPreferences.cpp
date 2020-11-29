@@ -27,17 +27,18 @@
 #include "WebPreferences.h"
 
 #include "WebPageGroup.h"
+#include "WebPageProxy.h"
 #include "WebPreferencesKeys.h"
 #include "WebProcessPool.h"
 #include <WebCore/LibWebRTCProvider.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/ThreadingPrimitives.h>
 
-namespace WebKit {
+#if !PLATFORM(COCOA)
+#include <WebCore/NotImplemented.h>
+#endif
 
-// FIXME: Manipulating this variable is not thread safe.
-// Instead of tracking private browsing state as a boolean preference, we should let the client provide storage sessions explicitly.
-static unsigned privateBrowsingPageCount;
+namespace WebKit {
 
 Ref<WebPreferences> WebPreferences::create(const String& identifier, const String& keyPrefix, const String& globalDebugKeyPrefix)
 {
@@ -87,31 +88,46 @@ void WebPreferences::addPage(WebPageProxy& webPageProxy)
 {
     ASSERT(!m_pages.contains(&webPageProxy));
     m_pages.add(&webPageProxy);
-
-    if (privateBrowsingEnabled()) {
-        if (!privateBrowsingPageCount)
-            WebProcessPool::willStartUsingPrivateBrowsing();
-
-        ++privateBrowsingPageCount;
-    }
 }
 
 void WebPreferences::removePage(WebPageProxy& webPageProxy)
 {
     ASSERT(m_pages.contains(&webPageProxy));
     m_pages.remove(&webPageProxy);
-
-    if (privateBrowsingEnabled()) {
-        --privateBrowsingPageCount;
-        if (!privateBrowsingPageCount)
-            WebProcessPool::willStopUsingPrivateBrowsing();
-    }
 }
 
 void WebPreferences::update()
 {
     for (auto& webPageProxy : m_pages)
         webPageProxy->preferencesDidChange();
+}
+
+void WebPreferences::setBoolValueForKey(const String& key, bool value)
+{
+    if (!m_store.setBoolValueForKey(key, value))
+        return;
+    updateBoolValueForKey(key, value);
+}
+
+void WebPreferences::setDoubleValueForKey(const String& key, double value)
+{
+    if (!m_store.setDoubleValueForKey(key, value))
+        return;
+    updateDoubleValueForKey(key, value);
+}
+
+void WebPreferences::setUInt32ValueForKey(const String& key, uint32_t value)
+{
+    if (!m_store.setUInt32ValueForKey(key, value))
+        return;
+    updateUInt32ValueForKey(key, value);
+}
+
+void WebPreferences::setStringValueForKey(const String& key, const String& value)
+{
+    if (!m_store.setStringValueForKey(key, value))
+        return;
+    updateStringValueForKey(key, value);
 }
 
 void WebPreferences::updateStringValueForKey(const String& key, const String& value)
@@ -122,11 +138,6 @@ void WebPreferences::updateStringValueForKey(const String& key, const String& va
 
 void WebPreferences::updateBoolValueForKey(const String& key, bool value)
 {
-    if (key == WebPreferencesKey::privateBrowsingEnabledKey()) {
-        updatePrivateBrowsingValue(value);
-        return;
-    }
-
     platformUpdateBoolValueForKey(key, value);
     update(); // FIXME: Only send over the changed key and value.
 }
@@ -139,19 +150,6 @@ void WebPreferences::updateBoolValueForInternalDebugFeatureKey(const String& key
 
         return;
     }
-    if (key == WebPreferencesKey::captureAudioInUIProcessEnabledKey()) {
-        for (auto* page : m_pages)
-            page->process().processPool().configuration().setShouldCaptureAudioInUIProcess(value);
-
-        return;
-    }
-    if (key == WebPreferencesKey::captureVideoInUIProcessEnabledKey()) {
-        for (auto* page : m_pages)
-            page->process().processPool().configuration().setShouldCaptureVideoInUIProcess(value);
-
-        return;
-    }
-
     update(); // FIXME: Only send over the changed key and value.
 }
 
@@ -178,53 +176,11 @@ void WebPreferences::updateFloatValueForKey(const String& key, float value)
     update(); // FIXME: Only send over the changed key and value.
 }
 
-void WebPreferences::updatePrivateBrowsingValue(bool value)
+void WebPreferences::deleteKey(const String& key)
 {
-    platformUpdateBoolValueForKey(WebPreferencesKey::privateBrowsingEnabledKey(), value);
-
-    unsigned pagesChanged = m_pages.size();
-    if (!pagesChanged)
-        return;
-
-    if (value) {
-        if (!privateBrowsingPageCount)
-            WebProcessPool::willStartUsingPrivateBrowsing();
-        privateBrowsingPageCount += pagesChanged;
-    }
-
+    m_store.deleteKey(key);
+    platformDeleteKey(key);
     update(); // FIXME: Only send over the changed key and value.
-
-    if (!value) {
-        ASSERT(privateBrowsingPageCount >= pagesChanged);
-        privateBrowsingPageCount -= pagesChanged;
-        if (!privateBrowsingPageCount)
-            WebProcessPool::willStopUsingPrivateBrowsing();
-    }
-}
-
-#define DEFINE_PREFERENCE_GETTER_AND_SETTERS(KeyUpper, KeyLower, TypeName, Type, DefaultValue, HumanReadableName, HumanReadableDescription) \
-    void WebPreferences::set##KeyUpper(const Type& value) \
-    { \
-        if (!m_store.set##TypeName##ValueForKey(WebPreferencesKey::KeyLower##Key(), value)) \
-            return; \
-        update##TypeName##ValueForKey(WebPreferencesKey::KeyLower##Key(), value); \
-        \
-    } \
-    \
-    Type WebPreferences::KeyLower() const \
-    { \
-        return m_store.get##TypeName##ValueForKey(WebPreferencesKey::KeyLower##Key()); \
-    } \
-
-FOR_EACH_WEBKIT_PREFERENCE(DEFINE_PREFERENCE_GETTER_AND_SETTERS)
-FOR_EACH_WEBKIT_DEBUG_PREFERENCE(DEFINE_PREFERENCE_GETTER_AND_SETTERS)
-
-#undef DEFINE_PREFERENCE_GETTER_AND_SETTERS
-
-
-bool WebPreferences::anyPagesAreUsingPrivateBrowsing()
-{
-    return privateBrowsingPageCount;
 }
 
 void WebPreferences::registerDefaultBoolValueForKey(const String& key, bool value)
@@ -242,5 +198,68 @@ void WebPreferences::registerDefaultUInt32ValueForKey(const String& key, uint32_
     if (platformGetUInt32UserValueForKey(key, userValue))
         m_store.setUInt32ValueForKey(key, userValue);
 }
+
+#if !PLATFORM(COCOA) && !PLATFORM(GTK)
+void WebPreferences::platformInitializeStore()
+{
+    notImplemented();
+}
+#endif
+
+#if !PLATFORM(COCOA)
+void WebPreferences::platformUpdateStringValueForKey(const String&, const String&)
+{
+    notImplemented();
+}
+
+void WebPreferences::platformUpdateBoolValueForKey(const String&, bool)
+{
+    notImplemented();
+}
+
+void WebPreferences::platformUpdateUInt32ValueForKey(const String&, uint32_t)
+{
+    notImplemented();
+}
+
+void WebPreferences::platformUpdateDoubleValueForKey(const String&, double)
+{
+    notImplemented();
+}
+
+void WebPreferences::platformUpdateFloatValueForKey(const String&, float)
+{
+    notImplemented();
+}
+
+void WebPreferences::platformDeleteKey(const String&)
+{
+    notImplemented();
+}
+
+bool WebPreferences::platformGetStringUserValueForKey(const String&, String&)
+{
+    notImplemented();
+    return false;
+}
+
+bool WebPreferences::platformGetBoolUserValueForKey(const String&, bool&)
+{
+    notImplemented();
+    return false;
+}
+
+bool WebPreferences::platformGetUInt32UserValueForKey(const String&, uint32_t&)
+{
+    notImplemented();
+    return false;
+}
+
+bool WebPreferences::platformGetDoubleUserValueForKey(const String&, double&)
+{
+    notImplemented();
+    return false;
+}
+#endif
 
 } // namespace WebKit

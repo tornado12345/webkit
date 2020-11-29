@@ -51,21 +51,57 @@ static void childSetupFunction(gpointer userData)
 }
 
 #if OS(LINUX)
+static bool isFlatpakSpawnUsable()
+{
+    static Optional<bool> ret;
+    if (ret)
+        return *ret;
+
+    // For our usage to work we need flatpak >= 1.5.2 on the host and flatpak-xdg-utils > 1.0.1 in the sandbox
+    GRefPtr<GSubprocess> process = adoptGRef(g_subprocess_new(static_cast<GSubprocessFlags>(G_SUBPROCESS_FLAGS_STDOUT_SILENCE | G_SUBPROCESS_FLAGS_STDERR_SILENCE),
+        nullptr, "flatpak-spawn", "--sandbox", "--sandbox-expose-path-ro-try=/this_path_doesnt_exist", "echo", nullptr));
+
+    if (!process.get())
+        ret = false;
+    else
+        ret = g_subprocess_wait_check(process.get(), nullptr, nullptr);
+
+    return *ret;
+}
+#endif
+
+#if ENABLE(BUBBLEWRAP_SANDBOX)
+static bool isInsideDocker()
+{
+    static Optional<bool> ret;
+    if (ret)
+        return *ret;
+
+    ret = g_file_test("/.dockerenv", G_FILE_TEST_EXISTS);
+    return *ret;
+}
+
 static bool isInsideFlatpak()
 {
-    static int ret = -1;
-    if (ret != -1)
-        return ret;
+    static Optional<bool> ret;
+    if (ret)
+        return *ret;
 
-    GUniquePtr<GKeyFile> infoFile(g_key_file_new());
-    if (!g_key_file_load_from_file(infoFile.get(), "/.flatpak-info", G_KEY_FILE_NONE, nullptr)) {
-        ret = false;
-        return ret;
-    }
+    ret = g_file_test("/.flatpak-info", G_FILE_TEST_EXISTS);
+    return *ret;
+}
 
-    // If we are in a `flatpak build` session we cannot launch ourselves since we aren't installed.
-    ret = !g_key_file_get_boolean(infoFile.get(), "Instance", "build", nullptr);
-    return ret;
+static bool isInsideSnap()
+{
+    static Optional<bool> ret;
+    if (ret)
+        return *ret;
+
+    // The "SNAP" environment variable is not unlikely to be set for/by something other
+    // than Snap, so check a couple of additional variables to avoid false positives.
+    // See: https://snapcraft.io/docs/environment-variables
+    ret = g_getenv("SNAP") && g_getenv("SNAP_NAME") && g_getenv("SNAP_REVISION");
+    return *ret;
 }
 #endif
 
@@ -75,29 +111,18 @@ void ProcessLauncher::launchProcess()
 
     String executablePath;
     CString realExecutablePath;
-#if ENABLE(NETSCAPE_PLUGIN_API)
-    String pluginPath;
-    CString realPluginPath;
-#endif
     switch (m_launchOptions.processType) {
     case ProcessLauncher::ProcessType::Web:
         executablePath = executablePathOfWebProcess();
         break;
-#if ENABLE(NETSCAPE_PLUGIN_API)
-    case ProcessLauncher::ProcessType::Plugin64:
-    case ProcessLauncher::ProcessType::Plugin32:
-        executablePath = executablePathOfPluginProcess();
-#if ENABLE(PLUGIN_PROCESS_GTK2)
-        if (m_launchOptions.extraInitializationData.contains("requires-gtk2"))
-            executablePath.append('2');
-#endif
-        pluginPath = m_launchOptions.extraInitializationData.get("plugin-path");
-        realPluginPath = FileSystem::fileSystemRepresentation(pluginPath);
-        break;
-#endif
     case ProcessLauncher::ProcessType::Network:
         executablePath = executablePathOfNetworkProcess();
         break;
+#if ENABLE(GPU_PROCESS)
+    case ProcessLauncher::ProcessType::GPU:
+        executablePath = executablePathOfGPUProcess();
+        break;
+#endif
     default:
         ASSERT_NOT_REACHED();
         return;
@@ -115,6 +140,12 @@ void ProcessLauncher::launchProcess()
             prefixArgs.append(arg.utf8());
         nargs += prefixArgs.size();
     }
+
+    bool configureJSCForTesting = false;
+    if (m_launchOptions.processType == ProcessLauncher::ProcessType::Web && m_client && m_client->shouldConfigureJSCForTesting()) {
+        configureJSCForTesting = true;
+        nargs++;
+    }
 #endif
 
     char** argv = g_newa(char*, nargs);
@@ -127,11 +158,11 @@ void ProcessLauncher::launchProcess()
     argv[i++] = const_cast<char*>(realExecutablePath.data());
     argv[i++] = processIdentifier.get();
     argv[i++] = webkitSocket.get();
-#if ENABLE(NETSCAPE_PLUGIN_API)
-    argv[i++] = const_cast<char*>(realPluginPath.data());
-#else
-    argv[i++] = nullptr;
+#if ENABLE(DEVELOPER_MODE)
+    if (configureJSCForTesting)
+        argv[i++] = const_cast<char*>("--configure-jsc-for-testing");
 #endif
+    argv[i++] = nullptr;
     argv[i++] = nullptr;
 
     GRefPtr<GSubprocessLauncher> launcher = adoptGRef(g_subprocess_launcher_new(G_SUBPROCESS_FLAGS_INHERIT_FDS));
@@ -140,6 +171,7 @@ void ProcessLauncher::launchProcess()
 
     GUniqueOutPtr<GError> error;
     GRefPtr<GSubprocess> process;
+
 #if OS(LINUX)
     const char* sandboxEnv = g_getenv("WEBKIT_FORCE_SANDBOX");
     bool sandboxEnabled = m_launchOptions.extraInitializationData.get("enable-sandbox") == "true";
@@ -147,14 +179,16 @@ void ProcessLauncher::launchProcess()
     if (sandboxEnv)
         sandboxEnabled = !strcmp(sandboxEnv, "1");
 
-    if (sandboxEnabled && isInsideFlatpak())
+    if (sandboxEnabled && isFlatpakSpawnUsable())
         process = flatpakSpawn(launcher.get(), m_launchOptions, argv, socketPair.client, &error.outPtr());
 #if ENABLE(BUBBLEWRAP_SANDBOX)
-    else if (sandboxEnabled)
+    // You cannot use bubblewrap within Flatpak or Docker so lets ensure it never happens.
+    // Snap can allow it but has its own limitations that require workarounds.
+    else if (sandboxEnabled && !isInsideFlatpak() && !isInsideSnap() && !isInsideDocker())
         process = bubblewrapSpawn(launcher.get(), m_launchOptions, argv, &error.outPtr());
-#endif
+#endif // ENABLE(BUBBLEWRAP_SANDBOX)
     else
-#endif
+#endif // OS(LINUX)
         process = adoptGRef(g_subprocess_launcher_spawnv(launcher.get(), argv, &error.outPtr()));
 
     if (!process.get())

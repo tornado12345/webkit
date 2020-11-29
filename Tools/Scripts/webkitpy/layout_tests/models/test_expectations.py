@@ -32,7 +32,9 @@ for layout tests.
 
 import logging
 import re
+import sys
 
+from webkitpy.common.iteration_compatibility import iteritems, itervalues
 from webkitpy.layout_tests.models.test_configuration import TestConfigurationConverter
 
 _log = logging.getLogger(__name__)
@@ -226,7 +228,8 @@ class TestExpectationParser(object):
     # FIXME: Update the original modifiers and remove this once the old syntax is gone.
     _configuration_tokens_list = [
         'SnowLeopard', 'Lion', 'MountainLion', 'Mavericks', 'Yosemite', 'ElCapitan', # Legacy macOS
-        'Mac', 'Sierra', 'HighSierra', 'Mojave',
+        'Mac', 'Sierra', 'HighSierra', 'Mojave', 'Catalina', 'BigSur',
+        'x86_64', 'x86', 'arm64', 'arm64_32', 'armv7k',
         'Win', 'XP', 'Vista', 'Win7',
         'Linux',
         'Android',
@@ -235,11 +238,12 @@ class TestExpectationParser(object):
     ]
 
     _configuration_tokens = dict((token, token.upper()) for token in _configuration_tokens_list)
-    _inverted_configuration_tokens = dict((value, name) for name, value in _configuration_tokens.iteritems())
+    _inverted_configuration_tokens = dict((value, name) for name, value in _configuration_tokens.items())
 
     # FIXME: Update the original modifiers list and remove this once the old syntax is gone.
     _expectation_tokens = {
         'Crash': 'CRASH',
+        'DumpJSConsoleLogInStdErr': 'DUMPJSCONSOLELOGINSTDERR',
         'Failure': 'FAIL',
         'ImageOnlyFailure': 'IMAGE',
         'Leak': 'LEAK',
@@ -252,7 +256,7 @@ class TestExpectationParser(object):
         'WontFix': 'WONTFIX',
     }
 
-    _inverted_expectation_tokens = dict([(value, name) for name, value in _expectation_tokens.iteritems()] +
+    _inverted_expectation_tokens = dict([(value, name) for name, value in _expectation_tokens.items()] +
                                         [('TEXT', 'Failure'), ('IMAGE+TEXT', 'Failure'), ('AUDIO', 'Failure')])
 
     # FIXME: Seems like these should be classmethods on TestExpectationLine instead of TestExpectationParser.
@@ -458,10 +462,6 @@ class TestExpectationLine(object):
         return self._format_line(self.modifiers, self.name, self.expectations, self.comment,
             include_modifiers, include_expectations, include_comment)
 
-    def to_csv(self):
-        # Note that this doesn't include the comments.
-        return '%s,%s,%s' % (self.name, ' '.join(self.modifiers), ' '.join(self.expectations))
-
     def _serialize_parsed_expectations(self, parsed_expectation_to_string):
         result = []
         for index in TestExpectations.EXPECTATION_ORDER:
@@ -566,7 +566,7 @@ class TestExpectationsModel(object):
 
         # We must not have an index on this modifier.
         matching_tests = set()
-        for test, modifiers in self._test_to_modifiers.iteritems():
+        for test, modifiers in iteritems(self._test_to_modifiers):
             if keyword.lower() in modifiers:
                 matching_tests.add(test)
         return matching_tests
@@ -694,7 +694,7 @@ class TestExpectationsModel(object):
         Args:
           test: test to look for
           dict: dict of sets of files"""
-        for set_of_tests in dict_of_sets_of_tests.itervalues():
+        for set_of_tests in itervalues(dict_of_sets_of_tests):
             if test in set_of_tests:
                 set_of_tests.remove(test)
 
@@ -949,21 +949,21 @@ class TestExpectations(object):
     def parse_generic_expectations(self):
         if self._port.path_to_generic_test_expectations_file() in self._expectations_dict:
             if self._include_generic:
-                expectations = self._parser.parse(self._expectations_dict.keys()[self._expectations_dict_index], self._expectations_dict.values()[self._expectations_dict_index])
+                expectations = self._parser.parse(list(self._expectations_dict.keys())[self._expectations_dict_index], list(self._expectations_dict.values())[self._expectations_dict_index])
                 self._add_expectations(expectations)
                 self._expectations += expectations
             self._expectations_dict_index += 1
 
     def parse_default_port_expectations(self):
         if len(self._expectations_dict) > self._expectations_dict_index:
-            expectations = self._parser.parse(self._expectations_dict.keys()[self._expectations_dict_index], self._expectations_dict.values()[self._expectations_dict_index])
+            expectations = self._parser.parse(list(self._expectations_dict.keys())[self._expectations_dict_index], list(self._expectations_dict.values())[self._expectations_dict_index])
             self._add_expectations(expectations)
             self._expectations += expectations
             self._expectations_dict_index += 1
 
     def parse_override_expectations(self):
         while len(self._expectations_dict) > self._expectations_dict_index and self._include_overrides:
-            expectations = self._parser.parse(self._expectations_dict.keys()[self._expectations_dict_index], self._expectations_dict.values()[self._expectations_dict_index])
+            expectations = self._parser.parse(list(self._expectations_dict.keys())[self._expectations_dict_index], list(self._expectations_dict.values())[self._expectations_dict_index])
             self._add_expectations(expectations)
             self._expectations += expectations
             self._expectations_dict_index += 1
@@ -1050,7 +1050,7 @@ class TestExpectations(object):
         for expectation in self._expectations:
             if expectation.name != test or expectation.is_flaky() or not expectation.parsed_expectations:
                 continue
-            if iter(expectation.parsed_expectations).next() not in (FAIL, IMAGE):
+            if not any([value in (FAIL, IMAGE) for value in expectation.parsed_expectations]):
                 continue
             if test_configuration not in expectation.matching_configurations:
                 continue

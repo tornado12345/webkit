@@ -76,84 +76,6 @@ static void testWebContextEphemeral(Test* test, gconstpointer)
     g_assert_true(webkit_web_context_is_ephemeral(context.get()));
 }
 
-#if ENABLE(NETSCAPE_PLUGIN_API)
-class PluginsTest: public Test {
-public:
-    MAKE_GLIB_TEST_FIXTURE(PluginsTest);
-
-    PluginsTest()
-        : m_mainLoop(g_main_loop_new(nullptr, TRUE))
-        , m_plugins(nullptr)
-    {
-        webkit_web_context_set_additional_plugins_directory(m_webContext.get(), WEBKIT_TEST_PLUGIN_DIR);
-    }
-
-    ~PluginsTest()
-    {
-        g_main_loop_unref(m_mainLoop);
-        g_list_free_full(m_plugins, g_object_unref);
-    }
-
-    static void getPluginsAsyncReadyCallback(GObject*, GAsyncResult* result, PluginsTest* test)
-    {
-        test->m_plugins = webkit_web_context_get_plugins_finish(test->m_webContext.get(), result, nullptr);
-        g_main_loop_quit(test->m_mainLoop);
-    }
-
-    GList* getPlugins()
-    {
-        g_list_free_full(m_plugins, g_object_unref);
-        webkit_web_context_get_plugins(m_webContext.get(), nullptr, reinterpret_cast<GAsyncReadyCallback>(getPluginsAsyncReadyCallback), this);
-        g_main_loop_run(m_mainLoop);
-        return m_plugins;
-    }
-
-    GMainLoop* m_mainLoop;
-    GList* m_plugins;
-};
-
-static void testWebContextGetPlugins(PluginsTest* test, gconstpointer)
-{
-    GList* plugins = test->getPlugins();
-    g_assert_nonnull(plugins);
-
-    GRefPtr<WebKitPlugin> testPlugin;
-    for (GList* item = plugins; item; item = g_list_next(item)) {
-        WebKitPlugin* plugin = WEBKIT_PLUGIN(item->data);
-        test->assertObjectIsDeletedWhenTestFinishes(G_OBJECT(plugin));
-        if (!g_strcmp0(webkit_plugin_get_name(plugin), "WebKit Test PlugIn")) {
-            testPlugin = plugin;
-            break;
-        }
-    }
-    g_assert_true(WEBKIT_IS_PLUGIN(testPlugin.get()));
-
-    char normalizedPath[PATH_MAX];
-    g_assert_nonnull(realpath(WEBKIT_TEST_PLUGIN_DIR, normalizedPath));
-    GUniquePtr<char> pluginPath(g_build_filename(normalizedPath, "libTestNetscapePlugIn.so", nullptr));
-    g_assert_cmpstr(webkit_plugin_get_path(testPlugin.get()), ==, pluginPath.get());
-    g_assert_cmpstr(webkit_plugin_get_description(testPlugin.get()), ==, "Simple Netscape® plug-in that handles test content for WebKit");
-    GList* mimeInfoList = webkit_plugin_get_mime_info_list(testPlugin.get());
-    g_assert_nonnull(mimeInfoList);
-    g_assert_cmpuint(g_list_length(mimeInfoList), ==, 2);
-
-    WebKitMimeInfo* mimeInfo = static_cast<WebKitMimeInfo*>(mimeInfoList->data);
-    g_assert_cmpstr(webkit_mime_info_get_mime_type(mimeInfo), ==, "image/png");
-    g_assert_cmpstr(webkit_mime_info_get_description(mimeInfo), ==, "png image");
-    const gchar* const* extensions = webkit_mime_info_get_extensions(mimeInfo);
-    g_assert_nonnull(extensions);
-    g_assert_cmpstr(extensions[0], ==, "png");
-
-    mimeInfoList = g_list_next(mimeInfoList);
-    mimeInfo = static_cast<WebKitMimeInfo*>(mimeInfoList->data);
-    g_assert_cmpstr(webkit_mime_info_get_mime_type(mimeInfo), ==, "application/x-webkit-test-netscape");
-    g_assert_cmpstr(webkit_mime_info_get_description(mimeInfo), ==, "test netscape content");
-    extensions = webkit_mime_info_get_extensions(mimeInfo);
-    g_assert_nonnull(extensions);
-    g_assert_cmpstr(extensions[0], ==, "testnetscape");
-}
-#endif // ENABLE(NETSCAPE_PLUGIN_API)
-
 static const char* kBarHTML = "<html><body>Bar</body></html>";
 static const char* kEchoHTMLFormat = "<html><body>%s</body></html>";
 static const char* errorDomain = "test";
@@ -161,7 +83,6 @@ static const int errorCode = 10;
 
 static const char* genericErrorMessage = "Error message.";
 static const char* beforeReceiveResponseErrorMessage = "Error before didReceiveResponse.";
-static const char* afterInitialChunkErrorMessage = "Error after reading the initial chunk.";
 
 class URISchemeTest: public LoadTrackingTest {
 public:
@@ -240,26 +161,8 @@ public:
         webkit_web_context_register_uri_scheme(m_webContext.get(), scheme, uriSchemeRequestCallback, this, 0);
     }
 
-    void loadCommitted() override
-    {
-        if (m_finishOnCommitted) {
-            GUniquePtr<GError> error(g_error_new_literal(g_quark_from_string(errorDomain), errorCode, afterInitialChunkErrorMessage));
-            webkit_uri_scheme_request_finish_error(m_uriSchemeRequest.get(), error.get());
-        }
-
-        LoadTrackingTest::loadCommitted();
-    }
-
-    void finishOnCommittedAndWaitUntilLoadFinished()
-    {
-        m_finishOnCommitted = true;
-        waitUntilLoadFinished();
-        m_finishOnCommitted = false;
-    }
-
     GRefPtr<WebKitURISchemeRequest> m_uriSchemeRequest;
     HashMap<String, URISchemeHandler> m_handlersMap;
-    bool m_finishOnCommitted { false };
 };
 
 String generateHTMLContent(unsigned contentLength)
@@ -271,14 +174,14 @@ String generateHTMLContent(unsigned contentLength)
     builder.append("<html><body>");
 
     if (contentLength <= baseLength)
-        builder.append(baseString, 0, contentLength);
+        builder.appendSubstring(baseString, 0, contentLength);
     else {
         unsigned currentLength = 0;
         while (currentLength < contentLength) {
             if ((currentLength + baseLength) <= contentLength)
                 builder.append(baseString);
             else
-                builder.append(baseString, 0, contentLength - currentLength);
+                builder.appendSubstring(baseString, 0, contentLength - currentLength);
 
             // Account for the 12 characters of the '<html><body>' prefix.
             currentLength = builder.length() - 12;
@@ -318,13 +221,28 @@ static void testWebContextURIScheme(URISchemeTest* test, gconstpointer)
     g_assert_cmpint(mainResourceDataSize, ==, strlen(echoHTML.get()));
     g_assert_cmpint(strncmp(mainResourceData, echoHTML.get(), mainResourceDataSize), ==, 0);
 
-    test->registerURISchemeHandler("nomime", kBarHTML, -1, 0);
+    test->registerURISchemeHandler("nomime", kBarHTML, -1, nullptr);
     test->m_loadEvents.clear();
     test->loadURI("nomime:foo-bar");
     test->waitUntilLoadFinished();
     g_assert_true(test->m_loadEvents.contains(LoadTrackingTest::ProvisionalLoadFailed));
 
-    test->registerURISchemeHandler("empty", 0, 0, "text/html");
+    static const char* charsetHTML = "<html><body><p id='emoji'>🙂</p></body></html>";
+    test->registerURISchemeHandler("charset", charsetHTML, -1, "text/html; charset=\"UTF-8\"");
+    test->loadURI("charset:test");
+    test->waitUntilLoadFinished();
+    mainResourceDataSize = 0;
+    mainResourceData = test->mainResourceData(mainResourceDataSize);
+    g_assert_cmpint(mainResourceDataSize, ==, strlen(charsetHTML));
+    g_assert_cmpint(strncmp(mainResourceData, charsetHTML, mainResourceDataSize), ==, 0);
+    GUniqueOutPtr<GError> error;
+    auto* javascriptResult = test->runJavaScriptAndWaitUntilFinished("document.getElementById('emoji').innerText", &error.outPtr());
+    g_assert_nonnull(javascriptResult);
+    g_assert_no_error(error.get());
+    GUniquePtr<char> emoji(WebViewTest::javascriptResultToCString(javascriptResult));
+    g_assert_cmpstr(emoji.get(), ==, "🙂");
+
+    test->registerURISchemeHandler("empty", nullptr, 0, "text/html");
     test->m_loadEvents.clear();
     test->loadURI("empty:nothing");
     test->waitUntilLoadFinished();
@@ -352,16 +270,7 @@ static void testWebContextURIScheme(URISchemeTest* test, gconstpointer)
     g_assert_error(test->m_error.get(), g_quark_from_string(errorDomain), errorCode);
     g_assert_cmpstr(test->m_error->message, ==, beforeReceiveResponseErrorMessage);
 
-    test->m_loadEvents.clear();
-    test->loadURI("error:after-first-chunk");
-    test->finishOnCommittedAndWaitUntilLoadFinished();
-    g_assert_false(test->m_loadEvents.contains(LoadTrackingTest::ProvisionalLoadFailed));
-    g_assert_true(test->m_loadEvents.contains(LoadTrackingTest::LoadFailed));
-    g_assert_true(test->m_loadFailed);
-    g_assert_error(test->m_error.get(), g_quark_from_string(errorDomain), errorCode);
-    g_assert_cmpstr(test->m_error->message, ==, afterInitialChunkErrorMessage);
-
-    test->registerURISchemeHandler("closed", 0, 0, 0);
+    test->registerURISchemeHandler("closed", nullptr, 0, nullptr);
     test->m_loadEvents.clear();
     test->loadURI("closed:input-stream");
     test->waitUntilLoadFinished();
@@ -442,7 +351,7 @@ static void testWebContextLanguages(WebViewTest* test, gconstpointer)
     g_ptr_array_add(languages.get(), 0);
     webkit_web_context_set_preferred_languages(test->m_webContext.get(), reinterpret_cast<const char* const*>(languages->pdata));
 
-    static const char* expectedLanguages = "en, es-es;q=0.90, de;q=0.80";
+    static const char* expectedLanguages = "en,ES-es;q=0.90,dE;q=0.80";
     test->loadURI(kServer->getURIForPath("/").data());
     test->waitUntilLoadFinished();
     mainResourceDataSize = 0;
@@ -762,7 +671,8 @@ static void testWebContextProxySettings(ProxyTest* test, gconstpointer)
     // Set default proxy URI to point to proxyServer. Requests to kServer should be received by proxyServer instead.
     GUniquePtr<char> proxyURI(soup_uri_to_string(test->m_proxyServer.baseURI(), FALSE));
     WebKitNetworkProxySettings* settings = webkit_network_proxy_settings_new(proxyURI.get(), nullptr);
-    webkit_web_context_set_network_proxy_settings(test->m_webContext.get(), WEBKIT_NETWORK_PROXY_MODE_CUSTOM, settings);
+    auto* dataManager = webkit_web_context_get_website_data_manager(test->m_webContext.get());
+    webkit_website_data_manager_set_network_proxy_settings(dataManager, WEBKIT_NETWORK_PROXY_MODE_CUSTOM, settings);
     GUniquePtr<char> proxyServerPortAsString = test->proxyServerPortAsString();
     mainResourceData = test->loadURIAndGetMainResourceData(kServer->getURIForPath("/echoPort").data());
     ASSERT_CMP_CSTRING(mainResourceData, ==, proxyServerPortAsString.get());
@@ -802,14 +712,14 @@ static void testWebContextProxySettings(ProxyTest* test, gconstpointer)
     g_main_loop_run(test->m_mainLoop);
 
     // Remove the proxy. Requests to kServer should be received by kServer again.
-    webkit_web_context_set_network_proxy_settings(test->m_webContext.get(), WEBKIT_NETWORK_PROXY_MODE_NO_PROXY, nullptr);
+    webkit_website_data_manager_set_network_proxy_settings(dataManager, WEBKIT_NETWORK_PROXY_MODE_NO_PROXY, nullptr);
     mainResourceData = test->loadURIAndGetMainResourceData(kServer->getURIForPath("/echoPort").data());
     ASSERT_CMP_CSTRING(mainResourceData, ==, serverPortAsString.get());
 
     // Use a default proxy uri, but ignoring requests to localhost.
     static const char* ignoreHosts[] = { "localhost", nullptr };
     settings = webkit_network_proxy_settings_new(proxyURI.get(), ignoreHosts);
-    webkit_web_context_set_network_proxy_settings(test->m_webContext.get(), WEBKIT_NETWORK_PROXY_MODE_CUSTOM, settings);
+    webkit_website_data_manager_set_network_proxy_settings(dataManager, WEBKIT_NETWORK_PROXY_MODE_CUSTOM, settings);
     mainResourceData = test->loadURIAndGetMainResourceData(kServer->getURIForPath("/echoPort").data());
     ASSERT_CMP_CSTRING(mainResourceData, ==, proxyServerPortAsString.get());
     GUniquePtr<char> localhostEchoPortURI(g_strdup_printf("http://localhost:%s/echoPort", serverPortAsString.get()));
@@ -818,20 +728,20 @@ static void testWebContextProxySettings(ProxyTest* test, gconstpointer)
     webkit_network_proxy_settings_free(settings);
 
     // Remove the proxy again to ensure next test is not using any previous values.
-    webkit_web_context_set_network_proxy_settings(test->m_webContext.get(), WEBKIT_NETWORK_PROXY_MODE_NO_PROXY, nullptr);
+    webkit_website_data_manager_set_network_proxy_settings(dataManager, WEBKIT_NETWORK_PROXY_MODE_NO_PROXY, nullptr);
     mainResourceData = test->loadURIAndGetMainResourceData(kServer->getURIForPath("/echoPort").data());
     ASSERT_CMP_CSTRING(mainResourceData, ==, serverPortAsString.get());
 
     // Use scheme specific proxy instead of the default.
     settings = webkit_network_proxy_settings_new(nullptr, nullptr);
     webkit_network_proxy_settings_add_proxy_for_scheme(settings, "http", proxyURI.get());
-    webkit_web_context_set_network_proxy_settings(test->m_webContext.get(), WEBKIT_NETWORK_PROXY_MODE_CUSTOM, settings);
+    webkit_website_data_manager_set_network_proxy_settings(dataManager, WEBKIT_NETWORK_PROXY_MODE_CUSTOM, settings);
     mainResourceData = test->loadURIAndGetMainResourceData(kServer->getURIForPath("/echoPort").data());
     ASSERT_CMP_CSTRING(mainResourceData, ==, proxyServerPortAsString.get());
     webkit_network_proxy_settings_free(settings);
 
     // Reset to use the default resolver.
-    webkit_web_context_set_network_proxy_settings(test->m_webContext.get(), WEBKIT_NETWORK_PROXY_MODE_DEFAULT, nullptr);
+    webkit_website_data_manager_set_network_proxy_settings(dataManager, WEBKIT_NETWORK_PROXY_MODE_DEFAULT, nullptr);
     mainResourceData = test->loadURIAndGetMainResourceData(kServer->getURIForPath("/echoPort").data());
     ASSERT_CMP_CSTRING(mainResourceData, ==, serverPortAsString.get());
 
@@ -847,9 +757,6 @@ void beforeAll()
 
     Test::add("WebKitWebContext", "default-context", testWebContextDefault);
     Test::add("WebKitWebContext", "ephemeral", testWebContextEphemeral);
-#if ENABLE(NETSCAPE_PLUGIN_API)
-    PluginsTest::add("WebKitWebContext", "get-plugins", testWebContextGetPlugins);
-#endif
     URISchemeTest::add("WebKitWebContext", "uri-scheme", testWebContextURIScheme);
     // FIXME: implement spellchecker in WPE.
 #if PLATFORM(GTK)

@@ -22,9 +22,10 @@
 
 import unittest
 
+from webkitcorepy import Version
+
 from webkitpy.common.system.systemhost import SystemHost
-from webkitpy.common.version import Version
-from version_name_map import VersionNameMap
+from webkitpy.common.version_name_map import VersionNameMap
 
 
 class VersionMapTestCase(unittest.TestCase):
@@ -36,6 +37,8 @@ class VersionMapTestCase(unittest.TestCase):
 
     def test_mac_version_by_name(self):
         map = VersionNameMap()
+        self.assertEqual(('mac', Version(10, 15)), map.from_name('Catalina'))
+        self.assertEqual(('mac', Version(10, 15)), map.from_name('catalina'))
         self.assertEqual(('mac', Version(10, 14)), map.from_name('Mojave'))
         self.assertEqual(('mac', Version(10, 14)), map.from_name('mojave'))
         self.assertEqual(('mac', Version(10, 13)), map.from_name('High Sierra'))
@@ -57,6 +60,7 @@ class VersionMapTestCase(unittest.TestCase):
 
     def test_mac_name_by_version(self):
         map = VersionNameMap()
+        self.assertEqual('Catalina', map.to_name(version=Version(10, 15), platform='mac'))
         self.assertEqual('Mojave', map.to_name(version=Version(10, 14), platform='mac'))
         self.assertEqual('High Sierra', map.to_name(version=Version(10, 13), platform='mac'))
         self.assertEqual('High Sierra', map.to_name(version=Version(10, 13, 3), platform='mac'))
@@ -66,6 +70,7 @@ class VersionMapTestCase(unittest.TestCase):
 
     def test_ios_name_by_version(self):
         map = VersionNameMap()
+        self.assertEqual('iOS 13', map.to_name(version=Version(13), platform='ios'))
         self.assertEqual('iOS 12', map.to_name(version=Version(12), platform='ios'))
         self.assertEqual('iOS 11', map.to_name(version=Version(11), platform='ios'))
         self.assertEqual('iOS 10', map.to_name(version=Version(10), platform='ios'))

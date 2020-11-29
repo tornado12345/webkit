@@ -26,11 +26,12 @@
 #include "config.h"
 #include "PointerEvent.h"
 
-#if ENABLE(POINTER_EVENTS)
-
-#import "EventNames.h"
+#include "EventNames.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(PointerEvent);
 
 const String& PointerEvent::mousePointerType()
 {
@@ -50,7 +51,7 @@ const String& PointerEvent::touchPointerType()
     return touchType;
 }
 
-static AtomicString pointerEventType(const AtomicString& mouseEventType)
+static AtomString pointerEventType(const AtomString& mouseEventType)
 {
     auto& names = eventNames();
     if (mouseEventType == names.mousedownEvent)
@@ -71,9 +72,28 @@ static AtomicString pointerEventType(const AtomicString& mouseEventType)
     return nullAtom();
 }
 
+RefPtr<PointerEvent> PointerEvent::create(short button, const MouseEvent& mouseEvent)
+{
+    auto type = pointerEventType(mouseEvent.type());
+    if (type.isEmpty())
+        return nullptr;
+
+    return create(type, button, mouseEvent);
+}
+
+Ref<PointerEvent> PointerEvent::create(const String& type, short button, const MouseEvent& mouseEvent)
+{
+    return adoptRef(*new PointerEvent(type, button, mouseEvent));
+}
+
+Ref<PointerEvent> PointerEvent::create(const String& type, PointerID pointerId, const String& pointerType, IsPrimary isPrimary)
+{
+    return adoptRef(*new PointerEvent(type, pointerId, pointerType, isPrimary));
+}
+
 PointerEvent::PointerEvent() = default;
 
-PointerEvent::PointerEvent(const AtomicString& type, Init&& initializer)
+PointerEvent::PointerEvent(const AtomString& type, Init&& initializer)
     : MouseEvent(type, initializer)
     , m_pointerId(initializer.pointerId)
     , m_width(initializer.width)
@@ -88,35 +108,18 @@ PointerEvent::PointerEvent(const AtomicString& type, Init&& initializer)
 {
 }
 
-RefPtr<PointerEvent> PointerEvent::create(const MouseEvent& mouseEvent)
+PointerEvent::PointerEvent(const AtomString& type, short button, const MouseEvent& mouseEvent)
+    : MouseEvent(type, typeCanBubble(type), typeIsCancelable(type), typeIsComposed(type), mouseEvent.view(), mouseEvent.detail(), mouseEvent.screenLocation(), { mouseEvent.clientX(), mouseEvent.clientY() }, mouseEvent.modifierKeys(), button, mouseEvent.buttons(), mouseEvent.syntheticClickType(), mouseEvent.relatedTarget())
+    , m_isPrimary(true)
 {
-    auto type = pointerEventType(mouseEvent.type());
-    if (type.isEmpty())
-        return nullptr;
+}
 
-    auto isEnterOrLeave = type == eventNames().pointerenterEvent || type == eventNames().pointerleaveEvent;
-
-    PointerEvent::Init init;
-    init.bubbles = !isEnterOrLeave;
-    init.cancelable = !isEnterOrLeave;
-    init.composed = !isEnterOrLeave;
-    init.view = mouseEvent.view();
-    init.ctrlKey = mouseEvent.ctrlKey();
-    init.shiftKey = mouseEvent.shiftKey();
-    init.altKey = mouseEvent.altKey();
-    init.metaKey = mouseEvent.metaKey();
-    init.modifierAltGraph = mouseEvent.altGraphKey();
-    init.modifierCapsLock = mouseEvent.capsLockKey();
-    init.screenX = mouseEvent.screenX();
-    init.screenY = mouseEvent.screenY();
-    init.clientX = mouseEvent.clientX();
-    init.clientY = mouseEvent.clientY();
-    init.button = mouseEvent.button();
-    init.buttons = mouseEvent.buttons();
-    init.relatedTarget = mouseEvent.relatedTarget();
-    init.isPrimary = true;
-
-    return PointerEvent::create(type, WTFMove(init));
+PointerEvent::PointerEvent(const AtomString& type, PointerID pointerId, const String& pointerType, IsPrimary isPrimary)
+    : MouseEvent(type, typeCanBubble(type), typeIsCancelable(type), typeIsComposed(type), nullptr, 0, { }, { }, { }, 0, 0, 0, nullptr)
+    , m_pointerId(pointerId)
+    , m_pointerType(pointerType)
+    , m_isPrimary(isPrimary == IsPrimary::Yes)
+{
 }
 
 PointerEvent::~PointerEvent() = default;
@@ -127,5 +130,3 @@ EventInterface PointerEvent::eventInterface() const
 }
 
 } // namespace WebCore
-
-#endif // ENABLE(POINTER_EVENTS)

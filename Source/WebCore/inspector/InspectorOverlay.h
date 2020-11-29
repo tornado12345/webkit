@@ -32,9 +32,11 @@
 #include "Color.h"
 #include "FloatQuad.h"
 #include "FloatRect.h"
+#include "Path.h"
 #include "Timer.h"
 #include <wtf/Deque.h>
 #include <wtf/MonotonicTime.h>
+#include <wtf/Optional.h>
 #include <wtf/RefPtr.h>
 #include <wtf/Vector.h>
 #include <wtf/text/WTFString.h>
@@ -47,53 +49,54 @@ class Node;
 class NodeList;
 class Page;
 
-struct HighlightConfig {
-    WTF_MAKE_FAST_ALLOCATED;
-public:
-    Color content;
-    Color contentOutline;
-    Color padding;
-    Color border;
-    Color margin;
-    bool showInfo;
-    bool usePageCoordinates;
-};
-
-enum class HighlightType {
-    Node, // Provides 4 quads: margin, border, padding, content.
-    NodeList, // Provides a list of nodes.
-    Rects, // Provides a list of quads.
-};
-
-struct Highlight {
-    Highlight() { }
-
-    void setDataFromConfig(const HighlightConfig& highlightConfig)
-    {
-        contentColor = highlightConfig.content;
-        contentOutlineColor = highlightConfig.contentOutline;
-        paddingColor = highlightConfig.padding;
-        borderColor = highlightConfig.border;
-        marginColor = highlightConfig.margin;
-        usePageCoordinates = highlightConfig.usePageCoordinates;
-    }
-
-    Color contentColor;
-    Color contentOutlineColor;
-    Color paddingColor;
-    Color borderColor;
-    Color marginColor;
-
-    HighlightType type {HighlightType::Node};
-    Vector<FloatQuad> quads;
-    bool usePageCoordinates {true};
-};
-
 class InspectorOverlay {
     WTF_MAKE_FAST_ALLOCATED;
 public:
     InspectorOverlay(Page&, InspectorClient*);
     ~InspectorOverlay();
+
+    struct Highlight {
+        WTF_MAKE_STRUCT_FAST_ALLOCATED;
+
+        enum class Type {
+            Node, // Provides 4 quads: margin, border, padding, content.
+            NodeList, // Provides a list of nodes.
+            Rects, // Provides a list of quads.
+        };
+
+        struct Config {
+            WTF_MAKE_STRUCT_FAST_ALLOCATED;
+            Color content;
+            Color contentOutline;
+            Color padding;
+            Color border;
+            Color margin;
+            bool showInfo;
+            bool usePageCoordinates;
+        };
+
+        void setDataFromConfig(const Config& config)
+        {
+            contentColor = config.content;
+            contentOutlineColor = config.contentOutline;
+            paddingColor = config.padding;
+            borderColor = config.border;
+            marginColor = config.margin;
+            usePageCoordinates = config.usePageCoordinates;
+        }
+
+        Color contentColor;
+        Color contentOutlineColor;
+        Color paddingColor;
+        Color borderColor;
+        Color marginColor;
+
+        Type type {Type::Node};
+        Vector<FloatQuad> quads;
+        bool usePageCoordinates {true};
+
+        using Bounds = FloatRect;
+    };
 
     enum class CoordinateSystem {
         View, // Adjusts for the main frame's scroll offset.
@@ -103,16 +106,18 @@ public:
     void update();
     void paint(GraphicsContext&);
     void getHighlight(Highlight&, CoordinateSystem) const;
+    bool shouldShowOverlay() const;
 
     void hideHighlight();
-    void highlightNodeList(RefPtr<NodeList>&&, const HighlightConfig&);
-    void highlightNode(Node*, const HighlightConfig&);
-    void highlightQuad(std::unique_ptr<FloatQuad>, const HighlightConfig&);
+    void highlightNodeList(RefPtr<NodeList>&&, const Highlight::Config&);
+    void highlightNode(Node*, const Highlight::Config&);
+    void highlightQuad(std::unique_ptr<FloatQuad>, const Highlight::Config&);
 
     void setShowPaintRects(bool);
     void showPaintRect(const FloatRect&);
 
     void setShowRulers(bool);
+    void setShowRulersDuringElementSelection(bool enabled) { m_showRulersDuringElementSelection = enabled; }
 
     Node* highlightedNode() const;
 
@@ -123,15 +128,18 @@ public:
 private:
     using TimeRectPair = std::pair<MonotonicTime, FloatRect>;
 
-    bool shouldShowOverlay() const;
+    struct RulerExclusion {
+        Highlight::Bounds bounds;
+        Path titlePath;
+    };
 
-    void drawNodeHighlight(GraphicsContext&, Node&);
-    void drawQuadHighlight(GraphicsContext&, const FloatQuad&);
+    RulerExclusion drawNodeHighlight(GraphicsContext&, Node&);
+    RulerExclusion drawQuadHighlight(GraphicsContext&, const FloatQuad&);
     void drawPaintRects(GraphicsContext&, const Deque<TimeRectPair>&);
-    void drawBounds(GraphicsContext&, const FloatRect&);
-    void drawRulers(GraphicsContext&);
+    void drawBounds(GraphicsContext&, const Highlight::Bounds&);
+    void drawRulers(GraphicsContext&, const RulerExclusion&);
 
-    void drawElementTitle(GraphicsContext&, Node&, const FloatRect& bounds);
+    Path drawElementTitle(GraphicsContext&, Node&, const Highlight::Bounds&);
 
     void updatePaintRectsTimerFired();
 
@@ -140,17 +148,18 @@ private:
 
     RefPtr<Node> m_highlightNode;
     RefPtr<NodeList> m_highlightNodeList;
-    HighlightConfig m_nodeHighlightConfig;
+    Highlight::Config m_nodeHighlightConfig;
 
     std::unique_ptr<FloatQuad> m_highlightQuad;
-    HighlightConfig m_quadHighlightConfig;
+    Highlight::Config m_quadHighlightConfig;
 
     Deque<TimeRectPair> m_paintRects;
     Timer m_paintRectUpdateTimer;
 
-    bool m_indicating {false};
-    bool m_showPaintRects {false};
-    bool m_showRulers {false};
+    bool m_indicating { false };
+    bool m_showPaintRects { false };
+    bool m_showRulers { false };
+    bool m_showRulersDuringElementSelection { false };
 };
 
 } // namespace WebCore

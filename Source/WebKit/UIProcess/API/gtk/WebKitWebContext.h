@@ -30,9 +30,11 @@
 #include <webkit2/WebKitDefines.h>
 #include <webkit2/WebKitDownload.h>
 #include <webkit2/WebKitFaviconDatabase.h>
+#include <webkit2/WebKitGeolocationManager.h>
 #include <webkit2/WebKitNetworkProxySettings.h>
 #include <webkit2/WebKitSecurityManager.h>
 #include <webkit2/WebKitURISchemeRequest.h>
+#include <webkit2/WebKitUserMessage.h>
 #include <webkit2/WebKitWebsiteDataManager.h>
 
 G_BEGIN_DECLS
@@ -66,11 +68,7 @@ typedef enum {
 
 /**
  * WebKitProcessModel:
- * @WEBKIT_PROCESS_MODEL_SHARED_SECONDARY_PROCESS: Use a single process to
- *   perform content rendering. The process is shared among all the
- *   #WebKitWebView instances created by the application: if the process
- *   hangs or crashes all the web views in the application will be affected.
- *   This is the default process model, and it should suffice for most cases.
+ * @WEBKIT_PROCESS_MODEL_SHARED_SECONDARY_PROCESS: Deprecated 2.26.
  * @WEBKIT_PROCESS_MODEL_MULTIPLE_SECONDARY_PROCESSES: Use one process
  *   for each #WebKitWebView, while still allowing for some of them to
  *   share a process in certain situations. The main advantage
@@ -89,37 +87,6 @@ typedef enum {
     WEBKIT_PROCESS_MODEL_SHARED_SECONDARY_PROCESS,
     WEBKIT_PROCESS_MODEL_MULTIPLE_SECONDARY_PROCESSES,
 } WebKitProcessModel;
-
-/**
- * WebKitTLSErrorsPolicy:
- * @WEBKIT_TLS_ERRORS_POLICY_IGNORE: Ignore TLS errors.
- * @WEBKIT_TLS_ERRORS_POLICY_FAIL: TLS errors will emit
- *   #WebKitWebView::load-failed-with-tls-errors and, if the signal is handled,
- *   finish the load. In case the signal is not handled,
- *   #WebKitWebView::load-failed is emitted before the load finishes.
- *
- * Enum values used to denote the TLS errors policy.
- */
-typedef enum {
-    WEBKIT_TLS_ERRORS_POLICY_IGNORE,
-    WEBKIT_TLS_ERRORS_POLICY_FAIL
-} WebKitTLSErrorsPolicy;
-
-/**
- * WebKitNetworkProxyMode:
- * @WEBKIT_NETWORK_PROXY_MODE_DEFAULT: Use the default proxy of the system.
- * @WEBKIT_NETWORK_PROXY_MODE_NO_PROXY: Do not use any proxy.
- * @WEBKIT_NETWORK_PROXY_MODE_CUSTOM: Use custom proxy settings.
- *
- * Enum values used to set the network proxy mode.
- *
- * Since: 2.16
- */
-typedef enum {
-    WEBKIT_NETWORK_PROXY_MODE_DEFAULT,
-    WEBKIT_NETWORK_PROXY_MODE_NO_PROXY,
-    WEBKIT_NETWORK_PROXY_MODE_CUSTOM
-} WebKitNetworkProxyMode;
 
 /**
  * WebKitURISchemeRequestCallback:
@@ -146,17 +113,18 @@ struct _WebKitWebContext {
 struct _WebKitWebContextClass {
     GObjectClass parent;
 
-    void (* download_started)                    (WebKitWebContext        *context,
-                                                  WebKitDownload          *download);
-    void (* initialize_web_extensions)           (WebKitWebContext        *context);
-    void (* initialize_notification_permissions) (WebKitWebContext        *context);
-    void (* automation_started)                  (WebKitWebContext        *context,
-                                                  WebKitAutomationSession *session);
+    void     (* download_started)                    (WebKitWebContext        *context,
+                                                      WebKitDownload          *download);
+    void     (* initialize_web_extensions)           (WebKitWebContext        *context);
+    void     (* initialize_notification_permissions) (WebKitWebContext        *context);
+    void     (* automation_started)                  (WebKitWebContext        *context,
+                                                      WebKitAutomationSession *session);
+    gboolean (* user_message_received)               (WebKitWebContext        *context,
+                                                      WebKitUserMessage       *message);
 
     void (*_webkit_reserved0) (void);
     void (*_webkit_reserved1) (void);
     void (*_webkit_reserved2) (void);
-    void (*_webkit_reserved3) (void);
 };
 
 WEBKIT_API GType
@@ -192,17 +160,17 @@ webkit_web_context_set_cache_model                  (WebKitWebContext           
 WEBKIT_API WebKitCacheModel
 webkit_web_context_get_cache_model                  (WebKitWebContext              *context);
 
-WEBKIT_API void
+WEBKIT_DEPRECATED void
 webkit_web_context_set_web_process_count_limit      (WebKitWebContext              *context,
                                                      guint                          limit);
 
-WEBKIT_API guint
+WEBKIT_DEPRECATED guint
 webkit_web_context_get_web_process_count_limit      (WebKitWebContext              *context);
 
 WEBKIT_API void
 webkit_web_context_clear_cache                      (WebKitWebContext              *context);
 
-WEBKIT_API void
+WEBKIT_DEPRECATED_FOR(webkit_website_data_manager_set_network_proxy_settings) void
 webkit_web_context_set_network_proxy_settings       (WebKitWebContext              *context,
                                                      WebKitNetworkProxyMode         proxy_mode,
                                                      WebKitNetworkProxySettings    *proxy_settings);
@@ -213,6 +181,9 @@ webkit_web_context_download_uri                     (WebKitWebContext           
 
 WEBKIT_API WebKitCookieManager *
 webkit_web_context_get_cookie_manager               (WebKitWebContext              *context);
+
+WEBKIT_API WebKitGeolocationManager *
+webkit_web_context_get_geolocation_manager          (WebKitWebContext              *context);
 
 WEBKIT_API WebKitFaviconDatabase *
 webkit_web_context_get_favicon_database             (WebKitWebContext              *context);
@@ -226,17 +197,17 @@ webkit_web_context_get_favicon_database_directory   (WebKitWebContext           
 WEBKIT_API WebKitSecurityManager *
 webkit_web_context_get_security_manager             (WebKitWebContext              *context);
 
-WEBKIT_API void
+WEBKIT_DEPRECATED void
 webkit_web_context_set_additional_plugins_directory (WebKitWebContext              *context,
                                                      const gchar                   *directory);
 
-WEBKIT_API void
+WEBKIT_DEPRECATED void
 webkit_web_context_get_plugins                      (WebKitWebContext              *context,
                                                      GCancellable                  *cancellable,
                                                      GAsyncReadyCallback            callback,
                                                      gpointer                       user_data);
 
-WEBKIT_API GList *
+WEBKIT_DEPRECATED GList *
 webkit_web_context_get_plugins_finish               (WebKitWebContext              *context,
                                                      GAsyncResult                  *result,
                                                      GError                       **error);
@@ -276,11 +247,11 @@ WEBKIT_API void
 webkit_web_context_set_preferred_languages          (WebKitWebContext              *context,
                                                      const gchar * const           *languages);
 
-WEBKIT_API void
+WEBKIT_DEPRECATED_FOR(webkit_website_data_manager_set_tls_errors_policy) void
 webkit_web_context_set_tls_errors_policy            (WebKitWebContext              *context,
                                                      WebKitTLSErrorsPolicy          policy);
 
-WEBKIT_API WebKitTLSErrorsPolicy
+WEBKIT_DEPRECATED_FOR(webkit_website_data_manager_get_tls_errors_policy) WebKitTLSErrorsPolicy
 webkit_web_context_get_tls_errors_policy            (WebKitWebContext              *context);
 
 WEBKIT_API void
@@ -317,6 +288,17 @@ webkit_web_context_initialize_notification_permissions
                                                     (WebKitWebContext              *context,
                                                      GList                         *allowed_origins,
                                                      GList                         *disallowed_origins);
+
+WEBKIT_API void
+webkit_web_context_send_message_to_all_extensions   (WebKitWebContext              *context,
+                                                     WebKitUserMessage             *message);
+
+WEBKIT_API void
+webkit_web_context_set_use_system_appearance_for_scrollbars (WebKitWebContext      *context,
+                                                             gboolean               enabled);
+
+WEBKIT_API gboolean
+webkit_web_context_get_use_system_appearance_for_scrollbars (WebKitWebContext      *context);
 
 G_END_DECLS
 

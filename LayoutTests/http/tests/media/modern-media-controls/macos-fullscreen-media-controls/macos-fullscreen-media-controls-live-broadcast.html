@@ -15,9 +15,7 @@ const media = document.querySelector("video");
 const mediaController = createControls(shadowRoot, media, null);
 
 media.addEventListener("webkitfullscreenchange", () => {
-    if (!media.webkitDisplayingFullscreen)
-        return;
-
+    shouldBeTrue("media.webkitDisplayingFullscreen");
     shouldBecomeEqual("media.duration", "Number.POSITIVE_INFINITY", () => {
         shouldBeFalse("mediaController.controls.rewindButton.enabled");
         shouldBeFalse("mediaController.controls.forwardButton.enabled");

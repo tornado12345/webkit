@@ -48,6 +48,8 @@ NSString * const _WKWebsiteDataTypeHSTSCache = @"_WKWebsiteDataTypeHSTSCache";
 NSString * const _WKWebsiteDataTypeSearchFieldRecentSearches = @"_WKWebsiteDataTypeSearchFieldRecentSearches";
 NSString * const _WKWebsiteDataTypeResourceLoadStatistics = @"_WKWebsiteDataTypeResourceLoadStatistics";
 NSString * const _WKWebsiteDataTypeCredentials = @"_WKWebsiteDataTypeCredentials";
+NSString * const _WKWebsiteDataTypeAdClickAttributions = @"_WKWebsiteDataTypeAdClickAttributions";
+NSString * const _WKWebsiteDataTypeAlternativeServices = @"_WKWebsiteDataTypeAlternativeServices";
 
 #if PLATFORM(MAC)
 NSString * const _WKWebsiteDataTypePlugInData = @"_WKWebsiteDataTypePlugInData";
@@ -100,6 +102,10 @@ static NSString *dataTypesToString(NSSet *dataTypes)
         [array addObject:@"Resource Load Statistics"];
     if ([dataTypes containsObject:_WKWebsiteDataTypeCredentials])
         [array addObject:@"Credentials"];
+    if ([dataTypes containsObject:_WKWebsiteDataTypeAdClickAttributions])
+        [array addObject:@"Ad Click Attributions"];
+    if ([dataTypes containsObject:_WKWebsiteDataTypeAlternativeServices])
+        [array addObject:@"Alternative Services"];
 
     return [array componentsJoinedByString:@", "];
 }
@@ -148,11 +154,9 @@ static NSString *dataTypesToString(NSSet *dataTypes)
 
 - (NSArray<NSString *> *)_originsStrings
 {
-    auto origins = _websiteDataRecord->websiteDataRecord().origins;
-    NSMutableArray<NSString *> *array = [[NSMutableArray alloc] initWithCapacity:origins.size()];
-    for (auto& origin : origins)
-        [array addObject:(NSString *)origin.toString()];
-    return [array autorelease];
+    return createNSArray(_websiteDataRecord->websiteDataRecord().origins, [] (auto& origin) -> NSString * {
+        return origin.toString();
+    }).autorelease();
 }
 
 @end

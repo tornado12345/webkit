@@ -27,24 +27,28 @@ WI.SourcesTabContentView = class SourcesTabContentView extends WI.ContentBrowser
 {
     constructor()
     {
-        let tabBarItem = WI.GeneralTabBarItem.fromTabInfo(WI.SourcesTabContentView.tabInfo());
-        const detailsSidebarPanelConstructors = [WI.ResourceDetailsSidebarPanel, WI.ScopeChainDetailsSidebarPanel, WI.ProbeDetailsSidebarPanel];
-        super("sources", ["sources"], tabBarItem, WI.SourcesNavigationSidebarPanel, detailsSidebarPanelConstructors);
+        super(SourcesTabContentView.tabInfo(), {
+            navigationSidebarPanelConstructor: WI.SourcesNavigationSidebarPanel,
+            detailsSidebarPanelConstructors: [
+                WI.ResourceDetailsSidebarPanel,
+                WI.ScopeChainDetailsSidebarPanel,
+                WI.ProbeDetailsSidebarPanel,
+            ],
+        });
 
         this._showScopeChainDetailsSidebarPanel = false;
+
+        WI.debuggerManager.addEventListener(WI.DebuggerManager.Event.Paused, this._handleDebuggerPaused, this);
+        WI.debuggerManager.addEventListener(WI.DebuggerManager.Event.Resumed, this._handleDebuggerResumed, this);
     }
 
     static tabInfo()
     {
         return {
-            image: "Images/Sources.svg",
-            title: WI.UIString("Sources"),
+            identifier: SourcesTabContentView.Type,
+            image: WI.debuggerManager.paused ? "Images/SourcesPaused.svg" : "Images/Sources.svg",
+            displayName: WI.UIString("Sources", "Sources Tab Name", "Name of Sources Tab"),
         };
-    }
-
-    static isTabAllowed()
-    {
-        return !!WI.settings.experimentalEnableSourcesTab.value;
     }
 
     // Public
@@ -69,6 +73,7 @@ WI.SourcesTabContentView = class SourcesTabContentView extends WI.ContentBrowser
             || representedObject instanceof WI.ScriptCollection
             || representedObject instanceof WI.CSSStyleSheet
             || representedObject instanceof WI.CSSStyleSheetCollection
+            || representedObject instanceof WI.LocalResourceOverride
             || super.canShowRepresentedObject(representedObject);
     }
 
@@ -83,12 +88,8 @@ WI.SourcesTabContentView = class SourcesTabContentView extends WI.ContentBrowser
         if (!scopeChainDetailsSidebarPanel)
             return;
 
-        let sidebar = scopeChainDetailsSidebarPanel.parentSidebar;
-        if (!sidebar)
-            return;
-
-        sidebar.selectedSidebarPanel = scopeChainDetailsSidebarPanel;
-        sidebar.collapsed = false;
+        WI.detailsSidebar.selectedSidebarPanel = scopeChainDetailsSidebarPanel;
+        WI.detailsSidebar.collapsed = false;
 
         this._showScopeChainDetailsSidebarPanel = false;
     }
@@ -105,6 +106,24 @@ WI.SourcesTabContentView = class SourcesTabContentView extends WI.ContentBrowser
         let treeElement = this.navigationSidebarPanel.treeElementForRepresentedObject(breakpoint);
         if (treeElement)
             treeElement.revealAndSelect();
+    }
+
+    handleCopyEvent(event)
+    {
+        if (this.navigationSidebarPanel.element.contains(WI.currentFocusElement))
+            this.navigationSidebarPanel.handleCopyEvent(event);
+    }
+
+    // Private
+
+    _handleDebuggerPaused(event)
+    {
+        this.tabBarItem.image = "Images/SourcesPaused.svg";
+    }
+
+    _handleDebuggerResumed(event)
+    {
+        this.tabBarItem.image = "Images/Sources.svg";
     }
 };
 

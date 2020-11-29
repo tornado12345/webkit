@@ -56,7 +56,7 @@
 - (NSString *)action
 {
     WebCore::JSMainThreadNullState state;
-    return IMPL->getURLAttribute(WebCore::HTMLNames::actionAttr);
+    return IMPL->getURLAttribute(WebCore::HTMLNames::actionAttr).string();
 }
 
 - (void)setAction:(NSString *)newAction
@@ -186,3 +186,5 @@ DOMHTMLFormElement *kit(WebCore::HTMLFormElement* value)
     WebCoreThreadViolationCheckRoundOne();
     return static_cast<DOMHTMLFormElement*>(kit(static_cast<WebCore::Node*>(value)));
 }
+
+#undef IMPL

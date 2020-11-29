@@ -60,16 +60,16 @@ SOFT_LINK_CLASS(QuickLookUI, QLPreviewMenuItem)
 
 @implementation WKImmediateActionController
 
-- (instancetype)initWithPage:(WebKit::WebPageProxy&)page view:(NSView *)view viewImpl:(WebKit::WebViewImpl&)viewImpl recognizer:(NSImmediateActionGestureRecognizer *)immediateActionRecognizer
+- (instancetype)initWithPage:(NakedRef<WebKit::WebPageProxy>)page view:(NSView *)view viewImpl:(NakedRef<WebKit::WebViewImpl>)viewImpl recognizer:(NSImmediateActionGestureRecognizer *)immediateActionRecognizer
 {
     self = [super init];
 
     if (!self)
         return nil;
 
-    _page = &page;
+    _page = page.ptr();
     _view = view;
-    _viewImpl = &viewImpl;
+    _viewImpl = viewImpl.ptr();
     _type = kWKImmediateActionNone;
     _immediateActionRecognizer = immediateActionRecognizer;
     _hasActiveImmediateAction = NO;
@@ -193,7 +193,7 @@ SOFT_LINK_CLASS(QuickLookUI, QLPreviewMenuItem)
     // FIXME: Connection can be null if the process is closed; we should clean up better in that case.
     if (_state == WebKit::ImmediateActionState::Pending) {
         if (auto* connection = _page->process().connection()) {
-            bool receivedReply = connection->waitForAndDispatchImmediately<Messages::WebPageProxy::DidPerformImmediateActionHitTest>(_page->pageID(), Seconds::fromMilliseconds(500));
+            bool receivedReply = connection->waitForAndDispatchImmediately<Messages::WebPageProxy::DidPerformImmediateActionHitTest>(_page->webPageID(), Seconds::fromMilliseconds(500));
             if (!receivedReply)
                 _state = WebKit::ImmediateActionState::TimedOut;
         }
@@ -276,6 +276,11 @@ SOFT_LINK_CLASS(QuickLookUI, QLPreviewMenuItem)
 
     String absoluteLinkURL = hitTestResult->absoluteLinkURL();
     if (!absoluteLinkURL.isEmpty()) {
+        if (WTF::protocolIs(absoluteLinkURL, "file")) {
+            _type = kWKImmediateActionNone;
+            return nil;
+        }
+
         if (WTF::protocolIs(absoluteLinkURL, "mailto")) {
             _type = kWKImmediateActionMailtoLink;
             return [self _animationControllerForDataDetectedLink];
@@ -328,6 +333,11 @@ SOFT_LINK_CLASS(QuickLookUI, QLPreviewMenuItem)
     }
 
     RefPtr<API::HitTestResult> hitTestResult = [self _webHitTestResult];
+    if (!hitTestResult) {
+        [self _cancelImmediateAction];
+        return;
+    }
+
     id customClientAnimationController = _page->immediateActionAnimationControllerForHitTestResult(hitTestResult, _type, _userData);
     if (customClientAnimationController == [NSNull null]) {
         [self _cancelImmediateAction];
@@ -353,6 +363,9 @@ SOFT_LINK_CLASS(QuickLookUI, QLPreviewMenuItem)
         return nil;
 
     RefPtr<API::HitTestResult> hitTestResult = [self _webHitTestResult];
+    if (!hitTestResult)
+        return nil;
+
     return [NSURL _web_URLWithWTFString:hitTestResult->absoluteLinkURL()];
 }
 
@@ -372,6 +385,9 @@ SOFT_LINK_CLASS(QuickLookUI, QLPreviewMenuItem)
         return NSZeroRect;
 
     RefPtr<API::HitTestResult> hitTestResult = [self _webHitTestResult];
+    if (!hitTestResult)
+        return NSZeroRect;
+
     return [_view convertRect:hitTestResult->elementBoundingBox() toView:nil];
 }
 
@@ -401,7 +417,7 @@ SOFT_LINK_CLASS(QuickLookUI, QLPreviewMenuItem)
     if (![[getDDActionsManagerClass() sharedManager] hasActionsForResult:actionContext.mainResult actionContext:actionContext])
         return nil;
 
-    RefPtr<WebKit::WebPageProxy> page = _page;
+    RefPtr<WebKit::WebPageProxy> page = _page.get();
     WebCore::PageOverlay::PageOverlayID overlayID = _hitTestResultData.detectedDataOriginatingPageOverlay;
     _currentActionContext = [actionContext contextForView:_view altMode:YES interactionStartedHandler:^() {
         page->send(Messages::WebPage::DataDetectorsDidPresentUI(overlayID));
@@ -437,7 +453,7 @@ SOFT_LINK_CLASS(QuickLookUI, QLPreviewMenuItem)
     [actionContext setAltMode:YES];
     [actionContext setImmediate:YES];
 
-    RefPtr<WebKit::WebPageProxy> page = _page;
+    RefPtr<WebKit::WebPageProxy> page = _page.get();
     _currentActionContext = [actionContext contextForView:_view altMode:YES interactionStartedHandler:^() {
     } interactionChangedHandler:^() {
         if (_hitTestResultData.linkTextIndicator)
@@ -449,6 +465,9 @@ SOFT_LINK_CLASS(QuickLookUI, QLPreviewMenuItem)
     [_currentActionContext setHighlightFrame:[_view.window convertRectToScreen:[_view convertRect:_hitTestResultData.elementBoundingBox toView:nil]]];
 
     RefPtr<API::HitTestResult> hitTestResult = [self _webHitTestResult];
+    if (!hitTestResult)
+        return nil;
+
     NSArray *menuItems = [[getDDActionsManagerClass() sharedManager] menuItemsForTargetURL:hitTestResult->absoluteLinkURL() actionContext:_currentActionContext.get()];
 
     if (menuItems.count != 1)

@@ -31,22 +31,9 @@
 #import "Test.h"
 #import "TestNavigationDelegate.h"
 #import "TestWKWebView.h"
+#import "UIKitSPI.h"
 #import <WebKit/WebKit.h>
 #import <wtf/RetainPtr.h>
-
-static UIView *recursiveFindWKContentView(UIView *view)
-{
-    if ([view isKindOfClass:NSClassFromString(@"WKContentView")])
-        return view;
-
-    for (UIView *subview in view.subviews) {
-        UIView *contentView = recursiveFindWKContentView(subview);
-        if (contentView)
-            return contentView;
-    }
-
-    return nil;
-}
 
 TEST(WebKit, WKContentViewEditingActions)
 {
@@ -58,7 +45,7 @@ TEST(WebKit, WKContentViewEditingActions)
 
     [webView stringByEvaluatingJavaScript:@"selectPlainText()"];
 
-    UIView *contentView = recursiveFindWKContentView(webView.get());
+    UIView *contentView = [webView wkContentView];
 
     __block bool done = false;
 
@@ -74,6 +61,14 @@ TEST(WebKit, WKContentViewEditingActions)
     TestWebKitAPI::Util::run(&done);
 
     EXPECT_WK_STREQ("Hello world", [[UIPasteboard generalPasteboard] string]);
+}
+
+TEST(WebKit, InvokeShareWithoutSelection)
+{
+    auto webView = adoptNS([[TestWKWebView alloc] initWithFrame:CGRectMake(0, 0, 320, 568)]);
+    [webView synchronouslyLoadTestPageNamed:@"simple"];
+    [[webView textInputContentView] _share:nil];
+    [webView waitForNextPresentationUpdate];
 }
 
 #endif

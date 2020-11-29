@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2018 Metrological Group B.V.
+ * Copyright (C) 2020 Igalia S.L.
  * Author: Thibault Saunier <tsaunier@igalia.com>
  * Author: Alejandro G. Castro  <alex@igalia.com>
  *
@@ -21,7 +22,7 @@
 
 #include "config.h"
 
-#if ENABLE(MEDIA_STREAM) && USE(LIBWEBRTC) && USE(GSTREAMER)
+#if ENABLE(MEDIA_STREAM) && USE(GSTREAMER)
 #include "GStreamerVideoCapturer.h"
 
 namespace WebCore {
@@ -38,8 +39,8 @@ GStreamerVideoCapturer::GStreamerVideoCapturer(const char* sourceFactory)
 
 GstElement* GStreamerVideoCapturer::createConverter()
 {
-    auto converter = gst_parse_bin_from_description("videoscale ! videoconvert ! videorate", TRUE, nullptr);
-
+    // https://gitlab.freedesktop.org/gstreamer/gst-plugins-base/issues/97#note_56575
+    auto converter = gst_parse_bin_from_description("videoscale ! videoconvert ! videorate drop-only=1 average-period=1", TRUE, nullptr);
     ASSERT(converter);
 
     return converter;
@@ -99,4 +100,4 @@ bool GStreamerVideoCapturer::setFrameRate(double frameRate)
 
 } // namespace WebCore
 
-#endif // ENABLE(MEDIA_STREAM) && USE(LIBWEBRTC) && USE(GSTREAMER)
+#endif // ENABLE(MEDIA_STREAM) && USE(GSTREAMER)

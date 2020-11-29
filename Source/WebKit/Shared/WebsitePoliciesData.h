@@ -27,9 +27,15 @@
 
 #include "WebsiteAutoplayPolicy.h"
 #include "WebsiteAutoplayQuirk.h"
-#include "WebsiteDataStoreParameters.h"
+#include "WebsiteLegacyOverflowScrollingTouchPolicy.h"
+#include "WebsiteMediaSourcePolicy.h"
+#include "WebsiteMetaViewportPolicy.h"
 #include "WebsitePopUpPolicy.h"
-#include <WebCore/HTTPHeaderField.h>
+#include "WebsiteSimulatedMouseEventsDispatchPolicy.h"
+#include <WebCore/CustomHeaderFields.h>
+#include <WebCore/DeviceOrientationOrMotionPermissionState.h>
+#include <WebCore/DocumentLoader.h>
+#include <WebCore/FrameLoaderTypes.h>
 #include <wtf/OptionSet.h>
 
 namespace IPC {
@@ -47,15 +53,24 @@ struct WebsitePoliciesData {
     static void applyToDocumentLoader(WebsitePoliciesData&&, WebCore::DocumentLoader&);
 
     bool contentBlockersEnabled { true };
-    bool deviceOrientationEventEnabled { true };
     OptionSet<WebsiteAutoplayQuirk> allowedAutoplayQuirks;
     WebsiteAutoplayPolicy autoplayPolicy { WebsiteAutoplayPolicy::Default };
-    Vector<WebCore::HTTPHeaderField> customHeaderFields;
+#if ENABLE(DEVICE_ORIENTATION)
+    WebCore::DeviceOrientationOrMotionPermissionState deviceOrientationAndMotionAccessState;
+#endif
+    Vector<WebCore::CustomHeaderFields> customHeaderFields;
     WebsitePopUpPolicy popUpPolicy { WebsitePopUpPolicy::Default };
-    Optional<WebsiteDataStoreParameters> websiteDataStoreParameters;
     String customUserAgent;
-    String customJavaScriptUserAgentAsSiteSpecificQuirks;
+    String customUserAgentAsSiteSpecificQuirks;
     String customNavigatorPlatform;
+    WebsiteMetaViewportPolicy metaViewportPolicy { WebsiteMetaViewportPolicy::Default };
+    WebsiteMediaSourcePolicy mediaSourcePolicy { WebsiteMediaSourcePolicy::Default };
+    WebsiteSimulatedMouseEventsDispatchPolicy simulatedMouseEventsDispatchPolicy { WebsiteSimulatedMouseEventsDispatchPolicy::Default };
+    WebsiteLegacyOverflowScrollingTouchPolicy legacyOverflowScrollingTouchPolicy { WebsiteLegacyOverflowScrollingTouchPolicy::Default };
+    bool allowContentChangeObserverQuirk { false };
+    WebCore::AllowsContentJavaScript allowsContentJavaScript { WebCore::AllowsContentJavaScript::Yes };
+    WebCore::MouseEventPolicy mouseEventPolicy { WebCore::MouseEventPolicy::Default };
+    bool idempotentModeAutosizingOnlyHonorsPercentages { false };
 
     void encode(IPC::Encoder&) const;
     static Optional<WebsitePoliciesData> decode(IPC::Decoder&);

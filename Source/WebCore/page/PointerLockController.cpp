@@ -34,13 +34,9 @@
 #include "EventNames.h"
 #include "Page.h"
 #include "PlatformMouseEvent.h"
-#include "RuntimeEnabledFeatures.h"
+#include "PointerCaptureController.h"
 #include "UserGestureIndicator.h"
 #include "VoidCallback.h"
-
-#if ENABLE(POINTER_EVENTS)
-#include "PointerCaptureController.h"
-#endif
 
 namespace WebCore {
 
@@ -75,9 +71,7 @@ void PointerLockController::requestPointerLock(Element* target)
         }
         m_element = target;
         enqueueEvent(eventNames().pointerlockchangeEvent, target);
-#if ENABLE(POINTER_EVENTS)
         m_page.pointerCaptureController().pointerLockWasApplied();
-#endif
     } else {
         m_lockPending = true;
         m_element = target;
@@ -182,7 +176,7 @@ void PointerLockController::didLosePointerLock()
     }
 }
 
-void PointerLockController::dispatchLockedMouseEvent(const PlatformMouseEvent& event, const AtomicString& eventType)
+void PointerLockController::dispatchLockedMouseEvent(const PlatformMouseEvent& event, const AtomString& eventType)
 {
     if (!m_element || !m_element->document().frame())
         return;
@@ -208,16 +202,17 @@ void PointerLockController::clearElement()
     m_element = nullptr;
 }
 
-void PointerLockController::enqueueEvent(const AtomicString& type, Element* element)
+void PointerLockController::enqueueEvent(const AtomString& type, Element* element)
 {
     if (element)
         enqueueEvent(type, &element->document());
 }
 
-void PointerLockController::enqueueEvent(const AtomicString& type, Document* document)
+void PointerLockController::enqueueEvent(const AtomString& type, Document* document)
 {
-    if (document)
-        document->enqueueDocumentEvent(Event::create(type, Event::CanBubble::Yes, Event::IsCancelable::No));
+    // FIXME: Spec doesn't specify which task source use.
+    if (auto protectedDocument = makeRefPtr(document))
+        protectedDocument->queueTaskToDispatchEvent(TaskSource::UserInteraction, Event::create(type, Event::CanBubble::Yes, Event::IsCancelable::No));
 }
 
 } // namespace WebCore

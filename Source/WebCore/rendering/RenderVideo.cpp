@@ -65,8 +65,15 @@ RenderVideo::~RenderVideo()
 void RenderVideo::willBeDestroyed()
 {
     visibleInViewportStateChanged();
+
+#if ENABLE(VIDEO_PRESENTATION_MODE)
+    auto player = videoElement().player();
+    if (player && videoElement().webkitPresentationMode() != HTMLVideoElement::VideoPresentationMode::PictureInPicture)
+        player->setVisible(false);
+#else
     if (auto player = videoElement().player())
         player->setVisible(false);
+#endif
 
     RenderMedia::willBeDestroyed();
 }
@@ -101,6 +108,10 @@ bool RenderVideo::updateIntrinsicSize()
     if (size.isEmpty() && document().isMediaDocument())
         return false;
 
+    // Treat the media player's natural size as visually non-empty.
+    if (videoElement().readyState() >= HTMLMediaElementEnums::HAVE_METADATA)
+        incrementVisuallyNonEmptyPixelCountIfNeeded(roundedIntSize(size));
+
     if (size == intrinsicSize())
         return false;
 
@@ -109,7 +120,7 @@ bool RenderVideo::updateIntrinsicSize()
     setNeedsLayout();
     return true;
 }
-    
+
 LayoutSize RenderVideo::calculateIntrinsicSize()
 {
     // Spec text from 4.8.6
@@ -200,6 +211,12 @@ void RenderVideo::paintReplaced(PaintInfo& paintInfo, const LayoutPoint& paintOf
     LayoutRect contentRect = contentBoxRect();
     contentRect.moveBy(paintOffset);
     GraphicsContext& context = paintInfo.context();
+
+    if (context.detectingContentfulPaint()) {
+        context.setContentfulPaintDetected();
+        return;
+    }
+
     bool clip = !contentRect.contains(rect);
     GraphicsContextStateSaver stateSaver(context, clip);
     if (clip)
@@ -209,7 +226,7 @@ void RenderVideo::paintReplaced(PaintInfo& paintInfo, const LayoutPoint& paintOf
         paintIntoRect(paintInfo, rect);
     else if (!videoElement().isFullscreen() || !mediaPlayer->supportsAcceleratedRendering()) {
         if (paintInfo.paintBehavior.contains(PaintBehavior::FlattenCompositingLayers))
-            mediaPlayer->paintCurrentFrameInContext(context, rect);
+            context.paintFrameForMedia(*mediaPlayer, rect);
         else
             mediaPlayer->paint(context, rect);
     }

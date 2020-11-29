@@ -37,7 +37,6 @@
 #import <AVFoundation/AVAudioMix.h>
 #import <AVFoundation/AVMediaFormat.h>
 #import <AVFoundation/AVPlayerItem.h>
-#import <mutex>
 #import <objc/runtime.h>
 #import <pal/avfoundation/MediaTimeAVFoundation.h>
 #import <wtf/Lock.h>
@@ -48,14 +47,10 @@
 #endif
 
 #import <pal/cf/CoreMediaSoftLink.h>
+#import <pal/cocoa/AVFoundationSoftLink.h>
 
-SOFT_LINK_FRAMEWORK(AVFoundation)
 SOFT_LINK_FRAMEWORK(MediaToolbox)
 SOFT_LINK_FRAMEWORK(AudioToolbox)
-
-SOFT_LINK_CLASS(AVFoundation, AVPlayerItem)
-SOFT_LINK_CLASS(AVFoundation, AVMutableAudioMix)
-SOFT_LINK_CLASS(AVFoundation, AVMutableAudioMixInputParameters)
 
 SOFT_LINK(AudioToolbox, AudioConverterConvertComplexBuffer, OSStatus, (AudioConverterRef inAudioConverter, UInt32 inNumberPCMFrames, const AudioBufferList* inInputData, AudioBufferList* outOutputData), (inAudioConverter, inNumberPCMFrames, inInputData, outOutputData))
 SOFT_LINK(AudioToolbox, AudioConverterNew, OSStatus, (const AudioStreamBasicDescription* inSourceFormat, const AudioStreamBasicDescription* inDestinationFormat, AudioConverterRef* outAudioConverter), (inSourceFormat, inDestinationFormat, outAudioConverter))
@@ -73,7 +68,7 @@ class AudioSourceProviderAVFObjC::TapStorage : public ThreadSafeRefCounted<Audio
 public:
     TapStorage(AudioSourceProviderAVFObjC* _this) : _this(_this) { }
     AudioSourceProviderAVFObjC* _this;
-    Lock mutex;
+    Lock lock;
 };
 
 RefPtr<AudioSourceProviderAVFObjC> AudioSourceProviderAVFObjC::create(AVPlayerItem *item)
@@ -92,15 +87,16 @@ AudioSourceProviderAVFObjC::~AudioSourceProviderAVFObjC()
 {
     setClient(nullptr);
     if (m_tapStorage) {
-        std::lock_guard<Lock> lock(m_tapStorage->mutex);
+        auto locker = holdLock(m_tapStorage->lock);
         m_tapStorage->_this = nullptr;
-        m_tapStorage = nullptr;
     }
+
+    m_tapStorage = nullptr;
 }
 
 void AudioSourceProviderAVFObjC::provideInput(AudioBus* bus, size_t framesToProcess)
 {
-    // Protect access to m_ringBuffer by try_locking the mutex. If we failed
+    // Protect access to m_ringBuffer by using tryHoldLock(). If we failed
     // to aquire, a re-configure is underway, and m_ringBuffer is unsafe to access.
     // Emit silence.
     if (!m_tapStorage) {
@@ -108,8 +104,8 @@ void AudioSourceProviderAVFObjC::provideInput(AudioBus* bus, size_t framesToProc
         return;
     }
 
-    std::unique_lock<Lock> lock(m_tapStorage->mutex, std::try_to_lock);
-    if (!lock.owns_lock() || !m_ringBuffer) {
+    auto locker = tryHoldLock(m_tapStorage->lock);
+    if (!locker || !m_ringBuffer) {
         bus->zero();
         return;
     }
@@ -207,7 +203,7 @@ void AudioSourceProviderAVFObjC::createMix()
     ASSERT(m_avPlayerItem);
     ASSERT(m_client);
 
-    m_avAudioMix = adoptNS([allocAVMutableAudioMixInstance() init]);
+    m_avAudioMix = adoptNS([PAL::allocAVMutableAudioMixInstance() init]);
 
     MTAudioProcessingTapCallbacks callbacks = {
         0,
@@ -220,11 +216,15 @@ void AudioSourceProviderAVFObjC::createMix()
     };
 
     MTAudioProcessingTapRef tap = nullptr;
-    MTAudioProcessingTapCreate(kCFAllocatorDefault, &callbacks, 1, &tap);
+    OSStatus status = MTAudioProcessingTapCreate(kCFAllocatorDefault, &callbacks, 1, &tap);
     ASSERT(tap);
     ASSERT(m_tap == tap);
+    if (status != noErr) {
+        m_tap = nullptr;
+        return;
+    }
 
-    RetainPtr<AVMutableAudioMixInputParameters> parameters = adoptNS([allocAVMutableAudioMixInputParametersInstance() init]);
+    RetainPtr<AVMutableAudioMixInputParameters> parameters = adoptNS([PAL::allocAVMutableAudioMixInputParametersInstance() init]);
     [parameters setAudioTapProcessor:m_tap.get()];
 
     CMPersistentTrackID trackID = m_avAssetTrack.get().trackID;
@@ -253,7 +253,7 @@ void AudioSourceProviderAVFObjC::finalizeCallback(MTAudioProcessingTapRef tap)
     TapStorage* tapStorage = static_cast<TapStorage*>(MTAudioProcessingTapGetStorage(tap));
 
     {
-        std::lock_guard<Lock> lock(tapStorage->mutex);
+        auto locker = holdLock(tapStorage->lock);
         if (tapStorage->_this)
             tapStorage->_this->finalize();
     }
@@ -265,7 +265,7 @@ void AudioSourceProviderAVFObjC::prepareCallback(MTAudioProcessingTapRef tap, CM
     ASSERT(tap);
     TapStorage* tapStorage = static_cast<TapStorage*>(MTAudioProcessingTapGetStorage(tap));
 
-    std::lock_guard<Lock> lock(tapStorage->mutex);
+    auto locker = holdLock(tapStorage->lock);
 
     if (tapStorage->_this)
         tapStorage->_this->prepare(maxFrames, processingFormat);
@@ -276,7 +276,7 @@ void AudioSourceProviderAVFObjC::unprepareCallback(MTAudioProcessingTapRef tap)
     ASSERT(tap);
     TapStorage* tapStorage = static_cast<TapStorage*>(MTAudioProcessingTapGetStorage(tap));
 
-    std::lock_guard<Lock> lock(tapStorage->mutex);
+    auto locker = holdLock(tapStorage->lock);
 
     if (tapStorage->_this)
         tapStorage->_this->unprepare();
@@ -287,7 +287,7 @@ void AudioSourceProviderAVFObjC::processCallback(MTAudioProcessingTapRef tap, CM
     ASSERT(tap);
     TapStorage* tapStorage = static_cast<TapStorage*>(MTAudioProcessingTapGetStorage(tap));
 
-    std::lock_guard<Lock> lock(tapStorage->mutex);
+    auto locker = holdLock(tapStorage->lock);
 
     if (tapStorage->_this)
         tapStorage->_this->process(tap, numberFrames, flags, bufferListInOut, numberFramesOut, flagsOut);
@@ -312,12 +312,12 @@ void AudioSourceProviderAVFObjC::prepare(CMItemCount maxFrames, const AudioStrea
 {
     ASSERT(maxFrames >= 0);
 
-    m_tapDescription = std::make_unique<AudioStreamBasicDescription>(*processingFormat);
+    m_tapDescription = makeUniqueWithoutFastMallocCheck<AudioStreamBasicDescription>(*processingFormat);
     int numberOfChannels = processingFormat->mChannelsPerFrame;
     double sampleRate = processingFormat->mSampleRate;
     ASSERT(sampleRate >= 0);
 
-    m_outputDescription = std::make_unique<AudioStreamBasicDescription>();
+    m_outputDescription = makeUniqueWithoutFastMallocCheck<AudioStreamBasicDescription>();
     m_outputDescription->mSampleRate = sampleRate;
     m_outputDescription->mFormatID = kAudioFormatLinearPCM;
     m_outputDescription->mFormatFlags = kAudioFormatFlagsNativeFloatPacked;
@@ -337,8 +337,13 @@ void AudioSourceProviderAVFObjC::prepare(CMItemCount maxFrames, const AudioStrea
     // Make the ringbuffer large enough to store at least two callbacks worth of audio, or 1s, whichever is larger.
     size_t capacity = std::max(static_cast<size_t>(2 * maxFrames), static_cast<size_t>(kRingBufferDuration * sampleRate));
 
-    m_ringBuffer = std::make_unique<CARingBuffer>();
-    m_ringBuffer->allocate(CAAudioStreamDescription(*processingFormat), capacity);
+    CAAudioStreamDescription description { *processingFormat };
+    if (m_ringBufferCallback)
+        m_ringBuffer = m_ringBufferCallback(description, capacity).moveToUniquePtr();
+    else {
+        m_ringBuffer = makeUnique<CARingBuffer>();
+        m_ringBuffer->allocate(description, capacity);
+    }
 
     // AudioBufferList is a variable-length struct, so create on the heap with a generic new() operator
     // with a custom size, and initialize the struct manually.
@@ -419,6 +424,21 @@ void AudioSourceProviderAVFObjC::process(MTAudioProcessingTapRef tap, CMItemCoun
         memset(buffer.mData, 0, buffer.mDataByteSize);
     }
     *numberFramesOut = 0;
+
+    if (m_audioCallback)
+        m_audioCallback(endFrame, itemCount);
+}
+
+void AudioSourceProviderAVFObjC::setAudioCallback(AudioCallback&& callback)
+{
+    ASSERT(!m_avAudioMix);
+    m_audioCallback = WTFMove(callback);
+}
+
+void AudioSourceProviderAVFObjC::setRingBufferCreationCallback(RingBufferCreationCallback&& callback)
+{
+    ASSERT(!m_avAudioMix);
+    m_ringBufferCallback = WTFMove(callback);
 }
 
 }

@@ -40,24 +40,27 @@ namespace WebCore {
 
 static const Seconds overflowScrollbarsAnimationDuration { 1_s };
 static const Seconds overflowScrollbarsAnimationHideDelay { 2_s };
-static const Seconds scrollCaptureThreshold { 150_ms };
 
 std::unique_ptr<ScrollAnimator> ScrollAnimator::create(ScrollableArea& scrollableArea)
 {
-    return std::make_unique<ScrollAnimatorGeneric>(scrollableArea);
+    return makeUnique<ScrollAnimatorGeneric>(scrollableArea);
 }
 
 ScrollAnimatorGeneric::ScrollAnimatorGeneric(ScrollableArea& scrollableArea)
     : ScrollAnimator(scrollableArea)
     , m_overlayScrollbarAnimationTimer(*this, &ScrollAnimatorGeneric::overlayScrollbarAnimationTimerFired)
 {
-    m_kineticAnimation = std::make_unique<ScrollAnimationKinetic>(m_scrollableArea, [this](FloatPoint&& position) {
+    m_kineticAnimation = makeUnique<ScrollAnimationKinetic>(
+        [this]() -> ScrollExtents {
+            return { m_scrollableArea.minimumScrollPosition(), m_scrollableArea.maximumScrollPosition(), m_scrollableArea.visibleSize() };
+        },
+        [this](FloatPoint&& position) {
 #if ENABLE(SMOOTH_SCROLLING)
-        if (m_smoothAnimation)
-            m_smoothAnimation->setCurrentPosition(position);
+            if (m_smoothAnimation)
+                m_smoothAnimation->setCurrentPosition(position);
 #endif
-        updatePosition(WTFMove(position));
-    });
+            updatePosition(WTFMove(position));
+        });
 
 #if ENABLE(SMOOTH_SCROLLING)
     if (scrollableArea.scrollAnimatorEnabled())
@@ -70,12 +73,23 @@ ScrollAnimatorGeneric::~ScrollAnimatorGeneric() = default;
 #if ENABLE(SMOOTH_SCROLLING)
 void ScrollAnimatorGeneric::ensureSmoothScrollingAnimation()
 {
-    if (m_smoothAnimation)
+    if (m_smoothAnimation) {
+        if (!m_smoothAnimation->isActive())
+            m_smoothAnimation->setCurrentPosition(m_currentPosition);
         return;
+    }
 
-    m_smoothAnimation = std::make_unique<ScrollAnimationSmooth>(m_scrollableArea, m_currentPosition, [this](FloatPoint&& position) {
-        updatePosition(WTFMove(position));
-    });
+    m_smoothAnimation = makeUnique<ScrollAnimationSmooth>(
+        [this]() -> ScrollExtents {
+            return { m_scrollableArea.minimumScrollPosition(), m_scrollableArea.maximumScrollPosition(), m_scrollableArea.visibleSize() };
+        },
+        m_currentPosition,
+        [this](FloatPoint&& position) {
+            updatePosition(WTFMove(position));
+        },
+        [this] {
+            m_scrollableArea.setScrollBehaviorStatus(ScrollBehaviorStatus::NotInAnimation);
+        });
 }
 #endif
 
@@ -94,7 +108,7 @@ void ScrollAnimatorGeneric::scrollToOffsetWithoutAnimation(const FloatPoint& off
 {
     FloatPoint position = ScrollableArea::scrollPositionFromOffset(offset, toFloatSize(m_scrollableArea.scrollOrigin()));
     m_kineticAnimation->stop();
-    m_scrollHistory.clear();
+    m_kineticAnimation->clearScrollHistory();
 
 #if ENABLE(SMOOTH_SCROLLING)
     if (m_smoothAnimation)
@@ -104,56 +118,29 @@ void ScrollAnimatorGeneric::scrollToOffsetWithoutAnimation(const FloatPoint& off
     updatePosition(WTFMove(position));
 }
 
-FloatPoint ScrollAnimatorGeneric::computeVelocity()
-{
-    if (m_scrollHistory.isEmpty())
-        return { };
-
-    auto first = m_scrollHistory[0].timestamp();
-    auto last = m_scrollHistory.rbegin()->timestamp();
-
-    if (last == first)
-        return { };
-
-    FloatPoint accumDelta;
-    for (const auto& scrollEvent : m_scrollHistory)
-        accumDelta += FloatPoint(scrollEvent.deltaX(), scrollEvent.deltaY());
-
-    m_scrollHistory.clear();
-
-    return FloatPoint(accumDelta.x() * -1 / (last - first).value(), accumDelta.y() * -1 / (last - first).value());
-}
-
 bool ScrollAnimatorGeneric::handleWheelEvent(const PlatformWheelEvent& event)
 {
     m_kineticAnimation->stop();
 
-    m_scrollHistory.removeAllMatching([&event] (PlatformWheelEvent& otherEvent) -> bool {
-        return (event.timestamp() - otherEvent.timestamp()) > scrollCaptureThreshold;
-    });
+#if ENABLE(KINETIC_SCROLLING)
+    m_kineticAnimation->appendToScrollHistory(event);
 
-#if ENABLE(ASYNC_SCROLLING)
     if (event.isEndOfNonMomentumScroll()) {
-        // We don't need to add the event to the history as its delta will be (0, 0).
-        static_cast<ScrollAnimationKinetic*>(m_kineticAnimation.get())->start(m_currentPosition, computeVelocity(), m_scrollableArea.horizontalScrollbar(), m_scrollableArea.verticalScrollbar());
+        m_kineticAnimation->start(m_currentPosition, m_kineticAnimation->computeVelocity(), m_scrollableArea.horizontalScrollbar(), m_scrollableArea.verticalScrollbar());
         return true;
     }
     if (event.isTransitioningToMomentumScroll()) {
-        m_scrollHistory.clear();
-        static_cast<ScrollAnimationKinetic*>(m_kineticAnimation.get())->start(m_currentPosition, event.swipeVelocity(), m_scrollableArea.horizontalScrollbar(), m_scrollableArea.verticalScrollbar());
+        m_kineticAnimation->clearScrollHistory();
+        m_kineticAnimation->start(m_currentPosition, event.swipeVelocity(), m_scrollableArea.horizontalScrollbar(), m_scrollableArea.verticalScrollbar());
         return true;
     }
 #endif
-
-    m_scrollHistory.append(event);
 
     return ScrollAnimator::handleWheelEvent(event);
 }
 
 void ScrollAnimatorGeneric::willEndLiveResize()
 {
-    m_kineticAnimation->updateVisibleLengths();
-
 #if ENABLE(SMOOTH_SCROLLING)
     if (m_smoothAnimation)
         m_smoothAnimation->updateVisibleLengths();
@@ -169,8 +156,6 @@ void ScrollAnimatorGeneric::updatePosition(FloatPoint&& position)
 
 void ScrollAnimatorGeneric::didAddVerticalScrollbar(Scrollbar* scrollbar)
 {
-    m_kineticAnimation->updateVisibleLengths();
-
 #if ENABLE(SMOOTH_SCROLLING)
     if (m_smoothAnimation)
         m_smoothAnimation->updateVisibleLengths();
@@ -186,8 +171,6 @@ void ScrollAnimatorGeneric::didAddVerticalScrollbar(Scrollbar* scrollbar)
 
 void ScrollAnimatorGeneric::didAddHorizontalScrollbar(Scrollbar* scrollbar)
 {
-    m_kineticAnimation->updateVisibleLengths();
-
 #if ENABLE(SMOOTH_SCROLLING)
     if (m_smoothAnimation)
         m_smoothAnimation->updateVisibleLengths();

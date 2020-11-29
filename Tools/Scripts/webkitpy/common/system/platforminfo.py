@@ -27,15 +27,26 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import os
+import logging
 import re
 import sys
+import platform
 
-from webkitpy.common.version import Version
+from webkitcorepy import Version
+
+from webkitpy.common.memoized import memoized
 from webkitpy.common.version_name_map import PUBLIC_TABLE, INTERNAL_TABLE, VersionNameMap
-from webkitpy.common.system.executive import Executive
+from webkitpy.common.system.executive import ScriptError
+from webkitpy.port.config import apple_additions
+
+
+_log = logging.getLogger(__name__)
 
 
 class PlatformInfo(object):
+    MAX = 2147483647
+
     """This class provides a consistent (and mockable) interpretation of
     system-specific values (like sys.platform and platform.mac_ver())
     to be used by the rest of the webkitpy code base.
@@ -57,14 +68,20 @@ class PlatformInfo(object):
         self._is_cygwin = sys_module.platform == 'cygwin'
 
         if self.os_name.startswith('mac'):
-            self.os_version = Version.from_string(platform_module.mac_ver()[0])
+            # Work around for <rdar://problem/70069051>
+            if apple_additions() and getattr(apple_additions(), 'os_version', None):
+                self.os_version = apple_additions().os_version(self._executive)
+            else:
+                self.os_version = Version.from_string(self._executive.run_command(['sw_vers', '-productVersion']).rstrip())
         elif self.os_name.startswith('win'):
             self.os_version = self._win_version()
-        elif self.os_name == 'linux' or self.os_name == 'freebsd' or self.os_name == 'openbsd' or self.os_name == 'netbsd':
-            return
         else:
             # Most other platforms (namely iOS) return conforming version strings.
-            self.os_version = Version.from_string(platform_module.release())
+            version = re.search(r'\d+.\d+(.\d+)?', platform_module.release())
+            if version:
+                self.os_version = Version.from_string(version.group(0))
+            else:
+                _log.debug('No OS version number found')
 
     def is_mac(self):
         return self.os_name == 'mac'
@@ -96,6 +113,24 @@ class PlatformInfo(object):
     def is_netbsd(self):
         return self.os_name == 'netbsd'
 
+    @memoized
+    def architecture(self):
+        try:
+            # Windows doesn't have built in uname, nor guarantee of
+            # os.uname()
+            if os.name == 'nt':
+                return platform.uname()[4]
+
+            # os.uname() won't work on embedded devices, we may support multiple architectures for a single embedded platform
+            output = self._executive.run_command(['uname', '-m']).rstrip()
+            if output:
+                if self.is_mac() and output != 'x86_64':
+                    output = 'arm64'
+                return output
+        except ScriptError:
+            pass
+        return os.uname()[4]
+
     def display_name(self):
         # platform.platform() returns Darwin information for Mac, which is just confusing.
         if self.is_mac():
@@ -118,11 +153,11 @@ class PlatformInfo(object):
 
     def total_bytes_memory(self):
         if self.is_mac():
-            return long(self._executive.run_command(["sysctl", "-n", "hw.memsize"]))
+            return int(self._executive.run_command(["sysctl", "-n", "hw.memsize"]))
         return None
 
     def terminal_width(self):
-        """Returns sys.maxint if the width cannot be determined."""
+        """Returns MAX if the width cannot be determined."""
         try:
             if self.is_win():
                 # From http://code.activestate.com/recipes/440694-determine-size-of-console-window-on-windows/
@@ -135,7 +170,7 @@ class PlatformInfo(object):
                     # Note that we return 1 less than the width since writing into the rightmost column
                     # automatically performs a line feed.
                     return right - left
-                return sys.maxint
+                return self.MAX
             else:
                 import fcntl
                 import struct
@@ -144,8 +179,14 @@ class PlatformInfo(object):
                 _, columns, _, _ = struct.unpack('HHHH', packed)
                 return columns
         except:
-            return sys.maxint
+            return self.MAX
 
+    def build_version(self):
+        if self.is_mac():
+            return self._executive.run_command(['/usr/bin/sw_vers', '-buildVersion'], return_stderr=False, ignore_errors=True).rstrip()
+        return None
+
+    @memoized
     def xcode_sdk_version(self, sdk_name):
         if self.is_mac():
             # Assumes that xcrun does not write to standard output on failure (e.g. SDK does not exist).
@@ -160,13 +201,15 @@ class PlatformInfo(object):
         output = self._executive.run_command(['xcrun', 'simctl', 'list'], return_stderr=False)
         return (line for line in output.splitlines())
 
+    @memoized
     def xcode_version(self):
-        if not self.is_mac():
+        if not self.xcode_sdk_version('macosx'):
             raise NotImplementedError
         return Version.from_string(self._executive.run_command(['xcodebuild', '-version']).split()[1])
 
+    @memoized
     def available_sdks(self):
-        if not self.is_mac():
+        if not self.xcode_sdk_version('macosx'):
             return []
 
         XCODE_SDK_REGEX = re.compile('\-sdk (?P<sdk>\D+)\d+\.\d+(?P<specifier>\D*)')

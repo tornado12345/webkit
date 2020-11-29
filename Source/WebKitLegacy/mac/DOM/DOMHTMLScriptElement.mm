@@ -114,7 +114,7 @@
 - (NSString *)src
 {
     WebCore::JSMainThreadNullState state;
-    return IMPL->getURLAttribute(WebCore::HTMLNames::srcAttr);
+    return IMPL->getURLAttribute(WebCore::HTMLNames::srcAttr).string();
 }
 
 - (void)setSrc:(NSString *)newSrc
@@ -166,3 +166,5 @@ DOMHTMLScriptElement *kit(WebCore::HTMLScriptElement* value)
     WebCoreThreadViolationCheckRoundOne();
     return static_cast<DOMHTMLScriptElement*>(kit(static_cast<WebCore::Node*>(value)));
 }
+
+#undef IMPL

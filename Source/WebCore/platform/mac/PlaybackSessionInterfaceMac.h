@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,10 +28,11 @@
 #if PLATFORM(MAC) && ENABLE(VIDEO_PRESENTATION_MODE)
 
 #include "HTMLMediaElementEnums.h"
-#include "PlaybackSessionInterface.h"
 #include "PlaybackSessionModel.h"
 #include <wtf/RefCounted.h>
 #include <wtf/RetainPtr.h>
+#include <wtf/WeakObjCPtr.h>
+#include <wtf/WeakPtr.h>
 #include <wtf/text/WTFString.h>
 
 OBJC_CLASS WebPlaybackControlsManager;
@@ -41,8 +42,7 @@ class IntRect;
 class PlaybackSessionModel;
 
 class WEBCORE_EXPORT PlaybackSessionInterfaceMac final
-    : public PlaybackSessionInterface
-    , public PlaybackSessionModelClient
+    : public PlaybackSessionModelClient
     , public RefCounted<PlaybackSessionInterfaceMac> {
 public:
     static Ref<PlaybackSessionInterfaceMac> create(PlaybackSessionModel&);
@@ -60,9 +60,8 @@ public:
     void legibleMediaSelectionIndexChanged(uint64_t) final;
     void externalPlaybackChanged(bool /* enabled */, PlaybackSessionModel::ExternalPlaybackTargetType, const String& /* localizedDeviceName */) final;
     void isPictureInPictureSupportedChanged(bool) final;
+    void ensureControlsManager() final;
 
-    void invalidate();
-    void ensureControlsManager();
 #if ENABLE(WEB_PLAYBACK_CONTROLS_MANAGER)
     void setPlayBackControlsManager(WebPlaybackControlsManager *);
     WebPlaybackControlsManager *playBackControlsManager();
@@ -72,15 +71,16 @@ public:
     void beginScrubbing();
     void endScrubbing();
 
+    void invalidate();
+
 private:
     PlaybackSessionInterfaceMac(PlaybackSessionModel&);
-    PlaybackSessionModel* m_playbackSessionModel { nullptr };
+    WeakPtr<PlaybackSessionModel> m_playbackSessionModel;
 #if ENABLE(WEB_PLAYBACK_CONTROLS_MANAGER)
-    WebPlaybackControlsManager *m_playbackControlsManager  { nullptr };
+    WeakObjCPtr<WebPlaybackControlsManager> m_playbackControlsManager;
 
     void updatePlaybackControlsManagerTiming(double currentTime, double anchorTime, double playbackRate, bool isPlaying);
 #endif
-
 };
 
 }

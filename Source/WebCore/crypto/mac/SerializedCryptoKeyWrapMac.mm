@@ -23,20 +23,21 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
-#include "SerializedCryptoKeyWrap.h"
+#import "config.h"
+#import "SerializedCryptoKeyWrap.h"
 
 #if ENABLE(WEB_CRYPTO)
 
-#include "CommonCryptoUtilities.h"
-#include "LocalizedStrings.h"
-#include <CommonCrypto/CommonSymmetricKeywrap.h>
-#include <crt_externs.h>
-#include <wtf/text/Base64.h>
-#include <wtf/text/CString.h>
-#include <wtf/CryptographicUtilities.h>
-#include <wtf/ProcessPrivilege.h>
-#include <wtf/RetainPtr.h>
+#import "CommonCryptoUtilities.h"
+#import "LocalizedStrings.h"
+#import <CommonCrypto/CommonSymmetricKeywrap.h>
+#import <crt_externs.h>
+#import <wtf/CryptographicUtilities.h>
+#import <wtf/ProcessPrivilege.h>
+#import <wtf/RetainPtr.h>
+#import <wtf/spi/cocoa/SecuritySPI.h>
+#import <wtf/text/Base64.h>
+#import <wtf/text/CString.h>
 
 #if PLATFORM(IOS_FAMILY)
 #define USE_KEYCHAIN_ACCESS_CONTROL_LISTS 0
@@ -45,7 +46,7 @@
 #endif
 
 #if USE(KEYCHAIN_ACCESS_CONTROL_LISTS)
-#include <wtf/cf/TypeCastsCF.h>
+#import <wtf/cf/TypeCastsCF.h>
 WTF_DECLARE_CF_TYPE_TRAIT(SecACL);
 #endif
 
@@ -114,7 +115,9 @@ static bool createAndStoreMasterKey(Vector<uint8_t>& masterKeyData)
     SecACLRef acl = checked_cf_cast<SecACLRef>(CFArrayGetValueAtIndex(acls.get(), 0));
 
     SecTrustedApplicationRef trustedAppRef;
+ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     status = SecTrustedApplicationCreateFromPath(0, &trustedAppRef);
+ALLOW_DEPRECATED_DECLARATIONS_END
     if (status) {
         WTFLogAlways("Cannot create a trusted application object for storing WebCrypto master key, error %d", (int)status);
         return false;
@@ -217,8 +220,9 @@ bool wrapSerializedCryptoKey(const Vector<uint8_t>& masterKey, const Vector<uint
     wrappedKEK.shrink(wrappedKEKSize);
 
     Vector<uint8_t> encryptedKey(key.size());
-    size_t tagLength = 16;
-    uint8_t tag[tagLength];
+    constexpr size_t maxTagLength = 16;
+    size_t tagLength = maxTagLength;
+    uint8_t tag[maxTagLength];
 
     ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     status = CCCryptorGCM(kCCEncrypt, kCCAlgorithmAES128, kek.data(), kek.size(),
@@ -284,8 +288,9 @@ bool unwrapSerializedCryptoKey(const Vector<uint8_t>& masterKey, const Vector<ui
         return false;
     kek.shrink(kekSize);
 
-    size_t tagLength = 16;
-    uint8_t actualTag[tagLength];
+    constexpr size_t maxTagLength = 16;
+    size_t tagLength = maxTagLength;
+    uint8_t actualTag[maxTagLength];
 
     key.resize(encryptedKey.size());
     ALLOW_DEPRECATED_DECLARATIONS_BEGIN

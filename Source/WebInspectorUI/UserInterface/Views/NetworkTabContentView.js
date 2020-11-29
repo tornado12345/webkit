@@ -25,11 +25,9 @@
 
 WI.NetworkTabContentView = class NetworkTabContentView extends WI.TabContentView
 {
-    constructor(identifier)
+    constructor()
     {
-        let tabBarItem = WI.GeneralTabBarItem.fromTabInfo(WI.NetworkTabContentView.tabInfo());
-
-        super(identifier || "network", "network", tabBarItem);
+        super(NetworkTabContentView.tabInfo());
 
         this._networkTableContentView = new WI.NetworkTableContentView;
 
@@ -50,14 +48,15 @@ WI.NetworkTabContentView = class NetworkTabContentView extends WI.TabContentView
     static tabInfo()
     {
         return {
+            identifier: NetworkTabContentView.Type,
             image: "Images/Network.svg",
-            title: WI.UIString("Network"),
+            displayName: WI.UIString("Network", "Network Tab Name", "Name of Network Tab"),
         };
     }
 
     static isTabAllowed()
     {
-        return !!window.NetworkAgent;
+        return InspectorBackend.hasDomain("Network");
     }
 
     // Protected
@@ -83,6 +82,26 @@ WI.NetworkTabContentView = class NetworkTabContentView extends WI.TabContentView
         super.closed();
     }
 
+    initialLayout()
+    {
+        super.initialLayout();
+
+        let dropZoneView = new WI.DropZoneView(this);
+        dropZoneView.text = WI.UIString("Import HAR");
+        dropZoneView.targetElement = this.element;
+        this.addSubview(dropZoneView);
+    }
+
+    get canHandleFindEvent()
+    {
+        return this._networkTableContentView.canFocusFilterBar;
+    }
+
+    handleFindEvent()
+    {
+        this._networkTableContentView.focusFilterBar();
+    }
+
     // Public
 
     get contentBrowser() { return this._contentBrowser; }
@@ -106,6 +125,24 @@ WI.NetworkTabContentView = class NetworkTabContentView extends WI.TabContentView
     get supportsSplitContentBrowser()
     {
         return true;
+    }
+
+    // DropZoneView delegate
+
+    dropZoneShouldAppearForDragEvent(dropZone, event)
+    {
+        return event.dataTransfer.types.includes("Files");
+    }
+
+    dropZoneHandleDrop(dropZone, event)
+    {
+        let files = event.dataTransfer.files;
+        if (files.length !== 1) {
+            InspectorFrontendHost.beep();
+            return;
+        }
+
+        WI.FileUtilities.readJSON(files, (result) => this._networkTableContentView.processHAR(result));
     }
 };
 

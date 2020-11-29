@@ -81,6 +81,12 @@ sub _classRefGetter
     return $$self{codeGenerator}->WK_lcfirst(_implementationClassName($type)) . "Class";
 }
 
+sub _constantGetterFunctionName
+{
+    my ($constantName) = @_;
+    return "get".$constantName;
+}
+
 sub _parseLicenseBlock
 {
     my ($fileHandle) = @_;
@@ -255,8 +261,7 @@ ${implementationClassName}* to${implementationClassName}(JSContextRef context, J
 
 JSClassRef ${className}::${classRefGetter}()
 {
-    static JSClassRef jsClass;
-    if (!jsClass) {
+    static const JSClassRef jsClass = [] {
         JSClassDefinition definition = kJSClassDefinitionEmpty;
         definition.className = "@{[$type->name]}";
         definition.parentClass = @{[$self->_parentClassRefGetterExpression($interface)]};
@@ -268,12 +273,33 @@ EOF
     push(@contents, "        definition.finalize = finalize;\n") unless _parentInterface($interface);
 
     push(@contents, <<EOF);
-        jsClass = JSClassCreate(&definition);
-    }
+        return JSClassCreate(&definition);
+    }();
     return jsClass;
 }
 
 EOF
+
+    if (my @constants = @{$interface->constants}) {
+        push(@contents, "\n// Constants\n");
+
+        foreach my $constant (@constants) {
+            $self->_includeHeaders(\%contentsIncludes, $constant->type);
+
+            my $getterName = _constantGetterFunctionName($self->_getterName($constant));
+            my $getterExpression = "impl->${getterName}()";
+            my $value = $constant->value;
+
+            push(@contents, <<EOF);
+static JSValueRef $getterName(JSContextRef context, JSObjectRef, JSStringRef, JSValueRef*)
+{
+    return JSValueMakeNumber(context, $value);
+}
+
+EOF
+        }
+
+    }
 
     push(@contents, $self->_staticFunctionsGetterImplementation($interface), "\n");
     push(@contents, $self->_staticValuesGetterImplementation($interface));
@@ -317,7 +343,7 @@ EOF
                 $functionCall = "impl->" . $operation->name . "(" . join(", ", @arguments) . ")";
             }
             
-            push(@contents, "    ${functionCall};\n\n") if $operation->type->name eq "void";
+            push(@contents, "    ${functionCall};\n\n") if $operation->type->name eq "undefined";
             push(@contents, "    return " . $self->_returnExpression($operation->type, $functionCall) . ";\n}\n");
         }
     }
@@ -372,8 +398,13 @@ EOF
 EOF
 
     unshift(@contents, map { "#include \"$_\"\n" } sort keys(%contentsIncludes));
+    my $conditionalString = $$self{codeGenerator}->GenerateConditionalString($interface);
+    unshift(@contents, "\n#if ${conditionalString}\n\n") if $conditionalString;
+
     unshift(@contents, "#include \"config.h\"\n");
     unshift(@contents, @contentsPrefix);
+
+    push(@contents, "\n#endif // ${conditionalString}\n") if $conditionalString;
 
     return { name => $filename, contents => \@contents };
 }
@@ -445,10 +476,11 @@ sub _platformTypeConstructor
 {
     my ($self, $type, $argumentName) = @_;
 
-    return "JSValueToNullableBoolean(context, $argumentName)" if $type->name eq "boolean" && $type->isNullable;
+    return "toOptionalBool(context, $argumentName)" if $type->name eq "boolean" && $type->isNullable;
     return "JSValueToBoolean(context, $argumentName)" if $type->name eq "boolean";
     return "$argumentName" if $type->name eq "object";
-    return "adopt(JSValueToStringCopy(context, $argumentName, nullptr))" if $$self{codeGenerator}->IsStringType($type);
+    return "createJSString(context, $argumentName)" if $$self{codeGenerator}->IsStringType($type);
+    return "toOptionalDouble(context, $argumentName)" if $$self{codeGenerator}->IsPrimitiveType($type) && $type->isNullable;
     return "JSValueToNumber(context, $argumentName, nullptr)" if $$self{codeGenerator}->IsPrimitiveType($type);
     return "to" . _implementationClassName($type) . "(context, $argumentName)";
 }
@@ -467,30 +499,28 @@ sub _platformTypeVariableDeclaration
         "JSValueRef" => 1,
     );
 
-    my $nullValue = "0";
+    my $nullValue = "nullptr";
     if ($platformType eq "JSValueRef") {
         $nullValue = "JSValueMakeUndefined(context)";
-    } elsif (defined $nonPointerTypes{$platformType} && $platformType ne "double") {
-        $nullValue = "$platformType()";
+    } elsif (defined $nonPointerTypes{$platformType}) {
+        $nullValue = $type->isNullable ? "WTF::nullopt" : "$platformType()";
     }
 
-    $platformType .= "*" unless defined $nonPointerTypes{$platformType};
-
-    return "$platformType $variableName = $condition && $constructor;" if $condition && $platformType eq "bool";
-    return "$platformType $variableName = $condition ? $constructor : $nullValue;" if $condition;
-    return "$platformType $variableName = $constructor;";
+    return "bool $variableName = $condition && $constructor;" if $condition && $platformType eq "bool";
+    return "auto $variableName = $condition ? $constructor : $nullValue;" if $condition;
+    return "auto $variableName = $constructor;";
 }
 
 sub _returnExpression
 {
     my ($self, $returnType, $expression) = @_;
 
-    return "JSValueMakeUndefined(context)" if $returnType->name eq "void";
-    return "JSValueMakeBooleanOrNull(context, ${expression})" if $returnType->name eq "boolean" && $returnType->isNullable;
+    return "JSValueMakeUndefined(context)" if $returnType->name eq "undefined";
+    return "makeValue(context, ${expression})" if $returnType->name eq "boolean" && $returnType->isNullable;
     return "JSValueMakeBoolean(context, ${expression})" if $returnType->name eq "boolean";
     return "${expression}" if $returnType->name eq "object";
     return "JSValueMakeNumber(context, ${expression})" if $$self{codeGenerator}->IsPrimitiveType($returnType);
-    return "JSValueMakeStringOrNull(context, ${expression}.get())" if $$self{codeGenerator}->IsStringType($returnType);
+    return "makeValue(context, ${expression}.get())" if $$self{codeGenerator}->IsStringType($returnType);
     return "toJS(context, WTF::getPtr(${expression}))";
 }
 
@@ -561,17 +591,33 @@ sub _staticValuesGetterImplementation
     my $mapFunction = sub {
         return if $_->extendedAttributes->{"NoImplementation"};
 
+        my $isReadOnly = 1;
+        my $getterName;
+
+        if (ref($_) eq "IDLAttribute") {
+            $isReadOnly = $_->isReadOnly;
+            $getterName = $self->_getterName($_);
+        } elsif (ref($_) eq "IDLConstant") {
+            $getterName = _constantGetterFunctionName($self->_getterName($_));
+        }
+
         my $attributeName = $_->name;
-        my $getterName = $self->_getterName($_);
-        my $setterName = $_->isReadOnly ? "0" : $self->_setterName($_);
+
+        my $setterName = $isReadOnly ? "0" : $self->_setterName($_);
         my @attributes = qw(kJSPropertyAttributeDontDelete);
-        push(@attributes, "kJSPropertyAttributeReadOnly") if $_->isReadOnly;
+        push(@attributes, "kJSPropertyAttributeReadOnly") if $isReadOnly;
         push(@attributes, "kJSPropertyAttributeDontEnum") if $_->extendedAttributes->{"DontEnum"};
 
         return "{ \"$attributeName\", $getterName, $setterName, " . join(" | ", @attributes) . " }";
     };
 
-    return $self->_staticFunctionsOrValuesGetterImplementation($interface, "value", "{ 0, 0, 0, 0 }", $mapFunction, $interface->attributes);
+    my $attributesAndConstants = [];
+    push (@$attributesAndConstants, @{ $interface->attributes });
+    if ($interface->constants) {
+        push (@$attributesAndConstants, @{ $interface->constants });
+    }
+
+    return $self->_staticFunctionsOrValuesGetterImplementation($interface, "value", "{ 0, 0, 0, 0 }", $mapFunction, $attributesAndConstants);
 }
 
 1;

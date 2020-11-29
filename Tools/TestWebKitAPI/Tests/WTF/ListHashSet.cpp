@@ -28,6 +28,8 @@
 #include "Counters.h"
 #include "MoveOnly.h"
 #include <wtf/ListHashSet.h>
+#include <wtf/NeverDestroyed.h>
+#include <wtf/RefCounted.h>
 
 namespace TestWebKitAPI {
 
@@ -380,7 +382,7 @@ TEST(WTF_ListHashSet, UniquePtrKey)
 
     ListHashSet<std::unique_ptr<ConstructorDestructorCounter>> list;
 
-    auto uniquePtr = std::make_unique<ConstructorDestructorCounter>();
+    auto uniquePtr = makeUnique<ConstructorDestructorCounter>();
     list.add(WTFMove(uniquePtr));
 
     EXPECT_EQ(1u, ConstructorDestructorCounter::constructionCount);
@@ -396,7 +398,7 @@ TEST(WTF_ListHashSet, UniquePtrKey_FindUsingRawPointer)
 {
     ListHashSet<std::unique_ptr<int>> list;
 
-    auto uniquePtr = std::make_unique<int>(5);
+    auto uniquePtr = makeUniqueWithoutFastMallocCheck<int>(5);
     auto ptr = uniquePtr.get();
     list.add(WTFMove(uniquePtr));
 
@@ -410,7 +412,7 @@ TEST(WTF_ListHashSet, UniquePtrKey_ContainsUsingRawPointer)
 {
     ListHashSet<std::unique_ptr<int>> list;
 
-    auto uniquePtr = std::make_unique<int>(5);
+    auto uniquePtr = makeUniqueWithoutFastMallocCheck<int>(5);
     auto ptr = uniquePtr.get();
     list.add(WTFMove(uniquePtr));
 
@@ -421,9 +423,9 @@ TEST(WTF_ListHashSet, UniquePtrKey_InsertBeforeUsingRawPointer)
 {
     ListHashSet<std::unique_ptr<int>> list;
 
-    auto uniquePtrWith2 = std::make_unique<int>(2);
+    auto uniquePtrWith2 = makeUniqueWithoutFastMallocCheck<int>(2);
     auto ptrWith2 = uniquePtrWith2.get();
-    auto uniquePtrWith4 = std::make_unique<int>(4);
+    auto uniquePtrWith4 = makeUniqueWithoutFastMallocCheck<int>(4);
     auto ptrWith4 = uniquePtrWith4.get();
 
     list.add(WTFMove(uniquePtrWith2));
@@ -435,7 +437,7 @@ TEST(WTF_ListHashSet, UniquePtrKey_InsertBeforeUsingRawPointer)
     ASSERT_EQ(ptrWith4, list.last().get());
     ASSERT_EQ(4, *list.last().get());
 
-    auto uniquePtrWith3 = std::make_unique<int>(3);
+    auto uniquePtrWith3 = makeUniqueWithoutFastMallocCheck<int>(3);
     auto ptrWith3 = uniquePtrWith3.get();
 
     list.insertBefore(ptrWith4, WTFMove(uniquePtrWith3));
@@ -462,7 +464,7 @@ TEST(WTF_ListHashSet, UniquePtrKey_RemoveUsingRawPointer)
 
     ListHashSet<std::unique_ptr<ConstructorDestructorCounter>> list;
 
-    auto uniquePtr = std::make_unique<ConstructorDestructorCounter>();
+    auto uniquePtr = makeUnique<ConstructorDestructorCounter>();
     auto* ptr = uniquePtr.get();
     list.add(WTFMove(uniquePtr));
 
@@ -474,6 +476,65 @@ TEST(WTF_ListHashSet, UniquePtrKey_RemoveUsingRawPointer)
 
     EXPECT_EQ(1u, ConstructorDestructorCounter::constructionCount);
     EXPECT_EQ(1u, ConstructorDestructorCounter::destructionCount);
+}
+
+class ListHashSetReferencedItem : public RefCounted<ListHashSetReferencedItem> {
+public:
+    static Ref<ListHashSetReferencedItem> create()
+    {
+        auto result = adoptRef(*new ListHashSetReferencedItem());
+        return result;
+    }
+
+    explicit ListHashSetReferencedItem()
+    {
+        instances().add(this);
+    }
+
+    ~ListHashSetReferencedItem()
+    {
+        ASSERT(instances().contains(this));
+        instances().remove(this);
+    }
+
+    static HashSet<ListHashSetReferencedItem*>& instances()
+    {
+        static NeverDestroyed<HashSet<ListHashSetReferencedItem*>> instances;
+        return instances;
+    }
+};
+
+using Collection = ListHashSet<RefPtr<ListHashSetReferencedItem>>;
+
+class FakeElementAnimationRareData {
+    WTF_MAKE_NONCOPYABLE(FakeElementAnimationRareData);
+    WTF_MAKE_FAST_ALLOCATED;
+public:
+    explicit FakeElementAnimationRareData() { };
+    ~FakeElementAnimationRareData() { };
+
+    Collection& collection() { return m_collection; }
+    void setCollection(Collection&& collection) { m_collection = WTFMove(collection); }
+
+private:
+    Collection m_collection;
+};
+
+TEST(WTF_ListHashSet, ClearsItemUponAssignment)
+{
+    std::unique_ptr<FakeElementAnimationRareData> data = makeUnique<FakeElementAnimationRareData>();
+
+    EXPECT_EQ(0u, ListHashSetReferencedItem::instances().size());
+
+    Collection firstCollection({ ListHashSetReferencedItem::create() });
+    data->setCollection(WTFMove(firstCollection));
+
+    EXPECT_EQ(1u, ListHashSetReferencedItem::instances().size());
+
+    Collection secondCollection;
+    data->setCollection(WTFMove(secondCollection));
+
+    EXPECT_EQ(0u, ListHashSetReferencedItem::instances().size());
 }
 
 } // namespace TestWebKitAPI

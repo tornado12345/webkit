@@ -25,25 +25,21 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
-#include "RealtimeIncomingVideoSourceCocoa.h"
+#import "config.h"
+#import "RealtimeIncomingVideoSourceCocoa.h"
 
 #if USE(LIBWEBRTC)
 
-#include "Logging.h"
-#include "MediaSampleAVFObjC.h"
-#include "RealtimeVideoUtilities.h"
-#include <pal/cf/CoreMediaSoftLink.h>
+#import "Logging.h"
+#import "MediaSampleAVFObjC.h"
+#import "RealtimeVideoUtilities.h"
+#import <wtf/cf/TypeCastsCF.h>
 
 ALLOW_UNUSED_PARAMETERS_BEGIN
-
-#include <webrtc/sdk/WebKit/WebKitUtilities.h>
-
+#import <webrtc/sdk/WebKit/WebKitUtilities.h>
 ALLOW_UNUSED_PARAMETERS_END
 
-#include <wtf/cf/TypeCastsCF.h>
-
-#include "CoreVideoSoftLink.h"
+#import <pal/cf/CoreMediaSoftLink.h>
 
 namespace WebCore {
 using namespace PAL;
@@ -92,33 +88,21 @@ RetainPtr<CVPixelBufferRef> createBlackPixelBuffer(size_t width, size_t height)
     return adoptCF(pixelBuffer);
 }
 
-CVPixelBufferPoolRef RealtimeIncomingVideoSourceCocoa::pixelBufferPool(size_t width, size_t height)
+CVPixelBufferPoolRef RealtimeIncomingVideoSourceCocoa::pixelBufferPool(size_t width, size_t height, webrtc::BufferType bufferType)
 {
-    if (!m_pixelBufferPool || m_pixelBufferPoolWidth != width || m_pixelBufferPoolHeight != height) {
-        const OSType videoCaptureFormat = kCVPixelFormatType_420YpCbCr8BiPlanarFullRange;
-        auto pixelAttributes = @{
-            (__bridge NSString *)kCVPixelBufferWidthKey: @(width),
-            (__bridge NSString *)kCVPixelBufferHeightKey: @(height),
-            (__bridge NSString *)kCVPixelBufferPixelFormatTypeKey: @(videoCaptureFormat),
-            (__bridge NSString *)kCVPixelBufferCGImageCompatibilityKey: @(NO),
-#if PLATFORM(IOS_FAMILY)
-            (__bridge NSString *)kCVPixelFormatOpenGLESCompatibility : @(YES),
-#else
-            (__bridge NSString *)kCVPixelBufferOpenGLCompatibilityKey : @(YES),
-#endif
-            (__bridge NSString *)kCVPixelBufferIOSurfacePropertiesKey : @{ }
-        };
-
-        CVPixelBufferPoolRef pool = nullptr;
-        auto status = CVPixelBufferPoolCreate(kCFAllocatorDefault, nullptr, (__bridge CFDictionaryRef)pixelAttributes, &pool);
-
-        if (status != kCVReturnSuccess) {
-            ERROR_LOG(LOGIDENTIFIER, "Failed creating a pixel buffer pool with error ", status);
-            return nullptr;
+    if (!m_pixelBufferPool || m_pixelBufferPoolWidth != width || m_pixelBufferPoolHeight != height || m_pixelBufferPoolBufferType != bufferType) {
+        OSType poolBufferType;
+        switch (bufferType) {
+        case webrtc::BufferType::I420:
+            poolBufferType = kCVPixelFormatType_420YpCbCr8BiPlanarFullRange;
+            break;
+        case webrtc::BufferType::I010:
+            poolBufferType = kCVPixelFormatType_420YpCbCr10BiPlanarFullRange;
         }
-        m_pixelBufferPool = adoptCF(pool);
+        m_pixelBufferPool = createPixelBufferPool(width, height, poolBufferType);
         m_pixelBufferPoolWidth = width;
         m_pixelBufferPoolHeight = height;
+        m_pixelBufferPoolBufferType = bufferType;
     }
     return m_pixelBufferPool.get();
 }
@@ -135,8 +119,8 @@ RetainPtr<CVPixelBufferRef> RealtimeIncomingVideoSourceCocoa::pixelBufferFromVid
     }
 
     RetainPtr<CVPixelBufferRef> newPixelBuffer;
-    return webrtc::pixelBufferFromFrame(frame, [this, &newPixelBuffer](size_t width, size_t height) -> CVPixelBufferRef {
-        auto pixelBufferPool = this->pixelBufferPool(width, height);
+    return webrtc::pixelBufferFromFrame(frame, [this, &newPixelBuffer](size_t width, size_t height, webrtc::BufferType bufferType) -> CVPixelBufferRef {
+        auto pixelBufferPool = this->pixelBufferPool(width, height, bufferType);
         if (!pixelBufferPool)
             return nullptr;
 
@@ -144,7 +128,7 @@ RetainPtr<CVPixelBufferRef> RealtimeIncomingVideoSourceCocoa::pixelBufferFromVid
         auto status = CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, m_pixelBufferPool.get(), &pixelBuffer);
 
         if (status != kCVReturnSuccess) {
-            ERROR_LOG(LOGIDENTIFIER, "Failed creating a pixel buffer with error ", status);
+            ERROR_LOG_IF(loggerPtr(), LOGIDENTIFIER, "Failed creating a pixel buffer with error ", status);
             return nullptr;
         }
         newPixelBuffer = adoptCF(pixelBuffer);
@@ -158,27 +142,24 @@ void RealtimeIncomingVideoSourceCocoa::OnFrame(const webrtc::VideoFrame& frame)
         return;
 
 #if !RELEASE_LOG_DISABLED
-    if (!(++m_numberOfFrames % 60))
-        ALWAYS_LOG(LOGIDENTIFIER, "frame ", m_numberOfFrames);
+    ALWAYS_LOG_IF(loggerPtr() && !(++m_numberOfFrames % 60), LOGIDENTIFIER, "frame ", m_numberOfFrames);
 #endif
 
     auto pixelBuffer = pixelBufferFromVideoFrame(frame);
     if (!pixelBuffer) {
-        ERROR_LOG(LOGIDENTIFIER, "Failed to get a pixel buffer from a frame");
+        ERROR_LOG_IF(loggerPtr(), LOGIDENTIFIER, "Failed to get a pixel buffer from a frame");
         return;
     }
 
-    // FIXME: Convert timing information from VideoFrame to CMSampleTimingInfo.
-    // For the moment, we will pretend that frames should be rendered asap.
     CMSampleTimingInfo timingInfo;
-    timingInfo.presentationTimeStamp = kCMTimeInvalid;
+    timingInfo.presentationTimeStamp = CMTimeMake(frame.timestamp_us(), 1000000);
     timingInfo.decodeTimeStamp = kCMTimeInvalid;
     timingInfo.duration = kCMTimeInvalid;
 
     CMVideoFormatDescriptionRef formatDescription;
     OSStatus ostatus = CMVideoFormatDescriptionCreateForImageBuffer(kCFAllocatorDefault, (CVImageBufferRef)pixelBuffer, &formatDescription);
     if (ostatus != noErr) {
-        ERROR_LOG(LOGIDENTIFIER, "Failed to initialize CMVideoFormatDescription with error ", static_cast<int>(ostatus));
+        ERROR_LOG_IF(loggerPtr(), LOGIDENTIFIER, "Failed to initialize CMVideoFormatDescription with error ", static_cast<int>(ostatus));
         return;
     }
 
@@ -186,17 +167,11 @@ void RealtimeIncomingVideoSourceCocoa::OnFrame(const webrtc::VideoFrame& frame)
     ostatus = CMSampleBufferCreateReadyWithImageBuffer(kCFAllocatorDefault, (CVImageBufferRef)pixelBuffer, formatDescription, &timingInfo, &sampleBuffer);
     CFRelease(formatDescription);
     if (ostatus != noErr) {
-        ERROR_LOG(LOGIDENTIFIER, "Failed to create the sample buffer with error ", static_cast<int>(ostatus));
+        ERROR_LOG_IF(loggerPtr(), LOGIDENTIFIER, "Failed to create the sample buffer with error ", static_cast<int>(ostatus));
         return;
     }
 
     auto sample = adoptCF(sampleBuffer);
-
-    CFArrayRef attachmentsArray = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, true);
-    for (CFIndex i = 0; i < CFArrayGetCount(attachmentsArray); ++i) {
-        CFMutableDictionaryRef attachments = checked_cf_cast<CFMutableDictionaryRef>(CFArrayGetValueAtIndex(attachmentsArray, i));
-        CFDictionarySetValue(attachments, kCMSampleAttachmentKey_DisplayImmediately, kCFBooleanTrue);
-    }
 
     unsigned width = frame.width();
     unsigned height = frame.height();
@@ -219,19 +194,8 @@ void RealtimeIncomingVideoSourceCocoa::OnFrame(const webrtc::VideoFrame& frame)
         break;
     }
 
-    callOnMainThread([protectedThis = makeRef(*this), sample = WTFMove(sample), width, height, rotation] {
-        protectedThis->processNewSample(sample.get(), width, height, rotation);
-    });
-}
-
-void RealtimeIncomingVideoSourceCocoa::processNewSample(CMSampleBufferRef sample, unsigned width, unsigned height, MediaSample::VideoRotation rotation)
-{
-    m_buffer = sample;
-    auto size = this->size();
-    if (WTF::safeCast<int>(width) != size.width() || WTF::safeCast<int>(height) != size.height())
-        setIntrinsicSize(IntSize(width, height));
-
-    videoSampleAvailable(MediaSampleAVFObjC::create(sample, rotation));
+    setIntrinsicSize(IntSize(width, height));
+    videoSampleAvailable(MediaSampleAVFObjC::create(sample.get(), rotation));
 }
 
 } // namespace WebCore

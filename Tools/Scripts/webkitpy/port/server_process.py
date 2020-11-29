@@ -1,4 +1,4 @@
-# Copyright (C) 2017 Apple Inc. All rights reserved.
+# Copyright (C) 2017-2019 Apple Inc. All rights reserved.
 # Copyright (C) 2010 Google Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -35,6 +35,8 @@ import signal
 import sys
 import time
 
+from webkitcorepy import string_utils
+
 # Note that although win32 python does provide an implementation of
 # the win32 select API, it only works on sockets, and not on the named pipes
 # used by subprocess, so we have to use the native APIs directly.
@@ -47,8 +49,6 @@ else:
     import os
     import select
 
-from webkitpy.common.system.executive import ScriptError
-
 
 _log = logging.getLogger(__name__)
 
@@ -60,13 +60,19 @@ class ServerProcess(object):
     indefinitely. The class also handles transparently restarting processes
     as necessary to keep issuing commands."""
 
-    def __init__(self, port_obj, name, cmd, env=None, universal_newlines=False, treat_no_data_as_crash=False, target_host=None):
+    def __init__(self, port_obj, name, cmd, env=None, universal_newlines=False, treat_no_data_as_crash=False, target_host=None, crash_message=None, allow_emulation=True):
         self._port = port_obj
         self._name = name  # Should be the command name (e.g. DumpRenderTree, ImageDiff)
-        self._cmd = cmd
+
+        platform = self._port.host.platform
+        if allow_emulation and platform.is_mac() and platform.architecture() != self._port.architecture():
+            self._cmd = ['/usr/bin/arch', '-{}'.format(self._port.architecture())] + cmd
+        else:
+            self._cmd = cmd
+        self._crash_message = crash_message or 'This test marked as a crash'
 
         # Windows does not allow unicode values in the environment
-        if env and self._port.host.platform.is_native_win():
+        if env and platform.is_native_win():
             self._env = {key: env[key].encode('utf-8') for key in env}
         else:
             self._env = env
@@ -77,14 +83,25 @@ class ServerProcess(object):
         self._treat_no_data_as_crash = treat_no_data_as_crash
         self._target_host = target_host or port_obj.host
         self._pid = None
+        self._system_pid = None
+        self._child_processes = {}
         self._reset()
 
         # See comment in imports for why we need the win32 APIs and can't just use select.
         # FIXME: there should be a way to get win32 vs. cygwin from platforminfo.
         self._use_win32_apis = sys.platform.startswith('win')
 
+    def child_processes(self):
+        return self._child_processes
+
+    def set_child_processes(self, child_processes):
+        self._child_processes = child_processes
+
     def pid(self):
         return self._pid
+
+    def system_pid(self):
+        return self._system_pid
 
     def _reset(self):
         if getattr(self, '_proc', None):
@@ -99,8 +116,8 @@ class ServerProcess(object):
                 self._proc.stderr = None
 
         self._proc = None
-        self._output = str()  # bytesarray() once we require Python 2.6
-        self._error = str()  # bytesarray() once we require Python 2.6
+        self._output = b''
+        self._error = b''
         self._crashed = False
         self.timed_out = False
 
@@ -123,6 +140,8 @@ class ServerProcess(object):
             env=self._env,
             universal_newlines=self._universal_newlines)
         self._pid = self._proc.pid
+        self._system_pid = int(self._port._filesystem.read_text_file('/proc/%d/winpid' % self._pid)) if self._port.host.platform.is_cygwin() else self._pid
+        self._child_processes = {}
         if not self._use_win32_apis:
             self._set_file_nonblocking(self._proc.stdout)
             self._set_file_nonblocking(self._proc.stderr)
@@ -165,23 +184,24 @@ class ServerProcess(object):
         if not self._proc:
             self._start()
         try:
-            self._proc.stdin.write(bytes)
-        except IOError as e:
+            self._proc.stdin.write(string_utils.encode(bytes))
+            self._proc.stdin.flush()
+        except (IOError, ValueError) as e:
             self.stop(0.0)
             # stop() calls _reset(), so we have to set crashed to True after calling stop()
             # unless we already know that this is a timeout.
             if not ignore_crash:
-                _log.debug('This test marked as a crash because of a broken pipe when writing to stdin of the server process.')
+                _log.debug('{} because of a broken pipe when writing to stdin of the server process.'.format(self._crash_message))
                 self._crashed = True
 
     def _pop_stdout_line_if_ready(self):
-        index_after_newline = self._output.find('\n') + 1
+        index_after_newline = self._output.find(b'\n') + 1
         if index_after_newline > 0:
             return self._pop_output_bytes(index_after_newline)
         return None
 
     def _pop_stderr_line_if_ready(self):
-        index_after_newline = self._error.find('\n') + 1
+        index_after_newline = self._error.find(b'\n') + 1
         if index_after_newline > 0:
             return self._pop_error_bytes(index_after_newline)
         return None
@@ -194,6 +214,14 @@ class ServerProcess(object):
 
     def read_stdout_line(self, deadline):
         return self._read(deadline, self._pop_stdout_line_if_ready)
+
+    def has_available_stdout(self):
+        if not self.has_crashed() and self._use_win32_apis:
+            self._wait_for_data_and_update_buffers_using_win32_apis(0)
+        elif not self.has_crashed():
+            self._wait_for_data_and_update_buffers_using_select(0)
+
+        return bool(self._output)
 
     def read_stderr_line(self, deadline):
         return self._read(deadline, self._pop_stderr_line_if_ready)
@@ -248,7 +276,7 @@ class ServerProcess(object):
         return output
 
     def _wait_for_data_and_update_buffers_using_select(self, deadline, stopping=False):
-        if self._proc.stdout.closed or self._proc.stderr.closed:
+        if not self._proc or self._proc.stdout.closed or self._proc.stderr.closed:
             # If the process crashed and is using FIFOs, like Chromium Android, the
             # stdout and stderr pipes will be closed.
             return
@@ -276,14 +304,14 @@ class ServerProcess(object):
             if out_fd in read_fds:
                 data = self._proc.stdout.read()
                 if not data and not stopping and (self._treat_no_data_as_crash or self._proc.poll()):
-                    _log.debug('This test marked as a crash because of no data while reading stdout for the server process.')
+                    _log.debug('{} because of no data while reading stdout for the server process.'.format(self._crash_message))
                     self._crashed = True
                 self._output += data
 
             if err_fd in read_fds:
                 data = self._proc.stderr.read()
                 if not data and not stopping and (self._treat_no_data_as_crash or self._proc.poll()):
-                    _log.debug('This test marked as a crash because of no data while reading stdout for the server process.')
+                    _log.debug('{} because of no data while reading stdout for the server process.'.format(self._crash_message))
                     self._crashed = True
                 self._error += data
         except IOError as e:
@@ -292,12 +320,16 @@ class ServerProcess(object):
             pass
 
     def _wait_for_data_and_update_buffers_using_win32_apis(self, deadline):
+        if not self._proc:
+            return
+
         # See http://code.activestate.com/recipes/440554-module-to-allow-asynchronous-subprocess-use-on-win/
         # and http://docs.activestate.com/activepython/2.6/pywin32/modules.html
         # for documentation on all of these win32-specific modules.
         out_fh = msvcrt.get_osfhandle(self._proc.stdout.fileno())
         err_fh = msvcrt.get_osfhandle(self._proc.stderr.fileno())
-        while time.time() < deadline:
+        checking = True
+        while checking:
             output = self._non_blocking_read_win32(out_fh)
             error = self._non_blocking_read_win32(err_fh)
             if output or error:
@@ -309,6 +341,7 @@ class ServerProcess(object):
             if self._proc.poll() is not None:
                 return
             time.sleep(0.01)
+            checking = time.time() < deadline
 
     def _non_blocking_read_win32(self, handle):
         try:
@@ -323,7 +356,7 @@ class ServerProcess(object):
 
     def has_crashed(self):
         if not self._crashed and self.poll():
-            _log.debug('This test marked as a crash because of failure to poll the server process (return code was %s).' % self._proc.returncode)
+            _log.debug('{} because of failure to poll the server process (return code was {}).'.format(self._crash_message, self._proc.returncode))
             self._crashed = True
             self._handle_possible_interrupt()
         return self._crashed
@@ -364,6 +397,9 @@ class ServerProcess(object):
         # Only bother to check for leaks or stderr if the process is still running.
         if self.poll() is None:
             self._port.check_for_leaks(self.process_name(), self.pid())
+            for child_process_name in self._child_processes.keys():
+                for child_process_id in self._child_processes[child_process_name]:
+                    self._port.check_for_leaks(child_process_name, child_process_id)
 
         if self._proc.stdin:
             self._proc.stdin.close()

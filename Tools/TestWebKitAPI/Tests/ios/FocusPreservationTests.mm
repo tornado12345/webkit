@@ -33,6 +33,7 @@
 #import "TestWKWebView.h"
 #import "UIKitSPI.h"
 #import <WebKit/WKWebViewPrivate.h>
+#import <WebKit/WKWebViewPrivateForTesting.h>
 #import <WebKit/_WKInputDelegate.h>
 #import <wtf/BlockPtr.h>
 
@@ -73,7 +74,8 @@ TEST(FocusPreservationTests, PreserveAndRestoreFocus)
     EXPECT_TRUE([webView becomeFirstResponder]);
 }
 
-TEST(FocusPreservationTests, ChangingFocusedNodeResetsFocusPreservationState)
+// FIXME: Re-enable this test once rdar://60644908 is resolved
+TEST(FocusPreservationTests, DISABLED_ChangingFocusedNodeResetsFocusPreservationState)
 {
     bool inputFocused = false;
     bool selectFocused = false;
@@ -94,11 +96,16 @@ TEST(FocusPreservationTests, ChangingFocusedNodeResetsFocusPreservationState)
     [webView evaluateJavaScript:@"document.querySelector('select').focus()" completionHandler:nil];
     Util::run(&selectFocused);
 
-    EXPECT_NOT_NULL(webView.textInputContentView.inputView);
+    BOOL isPhone = [[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPhone;
+    if (isPhone)
+        EXPECT_NOT_NULL(webView.textInputContentView.inputView);
+
     [webView selectFormAccessoryPickerRow:1];
-    EXPECT_TRUE([webView resignFirstResponder]);
-    EXPECT_FALSE([webView stringByEvaluatingJavaScript:@"document.activeElement == document.querySelector('select')"].boolValue);
+    [webView dismissFormAccessoryView];
     EXPECT_EQ(1, [webView stringByEvaluatingJavaScript:@"document.querySelector('select').selectedIndex"].intValue);
+
+    if (isPhone)
+        EXPECT_FALSE([webView stringByEvaluatingJavaScript:@"document.activeElement == document.querySelector('select')"].boolValue);
 
     [webView.textInputContentView _restoreFocusWithToken:focusToken];
 }

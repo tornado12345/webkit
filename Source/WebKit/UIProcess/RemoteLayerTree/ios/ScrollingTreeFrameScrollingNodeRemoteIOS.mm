@@ -32,6 +32,7 @@
 #import <WebCore/ScrollingStateFrameScrollingNode.h>
 #import <WebCore/ScrollingStateScrollingNode.h>
 #import <WebCore/ScrollingTree.h>
+#import <wtf/BlockObjCExceptions.h>
 
 namespace WebKit {
 using namespace WebCore;
@@ -57,17 +58,17 @@ void ScrollingTreeFrameScrollingNodeRemoteIOS::commitStateBeforeChildren(const S
     const auto& scrollingStateNode = downcast<ScrollingStateFrameScrollingNode>(stateNode);
 
     if (scrollingStateNode.hasChangedProperty(ScrollingStateFrameScrollingNode::CounterScrollingLayer))
-        m_counterScrollingLayer = scrollingStateNode.counterScrollingLayer();
+        m_counterScrollingLayer = static_cast<CALayer*>(scrollingStateNode.counterScrollingLayer());
 
     if (scrollingStateNode.hasChangedProperty(ScrollingStateFrameScrollingNode::HeaderLayer))
-        m_headerLayer = scrollingStateNode.headerLayer();
+        m_headerLayer = static_cast<CALayer*>(scrollingStateNode.headerLayer());
 
     if (scrollingStateNode.hasChangedProperty(ScrollingStateFrameScrollingNode::FooterLayer))
-        m_footerLayer = scrollingStateNode.footerLayer();
+        m_footerLayer = static_cast<CALayer*>(scrollingStateNode.footerLayer());
 
     if (stateNode.hasChangedProperty(ScrollingStateScrollingNode::ScrollContainerLayer)) {
         if (scrollContainerLayer())
-            m_scrollingNodeDelegate = std::make_unique<ScrollingTreeScrollingNodeDelegateIOS>(*this);
+            m_scrollingNodeDelegate = makeUnique<ScrollingTreeScrollingNodeDelegateIOS>(*this);
         else
             m_scrollingNodeDelegate = nullptr;
     }
@@ -82,12 +83,16 @@ void ScrollingTreeFrameScrollingNodeRemoteIOS::commitStateAfterChildren(const Sc
 
     const auto& scrollingStateNode = downcast<ScrollingStateFrameScrollingNode>(stateNode);
 
-    // Update the scroll position after child nodes have been updated, because they need to have updated their constraints before any scrolling happens.
-    if (scrollingStateNode.hasChangedProperty(ScrollingStateScrollingNode::RequestedScrollPosition))
-        scrollTo(scrollingStateNode.requestedScrollPosition());
+    if (m_scrollingNodeDelegate) {
+        m_scrollingNodeDelegate->commitStateAfterChildren(scrollingStateNode);
+        return;
+    }
 
-    if (m_scrollingNodeDelegate)
-        m_scrollingNodeDelegate->commitStateAfterChildren(downcast<ScrollingStateScrollingNode>(stateNode));
+    // Update the scroll position after child nodes have been updated, because they need to have updated their constraints before any scrolling happens.
+    if (scrollingStateNode.hasChangedProperty(ScrollingStateScrollingNode::RequestedScrollPosition)) {
+        const auto& requestedScrollData = scrollingStateNode.requestedScrollData();
+        scrollTo(requestedScrollData.scrollPosition, requestedScrollData.scrollType, requestedScrollData.clamping);
+    }
 }
 
 FloatPoint ScrollingTreeFrameScrollingNodeRemoteIOS::minimumScrollPosition() const
@@ -118,13 +123,12 @@ void ScrollingTreeFrameScrollingNodeRemoteIOS::repositionScrollingLayers()
         return;
     }
 
-    auto scrollPosition = currentScrollPosition();
-    // FIXME: This is always wrong on iOS. Maybe assert that we always have a delegate.
-    [scrolledContentsLayer() setPosition:-scrollPosition];
+    // Main frame scrolling is handled by the main UIScrollView.
 }
 
 void ScrollingTreeFrameScrollingNodeRemoteIOS::repositionRelatedLayers()
 {
+    BEGIN_BLOCK_OBJC_EXCEPTIONS
     auto layoutViewport = this->layoutViewport();
 
     [m_counterScrollingLayer setPosition:layoutViewport.location()];
@@ -140,6 +144,7 @@ void ScrollingTreeFrameScrollingNodeRemoteIOS::repositionRelatedLayers()
         if (m_footerLayer)
             [m_footerLayer setPosition:FloatPoint(layoutViewport.x(), totalContentsSize().height() - footerHeight())];
     }
+    END_BLOCK_OBJC_EXCEPTIONS
 }
 
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 Igalia S.L.
+ * Copyright (C) 2020 Igalia S.L.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -37,25 +37,40 @@ GRefPtr<GSubprocess> flatpakSpawn(GSubprocessLauncher* launcher, const WebKit::P
 {
     ASSERT(launcher);
 
-    // When we are running inside of flatpak's sandbox we do not have permissions to
-    // use the same sandbox we do outside but flatpak offers to create new sandboxes
+    // When we are running inside of flatpak's sandbox we do not have permissions to use the same
+    // bubblewrap sandbox we do outside but flatpak offers the ability to create new sandboxes
     // for us using flatpak-spawn.
-    //
-    // This is just a stub implementation atm though as the Spawn interface does not expose
-    // much outside of `--sandbox` (no permissions) and `--no-network`. We need to
-    // add some permissions in between those for this to provide meaningful security.
 
     GUniquePtr<gchar> childProcessSocketArg(g_strdup_printf("--forward-fd=%d", childProcessSocket));
-    Vector<const char*> flatpakArgs = {
-        "/usr/bin/flatpak-spawn",
+    Vector<CString> flatpakArgs = {
+        "flatpak-spawn",
         childProcessSocketArg.get(),
+        "--watch-bus"
     };
+
+    if (launchOptions.processType == ProcessLauncher::ProcessType::Web) {
+        flatpakArgs.appendVector(Vector<CString>({
+            "--sandbox",
+            "--no-network",
+            "--sandbox-flag=share-gpu",
+            "--sandbox-flag=share-display",
+            "--sandbox-flag=share-sound",
+            "--sandbox-flag=allow-a11y",
+            "--sandbox-flag=allow-dbus", // Note that this only allows portals and $appid.Sandbox.* access
+        }));
+
+        for (const auto& pathAndPermission : launchOptions.extraWebProcessSandboxPaths) {
+            const char* formatString = pathAndPermission.value == SandboxPermission::ReadOnly ? "--sandbox-expose-path-ro=%s": "--sandbox-expose-path=%s";
+            GUniquePtr<gchar> pathArg(g_strdup_printf(formatString, pathAndPermission.key.data()));
+            flatpakArgs.append(pathArg.get());
+        }
+    }
 
     char** newArgv = g_newa(char*, g_strv_length(argv) + flatpakArgs.size() + 1);
     size_t i = 0;
 
     for (const auto& arg : flatpakArgs)
-        newArgv[i++] = const_cast<char*>(arg);
+        newArgv[i++] = const_cast<char*>(arg.data());
     for (size_t x = 0; argv[x]; x++)
         newArgv[i++] = argv[x];
     newArgv[i++] = nullptr;

@@ -1,5 +1,0 @@
-PASS [object WebGPU] is defined.
-PASS successfullyParsed is true
-
-TEST COMPLETE
-

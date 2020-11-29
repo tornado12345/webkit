@@ -21,7 +21,7 @@ class WebKitPostTileWidget extends WP_Widget {
         return Front_Page_Posts::WP_Query();
     }
 
-    public function widget( array $args, array $options ) {
+    public function widget($args, $options) {
         $Query = $this->load($options);
 
         // Get the next post, if available
@@ -68,7 +68,7 @@ class WebKitPostTileWidget extends WP_Widget {
                 <a class="tile-link" href="<?php the_permalink(); ?>"><?php echo $title; ?></a>
                 <div class="background-image">
                     <svg viewbox="0 0 100 100">
-                        <use xlink:href="#<?php echo esc_attr(get_post_icon()); ?>" />
+                        <use xlink:href="#<?php echo esc_attr(get_post_icon()); ?>" aria-label="<?php echo esc_attr(str_replace('-',' ', get_post_icon())); ?> icon" />
                     </svg>
                     <div class="featured-image"<?php echo $image; ?>></div>
                     <?php if ( $featured ): ?><div class="background-vignette"></div><?php endif; ?>
@@ -82,7 +82,7 @@ class WebKitPostTileWidget extends WP_Widget {
         <?php
     }
 
-    public function form( array $options ) {
+    public function form($options) {
         if ( empty( $options['link'] ) ) $options['link'] = __('Read more');
         ?>
         <p><label for="<?php echo $this->get_field_id('title'); ?>"><?php _e('Title'); ?></label>

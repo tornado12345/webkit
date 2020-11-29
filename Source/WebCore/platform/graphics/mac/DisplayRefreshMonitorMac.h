@@ -25,7 +25,7 @@
 
 #pragma once
 
-#if USE(REQUEST_ANIMATION_FRAME_DISPLAY_MONITOR) && PLATFORM(MAC)
+#if PLATFORM(MAC)
 
 #include "DisplayRefreshMonitor.h"
 #include <wtf/WeakPtr.h>
@@ -34,7 +34,7 @@ typedef struct __CVDisplayLink *CVDisplayLinkRef;
 
 namespace WebCore {
 
-class DisplayRefreshMonitorMac : public DisplayRefreshMonitor, public CanMakeWeakPtr<DisplayRefreshMonitorMac> {
+class DisplayRefreshMonitorMac : public DisplayRefreshMonitor {
 public:
     static Ref<DisplayRefreshMonitorMac> create(PlatformDisplayID displayID)
     {
@@ -45,6 +45,7 @@ public:
 
     void displayLinkFired() override;
     bool requestRefreshCallback() override;
+    void stop() override;
 
 private:
     explicit DisplayRefreshMonitorMac(PlatformDisplayID);
@@ -54,4 +55,4 @@ private:
 
 }
 
-#endif // USE(REQUEST_ANIMATION_FRAME_DISPLAY_MONITOR) && PLATFORM(MAC)
+#endif // PLATFORM(MAC)

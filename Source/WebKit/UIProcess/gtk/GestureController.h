@@ -25,7 +25,7 @@
 
 #pragma once
 
-#if HAVE(GTK_GESTURES)
+#if !USE(GTK4)
 
 #include <WebCore/FloatPoint.h>
 #include <wtf/Noncopyable.h>
@@ -37,6 +37,7 @@ typedef struct _GdkEventTouch GdkEventTouch;
 typedef struct _GdkEventSequence GdkEventSequence;
 typedef struct _GtkGesture GtkGesture;
 
+
 namespace WebKit {
 
 class GestureControllerClient {
@@ -47,6 +48,7 @@ public:
 
     virtual void startDrag(GdkEventTouch*, const WebCore::FloatPoint&) = 0;
     virtual void drag(GdkEventTouch*, const WebCore::FloatPoint&, const WebCore::FloatPoint&) = 0;
+    virtual void cancelDrag() = 0;
 
     virtual void swipe(GdkEventTouch*, const WebCore::FloatPoint&) = 0;
 
@@ -96,12 +98,14 @@ private:
         // Notify that a drag started, allowing to stop kinetic deceleration.
         void startDrag(GdkEvent*);
         void handleDrag(GdkEvent*, double x, double y);
+        void cancelDrag();
         void handleTap(GdkEvent*);
         void longPressFired();
 
         static void begin(DragGesture*, double x, double y, GtkGesture*);
         static void update(DragGesture*, double x, double y, GtkGesture*);
         static void end(DragGesture*, GdkEventSequence*, GtkGesture*);
+        static void cancel(DragGesture*, GdkEventSequence*, GtkGesture*);
 
         WebCore::FloatPoint m_start;
         WebCore::FloatPoint m_offset;
@@ -158,4 +162,4 @@ private:
 
 } // namespace WebKit
 
-#endif // HAVE(GTK_GESTURES)
+#endif

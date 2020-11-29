@@ -74,9 +74,8 @@ ResourceHandleInternal* CurlResourceHandleDelegate::d()
     return m_handle.getInternal();
 }
 
-void CurlResourceHandleDelegate::curlDidSendData(CurlRequest& request, unsigned long long bytesSent, unsigned long long totalBytesToBeSent)
+void CurlResourceHandleDelegate::curlDidSendData(CurlRequest&, unsigned long long bytesSent, unsigned long long totalBytesToBeSent)
 {
-    UNUSED_PARAM(request);
     ASSERT(isMainThread());
 
     if (cancelledOrClientless())
@@ -89,17 +88,15 @@ static void handleCookieHeaders(ResourceHandleInternal* d, const ResourceRequest
 {
     static const auto setCookieHeader = "set-cookie: ";
 
-    const auto& storageSession = *d->m_context->storageSession();
-    const auto& cookieJar = storageSession.cookieStorage();
     for (const auto& header : response.headers) {
         if (header.startsWithIgnoringASCIICase(setCookieHeader)) {
             const auto contents = header.right(header.length() - strlen(setCookieHeader));
-            cookieJar.setCookiesFromHTTPResponse(storageSession, request.firstPartyForCookies(), response.url, contents);
+            d->m_context->storageSession()->setCookiesFromHTTPResponse(request.firstPartyForCookies(), response.url, contents);
         }
     }
 }
 
-void CurlResourceHandleDelegate::curlDidReceiveResponse(CurlRequest& request, const CurlResponse& receivedResponse)
+void CurlResourceHandleDelegate::curlDidReceiveResponse(CurlRequest& request, CurlResponse&& receivedResponse)
 {
     ASSERT(isMainThread());
     ASSERT(!d()->m_defersLoading);
@@ -108,9 +105,8 @@ void CurlResourceHandleDelegate::curlDidReceiveResponse(CurlRequest& request, co
         return;
 
     m_response = ResourceResponse(receivedResponse);
-
-    m_response.setCertificateInfo(request.certificateInfo().isolatedCopy());
-    m_response.setDeprecatedNetworkLoadMetrics(request.networkLoadMetrics().isolatedCopy());
+    m_response.setCertificateInfo(WTFMove(receivedResponse.certificateInfo));
+    m_response.setDeprecatedNetworkLoadMetrics(Box<NetworkLoadMetrics>::create(WTFMove(receivedResponse.networkLoadMetrics)));
 
     handleCookieHeaders(d(), request.resourceRequest(), receivedResponse);
 
@@ -130,7 +126,7 @@ void CurlResourceHandleDelegate::curlDidReceiveResponse(CurlRequest& request, co
         URL cacheUrl = m_response.url();
         cacheUrl.removeFragmentIdentifier();
 
-        if (CurlCacheManager::singleton().getCachedResponse(cacheUrl, m_response)) {
+        if (CurlCacheManager::singleton().getCachedResponse(cacheUrl.string(), m_response)) {
             if (d()->m_addedCacheValidationHeaders) {
                 m_response.setHTTPStatusCode(200);
                 m_response.setHTTPStatusText("OK");
@@ -145,9 +141,8 @@ void CurlResourceHandleDelegate::curlDidReceiveResponse(CurlRequest& request, co
     });
 }
 
-void CurlResourceHandleDelegate::curlDidReceiveBuffer(CurlRequest& request, Ref<SharedBuffer>&& buffer)
+void CurlResourceHandleDelegate::curlDidReceiveBuffer(CurlRequest&, Ref<SharedBuffer>&& buffer)
 {
-    UNUSED_PARAM(request);
     ASSERT(isMainThread());
 
     if (cancelledOrClientless())
@@ -157,22 +152,19 @@ void CurlResourceHandleDelegate::curlDidReceiveBuffer(CurlRequest& request, Ref<
     client()->didReceiveBuffer(&m_handle, WTFMove(buffer), buffer->size());
 }
 
-void CurlResourceHandleDelegate::curlDidComplete(CurlRequest& request)
+void CurlResourceHandleDelegate::curlDidComplete(CurlRequest&, NetworkLoadMetrics&&)
 {
     ASSERT(isMainThread());
 
     if (cancelledOrClientless())
         return;
 
-    m_response.setDeprecatedNetworkLoadMetrics(request.networkLoadMetrics().isolatedCopy());
-
     CurlCacheManager::singleton().didFinishLoading(m_handle);
     client()->didFinishLoading(&m_handle);
 }
 
-void CurlResourceHandleDelegate::curlDidFailWithError(CurlRequest& request, const ResourceError& resourceError)
+void CurlResourceHandleDelegate::curlDidFailWithError(CurlRequest&, ResourceError&& resourceError, CertificateInfo&&)
 {
-    UNUSED_PARAM(request);
     ASSERT(isMainThread());
 
     if (cancelledOrClientless())

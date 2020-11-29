@@ -49,8 +49,6 @@
 #import "WebUIKitSupport.h"
 #endif
 
-using namespace WebCore;
-
 static void checkCandidate(WebBasePluginPackage **currentPlugin, WebBasePluginPackage **candidatePlugin);
 
 @interface WebPluginDatabase (Internal)
@@ -292,7 +290,7 @@ static NSArray *additionalWebPlugInPaths;
         NSMutableSet *MIMETypes = [[NSMutableSet alloc] init];
         pluginEnumerator = [plugins objectEnumerator];
         while ((plugin = [pluginEnumerator nextObject])) {
-            const PluginInfo& pluginInfo = [plugin pluginInfo];
+            const auto& pluginInfo = [plugin pluginInfo];
             for (size_t i = 0; i < pluginInfo.mimes.size(); ++i)
                 [MIMETypes addObject:pluginInfo.mimes[i].type];
         }
@@ -392,11 +390,11 @@ static NSArray *additionalWebPlugInPaths;
     // For example, if there is a QuickTime.plugin in the users's home directory
     // that is used instead of the /Library/Internet Plug-ins version.
     // The purpose is to allow non-admin users to update their plug-ins.
-    return [NSArray arrayWithObjects:
+    return @[
         [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Internet Plug-Ins"],
         @"/Library/Internet Plug-Ins",
         [[NSBundle mainBundle] builtInPlugInsPath],
-        nil];
+    ];
 #else
     // iOS plug-ins are all located in /System/Library/Internet Plug-Ins
 #if !PLATFORM(IOS_FAMILY_SIMULATOR)
@@ -408,7 +406,7 @@ static NSArray *additionalWebPlugInPaths;
     NSString* platformRootDir = [NSString stringWithUTF8String:WebKitPlatformSystemRootDirectory()];
     NSString *systemDir = [platformRootDir stringByAppendingPathComponent:@"System/Library"];
 #endif
-    return [NSArray arrayWithObject:[systemDir stringByAppendingPathComponent:@"Internet Plug-Ins"]];
+    return @[[systemDir stringByAppendingPathComponent:@"Internet Plug-Ins"]];
 #endif
 }
 
@@ -440,7 +438,7 @@ static NSArray *additionalWebPlugInPaths;
     ASSERT(plugin);
 
     // Unregister plug-in's MIME type registrations
-    const PluginInfo& pluginInfo = [plugin pluginInfo];
+    const auto& pluginInfo = [plugin pluginInfo];
     for (size_t i = 0; i < pluginInfo.mimes.size(); ++i) {
         NSString *MIMEType = pluginInfo.mimes[i].type;
 

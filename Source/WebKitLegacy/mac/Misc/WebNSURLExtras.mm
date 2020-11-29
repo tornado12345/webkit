@@ -39,7 +39,6 @@
 #import <unicode/uchar.h>
 #import <unicode/uscript.h>
 #import <wtf/Assertions.h>
-#import <wtf/ObjCRuntimeExtras.h>
 #import <wtf/URL.h>
 #import <wtf/cocoa/NSURLExtras.h>
 
@@ -131,6 +130,12 @@ using namespace WTF;
 - (NSURL *)_webkit_canonicalize
 {
     return URLByCanonicalizingURL(self);
+}
+
+- (NSURL *)_webkit_canonicalize_with_wtf
+{
+    auto url = WTF::URL(self);
+    return url.isValid() ? (NSURL *)url : nil;
 }
 
 - (NSURL *)_webkit_URLByRemovingFragment 
@@ -233,7 +238,7 @@ using namespace WTF;
 
 - (NSString *)_webkit_stringByReplacingValidPercentEscapes
 {
-    return decodeURLEscapeSequences(self);
+    return decodeURLEscapeSequences(String(self));
 }
 
 - (NSString *)_webkit_scriptIfJavaScriptURL

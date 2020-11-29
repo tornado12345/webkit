@@ -30,23 +30,31 @@
 
 #import "GPURequestAdapterOptions.h"
 #import "Logging.h"
-
 #import <Metal/Metal.h>
+#import <pal/spi/cocoa/MetalSPI.h>
 #import <wtf/BlockObjCExceptions.h>
 
 namespace WebCore {
 
-RefPtr<GPUDevice> GPUDevice::create(Optional<GPURequestAdapterOptions>&& options)
+static bool isAcceptableDevice(id <MTLDevice> device)
+{
+    UNUSED_PARAM(device);
+    return true;
+}
+
+RefPtr<GPUDevice> GPUDevice::tryCreate(const Optional<GPURequestAdapterOptions>& options)
 {
     RetainPtr<MTLDevice> devicePtr;
 
-    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    BEGIN_BLOCK_OBJC_EXCEPTIONS
     
 #if PLATFORM(MAC)
-    if (options && options->powerPreference == GPURequestAdapterOptions::PowerPreference::LowPower) {
+    if (!options || !options->powerPreference || options->powerPreference == GPUPowerPreference::LowPower) {
         auto devices = adoptNS(MTLCopyAllDevices());
         
         for (id <MTLDevice> device : devices.get()) {
+            if (!isAcceptableDevice(device))
+                continue;
             if (device.lowPower) {
                 devicePtr = device;
                 break;
@@ -59,7 +67,10 @@ RefPtr<GPUDevice> GPUDevice::create(Optional<GPURequestAdapterOptions>&& options
     if (!devicePtr)
         devicePtr = adoptNS(MTLCreateSystemDefaultDevice());
 
-    END_BLOCK_OBJC_EXCEPTIONS;
+    if (!isAcceptableDevice(devicePtr.get()))
+        devicePtr.clear();
+
+    END_BLOCK_OBJC_EXCEPTIONS
 
     if (!devicePtr) {
         LOG(WebGPU, "GPUDevice::GPUDevice(): Unable to create GPUDevice!");

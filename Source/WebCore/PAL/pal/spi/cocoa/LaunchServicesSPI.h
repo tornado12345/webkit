@@ -23,19 +23,13 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#pragma once
-
 #import <Foundation/Foundation.h>
 
+#include <wtf/spi/darwin/XPCSPI.h>
+
 #if USE(APPLE_INTERNAL_SDK)
-
-#if PLATFORM(MAC)
 #import <CoreServices/CoreServicesPriv.h>
-#elif PLATFORM(IOS_FAMILY)
-#import <MobileCoreServices/LSAppLinkPriv.h>
-#endif
-
-#endif
+#endif // USE(APPLE_INTERNAL_SDK)
 
 #if HAVE(APP_LINKS)
 @class LSAppLink;
@@ -46,6 +40,7 @@ typedef void (^LSAppLinkOpenCompletionHandler)(BOOL success, NSError *error);
 #if !USE(APPLE_INTERNAL_SDK)
 
 @interface LSResourceProxy : NSObject <NSCopying, NSSecureCoding>
+@property (nonatomic, copy, readonly) NSString *localizedName;
 @end
 
 @interface LSBundleProxy : LSResourceProxy <NSSecureCoding>
@@ -53,19 +48,28 @@ typedef void (^LSAppLinkOpenCompletionHandler)(BOOL success, NSError *error);
 
 #if HAVE(APP_LINKS)
 @interface LSApplicationProxy : LSBundleProxy <NSSecureCoding>
-- (NSString *)localizedNameForContext:(NSString *)context;
 @end
 
 @interface LSAppLink : NSObject <NSSecureCoding>
 @end
 
 @interface LSAppLink ()
+#if HAVE(APP_LINKS_WITH_ISENABLED)
++ (NSArray<LSAppLink *> *)appLinksWithURL:(NSURL *)aURL limit:(NSUInteger)limit error:(NSError **)outError;
+- (void)openWithCompletionHandler:(LSAppLinkOpenCompletionHandler)completionHandler;
+@property (nonatomic, getter=isEnabled) BOOL enabled;
+#else
 + (void)getAppLinkWithURL:(NSURL *)aURL completionHandler:(LSAppLinkCompletionHandler)completionHandler;
-+ (void)openWithURL:(NSURL *)aURL completionHandler:(LSAppLinkOpenCompletionHandler)completionHandler;
 - (void)openInWebBrowser:(BOOL)inWebBrowser setAppropriateOpenStrategyAndWebBrowserState:(NSDictionary<NSString *, id> *)state completionHandler:(LSAppLinkOpenCompletionHandler)completionHandler;
+#endif
++ (void)openWithURL:(NSURL *)aURL completionHandler:(LSAppLinkOpenCompletionHandler)completionHandler;
 @property (readonly, strong) LSApplicationProxy *targetApplicationProxy;
 @end
 #endif
+
+@interface NSURL ()
+- (NSURL *)iTunesStoreURL;
+@end
 
 #if PLATFORM(MAC)
 enum LSSessionID {
@@ -73,7 +77,25 @@ enum LSSessionID {
 };
 #endif
 
+#if HAVE(LSDATABASECONTEXT)
+@interface LSDatabaseContext : NSObject
+@property (class, readonly) LSDatabaseContext *sharedDatabaseContext;
+@end
+#endif
+
 #endif // !USE(APPLE_INTERNAL_SDK)
+
+#if HAVE(LSDATABASECONTEXT)
+#if __has_include(<CoreServices/LSDatabaseContext+WebKit.h>)
+#import <CoreServices/LSDatabaseContext+WebKit.h>
+#elif !USE(APPLE_INTERNAL_SDK)
+@interface LSDatabaseContext (WebKitChangeTracking)
+- (id <NSObject>)addDatabaseChangeObserver4WebKit:(void (^)(xpc_object_t change))observer;
+- (void)removeDatabaseChangeObserver4WebKit:(id <NSObject>)token;
+- (void)observeDatabaseChange4WebKit:(xpc_object_t)change;
+@end
+#endif
+#endif
 
 #if PLATFORM(MAC)
 
@@ -94,3 +116,21 @@ OSStatus _RegisterApplication(CFDictionaryRef, ProcessSerialNumber*);
 WTF_EXTERN_C_END
 
 #endif // PLATFORM(MAC)
+
+#if PLATFORM(MAC) || PLATFORM(MACCATALYST)
+
+#if PLATFORM(MACCATALYST) && USE(APPLE_INTERNAL_SDK)
+enum LSSessionID {
+    kLSDefaultSessionID = -2,
+};
+#endif
+
+WTF_EXTERN_C_BEGIN
+
+typedef bool (^LSServerConnectionAllowedBlock) (CFDictionaryRef optionsRef);
+void _LSSetApplicationLaunchServicesServerConnectionStatus(uint64_t flags, LSServerConnectionAllowedBlock block);
+CFDictionaryRef _LSApplicationCheckIn(LSSessionID sessionID, CFDictionaryRef applicationInfo);
+
+WTF_EXTERN_C_END
+
+#endif // PLATFORM(MAC) || PLATFORM(MACCATALYST)

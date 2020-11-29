@@ -49,7 +49,7 @@ fi
 
 # If building for iOS, make sure we run this script to make it possible to build frameworks.
 if [ "$QUEUE_NAME" == "ios-ews" ]; then
-    (cd $WEBKIT_HOME; sudo ./Tools/Scripts/configure-xcode-for-ios-development)
+    (cd $WEBKIT_HOME; sudo ./Tools/Scripts/configure-xcode-for-embedded-development)
 fi
 
 # Delete log files older than 30 days, move aside the main $QUEUE_NAME-ews.log file to prevent it from growing extra large.
@@ -61,6 +61,13 @@ if [ -s $QUEUE_NAME.log ]; then
         mv -f $QUEUE_NAME.log ${QUEUE_NAME}_$(date +%Y-%m-%d_%H-%m).log
     fi
 fi
+
+# Fix-up rotten Simulator state
+/bin/rm -rf ~/Library/Developer/CoreSimulator/Devices/*
+/usr/bin/sudo /usr/bin/killall -9 com.apple.CoreSimulator.CoreSimulatorServer
+/usr/bin/xcrun simctl delete unavailable
+/bin/rm -rf ~/Library/Logs/CoreSimulator/*
+
 cd $WEBKIT_HOME
 
 # Delete WebKitBuild to force a clean build

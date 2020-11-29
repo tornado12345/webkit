@@ -75,6 +75,8 @@ WI.WebSocketResource = class WebSocketResource extends WI.Resource
 
         let frame = {data: frameData, isOutgoing, opcode, walltime: this._walltimeForWebSocketTimestamp(timestamp)};
         this._frames.push(frame);
+        if (InspectorFrontendHost.isUnderTest())
+            frame.dataForTest = data;
 
         // COMPATIBILITY (iOS 10.3): `payloadLength` did not exist in 10.3 and earlier.
         if (payloadLength === undefined)
@@ -83,6 +85,15 @@ WI.WebSocketResource = class WebSocketResource extends WI.Resource
         this.increaseSize(payloadLength, elapsedTime);
 
         this.dispatchEventToListeners(WI.WebSocketResource.Event.FrameAdded, frame);
+    }
+
+    // Protected
+
+    requestContentFromBackend()
+    {
+        console.assert(false, "A WebSocket's content was requested. WebSockets do not have content so the request is nonsensical.");
+
+        return super.requestContentFromBackend();
     }
 
     // Private

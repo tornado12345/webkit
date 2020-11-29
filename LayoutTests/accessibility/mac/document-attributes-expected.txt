@@ -1,12 +1,12 @@
 AXRole: AXWebArea
 AXRoleDescription: HTML content
 AXChildren: <array of size 0>
-AXHelp: 
+AXHelp:
 AXParent: <AXWebArea>
 AXSize: NSSize: {800, 600}
-AXTitle: 
-AXDescription: 
-AXValue: 
+AXTitle:
+AXDescription:
+AXValue:
 AXFocused: 0
 AXEnabled: 1
 AXWindow: <AXWebArea>
@@ -18,8 +18,8 @@ AXLinkedUIElements: <array of size 0>
 AXSelected: 0
 AXBlockQuoteLevel: 0
 AXTopLevelUIElement: <AXWebArea>
-AXLanguage: 
-AXDOMIdentifier: 
+AXLanguage:
+AXDOMIdentifier:
 AXDOMClassList: <array of size 0>
 AXLinkUIElements: <array of size 0>
 AXLoaded: 1
@@ -28,7 +28,7 @@ AXLoadingProgress: 1
 AXURL: LayoutTests/accessibility/mac/document-attributes.html
 AXCaretBrowsingEnabled: 0
 AXPreventKeyboardDOMEventDispatch: 0
-AXWebSessionID: 1
+AXWebSessionID: 2
 AXElementBusy: 0
 
 

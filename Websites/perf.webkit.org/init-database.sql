@@ -12,6 +12,7 @@ DROP TABLE IF EXISTS build_slaves CASCADE;
 DROP TABLE IF EXISTS builders CASCADE;
 DROP TABLE IF EXISTS repositories CASCADE;
 DROP TABLE IF EXISTS platforms CASCADE;
+DROP TABLE IF EXISTS platform_groups CASCADE;
 DROP TABLE IF EXISTS test_metrics CASCADE;
 DROP TABLE IF EXISTS tests CASCADE;
 DROP TABLE IF EXISTS reports CASCADE;
@@ -34,9 +35,15 @@ DROP TABLE IF EXISTS build_requests CASCADE;
 DROP TYPE IF EXISTS build_request_status_type CASCADE;
 
 
+CREATE TABLE platform_groups (
+    platformgroup_id serial PRIMARY KEY,
+    platformgroup_name varchar(64) NOT NULL,
+    CONSTRAINT platform_group_name_must_be_unique UNIQUE (platformgroup_name));
+
 CREATE TABLE platforms (
     platform_id serial PRIMARY KEY,
     platform_name varchar(64) NOT NULL,
+    platform_group integer REFERENCES platform_groups DEFAULT NULL,
     platform_hidden boolean NOT NULL DEFAULT FALSE);
 
 CREATE TABLE repositories (
@@ -76,10 +83,10 @@ CREATE TABLE builds (
     build_id serial PRIMARY KEY,
     build_builder integer REFERENCES builders ON DELETE CASCADE,
     build_slave integer REFERENCES build_slaves ON DELETE CASCADE,
-    build_number integer NOT NULL,
+    build_tag varchar(64) NOT NULL,
     build_time timestamp NOT NULL,
     build_latest_revision timestamp,
-    CONSTRAINT builder_build_time_tuple_must_be_unique UNIQUE(build_builder, build_number, build_time));
+    CONSTRAINT builder_build_time_tuple_must_be_unique UNIQUE(build_builder, build_tag, build_time));
 CREATE INDEX build_builder_index ON builds(build_builder);
 
 CREATE TABLE committers (
@@ -185,7 +192,7 @@ CREATE TABLE reports (
     report_id serial PRIMARY KEY,
     report_builder integer NOT NULL REFERENCES builders ON DELETE RESTRICT,
     report_slave integer REFERENCES build_slaves ON DELETE RESTRICT,
-    report_build_number integer,
+    report_build_tag varchar(64),
     report_build integer REFERENCES builds,
     report_created_at timestamp NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),
     report_committed_at timestamp,

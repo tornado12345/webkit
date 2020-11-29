@@ -29,6 +29,8 @@
 
 #include <WebCore/ScrollingTreeOverflowScrollingNode.h>
 
+OBJC_CLASS UIScrollView;
+
 namespace WebKit {
 
 class ScrollingTreeScrollingNodeDelegateIOS;
@@ -38,6 +40,8 @@ public:
     static Ref<ScrollingTreeOverflowScrollingNodeIOS> create(WebCore::ScrollingTree&, WebCore::ScrollingNodeID);
     virtual ~ScrollingTreeOverflowScrollingNodeIOS();
 
+    UIScrollView* scrollView() const;
+
 private:
     ScrollingTreeOverflowScrollingNodeIOS(WebCore::ScrollingTree&, WebCore::ScrollingNodeID);
 
@@ -46,6 +50,7 @@ private:
     
     void repositionScrollingLayers() override;
 
+    // The delegate is non-null for subframes.
     std::unique_ptr<ScrollingTreeScrollingNodeDelegateIOS> m_scrollingNodeDelegate;
 };
 

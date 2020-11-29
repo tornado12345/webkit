@@ -83,14 +83,14 @@ my @testCases = (
     description => "Debug with device SDK",
 },
 {
-    argValue => ["--debug", "ARCHS=i386"],
-    expectedValue => ["--debug", "ARCHS=i386"],
-    description => "Debug 32-bit build",
-},
-{
     argValue => ["--debug", "ARCHS=x86_64"],
     expectedValue => ["--debug", "ARCHS=x86_64"],
     description => "Debug 64-bit build",
+},
+{
+    argValue => ["--debug", "--ftw"],
+    expectedValue => ["--debug"],
+    description => "Debug with FTW",
 },
 );
 

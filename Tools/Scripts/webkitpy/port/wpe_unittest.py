@@ -33,7 +33,7 @@ import unittest
 
 from webkitpy.common.system.executive_mock import MockExecutive
 from webkitpy.common.system.filesystem_mock import MockFileSystem
-from webkitpy.common.system.outputcapture import OutputCapture
+from webkitpy.port.config import clear_cached_configuration
 from webkitpy.port.wpe import WPEPort
 from webkitpy.port.pulseaudio_sanitizer_mock import PulseAudioSanitizerMock
 from webkitpy.port import port_testcase
@@ -53,14 +53,18 @@ class WPEPortTest(port_testcase.PortTestCase):
 
     def test_default_baseline_search_path(self):
         port = self.make_port()
-        self.assertEqual(port.default_baseline_search_path(), ['/mock-checkout/LayoutTests/platform/wpe',
-            '/mock-checkout/LayoutTests/platform/wk2'])
+        self.assertEqual(port.default_baseline_search_path(),
+                         ['/mock-checkout/LayoutTests/platform/wpe',
+                          '/mock-checkout/LayoutTests/platform/glib',
+                          '/mock-checkout/LayoutTests/platform/wk2'])
 
     def test_port_specific_expectations_files(self):
         port = self.make_port()
-        self.assertEqual(port.expectations_files(), ['/mock-checkout/LayoutTests/TestExpectations',
-            '/mock-checkout/LayoutTests/platform/wk2/TestExpectations',
-            '/mock-checkout/LayoutTests/platform/wpe/TestExpectations'])
+        self.assertEqual(port.expectations_files(),
+                         ['/mock-checkout/LayoutTests/TestExpectations',
+                          '/mock-checkout/LayoutTests/platform/wk2/TestExpectations',
+                          '/mock-checkout/LayoutTests/platform/glib/TestExpectations',
+                          '/mock-checkout/LayoutTests/platform/wpe/TestExpectations'])
 
     def test_default_timeout_ms(self):
         self.assertEqual(self.make_port(options=MockOptions(configuration='Release')).default_timeout_ms(), 15000)
@@ -71,3 +75,12 @@ class WPEPortTest(port_testcase.PortTestCase):
     def test_get_crash_log(self):
         # This function tested in linux_get_crash_log_unittest.py
         pass
+
+    def test_default_upload_configuration(self):
+        clear_cached_configuration()
+        port = self.make_port()
+        configuration = port.configuration_for_upload()
+        self.assertEqual(configuration['architecture'], port.architecture())
+        self.assertEqual(configuration['is_simulator'], False)
+        self.assertEqual(configuration['platform'], 'WPE')
+        self.assertEqual(configuration['style'], 'release')

@@ -42,7 +42,7 @@ static bool testDone;
 
 static const unsigned pageLength = 100;
 static const unsigned pageGap = 100;
-static const unsigned expectedPageCount = 20;
+static const unsigned expectedPageCount = 49;
 
 static void didLayout(WKPageRef page, WKPageRenderingProgressEvents milestones, WKTypeRef, const void* clientInfo)
 {
@@ -61,7 +61,7 @@ static void didLayout(WKPageRef page, WKPageRenderingProgressEvents milestones, 
 
 TEST(WebKit, ResizeReversePaginatedWebView)
 {
-    WKRetainPtr<WKContextRef> context(AdoptWK, WKContextCreateWithConfiguration(nullptr));
+    WKRetainPtr<WKContextRef> context = adoptWK(WKContextCreateWithConfiguration(nullptr));
     PlatformWebView webView(context.get());
 
     WKPageNavigationClientV3 loaderClient;

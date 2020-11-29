@@ -1,3 +1,604 @@
+2020-10-27  Dewei Zhu  <dewei_zhu@apple.com>
+
+        Refactor 'platforms' table to contain group information.
+        https://bugs.webkit.org/show_bug.cgi?id=193132
+
+        Reviewed by Ryosuke Niwa.
+
+        Group 'platforms' so that bisecting can use commit sets from other platforms which are in the same platform group.
+        This will help to enhance the bisecting capability to higher granularity.
+        Added admin page to manage platform groups.
+        Updated platform admin page to allow update platform group.
+        SQL query to update existing database:
+        '''
+        BEGIN;
+        CREATE TABLE platform_groups (
+            platformgroup_id serial PRIMARY KEY,
+            platformgroup_name varchar(64) NOT NULL,
+            CONSTRAINT platform_group_name_must_be_unique UNIQUE (platformgroup_name));
+
+        ALTER TABLE platforms ADD COLUMN platform_group integer REFERENCES platform_groups DEFAULT NULL;
+        END;
+        '''
+
+        * init-database.sql: Added 'platform_group' column to 'platforms' table.
+        Added 'platform_groups' table.
+        * migrate-database.sql: Updated migration script accordingly.
+        * public/admin/platform-groups.php: Added a page to manage platform groups.
+        * public/admin/platforms.php: Added support to update platform group in admin page.
+        * public/include/admin-header.php: Added link to page that maneges platform groups.
+        * public/include/manifest-generator.php: Added 'platformGroup' in manifest.
+        * public/v3/index.html: Included 'platform-groups.js'.
+        * public/v3/models/analysis-task.js:
+        (AnalysisTask.prototype.async.commitSetsFromTestGroupsAndMeasurementSet):
+        Included measurement commit sets from other platforms in the same platform group.
+        (AnalysisTask.prototype._commitSetsInSamePlatformGroup):
+        Helper function to find measurement commit set for other platforms in same platform group.
+        * public/v3/models/manifest.js: Added step to build 'PlatformGroup' instances.
+        * public/v3/models/platform-group.js: Added 'PlatformGroup' to represent entries in 'platform_groups' table.
+        (PlatformGroup):
+        (PlatformGroup.prototype.addPlatform):
+        (PlatformGroup.prototype.platforms):
+        * public/v3/models/platform.js: Added itself to 'PlatformGroup' in constructor if it belongs
+        to a group.
+        (Platform.prototype.group): Return the platform group of current platform.
+        * public/v3/models/time-series.js: Added helper function to show view between a given time range.
+        (TimeSeries.prototype.viewBetweenTime):
+        * server-tests/api-manifest-tests.js: Updated unit test to also test platform group initialization.
+        * tools/js/database.js: Added prefix for 'platform_groups'.
+        * tools/js/v3-models.js: Added import for platform group.
+
+2020-10-26  Dewei Zhu  <dewei_zhu@apple.com>
+
+        Fix and update performance dashboard tests
+        https://bugs.webkit.org/show_bug.cgi?id=218222
+
+        Reviewed by Ryosuke Niwa.
+
+        * public/api/upload-root.php: Add a null check against empty array
+        when accessing invalid key which will show warning since php 7.4.
+        Per https://wiki.php.net/rfc/notice-for-non-valid-array-container.
+        * server-tests/tools-sync-buildbot-integration-tests.js:
+        Fixed a unit test that assumes build request IDs under one test group is
+        one after another. This assumption is wrong when 'StartServers' under
+        'mpm_prefork_module' is set more than one in apache config.
+        Fixed antoher incorrect unit test.
+        * unit-tests/analysis-results-notifier-tests.js:
+        Fixed unit tests which incorrectly used 'assert.throws' per
+        https://nodejs.org/docs/latest-v7.x/api/assert.html#assert_assert_throws_block_error_message.
+
+2020-03-04  Zhifei Fang  <zhifei_fang@apple.com>
+
+        Test-freshness page table heaer misplaced
+        Some platform name is too long
+        https://bugs.webkit.org/show_bug.cgi?id=208617
+
+        Reviewed by Ryosuke Niwa.
+
+        * public/v3/pages/test-freshness-page.js:
+        (TestFreshnessPage.cssTemplate):
+
+2019-12-15  Zhifei Fang  <zhifei_fang@apple.com>
+
+        Add power metric to perf dashboard
+        https://bugs.webkit.org/show_bug.cgi?id=205227
+
+        Reviewed by Ryosuke Niwa.
+
+        * public/v3/models/metric.js:
+        (Metric):
+
+2019-12-05  Dewei Zhu  <dewei_zhu@apple.com>
+
+        Custom analysis task page should allow schedule any triggerable accepted tests.
+        https://bugs.webkit.org/show_bug.cgi?id=204925
+
+        Reviewed by Ryosuke Niwa.
+
+        Fix a bug that subtest will not show on custom analysis task page if both itself and parent test are
+        accepted by triggerable.
+        Order test list in alphabetical order.
+
+        * public/v3/components/custom-analysis-task-configurator.js:
+        (CustomAnalysisTaskConfigurator.prototype._renderTriggerableTests):
+
+2019-10-28  Dewei Zhu  <dewei_zhu@apple.com>
+
+        Fix a bug that cannot unhide a platform.
+        https://bugs.webkit.org/show_bug.cgi?id=203521
+
+        Reviewed by Ryosuke Niwa.
+
+        Before this change, the there is no value in POST when 'hidden' checkbox is unchecked.
+        Then the update will fail because platform_hidden cannot be NULL.
+
+        * public/admin/platforms.php: Adapted 'update_boolean_field'.
+        * public/admin/triggerables.php: Adapted 'update_boolean_field'.
+        * public/include/admin-header.php: Added 'update_boolean_field' helper function to set explict
+        boolean value for update.
+
+2019-10-25  Dewei Zhu  <dewei_zhu@apple.com>
+
+        Add SSL support for peformance dashboard database connection.
+        https://bugs.webkit.org/show_bug.cgi?id=203426
+
+        Reviewed by Ryosuke Niwa.
+
+        Performance dashboard should allow connecting Postgres database with SSL.
+
+        * public/include/db.php: Add SSL configuration to connection string if specified.
+        * tools/js/database.js: Add SSL configuration to connection string if specified.
+        (Database.prototype._prepareSSLConfig):
+        (Database.prototype.connect):
+        * unit-tests/checkconfig.js: Added unit tests for optional ssl fields.
+
+2019-10-22  Dewei Zhu  <dewei_zhu@apple.com>
+
+        Refactor "builds" table "build_number" row to "build_tag" to fit more generic use cases.
+        https://bugs.webkit.org/show_bug.cgi?id=203270
+
+        Reviewed by Ryosuke Niwa.
+
+        Rename "build_number" to "build_tag" to fit more generic use cases.
+        Add support to be backward compatible to accept reports contain either
+        "buildNumber" or "buildTag".
+
+        * browser-tests/index.html:
+        * init-database.sql:
+        * migrate-database.sql: Updated migration sql for this change.
+        * public/admin/test-configurations.php:
+        * public/api/measurement-set.php:
+        * public/api/runs.php:
+        * public/api/upload-root.php: Added support for both "buildNumber" and "buildTag".
+        * public/include/report-processor.php: Added support for both "buildNumber" and "buildTag".
+        * public/v3/models/builder.js:
+        (Builder.prototype.urlForBuild):
+        (Builder):
+        (Build):
+        (Build.prototype.buildTag):
+        (Build.prototype.label):
+        (Build.prototype.url):
+        (Build.prototype.buildNumber): Deleted.
+        * public/v3/models/measurement-adaptor.js:
+        (MeasurementAdaptor):
+        (MeasurementAdaptor.prototype.applyTo.return.build):
+        * public/v3/pages/chart-pane-status-view.js:
+        * public/v3/pages/test-freshness-page.js:
+        (TestFreshnessPage.prototype._renderTooltip):
+        * server-tests/admin-platforms-tests.js:
+        (reportsForDifferentPlatforms):
+        * server-tests/admin-reprocess-report-tests.js:
+        * server-tests/api-commits-tests.js:
+        * server-tests/api-manifest-tests.js:
+        * server-tests/api-measurement-set-tests.js:
+        * server-tests/api-report-tests.js: Added unit tests for testing "buildNumber" and "buildTag".
+        (emptyReport):
+        (reportWitMismatchingCommitTime):
+        (reportWithOneSecondCommitTimeDifference):
+        (emptySlaveReport):
+        (makeReport):
+        (reportWithSameSubtestName):
+        * server-tests/api-upload-root-tests.js: Added unit tests for testing "buildNumber" and "buildTag".
+        * server-tests/privileged-api-add-build-requests-tests.js:
+        * server-tests/privileged-api-create-analysis-task-tests.js:
+        * server-tests/privileged-api-create-test-group-tests.js:
+        (createAnalysisTask):
+        * server-tests/privileged-api-upate-run-status.js:
+        * server-tests/privileged-api-update-test-group-tests.js:
+        (async.createAnalysisTask):
+        * server-tests/resources/mock-data.js:
+        (MockData.addMockConfiguration):
+        (MockData.sampleBuildData):
+        (MockData.finishedBuildData):
+        * server-tests/tools-sync-buildbot-integration-tests.js:
+        * tools/js/buildbot-syncer.js:
+        (BuildbotBuildEntry.prototype.initialize):
+        (BuildbotBuildEntry.prototype.buildTag):
+        (BuildbotBuildEntry.prototype.url):
+        (BuildbotSyncer.prototype.urlForBuildTag):
+        (BuildbotBuildEntry.prototype.buildNumber): Deleted.
+        (BuildbotSyncer.prototype.urlForBuildNumber): Deleted.
+        * unit-tests/analysis-task-tests.js:
+        (measurementCluster):
+        * unit-tests/buildbot-syncer-tests.js:
+        * unit-tests/measurement-adaptor-tests.js:
+        * unit-tests/measurement-set-analyzer-tests.js:
+        * unit-tests/measurement-set-tests.js:
+        * unit-tests/resources/mock-v3-models.js:
+
+2019-10-11  Dewei Zhu  <dewei_zhu@apple.com>
+
+        Improve test freshness page interaction experience.
+        https://bugs.webkit.org/show_bug.cgi?id=202684
+
+        Reviewed by Ryosuke Niwa.
+
+        Change test freshness page show tooltip on click instead of popuping on mouse hover.
+        And clicking anywhere in 'page-with-heading' section except the tooltip can dismiss tooltip.
+        Add keyboard support to move focus around including 'Tab' key support.
+        Add support to use 'Enter' key to show or dismiss tooltip.
+        Add support to use 'Escape' key to dismiss tooltip.
+
+        * public/shared/common-component-base.js: Added support for link to specify 'tabindex'.
+        (CommonComponentBase.prototype.createLink):
+        (CommonComponentBase.createLink):
+        (CommonComponentBase):
+        * public/v3/components/base.js: Added support for customizing whether or not prevent default and stop propagation
+        while creating event handler.
+        (ComponentBase.prototype.createEventHandler):
+        (ComponentBase.createEventHandler):
+        (ComponentBase):
+        * public/v3/components/freshness-indicator.js:
+        (FreshnessIndicator): Removed 'url' property and removed customization for mouse event.
+        (FreshnessIndicator.prototype.update):
+        (FreshnessIndicator.prototype.didConstructShadowTree): Deleted.
+        * public/v3/pages/test-freshness-page.js:
+        (TestFreshnessPage): Changed to show tooltip on click and added key board event.
+        (TestFreshnessPage.prototype.didConstructShadowTree): Added key event support.
+        (TestFreshnessPage.prototype._findClosestIndicatorAnchorForCoordinate):
+        (TestFreshnessPage.prototype.render):
+        (TestFreshnessPage.prototype._renderTooltip):
+        (TestFreshnessPage.prototype._constructTableCell): Added tabIndex for each cell that contains freshness indicator.
+        (TestFreshnessPage.prototype._configureAnchorForIndicator):
+        (TestFreshnessPage.prototype._clearIndicatorState): Changed the color of links in tooltip to a more readable color.
+        Added styles when anchor for status cell and links on tooltip are focused.
+        (TestFreshnessPage.cssTemplate):
+
+2019-10-04  Zhifei Fang  <zhifei_fang@apple.com>
+
+        [perf dashboard] Test fressness popover sometimes point to wrong place
+        https://bugs.webkit.org/show_bug.cgi?id=202606
+
+        Reviewed by Ryosuke Niwa.
+
+        * public/v3/pages/test-freshness-page.js: Use a invisable tooltip anchor to cacluate tooltip position. It also helps to get rid of caculation for determine the tooltip table position. 
+        (TestFreshnessPage.prototype._renderTooltip):
+        (TestFreshnessPage.cssTemplate):
+
+2019-10-04  Zhifei Fang  <zhifei_fang@apple.com>
+
+        [perf dashboard] Make test fressness head and indicator perfect centered
+        https://bugs.webkit.org/show_bug.cgi?id=202602
+
+        Reviewed by Ryosuke Niwa.
+
+        * public/v3/components/freshness-indicator.js: make indicator margin auto, it will then horizontally centered in the container
+        (FreshnessIndicator.cssTemplate):
+        (FreshnessIndicator):
+        * public/v3/pages/test-freshness-page.js: make the table head transform based on the center left
+        (TestFreshnessPage.cssTemplate):
+
+2019-10-02  Dewei Zhu  <dewei_zhu@apple.com>
+
+        Fix a bug that warning icon causes infinite rendering when it has warning message.
+        https://bugs.webkit.org/show_bug.cgi?id=202502
+
+        Reviewed by Ryosuke Niwa.
+
+        Fix the problem that a warning icon with a warning message will result in infinite rendering.
+
+        * public/v3/components/button-base.js:
+        (ButtonBase):
+        (ButtonBase.prototype.setButtonTitle): Fixed a typo in function name and moved the title update to
+        render function.
+        (ButtonBase.prototype.render): Added the logic to render title.
+        * public/v3/components/test-group-revision-table.js: Set warning message by invoking setButtonTitle.
+        * public/v3/components/warning-icon.js: Removed the warning messge related code and leave the responsibility
+        to ButtonBase.
+        (WarningIcon):
+        (WarningIcon.prototype.render):
+
+2019-07-30  Dewei Zhu  <dewei_zhu@apple.com>
+
+        Provide build request status description information on dashboard.
+        https://bugs.webkit.org/show_bug.cgi?id=199810
+
+        Reviewed by Ryosuke Niwa.
+
+        Add build request status description to show detailed information for a build and show it in dashboard.
+        Update SQL for existing instance:
+            ALTER TABLE build_requests ADD COLUMN IF NOT EXISTS request_status_description varchar(1024) DEFAULT NULL;
+
+        * ReadMe.md: Updated instructions for initializing a database to include running 'migrate-database.sql'.
+        * init-database.sql: Added request_status_description column.
+        * migrate-database.sql: A file stores migration SQL for existing instance.
+        * public/api/build-requests.php: Added support for updating request_status_description.
+        * public/include/build-requests-fetcher.php: Exposed `statusDescription` to API.
+        * public/v3/components/test-group-revision-table.js: Added UI for showing build request status detail.
+        (TestGroupRevisionTable.prototype._renderTable):
+        (TestGroupRevisionTable.prototype._buildDescriptionCell):
+        (TestGroupRevisionTable.cssTemplate):
+        * public/v3/components/warning-icon.js: Extended warning icon to be able to customize information on hover.
+        (WarningIcon):
+        (WarningIcon.prototype.render):
+        * public/v3/components/button-base.js: Added a instance method to set button title.
+        (ButtonBase.prototype.setButtonTitle):
+        * public/v3/models/build-request.js: Added 'statusDescription' field.
+        (BuildRequest):
+        (BuildRequest.prototype.updateSingleton):
+        (BuildRequest.prototype.statusDescription):
+        * server-tests/api-build-requests-tests.js: Fixed unit tests.
+        * server-tests/resources/mock-data.js:
+        (MockData.set mockTestSyncConfigWithSingleBuilder): Added 'status_description' in buildbot mock data.
+        (MockData.sampleBuildData):
+        * server-tests/resources/test-server.js:
+        (TestServer.prototype.initDatabase): Added code to execute 'migrate-database.sql' on initialization.
+        * server-tests/tools-sync-buildbot-integration-tests.js: Added unit tests.
+        * tools/js/buildbot-syncer.js: Added 'statusDescription' field to 'BuildbotBuildEntry'.
+        (BuildbotBuildEntry.prototype.initialize):
+        (BuildbotBuildEntry.prototype.statusDescription):
+        * tools/js/buildbot-triggerable.js:
+        (BuildbotTriggerable.prototype._pullBuildbotOnAllSyncers):
+        * unit-tests/buildbot-syncer-tests.js: Added test code for BuildbotBuildEntry.statusDescription.
+
+2019-07-26  Dewei Zhu  <dewei_zhu@apple.com>
+
+        Dashboard should defaults to first dashboard page when summary page is not available.
+        https://bugs.webkit.org/show_bug.cgi?id=200180
+
+        Reviewed by Ryosuke Niwa.
+
+        Fix a bug that charts page will become the default when there is no summary page but there
+        is at least one dashboard page.
+
+        * public/v3/main.js: Charts page and analysis category page should not be considered as summay pages.
+        (main):
+
+2019-07-30  Dewei Zhu  <dewei_zhu@apple.com>
+
+        Analysis task page should show build request author and creation time.
+        https://bugs.webkit.org/show_bug.cgi?id=200274
+
+        Reviewed by Ryosuke Niwa.
+
+        Author and creation time of a build request should be visible in analysis task page.
+
+        * public/v3/pages/analysis-task-page.js: Added UI to show build request creation time and author.
+        (AnalysisTaskTestGroupPane.prototype._renderCurrentTestGroup):
+
+2019-07-29  Dewei Zhu  <dewei_zhu@apple.com>
+
+        Should not render latest build information if there is no data points for a config.
+        https://bugs.webkit.org/show_bug.cgi?id=200250
+
+        Reviewed by Ryosuke Niwa.
+
+        Fix a bug test freshness page that tooltip cannot be rendered when a cell does not have
+        a data point.
+
+        * public/v3/pages/test-freshness-page.js: Added a null check on commit set before rendering
+        latest build informaiton.
+        (TestFreshnessPage.prototype._renderTooltip):
+
+2019-07-25  Dewei Zhu  <dewei_zhu@apple.com>
+
+        Fix a bug that cannot update builder password on builders administrative page.
+        https://bugs.webkit.org/show_bug.cgi?id=200154
+
+        Reviewed by Ryosuke Niwa.
+
+        'builders' administrative page should be able to update password for a builder.
+
+        * public/admin/builders.php: Should be able to update builder password.
+
+2019-07-23  Dewei Zhu  <dewei_zhu@apple.com>
+
+        Use 12 digits to show a git commit.
+        https://bugs.webkit.org/show_bug.cgi?id=200067
+
+        Reviewed by Ryosuke Niwa.
+
+        Use 12 digits to show a git commit to reasonably descrease commit prefix collision probability
+        for repository with large amount of commits.
+
+        * public/v3/models/commit-log.js: Increase digits from 8 to 12 for git SHA.
+        (CommitLog.prototype.label):
+        (CommitLog.prototype.diff):
+        * unit-tests/commit-log-tests.js: Updated unit tests.
+        * unit-tests/commit-set-tests.js: Updated unit tests.
+
+2019-07-03  Dewei Zhu  <dewei_zhu@apple.com>
+
+        Test freshness page should expose revision information for latest build on tooltip.
+        https://bugs.webkit.org/show_bug.cgi?id=199483
+
+        Reviewed by Ryosuke Niwa.
+
+        Added latest build revision information on test freshness page tooltip.
+
+        * public/v3/pages/test-freshness-page.js: Add build revision information on tooltip.
+        (TestFreshnessPage.prototype.didConstructShadowTree):
+        (TestFreshnessPage.prototype._fetchTestResults):
+        (TestFreshnessPage.prototype.render):
+        (TestFreshnessPage.prototype._renderTooltip):
+        (TestFreshnessPage.cssTemplate):
+
+2019-06-26  Dewei Zhu  <dewei_zhu@apple.com>
+
+        commit api should not return 'AmbiguousRevisionPrefix' if there is an exact revision match
+        https://bugs.webkit.org/show_bug.cgi?id=199227
+
+        Reviewed by Ryosuke Niwa.
+
+        When prefix match is specified, api should check whether there is an exact match when multiple commits
+        match the prefix.
+
+        * public/include/commit-log-fetcher.php: Added the logic to check if there is an exact match when multiple matches are found.
+        * server-tests/api-commits-tests.js: Added an unit test.
+
+2019-06-24  Dean Johnson  <dean_johnson@apple.com>
+
+        [perf.webkit.org] Update summary page calculations to use mean instead of median
+        https://bugs.webkit.org/show_bug.cgi?id=199050
+
+        Reviewed by Dewei Zhu.
+
+        * public/v3/pages/summary-page.js:
+        (SummaryPageConfigurationGroup): Updated 'median' references to 'mean'.
+        (SummaryPageConfigurationGroup.set _startAndEndPointForTimeRange): Factored out logic for finding data
+        points in a timeSeries, within a specified timeRange.
+        (SummaryPageConfigurationGroup.set _meanForTimeRange): New. Returns the mean of a timeSeries across a
+        given timeRange.
+
+2019-06-20  Dewei Zhu  <dewei_zhu@apple.com>
+
+        Fix a bug that 'test_metrics' and 'tests' tables are not joined correctly in CommitLogFetcher.fetch_latest_for_platform
+        https://bugs.webkit.org/show_bug.cgi?id=199062
+
+        Reviewed by Ryosuke Niwa.
+
+        'test_metrics' and 'tests' should be joined based on 'metric_test' and 'test_id'.
+
+        * public/include/commit-log-fetcher.php: Fix the typo in the query.
+        * server-tests/api-commits-tests.js: Added a unit test for this change.
+
+2019-06-17  Dewei Zhu  <dewei_zhu@apple.com>
+
+        Customizable test group form should allow user to supply a revision prefix of a commit and revision starts with 'r'.
+        https://bugs.webkit.org/show_bug.cgi?id=198940
+
+        Reviewed by Ryosuke Niwa.
+
+        Customizable test group form should adapt prefix matching when fetching for a commit.
+
+        * browser-tests/customizable-test-group-form-tests.js: Updated and added unit tests.
+        * public/v3/components/customizable-test-group-form.js: Removed loggings those a unintentionally committed.
+        * public/v3/models/commit-set.js: Adapted prefix matching API when fetching a commit.
+        (IntermediateCommitSet.prototype._fetchCommitLogAndOwnedCommits):
+        * unit-tests/commit-set-tests.js: Updated unit tests accordingly.
+
+2019-06-13  Dewei Zhu  <dewei_zhu@apple.com>
+
+        Custom analysis task configurator should allow supplying commit prefix and revision starts 'r'.
+        https://bugs.webkit.org/show_bug.cgi?id=198847
+
+        Reviewed by Ryosuke Niwa.
+
+        Custom analysis task configurator should not require full SHA to start an A/B test.
+        Custom analysis task configurator should accept svn revision starts with 'r'.
+
+        * browser-tests/custom-analysis-task-configurator-tests.js: Added a unit test for this change.
+        * public/api/commits.php: Extend this API to allow prefix matching when fethcing a single commit.
+        * public/include/commit-log-fetcher.php: Added a function to fetch a commit with prefix.
+        * public/v3/components/custom-analysis-task-configurator.js: Add UI support for accepting partial revision.
+        (CustomAnalysisTaskConfigurator.prototype._computeCommitSet):
+        (CustomAnalysisTaskConfigurator.prototype.async._resolveRevision):
+        (CustomAnalysisTaskConfigurator.prototype._buildTestabilityList):
+        * public/v3/models/commit-log.js:
+        (CommitLog.async.fetchForSingleRevision): Added third argument to specify prefix matching which defaults to false.
+        * server-tests/api-commits-tests.js: Added unit tests.
+        * unit-tests/commit-log-tests.js: Added a unit test.
+
+2019-05-15  Dewei Zhu  <dewei_zhu@apple.com>
+
+        Perf dashboard erroneously rejects a build request to build owned components when there are no patches.
+        https://bugs.webkit.org/show_bug.cgi?id=197928
+
+        Reviewed by Ryosuke Niwa.
+
+        Fix a bug that build type build request that only builds owned components failed to pass sanity check when there
+        is no repository accepts patch in triggerable repository group.
+        Add a sanity check to throw an error when build request type is build but there is no repository group template.
+
+        * tools/js/buildbot-syncer.js:
+        (BuildbotSyncer.prototype._propertiesForBuildRequest): Changed sanity check the always requires repository accepts patch when there is a build to make it also works for build request only builds owned components.
+        (BuildbotSyncer._parseRepositoryGroup): Added check for repository group templates not null  when build requiest type is build.
+        * unit-tests/buildbot-syncer-tests.js: Added unit tests for this change.
+        * unit-tests/resources/mock-v3-models.js: Added mock date for unit tests.
+
+2019-05-14  Dewei Zhu  <dewei_zhu@apple.com>
+
+        Pruning old file logic should not stop after removing 10 files if there are more files to be removed.
+        https://bugs.webkit.org/show_bug.cgi?id=197870
+
+        Reviewed by Ryosuke Niwa.
+
+        Pruning old file logic should keep removing removable files to make enough space for a new file upload.
+        It should only attempt to remve the files that have not been removed.
+
+        * public/include/uploaded-file-helpers.php: Modified 'prune_old_files' to allow to remove more than 10 files.
+        Fixed a bug that a removed file keep getting removed but never free up new space.
+        * server-tests/privileged-api-upload-file-tests.js:
+        (makeRandomAlnumStringForLength): Helper function to generate random content for a given length.
+        * server-tests/resources/test-server.js: Update total file size limit for this change.
+        (TestServer.prototype.testConfig):
+
+2019-03-25  Dewei Zhu  <dewei_zhu@apple.com>
+
+        Primary cluster of measurement set should always contain latest point.
+        https://bugs.webkit.org/show_bug.cgi?id=196243
+
+        Reviewed by Ryosuke Niwa.
+
+        Fix a bug in measurement-set api that primary cluster may not contain latest data point as
+        'carry_over' row may not be updated.
+
+        * public/api/measurement-set.php: Should always keep 'carry_over' data points up to date.
+        * server-tests/api-measurement-set-tests.js: Added an unit test for this change.
+        Fixed a typo.
+
+2019-03-21  Dewei Zhu  <dewei_zhu@apple.com>
+
+        'custom-configuration-test-group-form' should update test name when selected test or platform changes.
+        https://bugs.webkit.org/show_bug.cgi?id=196114
+
+        Reviewed by Ryosuke Niwa.
+
+        r240104 fixes commit sets unnecessarily get updated even there is no change.
+        However, this made changing test or platform no longer triggers 'commitSetChange' action.
+        Test name should change not only when 'commitSet' gets change, but also platform or test changes.
+        Renaming the action name from 'commitSetChange' to a more accurate description 'testConfigChange'.
+        Dispatch 'testConfigChange' when platform or test changes.
+
+        * browser-tests/custom-analysis-task-configurator-tests.js: Changed action name to 'commitSetChange'.
+        * public/v3/components/custom-analysis-task-configurator.js:
+        (CustomAnalysisTaskConfigurator.prototype._didUpdateSelectedPlatforms): Should dispatch 'commitSetChange' action.
+        (CustomAnalysisTaskConfigurator.prototype._updateCommitSetMap): Changed action name to 'commitSetChange'.
+        * public/v3/components/custom-configuration-test-group-form.js: Added a unit test for this change.
+        (CustomConfigurationTestGroupForm.prototype.didConstructShadowTree):
+
+2019-03-18  Dewei Zhu  <dewei_zhu@apple.com>
+
+        Fix a bug from r226303 that latest build time is not correctly calculated.
+        https://bugs.webkit.org/show_bug.cgi?id=195912
+
+        Reviewed by Ryosuke Niwa.
+
+        Time series is ordered by revision time which does not grantee the build time is
+        monotonically increasing.
+
+        * public/v3/pages/test-freshness-page.js: Use the latest build time instead of the build time of
+        last point on the chart.
+
+2019-03-13  Dewei Zhu  <dewei_zhu@apple.com>
+
+        Test freshness page should improve the ability to correlating issues from same builder.
+        https://bugs.webkit.org/show_bug.cgi?id=195242
+
+        Reviewed by Ryosuke Niwa.
+
+        Added the ability to highlight indicators with same builder when mouse is hovering over one indicator.
+        This is a very useful visualization for correlating issues specific to a builder.
+        Added tooltip with latest build link when hovering over an indicator.
+
+        * public/v3/components/freshness-indicator.js:
+        (FreshnessIndicator): Removed 'summary' field as it's no longer needed.
+        Added 'highlighted' field.
+        (FreshnessIndicator.prototype.update): Added 'highlighted' argument.
+        (FreshnessIndicator.prototype.didConstructShadowTree): Make indicator to dispatch mouse enter and leave
+        messages so that UI can highlight corresponding cells.
+        (FreshnessIndicator.prototype.render):
+        (FreshnessIndicator.cssTemplate):
+        * public/v3/pages/test-freshness-page.js: Added tooltip to show latest build time and build link.
+        Added logic to manually compute table body height.
+        (TestFreshnessPage):
+        (TestFreshnessPage.prototype.didConstructShadowTree):
+        (TestFreshnessPage.prototype._fetchTestResults):
+        (TestFreshnessPage.prototype.render):
+        (TestFreshnessPage.prototype._renderTooltip):
+        (TestFreshnessPage.prototype._constructTableCell):
+        (TestFreshnessPage.cssTemplate):
+
 2019-02-26  Dewei Zhu  <dewei_zhu@apple.com>
 
         The table head of test freshness page should not scroll with the page.

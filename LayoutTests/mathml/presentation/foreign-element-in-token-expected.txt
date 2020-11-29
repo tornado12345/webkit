@@ -1,452 +1,476 @@
 Foreign phrasing content should create renderers:
 
-a: 
+a:
 mi
 
-abbr: 
+abbr:
 mi
 
-b: 
+b:
 mi
 
-bdi: 
+bdi:
 mi
 
-bdo: 
+bdo:
 mi
 
-button: 
+button:
 mi
 
-cite: 
+cite:
 mi
 
-code: 
+code:
 mi
 
-datalist: 
+datalist:
 mi
 
-del: 
+data:
 mi
 
-dfn: 
+del:
 mi
 
-em: 
+dfn:
 mi
 
-embed: 
+em:
 mi
 
-i: 
+embed:
 mi
 
-img: 
+i:
 mi
 
-input: 
+img:
 mi
 
-ins: 
+input:
 mi
 
-kbd: 
+ins:
 mi
 
-keygen: 
+kbd:
 mi
 
-label: 
+keygen:
 mi
 
-mark: 
+label:
 mi
 
-math: 
+mark:
 mi
 
-object: 
+math:
 mi
 
-output: 
+object:
 mi
 
-q: 
+output:
 mi
 
-ruby: 
+q:
 mi
 
-s: 
+ruby:
 mi
 
-samp: 
+s:
 mi
 
-small: 
+samp:
 mi
 
-span: 
+small:
 mi
 
-strong: 
+span:
 mi
 
-sub: 
+strong:
 mi
 
-sup: 
+sub:
 mi
 
-svg: 
+sup:
 mi
 
-u: 
+svg:
 mi
 
-var: 
+time:
 mi
 
-a: 
+u:
+mi
+
+var:
+mi
+
+a:
 mn
 
-abbr: 
+abbr:
 mn
 
-b: 
+b:
 mn
 
-bdi: 
+bdi:
 mn
 
-bdo: 
+bdo:
 mn
 
-button: 
+button:
 mn
 
-cite: 
+cite:
 mn
 
-code: 
+code:
 mn
 
-datalist: 
+datalist:
 mn
 
-del: 
+data:
 mn
 
-dfn: 
+del:
 mn
 
-em: 
+dfn:
 mn
 
-embed: 
+em:
 mn
 
-i: 
+embed:
 mn
 
-img: 
+i:
 mn
 
-input: 
+img:
 mn
 
-ins: 
+input:
 mn
 
-kbd: 
+ins:
 mn
 
-keygen: 
+kbd:
 mn
 
-label: 
+keygen:
 mn
 
-mark: 
+label:
 mn
 
-math: 
+mark:
 mn
 
-object: 
+math:
 mn
 
-output: 
+object:
 mn
 
-q: 
+output:
 mn
 
-ruby: 
+q:
 mn
 
-s: 
+ruby:
 mn
 
-samp: 
+s:
 mn
 
-small: 
+samp:
 mn
 
-span: 
+small:
 mn
 
-strong: 
+span:
 mn
 
-sub: 
+strong:
 mn
 
-sup: 
+sub:
 mn
 
-svg: 
+sup:
 mn
 
-u: 
+svg:
 mn
 
-var: 
+time:
 mn
 
-a: 
+u:
+mn
+
+var:
+mn
+
+a:
 mtext
 
-abbr: 
+abbr:
 mtext
 
-b: 
+b:
 mtext
 
-bdi: 
+bdi:
 mtext
 
-bdo: 
+bdo:
 mtext
 
-button: 
+button:
 mtext
 
-cite: 
+cite:
 mtext
 
-code: 
+code:
 mtext
 
-datalist: 
+datalist:
 mtext
 
-del: 
+data:
 mtext
 
-dfn: 
+del:
 mtext
 
-em: 
+dfn:
 mtext
 
-embed: 
+em:
 mtext
 
-i: 
+embed:
 mtext
 
-img: 
+i:
 mtext
 
-input: 
+img:
 mtext
 
-ins: 
+input:
 mtext
 
-kbd: 
+ins:
 mtext
 
-keygen: 
+kbd:
 mtext
 
-label: 
+keygen:
 mtext
 
-mark: 
+label:
 mtext
 
-math: 
+mark:
 mtext
 
-object: 
+math:
 mtext
 
-output: 
+object:
 mtext
 
-q: 
+output:
 mtext
 
-ruby: 
+q:
 mtext
 
-s: 
+ruby:
 mtext
 
-samp: 
+s:
 mtext
 
-small: 
+samp:
 mtext
 
-span: 
+small:
 mtext
 
-strong: 
+span:
 mtext
 
-sub: 
+strong:
 mtext
 
-sup: 
+sub:
 mtext
 
-svg: 
+sup:
 mtext
 
-u: 
+svg:
 mtext
 
-var: 
+time:
 mtext
 
-a: 
+u:
+mtext
+
+var:
+mtext
+
+a:
 mo
 
-abbr: 
+abbr:
 mo
 
-b: 
+b:
 mo
 
-bdi: 
+bdi:
 mo
 
-bdo: 
+bdo:
 mo
 
-button: 
+button:
 mo
 
-cite: 
+cite:
 mo
 
-code: 
+code:
 mo
 
-datalist: 
+datalist:
 mo
 
-del: 
+data:
 mo
 
-dfn: 
+del:
 mo
 
-em: 
+dfn:
 mo
 
-embed: 
+em:
 mo
 
-i: 
+embed:
 mo
 
-img: 
+i:
 mo
 
-input: 
+img:
 mo
 
-ins: 
+input:
 mo
 
-kbd: 
+ins:
 mo
 
-keygen: 
+kbd:
 mo
 
-label: 
+keygen:
 mo
 
-mark: 
+label:
 mo
 
-math: 
+mark:
 mo
 
-object: 
+math:
 mo
 
-output: 
+object:
 mo
 
-q: 
+output:
 mo
 
-ruby: 
+q:
 mo
 
-s: 
+ruby:
 mo
 
-samp: 
+s:
 mo
 
-small: 
+samp:
 mo
 
-span: 
+small:
 mo
 
-strong: 
+span:
 mo
 
-sub: 
+strong:
 mo
 
-sup: 
+sub:
 mo
 
-svg: 
+sup:
 mo
 
-u: 
+svg:
 mo
 
-var: 
+time:
+mo
+
+u:
+mo
+
+var:
 mo
 
 Foreign non-phrasing content should not create renderers:
 
-p: 
+p:
 
-div: 
+div:
 
-h1: 
+h1:
 
-h2: 
+h2:
 
-h3: 
+h3:
 
-h4: 
+h4:
 
-h6: 
+h6:
 
-blockquote: 
+blockquote:
 

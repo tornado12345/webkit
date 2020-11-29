@@ -81,7 +81,6 @@
 #include "PluginMessageThrottlerWin.h"
 #endif
 
-using JSC::ExecState;
 using JSC::JSLock;
 using JSC::JSObject;
 using JSC::JSValue;
@@ -104,7 +103,7 @@ static InstanceMap& instanceMap()
 
 static String scriptStringIfJavaScriptURL(const URL& url)
 {
-    if (!protocolIsJavaScript(url))
+    if (!url.protocolIsJavaScript())
         return String();
 
     // This returns an unescaped string
@@ -249,7 +248,7 @@ bool PluginView::start()
     m_isStarted = true;
 
     if (!m_url.isEmpty() && !m_loadManually) {
-        FrameLoadRequest frameLoadRequest { *m_parentFrame->document(), m_parentFrame->document()->securityOrigin(), { }, { }, LockHistory::No, LockBackForwardList::No, ShouldSendReferrer::MaybeSendReferrer, AllowNavigationToInvalidURL::Yes, NewFrameOpenerPolicy::Allow, ShouldOpenExternalURLsPolicy::ShouldNotAllow, InitiatedByMainFrame::Unknown };
+        FrameLoadRequest frameLoadRequest { *m_parentFrame->document(), m_parentFrame->document()->securityOrigin(), { }, { }, InitiatedByMainFrame::Unknown };
         frameLoadRequest.resourceRequest().setHTTPMethod("GET");
         frameLoadRequest.resourceRequest().setURL(m_url);
         load(WTFMove(frameLoadRequest), false, nullptr);
@@ -416,7 +415,7 @@ void PluginView::performRequest(PluginRequest* request)
             // PluginView, so we protect it. <rdar://problem/6991251>
             RefPtr<PluginView> protect(this);
 
-            FrameLoadRequest frameLoadRequest { *m_parentFrame.get(), request->frameLoadRequest().resourceRequest(), ShouldOpenExternalURLsPolicy::ShouldNotAllow };
+            FrameLoadRequest frameLoadRequest { *m_parentFrame.get(), request->frameLoadRequest().resourceRequest() };
             frameLoadRequest.setFrameName(targetFrameName);
             frameLoadRequest.setShouldCheckNewWindowPolicy(true);
             m_parentFrame->loader().load(WTFMove(frameLoadRequest));
@@ -440,15 +439,15 @@ void PluginView::performRequest(PluginRequest* request)
     
     // Executing a script can cause the plugin view to be destroyed, so we keep a reference to it.
     RefPtr<PluginView> protector(this);
-    auto result = m_parentFrame->script().executeScript(jsString, request->shouldAllowPopups());
+    auto result = m_parentFrame->script().executeScriptIgnoringException(jsString, request->shouldAllowPopups());
 
     if (targetFrameName.isNull()) {
         CString cstr;
         {
-            JSC::ExecState& state = *m_parentFrame->script().globalObject(pluginWorld())->globalExec();
-            JSC::JSLockHolder lock(&state);
+            JSC::JSGlobalObject& globalObject = *m_parentFrame->script().globalObject(pluginWorld());
+            JSC::JSLockHolder lock(&globalObject);
             String resultString;
-            if (result && result.getString(&state, resultString))
+            if (result && result.getString(&globalObject, resultString))
                 cstr = resultString.utf8();
         }
 
@@ -510,7 +509,7 @@ NPError PluginView::load(FrameLoadRequest&& frameLoadRequest, bool sendNotificat
     } else if (!m_parentFrame->document()->securityOrigin().canDisplay(url))
         return NPERR_GENERIC_ERROR;
 
-    scheduleRequest(std::make_unique<PluginRequest>(WTFMove(frameLoadRequest), sendNotification, notifyData, arePopupsAllowed()));
+    scheduleRequest(makeUnique<PluginRequest>(WTFMove(frameLoadRequest), sendNotification, notifyData, arePopupsAllowed()));
 
     return NPERR_NO_ERROR;
 }
@@ -528,7 +527,7 @@ static URL makeURL(const URL& baseURL, const char* relativeURLString)
 
 NPError PluginView::getURLNotify(const char* url, const char* target, void* notifyData)
 {
-    FrameLoadRequest frameLoadRequest { *m_parentFrame->document(), m_parentFrame->document()->securityOrigin(), { }, target, LockHistory::No, LockBackForwardList::No, ShouldSendReferrer::MaybeSendReferrer, AllowNavigationToInvalidURL::Yes, NewFrameOpenerPolicy::Allow, ShouldOpenExternalURLsPolicy::ShouldNotAllow, InitiatedByMainFrame::Unknown };
+    FrameLoadRequest frameLoadRequest { *m_parentFrame->document(), m_parentFrame->document()->securityOrigin(), { }, target, InitiatedByMainFrame::Unknown };
 
     frameLoadRequest.resourceRequest().setHTTPMethod("GET");
     frameLoadRequest.resourceRequest().setURL(makeURL(m_parentFrame->document()->baseURL(), url));
@@ -538,7 +537,7 @@ NPError PluginView::getURLNotify(const char* url, const char* target, void* noti
 
 NPError PluginView::getURL(const char* url, const char* target)
 {
-    FrameLoadRequest frameLoadRequest { *m_parentFrame->document(), m_parentFrame->document()->securityOrigin(), { }, target, LockHistory::No, LockBackForwardList::No, ShouldSendReferrer::MaybeSendReferrer, AllowNavigationToInvalidURL::Yes, NewFrameOpenerPolicy::Allow, ShouldOpenExternalURLsPolicy::ShouldNotAllow, InitiatedByMainFrame::Unknown };
+    FrameLoadRequest frameLoadRequest { *m_parentFrame->document(), m_parentFrame->document()->securityOrigin(), { }, target, InitiatedByMainFrame::Unknown };
 
     frameLoadRequest.resourceRequest().setHTTPMethod("GET");
     frameLoadRequest.resourceRequest().setURL(makeURL(m_parentFrame->document()->baseURL(), url));
@@ -1081,7 +1080,7 @@ NPError PluginView::handlePost(const char* url, const char* target, uint32_t len
         }
     }
 
-    FrameLoadRequest frameLoadRequest { *m_parentFrame->document(), m_parentFrame->document()->securityOrigin(), { }, target, LockHistory::No, LockBackForwardList::No, ShouldSendReferrer::MaybeSendReferrer, AllowNavigationToInvalidURL::Yes, NewFrameOpenerPolicy::Allow, ShouldOpenExternalURLsPolicy::ShouldNotAllow, InitiatedByMainFrame::Unknown };
+    FrameLoadRequest frameLoadRequest { *m_parentFrame->document(), m_parentFrame->document()->securityOrigin(), { }, target, InitiatedByMainFrame::Unknown };
     frameLoadRequest.resourceRequest().setHTTPMethod("POST");
     frameLoadRequest.resourceRequest().setURL(makeURL(m_parentFrame->document()->baseURL(), url));
     frameLoadRequest.resourceRequest().setHTTPHeaderFields(WTFMove(headerFields));

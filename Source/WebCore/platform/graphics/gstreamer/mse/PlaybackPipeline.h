@@ -41,7 +41,7 @@ namespace WebCore {
 
 class ContentType;
 class SourceBufferPrivateGStreamer;
-class MediaSourceGStreamer;
+class MediaSourcePrivateGStreamer;
 
 class PlaybackPipeline: public RefCounted<PlaybackPipeline> {
 public:
@@ -61,13 +61,13 @@ public:
     void reattachTrack(RefPtr<SourceBufferPrivateGStreamer>, RefPtr<TrackPrivateBase>, GstCaps*);
     void notifyDurationChanged();
 
-    // From MediaSourceGStreamer.
+    // From MediaSourcePrivateGStreamer.
     void markEndOfStream(MediaSourcePrivate::EndOfStreamStatus);
 
     // From SourceBufferPrivateGStreamer.
-    void flush(AtomicString);
+    void flush(AtomString);
     void enqueueSample(Ref<MediaSample>&&);
-    void allSamplesInTrackEnqueued(const AtomicString&);
+    void allSamplesInTrackEnqueued(const AtomString&);
 
     GstElement* pipeline();
 private:

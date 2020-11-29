@@ -23,9 +23,9 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-import * as assert from 'assert.js';
-import LowLevelBinary from 'LowLevelBinary.js';
-import * as WASM from 'WASM.js';
+import * as assert from './assert.js';
+import LowLevelBinary from './LowLevelBinary.js';
+import * as WASM from './WASM.js';
 
 const put = (bin, type, value) => bin[type](value);
 
@@ -60,6 +60,8 @@ const putGlobalType = (bin, global) => {
 
 const putOp = (bin, op) => {
     put(bin, "uint8", op.value);
+    if (WASM.description.opcode[op.name].extendedOp)
+        put(bin, "uint8", WASM.description.opcode[op.name].extendedOp);
     if (op.arguments.length !== 0)
         throw new Error(`Unimplemented: arguments`); // FIXME https://bugs.webkit.org/show_bug.cgi?id=162706
 
@@ -90,7 +92,10 @@ const putOp = (bin, op) => {
 };
 
 const putInitExpr = (bin, expr) => {
-    putOp(bin, { value: WASM.description.opcode[expr.op].value, name: expr.op, immediates: [expr.initValue], arguments: [] });
+    if (expr.op == "ref.null")
+        putOp(bin, { value: WASM.description.opcode[expr.op].value, name: expr.op, immediates: [], arguments: [] });
+    else
+        putOp(bin, { value: WASM.description.opcode[expr.op].value, name: expr.op, immediates: [expr.initValue], arguments: [] });
     putOp(bin, { value: WASM.description.opcode.end.value, name: "end", immediates: [], arguments: [] });
 };
 
@@ -189,6 +194,8 @@ const emitters = {
         const data = section.data;
         put(bin, "varuint32", data.length);
         for (const {tableIndex, offset, functionIndices} of data) {
+            if (tableIndex != 0)
+                put(bin, "uint8", 2);
             put(bin, "varuint32", tableIndex);
 
             let initExpr;

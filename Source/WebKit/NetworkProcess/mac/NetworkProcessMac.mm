@@ -26,12 +26,11 @@
 #import "config.h"
 #import "NetworkProcess.h"
 
-#if PLATFORM(MAC) || PLATFORM(IOSMAC)
+#if PLATFORM(MAC) || PLATFORM(MACCATALYST)
 
 #import "NetworkCache.h"
 #import "NetworkProcessCreationParameters.h"
 #import "NetworkResourceLoader.h"
-#import "ResourceCachesToClear.h"
 #import "SandboxExtension.h"
 #import "SandboxInitializationParameters.h"
 #import "SecItemShim.h"
@@ -53,7 +52,7 @@ using namespace WebCore;
 
 void NetworkProcess::initializeProcess(const AuxiliaryProcessInitializationParameters&)
 {
-#if PLATFORM(MAC) && !PLATFORM(IOSMAC)
+#if PLATFORM(MAC) && !PLATFORM(MACCATALYST)
     // Having a window server connection in this process would result in spin logs (<rdar://problem/13239119>).
     OSStatus error = SetApplicationIsDaemon(true);
     ASSERT_UNUSED(error, error == noErr);
@@ -64,7 +63,7 @@ void NetworkProcess::initializeProcess(const AuxiliaryProcessInitializationParam
 
 void NetworkProcess::initializeProcessName(const AuxiliaryProcessInitializationParameters& parameters)
 {
-#if !PLATFORM(IOSMAC)
+#if !PLATFORM(MACCATALYST)
     NSString *applicationName = [NSString stringWithFormat:WEB_UI_STRING("%@ Networking", "visible name of the network process. The argument is the application name."), (NSString *)parameters.uiProcessName];
     _LSSetApplicationInformationItem(kLSDefaultSessionID, _LSGetCurrentApplicationASN(), _kLSDisplayNameKey, (CFStringRef)applicationName, nullptr);
 #endif
@@ -88,20 +87,11 @@ void NetworkProcess::allowSpecificHTTPSCertificateForHost(const CertificateInfo&
 void NetworkProcess::initializeSandbox(const AuxiliaryProcessInitializationParameters& parameters, SandboxInitializationParameters& sandboxParameters)
 {
     // Need to overide the default, because service has a different bundle ID.
-    NSBundle *webKit2Bundle = [NSBundle bundleForClass:NSClassFromString(@"WKWebView")];
+    auto webKitBundle = [NSBundle bundleWithIdentifier:@"com.apple.WebKit"];
 
-    sandboxParameters.setOverrideSandboxProfilePath([webKit2Bundle pathForResource:@"com.apple.WebKit.NetworkProcess" ofType:@"sb"]);
+    sandboxParameters.setOverrideSandboxProfilePath(makeString(String([webKitBundle resourcePath]), "/com.apple.WebKit.NetworkProcess.sb"));
 
     AuxiliaryProcess::initializeSandbox(parameters, sandboxParameters);
-}
-
-void NetworkProcess::clearCacheForAllOrigins(uint32_t cachesToClear)
-{
-    ResourceCachesToClear resourceCachesToClear = static_cast<ResourceCachesToClear>(cachesToClear);
-    if (resourceCachesToClear == InMemoryResourceCachesOnly)
-        return;
-
-    clearDiskCache(-WallTime::infinity(), [] { });
 }
 
 void NetworkProcess::platformTerminate()
@@ -113,7 +103,7 @@ void NetworkProcess::platformTerminate()
     }
 }
 
-#if PLATFORM(IOSMAC)
+#if PLATFORM(MACCATALYST)
 bool NetworkProcess::parentProcessHasServiceWorkerEntitlement() const
 {
     return true;

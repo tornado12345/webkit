@@ -40,9 +40,13 @@ extern "C" {
 #endif
 
 #define WEBKIT2_LOG_CHANNELS(M) \
-    M(Automation) \
     M(ActivityState) \
+    M(AdClickAttribution) \
+    M(AppSSO) \
+    M(Automation) \
+    M(AutomationInteractions) \
     M(BackForward) \
+    M(BackForwardCache) \
     M(CacheStorage) \
     M(ContentObservation) \
     M(ContextMenu) \
@@ -50,13 +54,20 @@ extern "C" {
     M(DragAndDrop) \
     M(Fullscreen) \
     M(Gamepad) \
-    M(IconDatabase) \
-    M(IndexedDB) \
     M(IPC) \
+    M(ITPDebug) \
+    M(IconDatabase) \
+    M(Images) \
+    M(IncrementalPDF) \
+    M(IncrementalPDFVerbose) \
+    M(IndexedDB) \
     M(KeyHandling) \
     M(Layers) \
+    M(Layout) \
     M(Loading) \
     M(LocalStorageDatabaseTracker) \
+    M(Media) \
+    M(MemoryPressure) \
     M(MouseHandling) \
     M(Network) \
     M(NetworkCache) \
@@ -74,23 +85,30 @@ extern "C" {
     M(RemoteLayerTree) \
     M(Resize) \
     M(ResourceLoadStatistics) \
-    M(ResourceLoadStatisticsDebug) \
     M(Scrolling) \
     M(Selection) \
     M(ServiceWorker) \
     M(SessionState) \
+    M(Storage) \
     M(StorageAPI) \
     M(TextInput) \
+    M(UIHitTesting) \
     M(ViewGestures) \
     M(ViewState) \
+    M(ViewportSizing) \
     M(VirtualMemory) \
     M(VisibleRects) \
     M(WebGL) \
     M(WebRTC) \
+    M(WheelEvents) \
 
 WEBKIT2_LOG_CHANNELS(DECLARE_LOG_CHANNEL)
 
 #undef DECLARE_LOG_CHANNEL
+
+namespace WebKit {
+WTFLogChannel* getLogChannel(const String&);
+} // namespace WebKit
 
 #ifdef __cplusplus
 }

@@ -37,10 +37,6 @@
 #include <wtf/MathExtras.h>
 #include <wtf/win/GDIObject.h>
 
-#if USE(DIRECT2D)
-#include <dwrite.h>
-#endif
-
 namespace WebCore {
 
 static bool g_shouldApplyMacAscentHack;
@@ -87,19 +83,11 @@ void Font::initGDIFont()
     OUTLINETEXTMETRIC metrics;
     GetOutlineTextMetrics(hdc, sizeof(metrics), &metrics);
     TEXTMETRIC& textMetrics = metrics.otmTextMetrics;
-    float ascent, descent, lineGap;
-    // The Open Font Format describes the OS/2 USE_TYPO_METRICS flag as follows:
-    // "If set, it is strongly recommended to use OS/2.sTypoAscender - OS/2.sTypoDescender+ OS/2.sTypoLineGap as a value for default line spacing for this font."
-    const UINT useTypoMetricsMask = 1 << 7;
-    if (metrics.otmfsSelection & useTypoMetricsMask) {
-        ascent = metrics.otmAscent;
-        descent = metrics.otmDescent;
-        lineGap = metrics.otmLineGap;
-    } else {
-        ascent = textMetrics.tmAscent;
-        descent = textMetrics.tmDescent;
-        lineGap = textMetrics.tmExternalLeading;
-    }
+    // FIXME: Needs to take OS/2 USE_TYPO_METRICS flag into account
+    // https://bugs.webkit.org/show_bug.cgi?id=199186
+    float ascent = textMetrics.tmAscent;
+    float descent = textMetrics.tmDescent;
+    float lineGap = textMetrics.tmExternalLeading;
     m_fontMetrics.setAscent(ascent);
     m_fontMetrics.setDescent(descent);
     m_fontMetrics.setLineGap(lineGap);
@@ -145,27 +133,6 @@ RefPtr<Font> Font::platformCreateScaledFont(const FontDescription& fontDescripti
     winfont.lfHeight = -lroundf(scaledSize * (m_platformData.useGDI() ? 1 : 32));
     auto hfont = adoptGDIObject(::CreateFontIndirect(&winfont));
     return Font::create(FontPlatformData(WTFMove(hfont), scaledSize, m_platformData.syntheticBold(), m_platformData.syntheticOblique(), m_platformData.useGDI()), origin());
-}
-
-void Font::determinePitch()
-{
-    if (origin() == Origin::Remote) {
-        m_treatAsFixedPitch = false;
-        return;
-    }
-
-    // TEXTMETRICS have this.  Set m_treatAsFixedPitch based off that.
-    HWndDC dc(0);
-    SaveDC(dc);
-    SelectObject(dc, m_platformData.hfont());
-
-    // Yes, this looks backwards, but the fixed pitch bit is actually set if the font
-    // is *not* fixed pitch.  Unbelievable but true.
-    TEXTMETRIC tm;
-    GetTextMetrics(dc, &tm);
-    m_treatAsFixedPitch = ((tm.tmPitchAndFamily & TMPF_FIXED_PITCH) == 0);
-
-    RestoreDC(dc, -1);
 }
 
 FloatRect Font::boundsForGDIGlyph(Glyph glyph) const

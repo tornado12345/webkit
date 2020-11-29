@@ -514,16 +514,11 @@ function checkExpectedValueCallback(expected, index)
 
 function pauseAnimationAtTimeOnElement(animationName, time, element)
 {
-    // If we haven't opted into CSS Animations and CSS Transitions as Web Animations, use the internal API.
-    if ('internals' in window && !internals.settings.webAnimationsCSSIntegrationEnabled())
-        return internals.pauseAnimationAtTimeOnElement(animationName, time, element);
-
-    // Otherwise, use the Web Animations API.
     const animations = element.getAnimations();
     for (let animation of animations) {
         if (animation instanceof CSSAnimation && animation.animationName == animationName) {
-            animation.currentTime = time * 1000;
             animation.pause();
+            animation.currentTime = time * 1000;
             return true;
         }
     }
@@ -595,6 +590,6 @@ function runAnimationTest(expected, startCallback, event, disablePauseAnimationA
 function waitForAnimationToStart(element, callback)
 {
     element.addEventListener('webkitAnimationStart', function() {
-        window.setTimeout(callback, 0); // delay to give hardware animations a chance to start
+        requestAnimationFrame(callback); // delay to give hardware animations a chance to start
     }, false);
 }

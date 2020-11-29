@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2018 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,8 +23,6 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#pragma once
-
 #if !PLATFORM(MAC) || USE(APPLE_INTERNAL_SDK)
 
 // FIXME: PassKit does not declare its NSString constant symbols with C linkage, so we end up with
@@ -39,15 +37,66 @@ WTF_EXTERN_C_END
 
 #if USE(APPLE_INTERNAL_SDK)
 
-#import <PassKit/PassKit.h>
+#import <PassKit/PKContact.h>
+#import <PassKit/PKError_Private.h>
+#import <PassKit/PKPassLibrary.h>
+#import <PassKit/PKPayment.h>
 #import <PassKit/PKPaymentAuthorizationViewController_Private.h>
+#import <PassKit/PKPaymentMethod.h>
+#import <PassKit/PKPaymentPass.h>
+#import <PassKit/PKPaymentSetupConfiguration_WebKit.h>
+#import <PassKit/PKPaymentSetupController.h>
+#import <PassKit/PKPaymentSetupRequest.h>
+#import <PassKitCore/PKPaymentRequestStatus.h>
+#import <PassKitCore/PKPaymentRequest_WebKit.h>
+
+#if PLATFORM(IOS_FAMILY)
+#import <PassKit/PKPaymentAuthorizationController_Private.h>
+#import <PassKit/PKPaymentSetupViewController.h>
+#endif
+
+#if !HAVE(PASSKIT_INSTALLMENTS)
 #import <PassKit/PKPaymentRequest_Private.h>
+#endif
 
 #else
+
+#import <Foundation/Foundation.h>
+
+typedef NS_ENUM(NSUInteger, PKPaymentRequestAPIType) {
+    PKPaymentRequestAPITypeInApp = 0,
+    PKPaymentRequestAPITypeWebJS,
+    PKPaymentRequestAPITypeWebPaymentRequest,
+};
 
 #if PLATFORM(IOS_FAMILY)
 
 #import <PassKit/PassKit.h>
+
+@protocol PKPaymentAuthorizationControllerPrivateDelegate;
+
+NS_ASSUME_NONNULL_BEGIN
+
+@interface PKPaymentAuthorizationController ()
++ (void)paymentServicesMerchantURLForAPIType:(PKPaymentRequestAPIType)APIType completion:(void(^)(NSURL *merchantURL, NSError *error))completion;
+@property (nonatomic, assign, nullable) id<PKPaymentAuthorizationControllerPrivateDelegate> privateDelegate;
+@end
+
+@class PKPaymentMerchantSession;
+
+@protocol PKPaymentAuthorizationControllerPrivateDelegate <NSObject>
+@optional
+- (void)paymentAuthorizationController:(PKPaymentAuthorizationController *)controller willFinishWithError:(NSError *)error;
+- (void)paymentAuthorizationController:(PKPaymentAuthorizationController *)controller didRequestMerchantSession:(void(^)(PKPaymentMerchantSession *, NSError *))sessionBlock;
+@end
+
+@class PKPaymentSetupRequest;
+
+@interface PKPaymentSetupViewController : UIViewController
+- (instancetype)initWithPaymentSetupRequest:(PKPaymentSetupRequest *)paymentSetupRequest;
+@end
+
+NS_ASSUME_NONNULL_END
 
 #elif PLATFORM(MAC)
 
@@ -55,8 +104,6 @@ WTF_EXTERN_C_END
 #import <Contacts/Contacts.h>
 
 NS_ASSUME_NONNULL_BEGIN
-
-#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 101300
 
 @class PKPaymentAuthorizationResult;
 @class PKPaymentRequestUpdate;
@@ -74,8 +121,6 @@ typedef NS_ERROR_ENUM(PKPaymentErrorDomain, PKPaymentErrorCode) {
     PKPaymentBillingContactInvalidError,
     PKPaymentShippingAddressUnserviceableError,
 };
-
-#endif
 
 typedef NS_OPTIONS(NSUInteger, PKAddressField) {
     PKAddressFieldNone = 0UL,
@@ -155,6 +200,7 @@ typedef NSString * PKPaymentNetwork NS_EXTENSIBLE_STRING_ENUM;
 @property (nonatomic, copy, readonly, nullable) PKPaymentNetwork network;
 @property (nonatomic, readonly) PKPaymentMethodType type;
 @property (nonatomic, copy, readonly, nullable) PKPaymentPass *paymentPass;
+@property (nonatomic, copy, readonly, nullable) CNContact *billingAddress;
 @end
 
 @interface PKPaymentToken : NSObject
@@ -203,11 +249,9 @@ typedef NSString * PKPaymentNetwork NS_EXTENSIBLE_STRING_ENUM;
 @property (nonatomic, copy, nullable) NSArray<PKShippingMethod *> *shippingMethods;
 @property (nonatomic, assign) PKShippingType shippingType;
 @property (nonatomic, copy, nullable) NSData *applicationData;
-#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 101300
 @property (nonatomic, copy, nullable) NSSet<NSString *> *supportedCountries;
 @property (nonatomic, strong) NSSet<PKContactField> *requiredShippingContactFields;
 @property (nonatomic, strong) NSSet<PKContactField> *requiredBillingContactFields;
-#endif
 @end
 
 @interface PKPaymentAuthorizationViewController : NSViewController
@@ -219,11 +263,7 @@ typedef NSString * PKPaymentNetwork NS_EXTENSIBLE_STRING_ENUM;
 @protocol PKPaymentAuthorizationViewControllerDelegate <NSObject>
 @required
 
-#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 101300
 - (void)paymentAuthorizationViewController:(PKPaymentAuthorizationViewController *)controller didAuthorizePayment:(PKPayment *)payment handler:(void (^)(PKPaymentAuthorizationResult *result))completion;
-#else
-- (void)paymentAuthorizationViewController:(PKPaymentAuthorizationViewController *)controller didAuthorizePayment:(PKPayment *)payment completion:(void (^)(PKPaymentAuthorizationStatus status))completion;
-#endif
 
 - (void)paymentAuthorizationViewControllerDidFinish:(PKPaymentAuthorizationViewController *)controller;
 
@@ -244,12 +284,62 @@ NS_ASSUME_NONNULL_BEGIN
 
 @protocol PKPaymentAuthorizationViewControllerPrivateDelegate;
 
+@class PKPaymentSetupConfiguration;
+@class PKPaymentSetupFeature;
+@class PKPaymentSetupRequest;
+
+typedef NS_ENUM(NSInteger, PKPaymentSetupFeatureState) {
+    PKPaymentSetupFeatureStateUnsupported,
+    PKPaymentSetupFeatureStateSupported,
+    PKPaymentSetupFeatureStateSupplementarySupported,
+    PKPaymentSetupFeatureStateCompleted,
+};
+
+typedef NS_ENUM(NSInteger, PKPaymentSetupFeatureType) {
+    PKPaymentSetupFeatureTypeApplePay,
+    PKPaymentSetupFeatureTypeAppleCard,
+    PKPaymentSetupFeatureTypeApplePay_X API_DEPRECATED_WITH_REPLACEMENT("PKPaymentSetupFeatureTypeAppleCard", ios(12.3, 12.3), macos(10.14.5, 10.14.5)) = PKPaymentSetupFeatureTypeAppleCard,
+};
+
+@interface PKPaymentSetupConfiguration : NSObject <NSSecureCoding>
+@property (nonatomic, copy) NSString *referrerIdentifier;
+@end
+
+@interface PKPaymentSetupConfiguration ()
+@property (nonatomic, strong) NSURL *originatingURL;
+@property (nonatomic, copy) NSString *merchantIdentifier;
+@property (nonatomic, copy) NSArray<NSString *> *signedFields;
+@property (nonatomic, copy) NSString *signature;
+@end
+
+@interface PKPaymentSetupController : NSObject
++ (void)paymentSetupFeaturesForConfiguration:(PKPaymentSetupConfiguration *)paymentSetupConfiguration completion:(void(^)(NSArray <PKPaymentSetupFeature *> *paymentSetupFeatures))completion;
+- (void)presentPaymentSetupRequest:(PKPaymentSetupRequest *)paymentSetupRequest completion:(void(^)(BOOL success))completion;
+@end
+
+@interface PKPaymentSetupFeature : NSObject <NSSecureCoding, NSCopying>
+@property (nonatomic, assign, readonly) PKPaymentSetupFeatureType type;
+@property (nonatomic, assign, readonly) PKPaymentSetupFeatureState state;
+@end
+
+@interface PKPaymentSetupRequest : NSObject <NSSecureCoding>
+@property (nonatomic, strong) PKPaymentSetupConfiguration *configuration;
+@property (nonatomic, strong) NSArray <PKPaymentSetupFeature *> *paymentSetupFeatures;
+@end
+
+#if PLATFORM(MAC) \
+    || (PLATFORM(IOS) && __IPHONE_OS_VERSION_MIN_REQUIRED < 140000) \
+    || (PLATFORM(WATCHOS) && __WATCH_OS_VERSION_MIN_REQUIRED < 70000)
+
 @interface PKPaymentMerchantSession : NSObject <NSSecureCoding, NSCopying>
 - (instancetype)initWithDictionary:(NSDictionary *)dictionary;
 @end
 
+#endif
+
 @interface PKPaymentAuthorizationViewController ()
 + (void)paymentServicesMerchantURL:(void(^)(NSURL *merchantURL, NSError *error))completion;
++ (void)paymentServicesMerchantURLForAPIType:(PKPaymentRequestAPIType)APIType completion:(void(^)(NSURL *merchantURL, NSError *error))completion;
 @property (nonatomic, assign, nullable) id<PKPaymentAuthorizationViewControllerPrivateDelegate> privateDelegate;
 @end
 
@@ -260,13 +350,19 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)paymentAuthorizationViewController:(PKPaymentAuthorizationViewController *)controller didRequestMerchantSession:(void(^)(PKPaymentMerchantSession *, NSError *))sessionBlock;
 @end
 
-#if (PLATFORM(MAC) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 101304) || PLATFORM(IOS_FAMILY)
-typedef NS_ENUM(NSUInteger, PKPaymentRequestAPIType) {
-    PKPaymentRequestAPITypeInApp = 0,
-    PKPaymentRequestAPITypeWebJS,
-    PKPaymentRequestAPITypeWebPaymentRequest,
-};
+@interface PKPaymentRequest ()
+@property (nonatomic, strong) NSArray *thumbnailURLs;
+@property (nonatomic, retain) NSURL *originatingURL;
+@property (nonatomic, assign) BOOL expectsMerchantSession;
+@property (nonatomic, strong) NSString *sourceApplicationBundleIdentifier;
+@property (nonatomic, strong) NSString *sourceApplicationSecondaryIdentifier;
+@property (nonatomic, strong) NSString *CTDataConnectionServiceType;
+#if HAVE(PASSKIT_BOUND_INTERFACE_IDENTIFIER)
+@property (nonatomic, copy) NSString *boundInterfaceIdentifier;
+#endif
+@end
 
+#if !HAVE(PASSKIT_INSTALLMENTS)
 @interface PKPaymentRequest ()
 @property (nonatomic, assign) PKPaymentRequestAPIType APIType;
 @end
@@ -297,7 +393,7 @@ typedef NS_ENUM(NSInteger, PKPaymentButtonType) {
 };
 #endif
 
-#if PLATFORM(MAC) && !USE(APPLE_INTERNAL_SDK) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 101300
+#if PLATFORM(MAC) && !USE(APPLE_INTERNAL_SDK)
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -306,16 +402,20 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, assign) PKPaymentAuthorizationStatus status;
 @end
 
-@interface PKPaymentRequestPaymentMethodUpdate : NSObject
-- (instancetype)initWithPaymentSummaryItems:(nonnull NSArray<PKPaymentSummaryItem *> *)paymentSummaryItems;
+@interface PKPaymentRequestUpdate : NSObject
+- (instancetype)initWithPaymentSummaryItems:(NSArray<PKPaymentSummaryItem *> *)paymentSummaryItems;
+@property (nonatomic, copy) NSArray<PKPaymentSummaryItem *> *paymentSummaryItems;
 @end
 
-@interface PKPaymentRequestUpdate : NSObject
+@interface PKPaymentRequestPaymentMethodUpdate : PKPaymentRequestUpdate
 @end
 
 @interface PKPaymentRequestShippingContactUpdate : PKPaymentRequestUpdate
-- (instancetype)initWithPaymentSummaryItems:(nonnull NSArray<PKPaymentSummaryItem *> *)summaryItems shippingMethods:(nonnull NSArray<PKShippingMethod *> *)shippingMethods;
 - (instancetype)initWithErrors:(nullable NSArray<NSError *> *)errors paymentSummaryItems:(nonnull NSArray<PKPaymentSummaryItem *> *)summaryItems shippingMethods:(nonnull NSArray<PKShippingMethod *> *)shippingMethods;
+@property (nonatomic, copy) NSArray<PKShippingMethod *> *shippingMethods;
+@end
+
+@interface PKPaymentRequestShippingMethodUpdate : PKPaymentRequestUpdate
 @end
 
 NS_ASSUME_NONNULL_END
@@ -323,7 +423,7 @@ NS_ASSUME_NONNULL_END
 #endif
 
 extern "C"
-void PKDrawApplePayButton(_Nonnull CGContextRef, CGRect drawRect, CGFloat scale, PKPaymentButtonType, PKPaymentButtonStyle, NSString * _Nullable languageCode);
+void PKDrawApplePayButtonWithCornerRadius(_Nonnull CGContextRef, CGRect drawRect, CGFloat scale, CGFloat cornerRadius, PKPaymentButtonType, PKPaymentButtonStyle, NSString * _Nullable languageCode);
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -334,18 +434,10 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)openPaymentSetupForMerchantIdentifier:(NSString *)identifier domain:(NSString *)domain completion:(void(^)(BOOL success))completion;
 @end
 
-@interface PKPayment () <NSSecureCoding>
-@end
-
-@interface PKPaymentMethod () <NSSecureCoding>
-@end
-
-@interface PKPaymentRequest ()
-@property (nonatomic, strong) NSString *sourceApplicationBundleIdentifier;
-@property (nonatomic, strong) NSString *sourceApplicationSecondaryIdentifier;
-@property (nonatomic, strong) NSString *CTDataConnectionServiceType;
-@end
-
 typedef void(^PKCanMakePaymentsCompletion)(BOOL isValid, NSError *);
 
 NS_ASSUME_NONNULL_END
+
+#define PAL_PASSKIT_SPI_GUARD_AGAINST_INDIRECT_INCLUSION
+#import "PassKitInstallmentsSPI.h"
+#undef PAL_PASSKIT_SPI_GUARD_AGAINST_INDIRECT_INCLUSION

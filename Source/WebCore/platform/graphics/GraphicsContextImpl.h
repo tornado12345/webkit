@@ -30,6 +30,7 @@
 namespace WebCore {
 
 class GraphicsContextImpl {
+    WTF_MAKE_FAST_ALLOCATED;
     WTF_MAKE_NONCOPYABLE(GraphicsContextImpl);
 public:
     GraphicsContextImpl(GraphicsContext&, const FloatRect& initialClip, const AffineTransform&);
@@ -71,10 +72,10 @@ public:
     virtual ImageDrawResult drawImage(Image&, const FloatRect& destination, const FloatRect& source, const ImagePaintingOptions&) = 0;
     virtual ImageDrawResult drawTiledImage(Image&, const FloatRect& destination, const FloatPoint& source, const FloatSize& tileSize, const FloatSize& spacing, const ImagePaintingOptions&) = 0;
     virtual ImageDrawResult drawTiledImage(Image&, const FloatRect& destination, const FloatRect& source, const FloatSize& tileScaleFactor, Image::TileRule hRule, Image::TileRule vRule, const ImagePaintingOptions&) = 0;
-#if USE(CG) || USE(CAIRO)
-    virtual void drawNativeImage(const NativeImagePtr&, const FloatSize& selfSize, const FloatRect& destRect, const FloatRect& srcRect, CompositeOperator, BlendMode, ImageOrientation) = 0;
-#endif
-    virtual void drawPattern(Image&, const FloatRect& destRect, const FloatRect& srcRect, const AffineTransform&, const FloatPoint& phase, const FloatSize& spacing, CompositeOperator, BlendMode = BlendMode::Normal) = 0;
+
+    virtual bool drawImageBuffer(ImageBuffer&, const FloatRect& destination, const FloatRect& source, const ImagePaintingOptions&) = 0;
+    virtual void drawNativeImage(const NativeImagePtr&, const FloatSize& selfSize, const FloatRect& destRect, const FloatRect& srcRect, const ImagePaintingOptions&) = 0;
+    virtual void drawPattern(Image&, const FloatRect& destRect, const FloatRect& srcRect, const AffineTransform&, const FloatPoint& phase, const FloatSize& spacing, const ImagePaintingOptions&) = 0;
 
     virtual void drawRect(const FloatRect&, float borderThickness) = 0;
     virtual void drawLine(const FloatPoint&, const FloatPoint&) = 0;
@@ -105,6 +106,9 @@ public:
     virtual void clipPath(const Path&, WindRule) = 0;
     virtual IntRect clipBounds() = 0;
     virtual void clipToImageBuffer(ImageBuffer&, const FloatRect&) = 0;
+    virtual void clipToDrawingCommands(const FloatRect& destination, ColorSpace, Function<void(GraphicsContext&)>&& drawingFunction) = 0;
+    virtual void paintFrameForMedia(MediaPlayer&, const FloatRect& destination) = 0;
+    virtual bool canPaintFrameForMedia() const = 0;
     
     virtual void applyDeviceScaleFactor(float) = 0;
 

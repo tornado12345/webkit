@@ -23,7 +23,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
+#import "config.h"
 
 #if PLATFORM(MAC)
 
@@ -36,7 +36,6 @@
 #import <WebKit/WKWebViewPrivate.h>
 #import <WebKit/_WKFullscreenDelegate.h>
 #import <wtf/RetainPtr.h>
-#import <wtf/mac/AppKitCompatibilityDeclarations.h>
 
 static bool receivedLoadedMessage;
 static bool receivedWillEnterFullscreenMessage;
@@ -86,8 +85,8 @@ namespace TestWebKitAPI {
 TEST(Fullscreen, Delegate)
 {
     RetainPtr<WKWebViewConfiguration> configuration = adoptNS([[WKWebViewConfiguration alloc] init]);
-    RetainPtr<WKWebView> webView = adoptNS([[WKWebView alloc] initWithFrame:NSMakeRect(0, 0, 100, 100) configuration:configuration.get()]);
     [configuration preferences]._fullScreenEnabled = YES;
+    RetainPtr<WKWebView> webView = adoptNS([[WKWebView alloc] initWithFrame:NSMakeRect(0, 0, 100, 100) configuration:configuration.get()]);
     RetainPtr<FullscreenDelegateMessageHandler> handler = adoptNS([[FullscreenDelegateMessageHandler alloc] init]);
     [[configuration userContentController] addScriptMessageHandler:handler.get() name:@"fullscreenChangeHandler"];
     [webView _setFullscreenDelegate:handler.get()];
@@ -118,7 +117,7 @@ TEST(Fullscreen, Delegate)
 TEST(Fullscreen, WKViewDelegate)
 {
     WKRetainPtr<WKContextRef> context = adoptWK(WKContextCreateWithConfiguration(nullptr));
-    WKRetainPtr<WKPageGroupRef> pageGroup(AdoptWK, WKPageGroupCreateWithIdentifier(Util::toWK("FullscreenDelegate").get()));
+    WKRetainPtr<WKPageGroupRef> pageGroup = adoptWK(WKPageGroupCreateWithIdentifier(Util::toWK("FullscreenDelegate").get()));
     WKPreferencesRef preferences = WKPageGroupGetPreferences(pageGroup.get());
     WKPreferencesSetFullScreenEnabled(preferences, true);
 
@@ -135,7 +134,7 @@ TEST(Fullscreen, WKViewDelegate)
     WKPageSetPageNavigationClient(webView.page(), &loaderClient.base);
 
     receivedLoadedMessage = false;
-    WKRetainPtr<WKURLRef> url(AdoptWK, Util::createURLForResource("FullscreenDelegate", "html"));
+    WKRetainPtr<WKURLRef> url = adoptWK(Util::createURLForResource("FullscreenDelegate", "html"));
     WKPageLoadURL(webView.page(), url.get());
 
     TestWebKitAPI::Util::run(&receivedLoadedMessage);

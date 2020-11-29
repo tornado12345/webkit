@@ -58,6 +58,8 @@ SOFT_LINK_FRAMEWORK(SafariServices)
 SOFT_LINK_CLASS(SafariServices, SSReadingList)
 #endif
 
+OBJC_CLASS DDAction;
+
 SOFT_LINK_PRIVATE_FRAMEWORK(TCC)
 SOFT_LINK(TCC, TCCAccessPreflight, TCCAccessPreflightResult, (CFStringRef service, CFDictionaryRef options), (service, options))
 SOFT_LINK_CONSTANT(TCC, kTCCServicePhotos, CFStringRef)
@@ -71,6 +73,10 @@ static bool applicationHasAppLinkEntitlements()
 
 static LSAppLink *appLinkForURL(NSURL *url)
 {
+#if HAVE(APP_LINKS_WITH_ISENABLED)
+    NSArray<LSAppLink *> *appLinks = [LSAppLink appLinksWithURL:url limit:1 error:nil];
+    return appLinks.firstObject;
+#else
     BinarySemaphore semaphore;
     __block LSAppLink *syncAppLink = nil;
     __block BinarySemaphore* semaphorePtr = &semaphore;
@@ -82,6 +88,7 @@ static LSAppLink *appLinkForURL(NSURL *url)
     semaphore.wait();
 
     return [syncAppLink autorelease];
+#endif
 }
 #endif
 
@@ -90,6 +97,9 @@ static LSAppLink *appLinkForURL(NSURL *url)
     RetainPtr<WKActionSheet> _interactionSheet;
     RetainPtr<_WKActivatedElementInfo> _elementInfo;
     Optional<WebKit::InteractionInformationAtPosition> _positionInformation;
+#if USE(UICONTEXTMENU)
+    RetainPtr<UIContextMenuInteraction> _dataDetectorContextMenuInteraction;
+#endif
     WeakObjCPtr<UIView> _view;
     BOOL _needsLinkIndicator;
     BOOL _isPresentingDDUserInterface;
@@ -166,6 +176,23 @@ static LSAppLink *appLinkForURL(NSURL *url)
     return [self superviewForSheet];
 }
 
+- (_WKElementAction *)_elementActionForDDAction:(DDAction *)action
+{
+#if PLATFORM(IOS) && !PLATFORM(MACCATALYST)
+    auto retainedSelf = retainPtr(self);
+    _WKElementAction *elementAction = [_WKElementAction elementActionWithTitle:action.localizedName actionHandler:^(_WKActivatedElementInfo *actionInfo) {
+        retainedSelf->_isPresentingDDUserInterface = action.hasUserInterface;
+        [[getDDDetectionControllerClass() sharedController] performAction:action fromAlertController:retainedSelf->_interactionSheet.get() interactionDelegate:retainedSelf.get()];
+    }];
+    elementAction.dismissalHandler = ^BOOL {
+        return !action.hasUserInterface;
+    };
+    return elementAction;
+#else
+    return nil;
+#endif
+}
+
 static const CGFloat presentationElementRectPadding = 15;
 
 - (CGRect)presentationRectForElementUsingClosestIndicatedRect
@@ -188,7 +215,7 @@ static const CGFloat presentationElementRectPadding = 15;
         indicatedRects.append(rect);
     }
 
-    for (auto path : WebCore::PathUtilities::pathsWithShrinkWrappedRects(indicatedRects, 0)) {
+    for (const auto& path : WebCore::PathUtilities::pathsWithShrinkWrappedRects(indicatedRects, 0)) {
         auto boundingRect = path.fastBoundingRect();
         if (boundingRect.contains(touchLocation))
             return CGRectInset([view convertRect:(CGRect)boundingRect fromView:_view.getAutoreleased()], -presentationElementRectPadding, -presentationElementRectPadding);
@@ -269,6 +296,25 @@ static const CGFloat presentationElementRectPadding = 15;
     return _interactionSheet != nil;
 }
 
+- (void)interactionDidStartWithPositionInformation:(const WebKit::InteractionInformationAtPosition&)information
+{
+#if ENABLE(DATA_DETECTION)
+    if (!_delegate)
+        return;
+
+    if (!WebCore::DataDetection::canBePresentedByDataDetectors(information.url))
+        return;
+
+    NSURL *targetURL = information.url;
+    if (!targetURL)
+        return;
+
+    auto *controller = [getDDDetectionControllerClass() sharedController];
+    if ([controller respondsToSelector:@selector(interactionDidStartForURL:)])
+        [controller interactionDidStartForURL:targetURL];
+#endif
+}
+
 - (NSArray *)currentAvailableActionTitles
 {
     if (!_interactionSheet)
@@ -282,7 +328,12 @@ static const CGFloat presentationElementRectPadding = 15;
     return array;
 }
 
-- (void)_createSheetWithElementActions:(NSArray *)actions showLinkTitle:(BOOL)showLinkTitle
+- (Optional<WebKit::InteractionInformationAtPosition>)currentPositionInformation
+{
+    return _positionInformation;
+}
+
+- (void)_createSheetWithElementActions:(NSArray *)actions defaultTitle:(NSString *)defaultTitle showLinkTitle:(BOOL)showLinkTitle
 {
     auto delegate = _delegate.get();
     if (!delegate)
@@ -291,7 +342,7 @@ static const CGFloat presentationElementRectPadding = 15;
     if (!_positionInformation)
         return;
 
-    NSURL *targetURL = [NSURL URLWithString:_positionInformation->url];
+    NSURL *targetURL = _positionInformation->url;
     NSString *urlScheme = [targetURL scheme];
     BOOL isJavaScriptURL = [urlScheme length] && [urlScheme caseInsensitiveCompare:@"javascript"] == NSOrderedSame;
     // FIXME: We should check if Javascript is enabled in the preferences.
@@ -309,7 +360,9 @@ static const CGFloat presentationElementRectPadding = 15;
             titleString = WTF::userVisibleString(targetURL);
             titleIsURL = YES;
         }
-    } else
+    } else if (defaultTitle)
+        titleString = defaultTitle;
+    else
         titleString = _positionInformation->title;
 
     if ([titleString length]) {
@@ -352,10 +405,11 @@ static const CGFloat presentationElementRectPadding = 15;
 
     void (^showImageSheetWithAlternateURLBlock)(NSURL*, NSDictionary *userInfo) = ^(NSURL *alternateURL, NSDictionary *userInfo) {
         NSURL *targetURL = _positionInformation->url;
+        NSURL *imageURL = _positionInformation->imageURL;
         if (!targetURL)
             targetURL = alternateURL;
         auto elementBounds = _positionInformation->bounds;
-        auto elementInfo = adoptNS([[_WKActivatedElementInfo alloc] _initWithType:_WKActivatedElementTypeImage URL:targetURL location:_positionInformation->request.point title:_positionInformation->title ID:_positionInformation->idAttribute rect:elementBounds image:_positionInformation->image.get() userInfo:userInfo]);
+        auto elementInfo = adoptNS([[_WKActivatedElementInfo alloc] _initWithType:_WKActivatedElementTypeImage URL:targetURL imageURL:imageURL location:_positionInformation->request.point title:_positionInformation->title ID:_positionInformation->idAttribute rect:elementBounds image:_positionInformation->image.get() userInfo:userInfo]);
         if ([delegate respondsToSelector:@selector(actionSheetAssistant:showCustomSheetForElement:)] && [delegate actionSheetAssistant:self showCustomSheetForElement:elementInfo.get()])
             return;
         auto defaultActions = [self defaultActionsForImageSheet:elementInfo.get()];
@@ -366,11 +420,13 @@ static const CGFloat presentationElementRectPadding = 15;
             return;
 
         if (!alternateURL && userInfo) {
+ALLOW_DEPRECATED_DECLARATIONS_BEGIN
             [UIApp _cancelAllTouches];
+ALLOW_DEPRECATED_DECLARATIONS_END
             return;
         }
 
-        [self _createSheetWithElementActions:actions.get() showLinkTitle:YES];
+        [self _createSheetWithElementActions:actions.get() defaultTitle:nil showLinkTitle:YES];
         if (!_interactionSheet)
             return;
 
@@ -429,43 +485,59 @@ static const CGFloat presentationElementRectPadding = 15;
     return WKActionSheetPresentAtElementRect;
 }
 
+#if HAVE(APP_LINKS)
+- (BOOL)_appendAppLinkOpenActionsForURL:(NSURL *)url actions:(NSMutableArray *)defaultActions elementInfo:(_WKActivatedElementInfo *)elementInfo
+{
+    ASSERT(_delegate);
+
+    if (!applicationHasAppLinkEntitlements() || ![_delegate.get() actionSheetAssistant:self shouldIncludeAppLinkActionsForElement:elementInfo])
+        return NO;
+
+    LSAppLink *appLink = appLinkForURL(url);
+    if (!appLink)
+        return NO;
+
+    NSString *openInDefaultBrowserTitle = WEB_UI_STRING("Open in Safari", "Title for Open in Safari Link action button");
+    _WKElementAction *openInDefaultBrowserAction = [_WKElementAction _elementActionWithType:_WKElementActionTypeOpenInDefaultBrowser title:openInDefaultBrowserTitle actionHandler:^(_WKActivatedElementInfo *) {
+#if HAVE(APP_LINKS_WITH_ISENABLED)
+        appLink.enabled = NO;
+        [appLink openWithCompletionHandler:nil];
+#else
+        [appLink openInWebBrowser:YES setAppropriateOpenStrategyAndWebBrowserState:nil completionHandler:^(BOOL success, NSError *error) { }];
+#endif
+    }];
+    [defaultActions addObject:openInDefaultBrowserAction];
+
+    NSString *externalApplicationName = appLink.targetApplicationProxy.localizedName;
+    if (!externalApplicationName)
+        return YES;
+
+    NSString *openInExternalApplicationTitle = [NSString stringWithFormat:WEB_UI_STRING("Open in “%@”", "Title for Open in External Application Link action button"), externalApplicationName];
+    _WKElementAction *openInExternalApplicationAction = [_WKElementAction _elementActionWithType:_WKElementActionTypeOpenInExternalApplication title:openInExternalApplicationTitle actionHandler:^(_WKActivatedElementInfo *) {
+#if HAVE(APP_LINKS_WITH_ISENABLED)
+        appLink.enabled = YES;
+        [appLink openWithCompletionHandler:nil];
+#else
+        [appLink openInWebBrowser:NO setAppropriateOpenStrategyAndWebBrowserState:nil completionHandler:^(BOOL success, NSError *error) { }];
+#endif
+    }];
+    [defaultActions addObject:openInExternalApplicationAction];
+
+    return YES;
+}
+#endif
+
 - (void)_appendOpenActionsForURL:(NSURL *)url actions:(NSMutableArray *)defaultActions elementInfo:(_WKActivatedElementInfo *)elementInfo
 {
 #if HAVE(APP_LINKS)
-    ASSERT(_delegate);
-    if (applicationHasAppLinkEntitlements() && [_delegate.get() actionSheetAssistant:self shouldIncludeAppLinkActionsForElement:elementInfo]) {
-        LSAppLink *appLink = appLinkForURL(url);
-        if (appLink) {
-            NSString *title = WEB_UI_STRING("Open in Safari", "Title for Open in Safari Link action button");
-            _WKElementAction *openInDefaultBrowserAction = [_WKElementAction _elementActionWithType:_WKElementActionTypeOpenInDefaultBrowser title:title actionHandler:^(_WKActivatedElementInfo *) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-                [appLink openInWebBrowser:YES setAppropriateOpenStrategyAndWebBrowserState:nil completionHandler:^(BOOL success, NSError *error) { }];
-#pragma clang diagnostic pop
-            }];
-            [defaultActions addObject:openInDefaultBrowserAction];
-
-            NSString *externalApplicationName = [appLink.targetApplicationProxy localizedNameForContext:nil];
-            if (externalApplicationName) {
-                NSString *title = [NSString stringWithFormat:WEB_UI_STRING("Open in “%@”", "Title for Open in External Application Link action button"), externalApplicationName];
-                _WKElementAction *openInExternalApplicationAction = [_WKElementAction _elementActionWithType:_WKElementActionTypeOpenInExternalApplication title:title actionHandler:^(_WKActivatedElementInfo *) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-                    [appLink openInWebBrowser:NO setAppropriateOpenStrategyAndWebBrowserState:nil completionHandler:^(BOOL success, NSError *error) { }];
-#pragma clang diagnostic pop
-                }];
-                [defaultActions addObject:openInExternalApplicationAction];
-            }
-        } else
-            [defaultActions addObject:[_WKElementAction _elementActionWithType:_WKElementActionTypeOpen assistant:self]];
-    } else
-        [defaultActions addObject:[_WKElementAction _elementActionWithType:_WKElementActionTypeOpen assistant:self]];
-#else
-    [defaultActions addObject:[_WKElementAction _elementActionWithType:_WKElementActionTypeOpen assistant:self]];
+    if ([self _appendAppLinkOpenActionsForURL:url actions:defaultActions elementInfo:elementInfo])
+        return;
 #endif
+
+    [defaultActions addObject:[_WKElementAction _elementActionWithType:_WKElementActionTypeOpen assistant:self]];
 }
 
-- (RetainPtr<NSArray>)defaultActionsForLinkSheet:(_WKActivatedElementInfo *)elementInfo
+- (RetainPtr<NSArray<_WKElementAction *>>)defaultActionsForLinkSheet:(_WKActivatedElementInfo *)elementInfo
 {
     NSURL *targetURL = [elementInfo URL];
     if (!targetURL)
@@ -478,6 +550,12 @@ static const CGFloat presentationElementRectPadding = 15;
     if ([getSSReadingListClass() supportsURL:targetURL])
         [defaultActions addObject:[_WKElementAction _elementActionWithType:_WKElementActionTypeAddToReadingList assistant:self]];
 #endif
+
+    if ([elementInfo imageURL]) {
+        if (TCCAccessPreflight(getkTCCServicePhotos(), NULL) != kTCCAccessPreflightDenied)
+            [defaultActions addObject:[_WKElementAction _elementActionWithType:_WKElementActionTypeSaveImage assistant:self]];
+    }
+
     if (![[targetURL scheme] length] || [[targetURL scheme] caseInsensitiveCompare:@"javascript"] != NSOrderedSame) {
         [defaultActions addObject:[_WKElementAction _elementActionWithType:_WKElementActionTypeCopy assistant:self]];
         [defaultActions addObject:[_WKElementAction _elementActionWithType:_WKElementActionTypeShare assistant:self]];
@@ -486,7 +564,7 @@ static const CGFloat presentationElementRectPadding = 15;
     return defaultActions;
 }
 
-- (RetainPtr<NSArray>)defaultActionsForImageSheet:(_WKActivatedElementInfo *)elementInfo
+- (RetainPtr<NSArray<_WKElementAction *>>)defaultActionsForImageSheet:(_WKActivatedElementInfo *)elementInfo
 {
     NSURL *targetURL = [elementInfo URL];
 
@@ -494,7 +572,8 @@ static const CGFloat presentationElementRectPadding = 15;
     if (targetURL) {
         [self _appendOpenActionsForURL:targetURL actions:defaultActions.get() elementInfo:elementInfo];
         [defaultActions addObject:[_WKElementAction _elementActionWithType:_WKElementActionTypeShare assistant:self]];
-    }
+    } else if ([elementInfo imageURL])
+        [defaultActions addObject:[_WKElementAction _elementActionWithType:_WKElementActionTypeShare assistant:self]];
 
 #if HAVE(SAFARI_SERVICES_FRAMEWORK)
     if ([getSSReadingListClass() supportsURL:targetURL])
@@ -516,9 +595,7 @@ static const CGFloat presentationElementRectPadding = 15;
 - (void)showLinkSheet
 {
     ASSERT(!_elementInfo);
-
-    auto delegate = _delegate.get();
-    if (!delegate)
+    if (!_delegate)
         return;
 
     _needsLinkIndicator = YES;
@@ -531,22 +608,22 @@ static const CGFloat presentationElementRectPadding = 15;
         return;
     }
 
-    auto elementInfo = adoptNS([[_WKActivatedElementInfo alloc] _initWithType:_WKActivatedElementTypeLink URL:targetURL location:_positionInformation->request.point title:_positionInformation->title ID:_positionInformation->idAttribute rect:_positionInformation->bounds image:_positionInformation->image.get()]);
-    if ([delegate respondsToSelector:@selector(actionSheetAssistant:showCustomSheetForElement:)] && [delegate actionSheetAssistant:self showCustomSheetForElement:elementInfo.get()]) {
+    auto elementInfo = adoptNS([[_WKActivatedElementInfo alloc] _initWithType:_WKActivatedElementTypeLink URL:targetURL imageURL:(NSURL*)_positionInformation->imageURL location:_positionInformation->request.point title:_positionInformation->title ID:_positionInformation->idAttribute rect:_positionInformation->bounds image:_positionInformation->image.get()]);
+    if ([_delegate respondsToSelector:@selector(actionSheetAssistant:showCustomSheetForElement:)] && [_delegate actionSheetAssistant:self showCustomSheetForElement:elementInfo.get()]) {
         _needsLinkIndicator = NO;
         return;
     }
 
     auto defaultActions = [self defaultActionsForLinkSheet:elementInfo.get()];
 
-    RetainPtr<NSArray> actions = [delegate actionSheetAssistant:self decideActionsForElement:elementInfo.get() defaultActions:WTFMove(defaultActions)];
+    RetainPtr<NSArray> actions = [_delegate actionSheetAssistant:self decideActionsForElement:elementInfo.get() defaultActions:WTFMove(defaultActions)];
 
     if (![actions count]) {
         _needsLinkIndicator = NO;
         return;
     }
 
-    [self _createSheetWithElementActions:actions.get() showLinkTitle:YES];
+    [self _createSheetWithElementActions:actions.get() defaultTitle:nil showLinkTitle:YES];
     if (!_interactionSheet) {
         _needsLinkIndicator = NO;
         return;
@@ -558,15 +635,38 @@ static const CGFloat presentationElementRectPadding = 15;
         [self cleanupSheet];
 }
 
-- (void)showDataDetectorsSheet
+#if ENABLE(DATA_DETECTION) && USE(UICONTEXTMENU)
+- (void)removeContextMenuInteraction
+{
+    if (_dataDetectorContextMenuInteraction) {
+        [_view removeInteraction:_dataDetectorContextMenuInteraction.get()];
+        _dataDetectorContextMenuInteraction = nil;
+        if ([_delegate respondsToSelector:@selector(removeContextMenuViewIfPossibleForActionSheetAssistant:)])
+            return [_delegate removeContextMenuViewIfPossibleForActionSheetAssistant:self];
+    }
+}
+
+- (void)ensureContextMenuInteraction
+{
+    if (!_dataDetectorContextMenuInteraction) {
+        _dataDetectorContextMenuInteraction = adoptNS([[UIContextMenuInteraction alloc] initWithDelegate:self]);
+        [_view addInteraction:_dataDetectorContextMenuInteraction.get()];
+    }
+}
+
+- (BOOL)hasContextMenuInteraction
+{
+    return !!_dataDetectorContextMenuInteraction;
+}
+#endif
+
+- (void)showDataDetectorsUIForPositionInformation:(const WebKit::InteractionInformationAtPosition&)positionInformation
 {
 #if ENABLE(DATA_DETECTION)
-    auto delegate = _delegate.get();
-    if (!delegate)
+    if (!_delegate)
         return;
 
-    if (![self synchronouslyRetrievePositionInformation])
-        return;
+    _positionInformation = positionInformation;
 
     if (!WebCore::DataDetection::canBePresentedByDataDetectors(_positionInformation->url))
         return;
@@ -578,41 +678,36 @@ static const CGFloat presentationElementRectPadding = 15;
     DDDetectionController *controller = [getDDDetectionControllerClass() sharedController];
     NSDictionary *context = nil;
     NSString *textAtSelection = nil;
-    RetainPtr<NSMutableDictionary> extendedContext;
 
-    if ([delegate respondsToSelector:@selector(dataDetectionContextForActionSheetAssistant:)])
-        context = [delegate dataDetectionContextForActionSheetAssistant:self];
-    if ([delegate respondsToSelector:@selector(selectedTextForActionSheetAssistant:)])
-        textAtSelection = [delegate selectedTextForActionSheetAssistant:self];
-    if (!_positionInformation->textBefore.isEmpty() || !_positionInformation->textAfter.isEmpty()) {
-        extendedContext = adoptNS([@{
-            getkDataDetectorsLeadingText() : _positionInformation->textBefore,
-            getkDataDetectorsTrailingText() : _positionInformation->textAfter,
-        } mutableCopy]);
-        
-        if (context)
-            [extendedContext addEntriesFromDictionary:context];
-        context = extendedContext.get();
+    if ([_delegate respondsToSelector:@selector(dataDetectionContextForActionSheetAssistant:positionInformation:)])
+        context = [_delegate dataDetectionContextForActionSheetAssistant:self positionInformation:*_positionInformation];
+    if ([_delegate respondsToSelector:@selector(selectedTextForActionSheetAssistant:)])
+        textAtSelection = [_delegate selectedTextForActionSheetAssistant:self];
+
+    if ([controller respondsToSelector:@selector(shouldImmediatelyLaunchDefaultActionForURL:)] && [controller shouldImmediatelyLaunchDefaultActionForURL:targetURL]) {
+        auto action = [controller defaultActionForURL:targetURL results:_positionInformation->dataDetectorResults.get() context:context];
+        auto *elementAction = [self _elementActionForDDAction:action];
+        [elementAction _runActionWithElementInfo:_elementInfo.get() forActionSheetAssistant:self];
+        return;
     }
+
     NSArray *dataDetectorsActions = [controller actionsForURL:targetURL identifier:_positionInformation->dataDetectorIdentifier selectedText:textAtSelection results:_positionInformation->dataDetectorResults.get() context:context];
     if ([dataDetectorsActions count] == 0)
         return;
-
+    
+#if USE(UICONTEXTMENU) && HAVE(UICONTEXTMENU_LOCATION)
+    [self ensureContextMenuInteraction];
+    [_dataDetectorContextMenuInteraction _presentMenuAtLocation:_positionInformation->request.point];
+#else
     NSMutableArray *elementActions = [NSMutableArray array];
     for (NSUInteger actionNumber = 0; actionNumber < [dataDetectorsActions count]; actionNumber++) {
         DDAction *action = [dataDetectorsActions objectAtIndex:actionNumber];
-        RetainPtr<WKActionSheetAssistant> retainedSelf = self;
-        _WKElementAction *elementAction = [_WKElementAction elementActionWithTitle:[action localizedName] actionHandler:^(_WKActivatedElementInfo *actionInfo) {
-            retainedSelf.get()->_isPresentingDDUserInterface = action.hasUserInterface;
-            [[getDDDetectionControllerClass() sharedController] performAction:action fromAlertController:retainedSelf.get()->_interactionSheet.get() interactionDelegate:retainedSelf.get()];
-        }];
-        elementAction.dismissalHandler = ^{
-            return (BOOL)!action.hasUserInterface;
-        };
+        auto *elementAction = [self _elementActionForDDAction:action];
         [elementActions addObject:elementAction];
     }
 
-    [self _createSheetWithElementActions:elementActions showLinkTitle:NO];
+    NSString *title = [controller titleForURL:targetURL results:_positionInformation->dataDetectorResults.get() context:context];
+    [self _createSheetWithElementActions:elementActions defaultTitle:title showLinkTitle:NO];
     if (!_interactionSheet)
         return;
 
@@ -622,6 +717,129 @@ static const CGFloat presentationElementRectPadding = 15;
     if (![_interactionSheet presentSheet:WKActionSheetPresentAtTouchLocation])
         [self cleanupSheet];
 #endif
+#endif // ENABLE(DATA_DETECTION)
+}
+
+#if USE(UICONTEXTMENU)
+
+static NSArray<UIMenuElement *> *menuElementsFromDefaultActions(RetainPtr<NSArray> defaultElementActions, RetainPtr<_WKActivatedElementInfo> elementInfo)
+{
+    if (![defaultElementActions count])
+        return nil;
+
+    auto actions = [NSMutableArray arrayWithCapacity:[defaultElementActions count]];
+    for (_WKElementAction *elementAction in defaultElementActions.get())
+        [actions addObject:[elementAction uiActionForElementInfo:elementInfo.get()]];
+
+    return actions;
+}
+
+- (NSArray<UIMenuElement *> *)suggestedActionsForContextMenuWithPositionInformation:(const WebKit::InteractionInformationAtPosition&)positionInformation
+{
+    auto elementInfo = adoptNS([[_WKActivatedElementInfo alloc] _initWithInteractionInformationAtPosition:positionInformation userInfo:nil]);
+    RetainPtr<NSArray<_WKElementAction *>> defaultActionsFromAssistant = positionInformation.isLink ? [self defaultActionsForLinkSheet:elementInfo.get()] : [self defaultActionsForImageSheet:elementInfo.get()];
+    return menuElementsFromDefaultActions(defaultActionsFromAssistant, elementInfo);
+}
+
+#if ENABLE(DATA_DETECTION)
+
+- (UIContextMenuConfiguration *)contextMenuInteraction:(UIContextMenuInteraction *)interaction configurationForMenuAtLocation:(CGPoint)location
+{
+    DDDetectionController *controller = [getDDDetectionControllerClass() sharedController];
+    NSDictionary *context = nil;
+    NSString *textAtSelection = nil;
+
+    if ([_delegate respondsToSelector:@selector(dataDetectionContextForActionSheetAssistant:positionInformation:)])
+        context = [_delegate dataDetectionContextForActionSheetAssistant:self positionInformation:*_positionInformation];
+    if ([_delegate respondsToSelector:@selector(selectedTextForActionSheetAssistant:)])
+        textAtSelection = [_delegate selectedTextForActionSheetAssistant:self];
+
+    NSDictionary *newContext = nil;
+    DDResultRef ddResult = [controller resultForURL:_positionInformation->url identifier:_positionInformation->dataDetectorIdentifier selectedText:textAtSelection results:_positionInformation->dataDetectorResults.get() context:context extendedContext:&newContext];
+
+    CGRect sourceRect;
+    if (_positionInformation->isLink)
+        sourceRect = _positionInformation->linkIndicator.textBoundingRectInRootViewCoordinates;
+    else
+        sourceRect = _positionInformation->bounds;
+
+    auto ddContextMenuActionClass = getDDContextMenuActionClass();
+    auto finalContext = [ddContextMenuActionClass updateContext:newContext withSourceRect:sourceRect];
+
+    if (ddResult)
+        return [ddContextMenuActionClass contextMenuConfigurationWithResult:ddResult inView:_view.getAutoreleased() context:finalContext menuIdentifier:nil];
+    return [ddContextMenuActionClass contextMenuConfigurationWithURL:_positionInformation->url inView:_view.getAutoreleased() context:finalContext menuIdentifier:nil];
+}
+
+- (UITargetedPreview *)contextMenuInteraction:(UIContextMenuInteraction *)interaction previewForHighlightingMenuWithConfiguration:(UIContextMenuConfiguration *)configuration
+{
+    auto delegate = _delegate.get();
+    CGPoint center = _positionInformation->request.point;
+    
+    if ([delegate respondsToSelector:@selector(createTargetedContextMenuHintForActionSheetAssistant:)])
+        return [delegate createTargetedContextMenuHintForActionSheetAssistant:self];
+    
+    RetainPtr<UIPreviewParameters> unusedPreviewParameters = adoptNS([[UIPreviewParameters alloc] init]);
+    RetainPtr<UIPreviewTarget> previewTarget = adoptNS([[UIPreviewTarget alloc] initWithContainer:_view.getAutoreleased() center:center]);
+    RetainPtr<UITargetedPreview> preview = adoptNS([[UITargetedPreview alloc] initWithView:_view.getAutoreleased() parameters:unusedPreviewParameters.get() target:previewTarget.get()]);
+    return preview.autorelease();
+}
+
+- (_UIContextMenuStyle *)_contextMenuInteraction:(UIContextMenuInteraction *)interaction styleForMenuWithConfiguration:(UIContextMenuConfiguration *)configuration
+{
+    _UIContextMenuStyle *style = [_UIContextMenuStyle defaultStyle];
+    style.preferredLayout = _UIContextMenuLayoutCompactMenu;
+    return style;
+}
+
+- (void)contextMenuInteraction:(UIContextMenuInteraction *)interaction willEndForConfiguration:(UIContextMenuConfiguration *)configuration animator:(id<UIContextMenuInteractionAnimating>)animator
+{
+    [animator addCompletion:^{
+        [self removeContextMenuInteraction];
+    }];
+}
+
+- (NSArray<UIMenuElement *> *)_contextMenuInteraction:(UIContextMenuInteraction *)interaction overrideSuggestedActionsForConfiguration:(UIContextMenuConfiguration *)configuration
+{
+    if (!_positionInformation)
+        return nil;
+    return [self suggestedActionsForContextMenuWithPositionInformation:*_positionInformation];
+}
+
+#endif // ENABLE(DATA_DETECTION)
+
+#endif // USE(UICONTEXTMENU)
+
+- (void)handleElementActionWithType:(_WKElementActionType)type element:(_WKActivatedElementInfo *)element needsInteraction:(BOOL)needsInteraction
+{
+    auto delegate = _delegate.get();
+
+    if (needsInteraction && [delegate respondsToSelector:@selector(actionSheetAssistant:willStartInteractionWithElement:)])
+        [delegate actionSheetAssistant:self willStartInteractionWithElement:element];
+
+    switch (type) {
+    case _WKElementActionTypeCopy:
+        [delegate actionSheetAssistant:self performAction:WebKit::SheetAction::Copy];
+        break;
+    case _WKElementActionTypeOpen:
+        [delegate actionSheetAssistant:self openElementAtLocation:element._interactionLocation];
+        break;
+    case _WKElementActionTypeSaveImage:
+        [delegate actionSheetAssistant:self performAction:WebKit::SheetAction::SaveImage];
+        break;
+    case _WKElementActionTypeShare:
+        if (URL(element.imageURL).protocolIsData() && element.image && [delegate respondsToSelector:@selector(actionSheetAssistant:shareElementWithImage:rect:)])
+            [delegate actionSheetAssistant:self shareElementWithImage:element.image rect:element.boundingRect];
+        else
+            [delegate actionSheetAssistant:self shareElementWithURL:element.URL ?: element.imageURL rect:element.boundingRect];
+        break;
+    default:
+        ASSERT_NOT_REACHED();
+        break;
+    }
+
+    if (needsInteraction && [delegate respondsToSelector:@selector(actionSheetAssistantDidStopInteraction:)])
+        [delegate actionSheetAssistantDidStopInteraction:self];
 }
 
 - (void)cleanupSheet

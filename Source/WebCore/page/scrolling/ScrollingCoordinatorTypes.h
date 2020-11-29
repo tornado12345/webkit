@@ -26,18 +26,30 @@
 #pragma once
 
 #include "ScrollTypes.h"
+#include <wtf/EnumTraits.h>
 
 namespace WebCore {
 
-typedef unsigned SynchronousScrollingReasons;
+enum class SynchronousScrollingReason {
+    // Flags for frame scrolling.
+    ForcedOnMainThread                                          = 1 << 0,
+    HasViewportConstrainedObjectsWithoutSupportingFixedLayers   = 1 << 1,
+    HasNonLayerViewportConstrainedObjects                       = 1 << 2,
+    IsImageDocument                                             = 1 << 3,
+    // Flags for frame and overflow scrolling.
+    HasSlowRepaintObjects                                       = 1 << 4,
+    DescendantScrollersHaveSynchronousScrolling                 = 1 << 5,
+};
 
 enum class ScrollingNodeType : uint8_t {
     MainFrame,
     Subframe,
     FrameHosting,
     Overflow,
+    OverflowProxy,
     Fixed,
-    Sticky
+    Sticky,
+    Positioned
 };
 
 enum ScrollingStateTreeAsTextBehaviorFlags {
@@ -65,6 +77,9 @@ struct ScrollableAreaParameters {
     bool hasEnabledHorizontalScrollbar { false };
     bool hasEnabledVerticalScrollbar { false };
 
+    bool horizontalScrollbarHiddenByStyle { false };
+    bool verticalScrollbarHiddenByStyle { false };
+
     bool useDarkAppearanceForScrollbars { false };
 
     bool operator==(const ScrollableAreaParameters& other) const
@@ -74,15 +89,11 @@ struct ScrollableAreaParameters {
             && horizontalScrollbarMode == other.horizontalScrollbarMode
             && verticalScrollbarMode == other.verticalScrollbarMode
             && hasEnabledHorizontalScrollbar == other.hasEnabledHorizontalScrollbar
+            && horizontalScrollbarHiddenByStyle == other.horizontalScrollbarHiddenByStyle
+            && verticalScrollbarHiddenByStyle == other.verticalScrollbarHiddenByStyle
             && hasEnabledVerticalScrollbar == other.hasEnabledVerticalScrollbar
             && useDarkAppearanceForScrollbars == other.useDarkAppearanceForScrollbars;
     }
-};
-
-enum class ScrollingEventResult {
-    DidNotHandleEvent,
-    DidHandleEvent,
-    SendToMainThread
 };
 
 enum class ViewportRectStability {
@@ -91,4 +102,22 @@ enum class ViewportRectStability {
     ChangingObscuredInsetsInteractively // This implies Unstable.
 };
 
-}
+} // namespace WebCore
+
+namespace WTF {
+
+template<> struct EnumTraits<WebCore::ScrollingNodeType> {
+    using values = EnumValues<
+        WebCore::ScrollingNodeType,
+        WebCore::ScrollingNodeType::MainFrame,
+        WebCore::ScrollingNodeType::Subframe,
+        WebCore::ScrollingNodeType::FrameHosting,
+        WebCore::ScrollingNodeType::Overflow,
+        WebCore::ScrollingNodeType::OverflowProxy,
+        WebCore::ScrollingNodeType::Fixed,
+        WebCore::ScrollingNodeType::Sticky,
+        WebCore::ScrollingNodeType::Positioned
+    >;
+};
+
+} // namespace WTF

@@ -23,19 +23,23 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef NativeWebWheelEvent_h
-#define NativeWebWheelEvent_h
+#pragma once
 
-#include "WebEvent.h"
+#include "WebWheelEvent.h"
 
 #if USE(APPKIT)
 #include <wtf/RetainPtr.h>
 OBJC_CLASS NSView;
+OBJC_CLASS NSEvent;
 #endif
 
 #if PLATFORM(GTK)
 #include <WebCore/GUniquePtrGtk.h>
+#if USE(GTK4)
+typedef struct _GdkEvent GdkEvent;
+#else
 typedef union _GdkEvent GdkEvent;
+#endif
 #endif
 
 #if USE(LIBWPE)
@@ -56,8 +60,10 @@ public:
     NativeWebWheelEvent(const NativeWebWheelEvent&);
     NativeWebWheelEvent(GdkEvent*);
     NativeWebWheelEvent(GdkEvent*, WebWheelEvent::Phase, WebWheelEvent::Phase momentumPhase);
+    NativeWebWheelEvent(GdkEvent*, const WebCore::IntPoint&, const WebCore::FloatSize& wheelTicks);
+    NativeWebWheelEvent(const WebCore::IntPoint& position, const WebCore::IntPoint& globalPosition, const WebCore::FloatSize& delta, const WebCore::FloatSize& wheelTicks, WebWheelEvent::Phase, WebWheelEvent::Phase momentumPhase);
 #elif USE(LIBWPE)
-    NativeWebWheelEvent(struct wpe_input_axis_event*, float deviceScaleFactor);
+    NativeWebWheelEvent(struct wpe_input_axis_event*, float deviceScaleFactor, WebWheelEvent::Phase, WebWheelEvent::Phase momentumPhase);
 #elif PLATFORM(WIN)
     NativeWebWheelEvent(HWND, UINT message, WPARAM, LPARAM);
 #endif
@@ -83,5 +89,3 @@ private:
 };
 
 } // namespace WebKit
-
-#endif // NativeWebWheelEvent_h

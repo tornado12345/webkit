@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2018-2020 Apple Inc. All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,46 +27,59 @@
 #include "config.h"
 #include "WorkletGlobalScope.h"
 
-#if ENABLE(CSS_PAINTING_API)
-
-#include "Document.h"
 #include "Frame.h"
 #include "InspectorInstrumentation.h"
 #include "JSWorkletGlobalScope.h"
 #include "PageConsoleClient.h"
 #include "SecurityOriginPolicy.h"
 #include "Settings.h"
-#include "WorkletScriptController.h"
-
+#include "WorkerMessagePortChannelProvider.h"
+#include "WorkerOrWorkletThread.h"
+#include "WorkerScriptLoader.h"
+#include "WorkletParameters.h"
 #include <JavaScriptCore/Exception.h>
 #include <JavaScriptCore/JSLock.h>
 #include <JavaScriptCore/ScriptCallStack.h>
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
 using namespace Inspector;
 
-WorkletGlobalScope::WorkletGlobalScope(Document& document, ScriptSourceCode&& code)
-    : m_document(makeWeakPtr(document))
-    , m_sessionID(m_document->sessionID())
-    , m_script(std::make_unique<WorkletScriptController>(this))
+WTF_MAKE_ISO_ALLOCATED_IMPL(WorkletGlobalScope);
+
+WorkletGlobalScope::WorkletGlobalScope(WorkerOrWorkletThread& thread, const WorkletParameters& parameters)
+    : WorkerOrWorkletGlobalScope(JSC::VM::create(), &thread)
     , m_topOrigin(SecurityOrigin::createUnique())
-    , m_eventQueue(*this)
+    , m_url(parameters.windowURL)
+    , m_jsRuntimeFlags(parameters.jsRuntimeFlags)
+{
+    auto addResult = allWorkletGlobalScopesSet().add(this);
+    ASSERT_UNUSED(addResult, addResult);
+
+    setSecurityOriginPolicy(SecurityOriginPolicy::create(SecurityOrigin::create(this->url())));
+    setContentSecurityPolicy(makeUnique<ContentSecurityPolicy>(URL { this->url() }, *this));
+}
+
+WorkletGlobalScope::WorkletGlobalScope(Document& document, Ref<JSC::VM>&& vm, ScriptSourceCode&& code)
+    : WorkerOrWorkletGlobalScope(WTFMove(vm), nullptr)
+    , m_document(makeWeakPtr(document))
+    , m_topOrigin(SecurityOrigin::createUnique())
+    , m_url(code.url())
+    , m_jsRuntimeFlags(document.settings().javaScriptRuntimeFlags())
     , m_code(WTFMove(code))
 {
     auto addResult = allWorkletGlobalScopesSet().add(this);
     ASSERT_UNUSED(addResult, addResult);
 
-    auto* frame = document.frame();
-    m_jsRuntimeFlags = frame ? frame->settings().javaScriptRuntimeFlags() : JSC::RuntimeFlags();
     ASSERT(document.page());
 
-    setSecurityOriginPolicy(SecurityOriginPolicy::create(m_topOrigin.copyRef()));
-    setContentSecurityPolicy(std::make_unique<ContentSecurityPolicy>(URL { m_code.url() }, *this));
+    setSecurityOriginPolicy(SecurityOriginPolicy::create(SecurityOrigin::create(this->url())));
+    setContentSecurityPolicy(makeUnique<ContentSecurityPolicy>(URL { this->url() }, *this));
 }
 
 WorkletGlobalScope::~WorkletGlobalScope()
 {
-    ASSERT(!m_script);
+    ASSERT(!script());
     removeFromContextsMap();
     auto removeResult = allWorkletGlobalScopesSet().remove(this);
     ASSERT_UNUSED(removeResult, removeResult);
@@ -74,24 +87,18 @@ WorkletGlobalScope::~WorkletGlobalScope()
 
 void WorkletGlobalScope::prepareForDestruction()
 {
-    if (!m_script)
-        return;
-    stopActiveDOMObjects();
-    removeRejectedPromiseTracker();
-    removeAllEventListeners();
-    m_script->vm().notifyNeedTermination();
-    m_script = nullptr;
+    WorkerOrWorkletGlobalScope::prepareForDestruction();
+
+    if (script()) {
+        script()->vm().notifyNeedTermination();
+        clearScript();
+    }
 }
 
 auto WorkletGlobalScope::allWorkletGlobalScopesSet() -> WorkletGlobalScopesSet&
 {
     static NeverDestroyed<WorkletGlobalScopesSet> scopes;
     return scopes;
-}
-
-String WorkletGlobalScope::origin() const
-{
-    return m_topOrigin->toString();
 }
 
 String WorkletGlobalScope::userAgent(const URL& url) const
@@ -103,29 +110,15 @@ String WorkletGlobalScope::userAgent(const URL& url) const
 
 void WorkletGlobalScope::evaluate()
 {
-    m_script->evaluate(m_code);
+    if (m_code)
+        script()->evaluate(*m_code);
 }
 
-bool WorkletGlobalScope::isJSExecutionForbidden() const
-{
-    return !m_script || m_script->isExecutionForbidden();
-}
-
-void WorkletGlobalScope::disableEval(const String& errorMessage)
-{
-    m_script->disableEval(errorMessage);
-}
-
-void WorkletGlobalScope::disableWebAssembly(const String& errorMessage)
-{
-    m_script->disableWebAssembly(errorMessage);
-}
-
-URL WorkletGlobalScope::completeURL(const String& url) const
+URL WorkletGlobalScope::completeURL(const String& url, ForceUTF8) const
 {
     if (url.isNull())
         return URL();
-    return URL(m_code.url(), url);
+    return URL(this->url(), url);
 }
 
 void WorkletGlobalScope::logExceptionToConsole(const String& errorMessage, const String& sourceURL, int lineNumber, int columnNumber, RefPtr<ScriptCallStack>&& stack)
@@ -139,7 +132,7 @@ void WorkletGlobalScope::addConsoleMessage(std::unique_ptr<Inspector::ConsoleMes
 {
     if (!m_document || isJSExecutionForbidden() || !message)
         return;
-    m_document->addConsoleMessage(std::make_unique<Inspector::ConsoleMessage>(message->source(), message->type(), message->level(), message->message(), 0));
+    m_document->addConsoleMessage(makeUnique<Inspector::ConsoleMessage>(message->source(), message->type(), message->level(), message->message(), 0));
 }
 
 void WorkletGlobalScope::addConsoleMessage(MessageSource source, MessageLevel level, const String& message, unsigned long requestIdentifier)
@@ -149,12 +142,94 @@ void WorkletGlobalScope::addConsoleMessage(MessageSource source, MessageLevel le
     m_document->addConsoleMessage(source, level, message, requestIdentifier);
 }
 
-void WorkletGlobalScope::addMessage(MessageSource source, MessageLevel level, const String& messageText, const String& sourceURL, unsigned lineNumber, unsigned columnNumber, RefPtr<ScriptCallStack>&& callStack, JSC::ExecState*, unsigned long requestIdentifier)
+void WorkletGlobalScope::addMessage(MessageSource source, MessageLevel level, const String& messageText, const String& sourceURL, unsigned lineNumber, unsigned columnNumber, RefPtr<ScriptCallStack>&& callStack, JSC::JSGlobalObject*, unsigned long requestIdentifier)
 {
     if (!m_document || isJSExecutionForbidden())
         return;
     m_document->addMessage(source, level, messageText, sourceURL, lineNumber, columnNumber, WTFMove(callStack), nullptr, requestIdentifier);
 }
 
-} // namespace WebCore
+ReferrerPolicy WorkletGlobalScope::referrerPolicy() const
+{
+    return ReferrerPolicy::NoReferrer;
+}
+
+void WorkletGlobalScope::fetchAndInvokeScript(const URL& moduleURL, FetchRequestCredentials credentials, CompletionHandler<void(Optional<Exception>&&)>&& completionHandler)
+{
+    ASSERT(!isMainThread());
+    m_scriptFetchJobs.append({ moduleURL, credentials, WTFMove(completionHandler) });
+    processNextScriptFetchJobIfNeeded();
+}
+
+void WorkletGlobalScope::processNextScriptFetchJobIfNeeded()
+{
+    if (m_scriptFetchJobs.isEmpty() || m_scriptLoader)
+        return;
+
+    auto& scriptFetchJob = m_scriptFetchJobs.first();
+
+    ResourceRequest request { scriptFetchJob.moduleURL };
+
+    FetchOptions fetchOptions;
+    fetchOptions.mode = FetchOptions::Mode::Cors;
+    fetchOptions.cache = FetchOptions::Cache::Default;
+    fetchOptions.redirect = FetchOptions::Redirect::Follow;
+    fetchOptions.credentials = scriptFetchJob.credentials;
+#if ENABLE(WEB_AUDIO)
+    if (isAudioWorkletGlobalScope())
+        fetchOptions.destination = FetchOptions::Destination::Audioworklet;
 #endif
+#if ENABLE(CSS_PAINTING_API)
+    if (isPaintWorkletGlobalScope())
+        fetchOptions.destination = FetchOptions::Destination::Paintworklet;
+#endif
+
+    auto contentSecurityPolicyEnforcement = shouldBypassMainWorldContentSecurityPolicy() ? ContentSecurityPolicyEnforcement::DoNotEnforce : ContentSecurityPolicyEnforcement::EnforceChildSrcDirective;
+
+    m_scriptLoader = WorkerScriptLoader::create();
+    m_scriptLoader->loadAsynchronously(*this, WTFMove(request), WTFMove(fetchOptions), contentSecurityPolicyEnforcement, ServiceWorkersMode::All, *this);
+}
+
+void WorkletGlobalScope::didReceiveResponse(unsigned long, const ResourceResponse&)
+{
+}
+
+void WorkletGlobalScope::notifyFinished()
+{
+    auto completedJob = m_scriptFetchJobs.takeFirst();
+
+    if (m_scriptLoader->failed()) {
+        didCompleteScriptFetchJob(WTFMove(completedJob), Exception { NetworkError, makeString("Failed to fetch module, error: ", m_scriptLoader->error().localizedDescription()) });
+        return;
+    }
+
+    // FIXME: This should really be run as a module script but we don't support this in workers yet.
+    URL moduleURL(m_scriptLoader->responseURL());
+    auto addResult = m_evaluatedModules.add(moduleURL);
+    if (addResult.isNewEntry) {
+        NakedPtr<JSC::Exception> exception;
+        script()->evaluate(ScriptSourceCode(m_scriptLoader->script(), WTFMove(moduleURL)), exception);
+        if (exception)
+            script()->setException(exception);
+    }
+
+    didCompleteScriptFetchJob(WTFMove(completedJob), { });
+}
+
+void WorkletGlobalScope::didCompleteScriptFetchJob(ScriptFetchJob&& job, Optional<Exception> result)
+{
+    m_scriptLoader = nullptr;
+
+    job.completionHandler(WTFMove(result));
+
+    processNextScriptFetchJobIfNeeded();
+}
+
+MessagePortChannelProvider& WorkletGlobalScope::messagePortChannelProvider()
+{
+    if (!m_messagePortChannelProvider)
+        m_messagePortChannelProvider = makeUnique<WorkerMessagePortChannelProvider>(*this);
+    return *m_messagePortChannelProvider;
+}
+
+} // namespace WebCore

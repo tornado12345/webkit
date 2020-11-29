@@ -29,13 +29,14 @@
 #if PLATFORM(IOS_FAMILY)
 
 #import "UIKitSPI.h"
-#import "VersionChecks.h"
-#import "WKWebViewInternal.h"
+#import "WKDeferringGestureRecognizer.h"
+#import "WKWebViewIOS.h"
+#import <WebCore/VersionChecks.h>
 #import <pal/spi/cg/CoreGraphicsSPI.h>
 #import <wtf/WeakObjCPtr.h>
 
 #if PLATFORM(WATCHOS)
-#import <PepperUICore/UIScrollView+PUICAdditionsPrivate.h>
+#import "PepperUICoreSPI.h"
 #endif
 
 @interface WKScrollViewDelegateForwarder : NSObject <UIScrollViewDelegate>
@@ -126,10 +127,15 @@ static BOOL shouldForwardScrollViewDelegateMethodToExternalDelegate(SEL selector
     WeakObjCPtr<id <UIScrollViewDelegate>> _externalDelegate;
     WKScrollViewDelegateForwarder *_delegateForwarder;
 
-#if __IPHONE_OS_VERSION_MIN_REQUIRED >= 110000
+// FIXME: Likely we can remove this special case for watchOS and tvOS.
+#if !PLATFORM(WATCHOS) && !PLATFORM(APPLETV)
     BOOL _contentInsetAdjustmentBehaviorWasExternallyOverridden;
 #endif
     CGFloat _keyboardBottomInsetAdjustment;
+    BOOL _scrollEnabledByClient;
+    BOOL _scrollEnabledInternal;
+    BOOL _zoomEnabledByClient;
+    BOOL _zoomEnabledInternal;
 }
 
 - (id)initWithFrame:(CGRect)frame
@@ -139,11 +145,17 @@ static BOOL shouldForwardScrollViewDelegateMethodToExternalDelegate(SEL selector
     if (!self)
         return nil;
 
+    _scrollEnabledByClient = YES;
+    _scrollEnabledInternal = YES;
+    _zoomEnabledByClient = YES;
+    _zoomEnabledInternal = YES;
+
     self.alwaysBounceVertical = YES;
     self.directionalLockEnabled = YES;
     [self _setIndicatorInsetAdjustmentBehavior:UIScrollViewIndicatorInsetAdjustmentAlways];
 
-#if __IPHONE_OS_VERSION_MIN_REQUIRED >= 110000
+// FIXME: Likely we can remove this special case for watchOS and tvOS.
+#if !PLATFORM(WATCHOS) && !PLATFORM(APPLETV)
     _contentInsetAdjustmentBehaviorWasExternallyOverridden = (self.contentInsetAdjustmentBehavior != UIScrollViewContentInsetAdjustmentAutomatic);
 #endif
     
@@ -173,6 +185,22 @@ static BOOL shouldForwardScrollViewDelegateMethodToExternalDelegate(SEL selector
 - (id <UIScrollViewDelegate>)delegate
 {
     return _externalDelegate.getAutoreleased();
+}
+
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer shouldRequireFailureOfGestureRecognizer:(UIGestureRecognizer *)otherGestureRecognizer
+{
+    if ([otherGestureRecognizer isKindOfClass:WKDeferringGestureRecognizer.class])
+        return [(WKDeferringGestureRecognizer *)otherGestureRecognizer shouldDeferGestureRecognizer:gestureRecognizer];
+
+    return NO;
+}
+
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer shouldBeRequiredToFailByGestureRecognizer:(UIGestureRecognizer *)otherGestureRecognizer
+{
+    if ([gestureRecognizer isKindOfClass:WKDeferringGestureRecognizer.class])
+        return [(WKDeferringGestureRecognizer *)gestureRecognizer shouldDeferGestureRecognizer:otherGestureRecognizer];
+
+    return NO;
 }
 
 - (void)_updateDelegate
@@ -252,7 +280,8 @@ static inline bool valuesAreWithinOnePixel(CGFloat a, CGFloat b)
     [_internalDelegate _scheduleVisibleContentRectUpdate];
 }
 
-#if __IPHONE_OS_VERSION_MIN_REQUIRED >= 110000
+// FIXME: Likely we can remove this special case for watchOS and tvOS.
+#if !PLATFORM(WATCHOS) && !PLATFORM(APPLETV)
 
 - (BOOL)_contentInsetAdjustmentBehaviorWasExternallyOverridden
 {
@@ -315,7 +344,9 @@ static inline bool valuesAreWithinOnePixel(CGFloat a, CGFloat b)
 {
     CGSize currentContentSize = [self contentSize];
 
-    if (CGSizeEqualToSize(currentContentSize, CGSizeZero) || CGSizeEqualToSize(currentContentSize, contentSize) || self.zoomScale < self.minimumZoomScale) {
+    BOOL mightBeRubberbanding = self.isDragging || self.isVerticalBouncing || self.isHorizontalBouncing;
+    if (!mightBeRubberbanding || CGSizeEqualToSize(currentContentSize, CGSizeZero) || CGSizeEqualToSize(currentContentSize, contentSize) || self.zoomScale < self.minimumZoomScale) {
+        // FIXME: rdar://problem/65277759 Find out why iOS Mail needs this call even when the contentSize has not changed.
         [self setContentSize:contentSize];
         return;
     }
@@ -330,9 +361,9 @@ static inline bool valuesAreWithinOnePixel(CGFloat a, CGFloat b)
 
 - (void)_adjustForAutomaticKeyboardInfo:(NSDictionary *)info animated:(BOOL)animated lastAdjustment:(CGFloat*)lastAdjustment
 {
-    [super _adjustForAutomaticKeyboardInfo:info animated:animated lastAdjustment:lastAdjustment];
-
     _keyboardBottomInsetAdjustment = [[UIPeripheralHost sharedInstance] getVerticalOverlapForView:self usingKeyboardInfo:info];
+
+    [super _adjustForAutomaticKeyboardInfo:info animated:animated lastAdjustment:lastAdjustment];
 }
 
 - (UIEdgeInsets)_systemContentInset
@@ -348,10 +379,44 @@ static inline bool valuesAreWithinOnePixel(CGFloat a, CGFloat b)
     // to include keyboard insets in the systemContentInset. We always want
     // keyboard insets applied, even when web content has chosen to disable automatic
     // safe area inset adjustment.
-    if (linkedOnOrAfter(WebKit::SDKVersion::FirstWhereUIScrollViewDoesNotApplyKeyboardInsetsUnconditionally) && self.contentInsetAdjustmentBehavior == UIScrollViewContentInsetAdjustmentNever)
+    if (linkedOnOrAfter(WebCore::SDKVersion::FirstWhereUIScrollViewDoesNotApplyKeyboardInsetsUnconditionally) && self.contentInsetAdjustmentBehavior == UIScrollViewContentInsetAdjustmentNever)
         systemContentInset.bottom += _keyboardBottomInsetAdjustment;
 
     return systemContentInset;
+}
+
+- (void)setScrollEnabled:(BOOL)value
+{
+    _scrollEnabledByClient = value;
+    [self _updateScrollability];
+}
+
+- (void)_setScrollEnabledInternal:(BOOL)value
+{
+    _scrollEnabledInternal = value;
+    [self _updateScrollability];
+}
+
+- (void)_updateScrollability
+{
+    [super setScrollEnabled:(_scrollEnabledByClient && _scrollEnabledInternal)];
+}
+
+- (void)setZoomEnabled:(BOOL)value
+{
+    _zoomEnabledByClient = value;
+    [self _updateZoomability];
+}
+
+- (void)_setZoomEnabledInternal:(BOOL)value
+{
+    _zoomEnabledInternal = value;
+    [self _updateZoomability];
+}
+
+- (void)_updateZoomability
+{
+    [super setZoomEnabled:(_zoomEnabledByClient && _zoomEnabledInternal)];
 }
 
 #if PLATFORM(WATCHOS)

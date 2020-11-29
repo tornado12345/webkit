@@ -17,6 +17,7 @@
 # the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
 # Boston, MA 02110-1301, USA.
 
+from __future__ import print_function
 import logging
 import subprocess
 import os
@@ -34,7 +35,7 @@ import flatpakutils
 from api_test_runner import TestRunner, add_options
 
 class GtkTestRunner(TestRunner):
-    TestRunner.TEST_DIRS = [ "WebKit2Gtk", "WebKit", "JavaScriptCore", "WTF", "WebCore" ]
+    TestRunner.TEST_TARGETS = [ "WebKit2Gtk", "TestWebKit", "TestJSC", "TestWTF", "TestWebCore" ]
 
     def __init__(self, options, tests=[]):
         super(GtkTestRunner, self).__init__("gtk", options, tests)
@@ -109,8 +110,8 @@ class GtkTestRunner(TestRunner):
 
         # If we cannot start the accessibility daemons, we can just skip the accessibility tests.
         if not self._start_accessibility_daemons():
-            print "Could not start accessibility bus, so disabling TestWebKitAccessibility"
-            self._disabled_tests.append("WebKit2APITests/TestWebKitAccessibility")
+            print("Could not start accessibility bus, so disabling TestWebKitAccessibility")
+            self._disabled_tests.append("WebKit2Gtk/TestWebKitAccessibility")
 
     def _tear_down_testing_environment(self):
         if self._spi_registryd:
@@ -120,10 +121,10 @@ class GtkTestRunner(TestRunner):
         super(GtkTestRunner, self)._tear_down_testing_environment()
 
     def is_glib_test(self, test_program):
-        return os.path.basename(os.path.dirname(test_program)) in ["WebKit2Gtk", "JavaScriptCore"]
+        return os.path.basename(os.path.dirname(test_program)) in ["WebKit2Gtk"] or os.path.basename(test_program) in ["TestJSC"]
 
     def is_google_test(self, test_program):
-        return os.path.basename(os.path.dirname(test_program)) in ["WebKit", "WTF", "WebCore",  "WebCoreGtk"]
+        return os.path.basename(test_program) in ["TestWebKit", "TestWTF", "TestWebCore"]
 
     def is_qt_test(self, test_program):
         return False
@@ -131,10 +132,10 @@ class GtkTestRunner(TestRunner):
 if __name__ == "__main__":
     flatpakutils.run_in_sandbox_if_available(sys.argv)
     if not flatpakutils.is_sandboxed() and not jhbuildutils.enter_jhbuild_environment_if_available("gtk"):
-        print '***'
-        print '*** Warning: jhbuild environment not present and not running in flatpak.'
-        print '*** Run update-webkitgtk-libs or update-webkitgtk-flatpak before build-webkit to ensure proper testing..'
-        print '***'
+        print('***')
+        print('*** Warning: jhbuild environment not present and not running in flatpak.')
+        print('*** Run update-webkitgtk-libs or update-webkit-flatpak before build-webkit to ensure proper testing..')
+        print('***')
 
     option_parser = optparse.OptionParser(usage='usage: %prog [options] [test...]')
     add_options(option_parser)

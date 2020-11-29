@@ -43,7 +43,8 @@ WI.AppControllerBase = class AppControllerBase
         this._initialized = false;
     }
 
-    get hasExtraDomains() { throw WI.NotImplementedError.subclassMustOverride(); }
+    // Public
+
     get debuggableType() { throw WI.NotImplementedError.subclassMustOverride(); }
 
     // Since various members of the app controller depend on the global singleton to exist,
@@ -57,5 +58,11 @@ WI.AppControllerBase = class AppControllerBase
 
         // FIXME: eventually all code within WI.loaded should be distributed elsewhere.
         WI.loaded();
+    }
+
+    isWebDebuggable()
+    {
+        return this.debuggableType === WI.DebuggableType.Page
+            || this.debuggableType === WI.DebuggableType.WebPage;
     }
 };

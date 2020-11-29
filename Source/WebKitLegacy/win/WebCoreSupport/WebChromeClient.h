@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2006-2020 Apple Inc. All rights reserved.
  * Copyright (C) 2010 Nokia Corporation and/or its subsidiary(-ies).
  *
  * Redistribution and use in source and binary forms, with or without
@@ -24,6 +24,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
+#pragma once
+
 #include <WebCore/ChromeClient.h>
 #include <WebCore/COMPtr.h>
 #include <WebCore/GraphicsContext.h>
@@ -38,6 +40,7 @@ class WebDesktopNotificationsDelegate;
 interface IWebUIDelegate;
 
 class WebChromeClient final : public WebCore::ChromeClient {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     WebChromeClient(WebView*);
 
@@ -57,7 +60,7 @@ public:
     void focusedElementChanged(WebCore::Element*) final;
     void focusedFrameChanged(WebCore::Frame*) final;
 
-    WebCore::Page* createWindow(WebCore::Frame&, const WebCore::FrameLoadRequest&, const WebCore::WindowFeatures&, const WebCore::NavigationAction&) final;
+    WebCore::Page* createWindow(WebCore::Frame&, const WebCore::WindowFeatures&, const WebCore::NavigationAction&) final;
     void show() final;
 
     bool canRunModal() final;
@@ -91,6 +94,11 @@ public:
 
     WebCore::KeyboardUIMode keyboardUIMode() final;
 
+    bool hoverSupportedByPrimaryPointingDevice() const final { return true; }
+    bool hoverSupportedByAnyAvailablePointingDevice() const final { return true; }
+    Optional<WebCore::PointerCharacteristics> pointerCharacteristicsOfPrimaryPointingDevice() const final { return WebCore::PointerCharacteristics::Fine; }
+    OptionSet<WebCore::PointerCharacteristics> pointerCharacteristicsOfAllAvailablePointingDevices() const final { return WebCore::PointerCharacteristics::Fine; }
+
     void invalidateRootView(const WebCore::IntRect&) final;
     void invalidateContentsAndRootView(const WebCore::IntRect&) final;
     void invalidateContentsForSlowScroll(const WebCore::IntRect&) final;
@@ -102,12 +110,11 @@ public:
     WebCore::IntRect rootViewToAccessibilityScreen(const WebCore::IntRect&) const final;
     PlatformPageClient platformPageClient() const final;
     void contentsSizeChanged(WebCore::Frame&, const WebCore::IntSize&) const final;
+    void intrinsicContentsSizeChanged(const WebCore::IntSize&) const final;
 
-    void mouseDidMoveOverElement(const WebCore::HitTestResult&, unsigned modifierFlags) final;
+    void mouseDidMoveOverElement(const WebCore::HitTestResult&, unsigned modifierFlags, const WTF::String&, WebCore::TextDirection) final;
     bool shouldUnavailablePluginMessageBeButton(WebCore::RenderEmbeddedObject::PluginUnavailabilityReason) const final;
     void unavailablePluginButtonClicked(WebCore::Element&, WebCore::RenderEmbeddedObject::PluginUnavailabilityReason) const final;
-
-    void setToolTip(const WTF::String&, WebCore::TextDirection) final;
 
     void print(WebCore::Frame&) final;
 
@@ -131,7 +138,7 @@ public:
     void setNeedsOneShotDrawingSynchronization() final { }
     // Sets a flag to specify that the view needs to be updated, so we need
     // to do an eager layout before the drawing.
-    void scheduleCompositingLayerFlush() final;
+    void triggerRenderingUpdate() final;
 
 #if PLATFORM(WIN) && USE(AVFOUNDATION)
     WebCore::GraphicsDeviceAdapter* graphicsDeviceAdapter() const final;
@@ -170,6 +177,8 @@ public:
     bool shouldUseTiledBackingForFrameView(const WebCore::FrameView&) const final;
 
     RefPtr<WebCore::Icon> createIconForFiles(const Vector<String>&) final;
+
+    void didFinishLoadingImageForElement(WebCore::HTMLImageElement&) final;
 
 private:
     COMPtr<IWebUIDelegate> uiDelegate();

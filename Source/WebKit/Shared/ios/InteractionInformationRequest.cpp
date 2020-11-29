@@ -38,6 +38,9 @@ void InteractionInformationRequest::encode(IPC::Encoder& encoder) const
     encoder << point;
     encoder << includeSnapshot;
     encoder << includeLinkIndicator;
+    encoder << includeCaretContext;
+    encoder << includeHasDoubleClickHandler;
+    encoder << linkIndicatorShouldHaveLegacyMargins;
 }
 
 bool InteractionInformationRequest::decode(IPC::Decoder& decoder, InteractionInformationRequest& result)
@@ -51,32 +54,41 @@ bool InteractionInformationRequest::decode(IPC::Decoder& decoder, InteractionInf
     if (!decoder.decode(result.includeLinkIndicator))
         return false;
 
+    if (!decoder.decode(result.includeCaretContext))
+        return false;
+
+    if (!decoder.decode(result.includeHasDoubleClickHandler))
+        return false;
+
+    if (!decoder.decode(result.linkIndicatorShouldHaveLegacyMargins))
+        return false;
+
     return true;
 }
 
-bool InteractionInformationRequest::isValidForRequest(const InteractionInformationRequest& other)
+bool InteractionInformationRequest::isValidForRequest(const InteractionInformationRequest& other, int radius) const
 {
-    if (other.point != point)
-        return false;
-
     if (other.includeSnapshot && !includeSnapshot)
         return false;
 
     if (other.includeLinkIndicator && !includeLinkIndicator)
         return false;
 
-    return true;
+    if (other.includeCaretContext && !includeCaretContext)
+        return false;
+
+    if (other.includeHasDoubleClickHandler && !includeHasDoubleClickHandler)
+        return false;
+
+    if (other.linkIndicatorShouldHaveLegacyMargins != linkIndicatorShouldHaveLegacyMargins)
+        return false;
+
+    return (other.point - point).diagonalLengthSquared() <= radius * radius;
 }
     
-bool InteractionInformationRequest::isApproximatelyValidForRequest(const InteractionInformationRequest& other)
+bool InteractionInformationRequest::isApproximatelyValidForRequest(const InteractionInformationRequest& other, int radius) const
 {
-    if (other.includeSnapshot && !includeSnapshot)
-        return false;
-    
-    if (other.includeLinkIndicator && !includeLinkIndicator)
-        return false;
-    
-    return (other.point - point).diagonalLengthSquared() <= 4;
+    return isValidForRequest(other, radius);
 }
 
 #endif // PLATFORM(IOS_FAMILY)

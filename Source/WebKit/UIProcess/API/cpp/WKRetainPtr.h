@@ -23,19 +23,13 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef WKRetainPtr_h
-#define WKRetainPtr_h
+#pragma once
 
 #include <WebKit/WKType.h>
 #include <algorithm>
-#include <wtf/GetPtr.h>
-#include <wtf/HashFunctions.h>
 #include <wtf/HashTraits.h>
-#include <wtf/RefPtr.h>
 
 namespace WebKit {
-
-enum WKAdoptTag { AdoptWK };
 
 template<typename T> class WKRetainPtr {
 public:
@@ -53,11 +47,6 @@ public:
             WKRetain(ptr);
     }
 
-    WKRetainPtr(WKAdoptTag, PtrType ptr)
-        : m_ptr(ptr)
-    {
-    }
-    
     template<typename U> WKRetainPtr(const WKRetainPtr<U>& o)
         : m_ptr(o.get())
     {
@@ -133,6 +122,11 @@ public:
     void swap(WKRetainPtr&);
 
 private:
+    template<typename U> friend WKRetainPtr<U> adoptWK(U);
+    enum WKAdoptTag { AdoptWK };
+    WKRetainPtr(WKAdoptTag, PtrType ptr)
+        : m_ptr(ptr) { }
+
     PtrType m_ptr;
 };
 
@@ -249,7 +243,7 @@ template<typename T> inline WKRetainPtr<T> adoptWK(T) __attribute__((warn_unused
 #endif
 template<typename T> inline WKRetainPtr<T> adoptWK(T o)
 {
-    return WKRetainPtr<T>(AdoptWK, o);
+    return WKRetainPtr<T>(WKRetainPtr<T>::AdoptWK, o);
 }
 
 template<typename T> inline WKRetainPtr<T> retainWK(T ptr)
@@ -260,19 +254,19 @@ template<typename T> inline WKRetainPtr<T> retainWK(T ptr)
 } // namespace WebKit
 
 using WebKit::WKRetainPtr;
-using WebKit::AdoptWK;
 using WebKit::adoptWK;
 using WebKit::retainWK;
 
 namespace WTF {
 
-template <typename T> struct IsSmartPtr<WKRetainPtr<T>> {
+template<typename> struct IsSmartPtr;
+template<typename> struct DefaultHash;
+
+template<typename T> struct IsSmartPtr<WKRetainPtr<T>> {
     WTF_INTERNAL static const bool value = true;
 };
 
-template<typename P> struct DefaultHash<WKRetainPtr<P>> {
-    typedef PtrHash<WKRetainPtr<P>> Hash;
-};
+template<typename P> struct DefaultHash<WKRetainPtr<P>> : PtrHash<WKRetainPtr<P>> { };
 
 template<typename P> struct HashTraits<WKRetainPtr<P>> : SimpleClassHashTraits<WKRetainPtr<P>> {
     static P emptyValue() { return nullptr; }
@@ -283,5 +277,3 @@ template<typename P> struct HashTraits<WKRetainPtr<P>> : SimpleClassHashTraits<W
 };
 
 } // namespace WTF
-
-#endif // WKRetainPtr_h

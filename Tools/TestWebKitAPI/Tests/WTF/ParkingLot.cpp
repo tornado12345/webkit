@@ -51,7 +51,7 @@ struct SingleLatchTest {
                     [&] () {
                         down();
 
-                        std::lock_guard<std::mutex> locker(lock);
+                        std::scoped_lock<std::mutex> locker(lock);
                         awake.add(Thread::current());
                         lastAwoken = &Thread::current();
                         condition.notify_one();
@@ -182,7 +182,7 @@ struct SingleLatchTest {
 
 void runParkingTest(unsigned numLatches, unsigned delay, unsigned numThreads, unsigned numSingleUnparks)
 {
-    std::unique_ptr<SingleLatchTest[]> tests = std::make_unique<SingleLatchTest[]>(numLatches);
+    std::unique_ptr<SingleLatchTest[]> tests = makeUniqueWithoutFastMallocCheck<SingleLatchTest[]>(numLatches);
 
     for (unsigned latchIndex = numLatches; latchIndex--;)
         tests[latchIndex].initialize(numThreads);

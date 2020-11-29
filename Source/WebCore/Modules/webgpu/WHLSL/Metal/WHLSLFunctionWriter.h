@@ -25,9 +25,9 @@
 
 #pragma once
 
-#if ENABLE(WEBGPU)
+#if ENABLE(WHLSL_COMPILER)
 
-#include "WHLSLMappedBindings.h"
+#include "WHLSLMangledNames.h"
 #include "WHLSLSemanticMatcher.h"
 
 namespace WebCore {
@@ -40,18 +40,16 @@ namespace Metal {
 
 class TypeNamer;
 
-struct RenderMetalFunctions {
-    String metalSource;
-    MappedBindGroups vertexMappedBindGroups;
-    MappedBindGroups fragmentMappedBindGroups;
+struct RenderMetalFunctionEntryPoints {
+    MangledFunctionName mangledVertexEntryPointName;
+    MangledFunctionName mangledFragmentEntryPointName;
 };
-RenderMetalFunctions metalFunctions(Program&, TypeNamer&, MatchedRenderSemantics&&, Layout&);
+RenderMetalFunctionEntryPoints emitMetalFunctions(StringBuilder&, Program&, TypeNamer&, MatchedRenderSemantics&&, Layout&);
 
-struct ComputeMetalFunctions {
-    String metalSource;
-    MappedBindGroups mappedBindGroups;
+struct ComputeMetalFunctionEntryPoints {
+    MangledFunctionName mangledEntryPointName;
 };
-ComputeMetalFunctions metalFunctions(Program&, TypeNamer&, MatchedComputeSemantics&&, Layout&);
+ComputeMetalFunctionEntryPoints emitMetalFunctions(StringBuilder&, Program&, TypeNamer&, MatchedComputeSemantics&&, Layout&);
 
 }
 
@@ -59,4 +57,4 @@ ComputeMetalFunctions metalFunctions(Program&, TypeNamer&, MatchedComputeSemanti
 
 }
 
-#endif
+#endif // ENABLE(WHLSL_COMPILER)

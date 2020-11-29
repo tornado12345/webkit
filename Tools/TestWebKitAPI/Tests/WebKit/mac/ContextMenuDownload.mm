@@ -23,17 +23,17 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
-#include "JavaScriptTest.h"
-#include "PlatformUtilities.h"
-#include "PlatformWebView.h"
-#include <WebKit/WKContextMenuItem.h>
-#include <WebKit/WKDownload.h>
-#include <WebKit/WKPage.h>
-#include <WebKit/WKPageContextMenuClient.h>
-#include <WebKit/WKPreferencesPrivate.h>
-#include <WebKit/WKRetainPtr.h>
-#include <WebKit/_WKDownload.h>
+#import "config.h"
+#import "JavaScriptTest.h"
+#import "PlatformUtilities.h"
+#import "PlatformWebView.h"
+#import <WebKit/WKContextMenuItem.h>
+#import <WebKit/WKDownload.h>
+#import <WebKit/WKPage.h>
+#import <WebKit/WKPageContextMenuClient.h>
+#import <WebKit/WKPreferencesPrivate.h>
+#import <WebKit/WKRetainPtr.h>
+#import <WebKit/_WKDownload.h>
 
 namespace TestWebKitAPI {
 
@@ -80,7 +80,7 @@ static WKStringRef decideDestinationWithSuggestedFilename(WKContextRef, WKDownlo
 // the "Download Linked File" item in the context menu.
 TEST(WebKit, ContextMenuDownloadHTMLDownloadAttribute)
 {
-    WKRetainPtr<WKContextRef> context(AdoptWK, Util::createContextWithInjectedBundle());
+    WKRetainPtr<WKContextRef> context = adoptWK(Util::createContextWithInjectedBundle());
 
     WKContextDownloadClientV0 client;
     memset(&client, 0, sizeof(client));
@@ -88,7 +88,7 @@ TEST(WebKit, ContextMenuDownloadHTMLDownloadAttribute)
     client.decideDestinationWithSuggestedFilename = decideDestinationWithSuggestedFilename;
     WKContextSetDownloadClient(context.get(), &client.base);
 
-    WKRetainPtr<WKPageGroupRef> pageGroup(AdoptWK, WKPageGroupCreateWithIdentifier(Util::toWK("MyGroup").get()));
+    WKRetainPtr<WKPageGroupRef> pageGroup = adoptWK(WKPageGroupCreateWithIdentifier(Util::toWK("MyGroup").get()));
     PlatformWebView webView(context.get(), pageGroup.get());
 
     WKPageNavigationClientV0 loaderClient;
@@ -103,7 +103,7 @@ TEST(WebKit, ContextMenuDownloadHTMLDownloadAttribute)
     contextMenuClient.getContextMenuFromProposedMenu = getContextMenuFromProposedMenu;
     WKPageSetPageContextMenuClient(webView.page(), &contextMenuClient.base);
 
-    WKRetainPtr<WKURLRef> url(AdoptWK, Util::createURLForResource("link-with-download-attribute", "html"));
+    WKRetainPtr<WKURLRef> url = adoptWK(Util::createURLForResource("link-with-download-attribute", "html"));
 
     expectedOriginatingPage = webView.page();
     WKPageLoadURL(webView.page(), url.get());
@@ -127,7 +127,7 @@ static WKStringRef decideDestinationWithSuggestedFilenameContainingSlashes(WKCon
 
 TEST(WebKit, ContextMenuDownloadHTMLDownloadAttributeWithSlashes)
 {
-    WKRetainPtr<WKContextRef> context(AdoptWK, Util::createContextWithInjectedBundle());
+    WKRetainPtr<WKContextRef> context = adoptWK(Util::createContextWithInjectedBundle());
 
     WKContextDownloadClientV0 client;
     memset(&client, 0, sizeof(client));
@@ -135,7 +135,7 @@ TEST(WebKit, ContextMenuDownloadHTMLDownloadAttributeWithSlashes)
     client.decideDestinationWithSuggestedFilename = decideDestinationWithSuggestedFilenameContainingSlashes;
     WKContextSetDownloadClient(context.get(), &client.base);
 
-    WKRetainPtr<WKPageGroupRef> pageGroup(AdoptWK, WKPageGroupCreateWithIdentifier(Util::toWK("MyGroup").get()));
+    WKRetainPtr<WKPageGroupRef> pageGroup = adoptWK(WKPageGroupCreateWithIdentifier(Util::toWK("MyGroup").get()));
     PlatformWebView webView(context.get(), pageGroup.get());
 
     WKPageNavigationClientV0 loaderClient;
@@ -150,7 +150,7 @@ TEST(WebKit, ContextMenuDownloadHTMLDownloadAttributeWithSlashes)
     contextMenuClient.getContextMenuFromProposedMenu = getContextMenuFromProposedMenu;
     WKPageSetPageContextMenuClient(webView.page(), &contextMenuClient.base);
 
-    WKRetainPtr<WKURLRef> url(AdoptWK, Util::createURLForResource("link-with-download-attribute-with-slashes", "html"));
+    WKRetainPtr<WKURLRef> url = adoptWK(Util::createURLForResource("link-with-download-attribute-with-slashes", "html"));
 
     expectedOriginatingPage = webView.page();
     WKPageLoadURL(webView.page(), url.get());

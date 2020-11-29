@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 Apple Inc. All rights reserved.
+ * Copyright (C) 2018-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,27 +32,11 @@
 #include "ArgumentCodersCF.h"
 #endif
 
-#if USE(CURL)
+#if USE(CURL) || USE(SOUP)
 #include "WebCoreArgumentCoders.h"
 #endif
 
 namespace WebKit {
-
-NetworkSessionCreationParameters NetworkSessionCreationParameters::privateSessionParameters(const PAL::SessionID& sessionID)
-{
-    return { sessionID, { }, AllowsCellularAccess::Yes
-#if PLATFORM(COCOA)
-        , { }, { }, { }, false, { }, { }, { }
-#endif
-#if USE(SOUP)
-        , { }, SoupCookiePersistentStorageType::Text
-#endif
-#if USE(CURL)
-        , { }, { }
-#endif
-        , { }, { }, false
-    };
-}
 
 void NetworkSessionCreationParameters::encode(IPC::Encoder& encoder) const
 {
@@ -68,23 +52,47 @@ void NetworkSessionCreationParameters::encode(IPC::Encoder& encoder) const
     encoder << httpProxy;
     encoder << httpsProxy;
 #endif
+#if HAVE(CFNETWORK_ALTERNATIVE_SERVICE)
+    encoder << alternativeServiceDirectory;
+    encoder << alternativeServiceDirectoryExtensionHandle;
+    encoder << http3Enabled;
+#endif
+    encoder << hstsStorageDirectory;
+    encoder << hstsStorageDirectoryExtensionHandle;
 #if USE(SOUP)
     encoder << cookiePersistentStoragePath;
     encoder << cookiePersistentStorageType;
+    encoder << persistentCredentialStorageEnabled;
+    encoder << ignoreTLSErrors;
+    encoder << proxySettings;
 #endif
 #if USE(CURL)
     encoder << cookiePersistentStorageFile;
     encoder << proxySettings;
 #endif
-    encoder << resourceLoadStatisticsDirectory;
-    encoder << resourceLoadStatisticsDirectoryExtensionHandle;
-    encoder << enableResourceLoadStatistics;
+    encoder << networkCacheDirectory << networkCacheDirectoryExtensionHandle;
+
+    encoder << deviceManagementRestrictionsEnabled;
+    encoder << allLoadsBlockedByDeviceManagementRestrictionsForTesting;
+    encoder << dataConnectionServiceType;
+    encoder << fastServerTrustEvaluationEnabled;
+    encoder << networkCacheSpeculativeValidationEnabled;
+    encoder << shouldUseTestingNetworkSession;
+    encoder << staleWhileRevalidateEnabled;
+    encoder << testSpeedMultiplier;
+    encoder << suppressesConnectionTerminationOnSystemChange;
+    encoder << allowsServerPreconnect;
+    encoder << requiresSecureHTTPSProxyConnection;
+    encoder << preventsSystemHTTPProxyAuthentication;
+    encoder << appHasRequestedCrossWebsiteTrackingPermission;
+    encoder << resourceLoadStatisticsParameters;
 }
 
 Optional<NetworkSessionCreationParameters> NetworkSessionCreationParameters::decode(IPC::Decoder& decoder)
 {
-    PAL::SessionID sessionID;
-    if (!decoder.decode(sessionID))
+    Optional<PAL::SessionID> sessionID;
+    decoder >> sessionID;
+    if (!sessionID)
         return WTF::nullopt;
     
     Optional<String> boundInterfaceIdentifier;
@@ -111,7 +119,7 @@ Optional<NetworkSessionCreationParameters> NetworkSessionCreationParameters::dec
     decoder >> sourceApplicationSecondaryIdentifier;
     if (!sourceApplicationSecondaryIdentifier)
         return WTF::nullopt;
-    
+
     Optional<bool> shouldLogCookieInformation;
     decoder >> shouldLogCookieInformation;
     if (!shouldLogCookieInformation)
@@ -133,6 +141,33 @@ Optional<NetworkSessionCreationParameters> NetworkSessionCreationParameters::dec
         return WTF::nullopt;
 #endif
 
+#if HAVE(CFNETWORK_ALTERNATIVE_SERVICE)
+    Optional<String> alternativeServiceDirectory;
+    decoder >> alternativeServiceDirectory;
+    if (!alternativeServiceDirectory)
+        return WTF::nullopt;
+
+    Optional<SandboxExtension::Handle> alternativeServiceDirectoryExtensionHandle;
+    decoder >> alternativeServiceDirectoryExtensionHandle;
+    if (!alternativeServiceDirectoryExtensionHandle)
+        return WTF::nullopt;
+    
+    Optional<bool> http3Enabled;
+    decoder >> http3Enabled;
+    if (!http3Enabled)
+        return WTF::nullopt;
+#endif
+
+    Optional<String> hstsStorageDirectory;
+    decoder >> hstsStorageDirectory;
+    if (!hstsStorageDirectory)
+        return WTF::nullopt;
+
+    Optional<SandboxExtension::Handle> hstsStorageDirectoryExtensionHandle;
+    decoder >> hstsStorageDirectoryExtensionHandle;
+    if (!hstsStorageDirectoryExtensionHandle)
+        return WTF::nullopt;
+    
 #if USE(SOUP)
     Optional<String> cookiePersistentStoragePath;
     decoder >> cookiePersistentStoragePath;
@@ -142,6 +177,21 @@ Optional<NetworkSessionCreationParameters> NetworkSessionCreationParameters::dec
     Optional<SoupCookiePersistentStorageType> cookiePersistentStorageType;
     decoder >> cookiePersistentStorageType;
     if (!cookiePersistentStorageType)
+        return WTF::nullopt;
+
+    Optional<bool> persistentCredentialStorageEnabled;
+    decoder >> persistentCredentialStorageEnabled;
+    if (!persistentCredentialStorageEnabled)
+        return WTF::nullopt;
+
+    Optional<bool> ignoreTLSErrors;
+    decoder >> ignoreTLSErrors;
+    if (!ignoreTLSErrors)
+        return WTF::nullopt;
+
+    Optional<WebCore::SoupNetworkProxySettings> proxySettings;
+    decoder >> proxySettings;
+    if (!proxySettings)
         return WTF::nullopt;
 #endif
 
@@ -157,23 +207,88 @@ Optional<NetworkSessionCreationParameters> NetworkSessionCreationParameters::dec
         return WTF::nullopt;
 #endif
 
-    Optional<String> resourceLoadStatisticsDirectory;
-    decoder >> resourceLoadStatisticsDirectory;
-    if (!resourceLoadStatisticsDirectory)
+    Optional<String> networkCacheDirectory;
+    decoder >> networkCacheDirectory;
+    if (!networkCacheDirectory)
+        return WTF::nullopt;
+    
+    Optional<SandboxExtension::Handle> networkCacheDirectoryExtensionHandle;
+    decoder >> networkCacheDirectoryExtensionHandle;
+    if (!networkCacheDirectoryExtensionHandle)
         return WTF::nullopt;
 
-    Optional<SandboxExtension::Handle> resourceLoadStatisticsDirectoryExtensionHandle;
-    decoder >> resourceLoadStatisticsDirectoryExtensionHandle;
-    if (!resourceLoadStatisticsDirectoryExtensionHandle)
+    Optional<bool> deviceManagementRestrictionsEnabled;
+    decoder >> deviceManagementRestrictionsEnabled;
+    if (!deviceManagementRestrictionsEnabled)
         return WTF::nullopt;
 
-    Optional<bool> enableResourceLoadStatistics;
-    decoder >> enableResourceLoadStatistics;
-    if (!enableResourceLoadStatistics)
+    Optional<bool> allLoadsBlockedByDeviceManagementRestrictionsForTesting;
+    decoder >> allLoadsBlockedByDeviceManagementRestrictionsForTesting;
+    if (!allLoadsBlockedByDeviceManagementRestrictionsForTesting)
         return WTF::nullopt;
 
+    Optional<String> dataConnectionServiceType;
+    decoder >> dataConnectionServiceType;
+    if (!dataConnectionServiceType)
+        return WTF::nullopt;
+    
+    Optional<bool> fastServerTrustEvaluationEnabled;
+    decoder >> fastServerTrustEvaluationEnabled;
+    if (!fastServerTrustEvaluationEnabled)
+        return WTF::nullopt;
+    
+    Optional<bool> networkCacheSpeculativeValidationEnabled;
+    decoder >> networkCacheSpeculativeValidationEnabled;
+    if (!networkCacheSpeculativeValidationEnabled)
+        return WTF::nullopt;
+    
+    Optional<bool> shouldUseTestingNetworkSession;
+    decoder >> shouldUseTestingNetworkSession;
+    if (!shouldUseTestingNetworkSession)
+        return WTF::nullopt;
+
+    Optional<bool> staleWhileRevalidateEnabled;
+    decoder >> staleWhileRevalidateEnabled;
+    if (!staleWhileRevalidateEnabled)
+        return WTF::nullopt;
+
+    Optional<unsigned> testSpeedMultiplier;
+    decoder >> testSpeedMultiplier;
+    if (!testSpeedMultiplier)
+        return WTF::nullopt;
+    
+    Optional<bool> suppressesConnectionTerminationOnSystemChange;
+    decoder >> suppressesConnectionTerminationOnSystemChange;
+    if (!suppressesConnectionTerminationOnSystemChange)
+        return WTF::nullopt;
+
+    Optional<bool> allowsServerPreconnect;
+    decoder >> allowsServerPreconnect;
+    if (!allowsServerPreconnect)
+        return WTF::nullopt;
+
+    Optional<bool> requiresSecureHTTPSProxyConnection;
+    decoder >> requiresSecureHTTPSProxyConnection;
+    if (!requiresSecureHTTPSProxyConnection)
+        return WTF::nullopt;
+    
+    Optional<bool> preventsSystemHTTPProxyAuthentication;
+    decoder >> preventsSystemHTTPProxyAuthentication;
+    if (!preventsSystemHTTPProxyAuthentication)
+        return WTF::nullopt;
+    
+    Optional<bool> appHasRequestedCrossWebsiteTrackingPermission;
+    decoder >> appHasRequestedCrossWebsiteTrackingPermission;
+    if (!appHasRequestedCrossWebsiteTrackingPermission)
+        return WTF::nullopt;
+
+    Optional<ResourceLoadStatisticsParameters> resourceLoadStatisticsParameters;
+    decoder >> resourceLoadStatisticsParameters;
+    if (!resourceLoadStatisticsParameters)
+        return WTF::nullopt;
+    
     return {{
-        sessionID
+        *sessionID
         , WTFMove(*boundInterfaceIdentifier)
         , WTFMove(*allowsCellularAccess)
 #if PLATFORM(COCOA)
@@ -185,17 +300,40 @@ Optional<NetworkSessionCreationParameters> NetworkSessionCreationParameters::dec
         , WTFMove(*httpProxy)
         , WTFMove(*httpsProxy)
 #endif
+#if HAVE(CFNETWORK_ALTERNATIVE_SERVICE)
+        , WTFMove(*alternativeServiceDirectory)
+        , WTFMove(*alternativeServiceDirectoryExtensionHandle)
+        , WTFMove(*http3Enabled)
+#endif
+        , WTFMove(*hstsStorageDirectory)
+        , WTFMove(*hstsStorageDirectoryExtensionHandle)
 #if USE(SOUP)
         , WTFMove(*cookiePersistentStoragePath)
         , WTFMove(*cookiePersistentStorageType)
+        , WTFMove(*persistentCredentialStorageEnabled)
+        , WTFMove(*ignoreTLSErrors)
+        , WTFMove(*proxySettings)
 #endif
 #if USE(CURL)
         , WTFMove(*cookiePersistentStorageFile)
         , WTFMove(*proxySettings)
 #endif
-        , WTFMove(*resourceLoadStatisticsDirectory)
-        , WTFMove(*resourceLoadStatisticsDirectoryExtensionHandle)
-        , WTFMove(*enableResourceLoadStatistics)
+        , WTFMove(*deviceManagementRestrictionsEnabled)
+        , WTFMove(*allLoadsBlockedByDeviceManagementRestrictionsForTesting)
+        , WTFMove(*networkCacheDirectory)
+        , WTFMove(*networkCacheDirectoryExtensionHandle)
+        , WTFMove(*dataConnectionServiceType)
+        , WTFMove(*fastServerTrustEvaluationEnabled)
+        , WTFMove(*networkCacheSpeculativeValidationEnabled)
+        , WTFMove(*shouldUseTestingNetworkSession)
+        , WTFMove(*staleWhileRevalidateEnabled)
+        , WTFMove(*testSpeedMultiplier)
+        , WTFMove(*suppressesConnectionTerminationOnSystemChange)
+        , WTFMove(*allowsServerPreconnect)
+        , WTFMove(*requiresSecureHTTPSProxyConnection)
+        , WTFMove(*preventsSystemHTTPProxyAuthentication)
+        , WTFMove(*appHasRequestedCrossWebsiteTrackingPermission)
+        , WTFMove(*resourceLoadStatisticsParameters)
     }};
 }
 

@@ -32,6 +32,7 @@
 #include <WebKit/WKBundleFrame.h>
 #include <WebKit/WKBundlePage.h>
 #include <WebKit/WKBundlePageGroup.h>
+#include <WebKit/WKBundlePagePrivate.h>
 #include <WebKit/WKBundlePrivate.h>
 #include <WebKit/WKBundleScriptWorld.h>
 #include <WebKit/WKRetainPtr.h>
@@ -67,9 +68,8 @@ class DOMWindowExtensionNoCache : public InjectedBundleTest {
 public:
     DOMWindowExtensionNoCache(const std::string& identifier);
 
-    virtual void initialize(WKBundleRef, WKTypeRef userData);
-    virtual void didCreatePage(WKBundleRef, WKBundlePageRef);
-    virtual void willDestroyPage(WKBundleRef, WKBundlePageRef);
+    void didCreatePage(WKBundleRef, WKBundlePageRef) override;
+    void willDestroyPage(WKBundleRef, WKBundlePageRef) override;
 
     void globalObjectIsAvailableForFrame(WKBundleFrameRef, WKBundleScriptWorldRef);
     void willDisconnectDOMWindowExtensionFromGlobalObject(WKBundleDOMWindowExtensionRef);
@@ -149,18 +149,12 @@ void DOMWindowExtensionNoCache::sendExtensionStateMessage()
     WKBundlePostMessage(m_bundle, messageName.get(), messageBody.get());
 }
 
-void DOMWindowExtensionNoCache::initialize(WKBundleRef bundle, WKTypeRef userData)
-{
-    assert(WKGetTypeID(userData) == WKBundlePageGroupGetTypeID());
-    WKBundlePageGroupRef pageGroup = static_cast<WKBundlePageGroupRef>(userData);
-
-    WKRetainPtr<WKStringRef> source(AdoptWK, WKStringCreateWithUTF8CString("alert('Unimportant alert');"));
-    WKBundleAddUserScript(bundle, pageGroup, WKBundleScriptWorldCreateWorld(), source.get(), 0, 0, 0, kWKInjectAtDocumentStart, kWKInjectInAllFrames);
-}
-
 void DOMWindowExtensionNoCache::didCreatePage(WKBundleRef bundle, WKBundlePageRef page)
 {
     m_bundle = bundle;
+
+    auto source = adoptWK(WKStringCreateWithUTF8CString("alert('Unimportant alert');"));
+    WKBundlePageAddUserScriptInWorld(page, source.get(), WKBundleScriptWorldCreateWorld(), kWKInjectAtDocumentStart, kWKInjectInAllFrames);
 
     WKBundlePageLoaderClientV7 pageLoaderClient;
     memset(&pageLoaderClient, 0, sizeof(pageLoaderClient));
@@ -235,13 +229,13 @@ void DOMWindowExtensionNoCache::globalObjectIsAvailableForFrame(WKBundleFrameRef
 
 void DOMWindowExtensionNoCache::willDisconnectDOMWindowExtensionFromGlobalObject(WKBundleDOMWindowExtensionRef extension)
 {
-    // No items should be going into a 0-capacity page cache.
+    // No items should be going into a 0-capacity back/forward cache.
     ASSERT_NOT_REACHED();
 }
 
 void DOMWindowExtensionNoCache::didReconnectDOMWindowExtensionToGlobalObject(WKBundleDOMWindowExtensionRef)
 {
-    // No items should be coming out of a 0-capacity page cache.
+    // No items should be coming out of a 0-capacity back/forward cache.
     ASSERT_NOT_REACHED();
 }
 

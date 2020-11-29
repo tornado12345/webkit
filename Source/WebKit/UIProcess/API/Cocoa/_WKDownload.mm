@@ -26,7 +26,9 @@
 #import "config.h"
 #import "_WKDownloadInternal.h"
 
+#import "APIDownloadClient.h"
 #import "DownloadProxy.h"
+#import "WKFrameInfoInternal.h"
 #import "WKNSData.h"
 #import "WKWebViewInternal.h"
 #import <wtf/WeakObjCPtr.h>
@@ -44,7 +46,9 @@
 
 - (void)cancel
 {
-    _download->cancel();
+    _download->cancel([download = makeRef(*_download)] (auto*) {
+        download->client().legacyDidCancel(download.get());
+    });
 }
 
 - (void)publishProgressAtURL:(NSURL *)URL
@@ -66,11 +70,9 @@
 
 -(NSArray<NSURL *> *)redirectChain
 {
-    auto& redirectURLs = _download->redirectChain();
-    NSMutableArray<NSURL *> *nsURLs = [NSMutableArray arrayWithCapacity:redirectURLs.size()];
-    for (const auto& redirectURL : redirectURLs)
-        [nsURLs addObject:(NSURL *)redirectURL];
-    return nsURLs;
+    return createNSArray(_download->redirectChain(), [] (auto& url) -> NSURL * {
+        return url;
+    }).autorelease();
 }
 
 - (BOOL)wasUserInitiated
@@ -80,7 +82,17 @@
 
 - (NSData *)resumeData
 {
-    return WebKit::wrapper(_download->resumeData());
+    return WebKit::wrapper(_download->legacyResumeData());
+}
+
+- (WKFrameInfo *)originatingFrame
+{
+    return WebKit::wrapper(&_download->frameInfo());
+}
+
+- (id)copyWithZone:(NSZone *)zone
+{
+    return [self retain];
 }
 
 #pragma mark WKObject protocol implementation

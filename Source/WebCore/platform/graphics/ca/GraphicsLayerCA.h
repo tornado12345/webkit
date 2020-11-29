@@ -30,6 +30,7 @@
 #include "PlatformCALayer.h"
 #include "PlatformCALayerClient.h"
 #include <wtf/HashMap.h>
+#include <wtf/Optional.h>
 #include <wtf/RetainPtr.h>
 #include <wtf/text/StringHash.h>
 
@@ -55,6 +56,7 @@ public:
     WEBCORE_EXPORT void initialize(Type) override;
 
     WEBCORE_EXPORT void setName(const String&) override;
+    WEBCORE_EXPORT String debugName() const override;
 
     WEBCORE_EXPORT PlatformLayerID primaryLayerID() const override;
 
@@ -119,21 +121,25 @@ public:
     
     WEBCORE_EXPORT void setContentsRect(const FloatRect&) override;
     WEBCORE_EXPORT void setContentsClippingRect(const FloatRoundedRect&) override;
-    WEBCORE_EXPORT bool setMasksToBoundsRect(const FloatRoundedRect&) override;
+    WEBCORE_EXPORT void setContentsRectClipsDescendants(bool) override;
+    WEBCORE_EXPORT void setMasksToBoundsRect(const FloatRoundedRect&) override;
 
     WEBCORE_EXPORT void setShapeLayerPath(const Path&) override;
     WEBCORE_EXPORT void setShapeLayerWindRule(WindRule) override;
+
+    WEBCORE_EXPORT void setEventRegion(EventRegion&&) override;
+#if ENABLE(SCROLLING_THREAD)
+    WEBCORE_EXPORT void setScrollingNodeID(ScrollingNodeID) override;
+#endif
 
     WEBCORE_EXPORT void suspendAnimations(MonotonicTime) override;
     WEBCORE_EXPORT void resumeAnimations() override;
 
     WEBCORE_EXPORT bool addAnimation(const KeyframeValueList&, const FloatSize& boxSize, const Animation*, const String& animationName, double timeOffset) override;
     WEBCORE_EXPORT void pauseAnimation(const String& animationName, double timeOffset) override;
-    WEBCORE_EXPORT void seekAnimation(const String& animationName, double timeOffset) override;
     WEBCORE_EXPORT void removeAnimation(const String& animationName) override;
-
+    WEBCORE_EXPORT void transformRelatedPropertyDidChange() override;
     WEBCORE_EXPORT void setContentsToImage(Image*) override;
-    WEBCORE_EXPORT void setContentsToEmbeddedView(GraphicsLayer::ContentsLayerEmbeddedViewType, GraphicsLayer::EmbeddedViewID) override;
 #if PLATFORM(IOS_FAMILY)
     WEBCORE_EXPORT PlatformLayer* contentsLayerForMedia() const override;
 #endif
@@ -155,13 +161,13 @@ public:
     FloatSize pixelAlignmentOffset() const override { return m_pixelAlignmentOffset; }
 
     struct CommitState {
+        WTF_MAKE_STRUCT_FAST_ALLOCATED;
         unsigned treeDepth { 0 };
         unsigned totalBackdropFilterArea { 0 };
         bool ancestorHadChanges { false };
         bool ancestorHasTransformAnimation { false };
         bool ancestorStartedOrEndedTransformAnimation { false };
         bool ancestorWithTransformAnimationIntersectsCoverageRect { false };
-        bool ancestorIsViewportConstrained { false };
     };
     bool needsCommit(const CommitState&);
     void recursiveCommitChanges(CommitState&, const TransformState&, float pageScaleFactor = 1, const FloatPoint& positionRelativeToBase = FloatPoint(), bool affectedByPageScale = false);
@@ -178,8 +184,6 @@ public:
 protected:
     WEBCORE_EXPORT void setOpacityInternal(float) override;
     
-    WEBCORE_EXPORT bool animationCanBeAccelerated(const KeyframeValueList&, const Animation*) const;
-
 private:
     bool isGraphicsLayerCA() const override { return true; }
 
@@ -213,8 +217,8 @@ private:
     bool isCommittingChanges() const override { return m_isCommittingChanges; }
     bool isUsingDisplayListDrawing(PlatformCALayer*) const override { return m_usesDisplayListDrawing; }
 
-    WEBCORE_EXPORT void setIsViewportConstrained(bool) override;
-    bool isViewportConstrained() const override { return m_isViewportConstrained; }
+    WEBCORE_EXPORT void setAllowsBackingStoreDetaching(bool) override;
+    bool allowsBackingStoreDetaching() const override { return m_allowsBackingStoreDetaching; }
 
     WEBCORE_EXPORT String displayListAsText(DisplayList::AsTextFlags) const override;
 
@@ -229,7 +233,6 @@ private:
 
     virtual Ref<PlatformCALayer> createPlatformCALayer(PlatformCALayer::LayerType, PlatformCALayerClient* owner);
     virtual Ref<PlatformCALayer> createPlatformCALayer(PlatformLayer*, PlatformCALayerClient* owner);
-    virtual Ref<PlatformCALayer> createPlatformCALayerForEmbeddedView(PlatformCALayer::LayerType, GraphicsLayer::EmbeddedViewID, PlatformCALayerClient* owner);
     virtual Ref<PlatformCAAnimation> createPlatformCAAnimation(PlatformCAAnimation::AnimationType, const String& keyPath);
 
     PlatformCALayer* primaryLayer() const { return m_structuralLayer.get() ? m_structuralLayer.get() : m_layer.get(); }
@@ -271,11 +274,8 @@ private:
     WEBCORE_EXPORT bool backingStoreAttached() const override;
     WEBCORE_EXPORT bool backingStoreAttachedForTesting() const override;
 
-    bool hasAnimations() const { return m_animations.get(); }
-    bool animationIsRunning(const String& animationName) const
-    {
-        return m_animations && m_animations->runningAnimations.contains(animationName);
-    }
+    bool hasAnimations() const { return !m_animations.isEmpty(); }
+    bool animationIsRunning(const String& animationName) const;
 
     void commitLayerChangesBeforeSublayers(CommitState&, float pageScaleFactor, const FloatPoint& positionRelativeToBase, bool& layerTypeChanged);
     void commitLayerChangesAfterSublayers(CommitState&);
@@ -294,8 +294,6 @@ private:
 
     WEBCORE_EXPORT void setReplicatedByLayer(RefPtr<GraphicsLayer>&&) override;
 
-    WEBCORE_EXPORT bool canThrottleLayerFlush() const override;
-
     WEBCORE_EXPORT void getDebugBorderInfo(Color&, float& width) const override;
     WEBCORE_EXPORT void dumpAdditionalProperties(WTF::TextStream&, LayerTreeAsTextBehavior) const override;
 
@@ -303,11 +301,13 @@ private:
         FloatPoint& position, FloatPoint3D& anchorPoint, FloatSize& alignmentOffset) const;
 
     TransformationMatrix layerTransform(const FloatPoint& position, const TransformationMatrix* customTransform = 0) const;
+    TransformationMatrix transformByApplyingAnchorPoint(const TransformationMatrix&) const;
 
     enum ComputeVisibleRectFlag { RespectAnimatingTransforms = 1 << 0 };
     typedef unsigned ComputeVisibleRectFlags;
     
     struct VisibleAndCoverageRects {
+        WTF_MAKE_STRUCT_FAST_ALLOCATED;
         FloatRect visibleRect;
         FloatRect coverageRect;
         TransformationMatrix animatingTransform;
@@ -319,16 +319,15 @@ private:
     const FloatRect& visibleRect() const { return m_visibleRect; }
     const FloatRect& coverageRect() const { return m_coverageRect; }
 
-    void setVisibleAndCoverageRects(const VisibleAndCoverageRects&, bool isViewportConstrained);
+    void setVisibleAndCoverageRects(const VisibleAndCoverageRects&);
     
-    static FloatRect adjustTiledLayerVisibleRect(TiledBacking*, const FloatRect& oldVisibleRect, const FloatRect& newVisibleRect, const FloatSize& oldSize, const FloatSize& newSize);
-
     bool recursiveVisibleRectChangeRequiresFlush(const CommitState&, const TransformState&) const;
     
     bool isPageTiledBackingLayer() const { return type() == Type::PageTiledBacking; }
 
     // Used to track the path down the tree for replica layers.
     struct ReplicaState {
+        WTF_MAKE_STRUCT_FAST_ALLOCATED;
         static const size_t maxReplicaDepth = 16;
         enum ReplicaBranchType { ChildBranch = 0, ReplicaBranch = 1 };
         ReplicaState(ReplicaBranchType firstBranch)
@@ -413,6 +412,10 @@ private:
     void updateContentsColorLayer();
     void updateContentsRects();
     void updateMasksToBoundsRect();
+    void updateEventRegion();
+#if ENABLE(SCROLLING_THREAD)
+    void updateScrollingNode();
+#endif
     void updateMaskLayer();
     void updateReplicatedLayers();
 
@@ -445,13 +448,42 @@ private:
     };
     bool ensureStructuralLayer(StructuralLayerPurpose);
     StructuralLayerPurpose structuralLayerPurpose() const;
-    
-    void ensureLayerAnimations();
 
-    void setAnimationOnLayer(PlatformCAAnimation&, AnimatedPropertyID, const String& animationName, int index, int subIndex, Seconds timeOffset);
-    bool removeCAAnimationFromLayer(AnimatedPropertyID, const String& animationName, int index, int subINdex);
-    void pauseCAAnimationOnLayer(AnimatedPropertyID, const String& animationName, int index, int subIndex, Seconds timeOffset);
-    void seekCAAnimationOnLayer(AnimatedPropertyID, const String& animationName, int index, int subIndex, Seconds timeOffset);
+    // This represents the animation of a single property. There may be multiple transform animations for
+    // a single transition or keyframe animation, so index is used to distinguish these.
+    enum class PlayState { Playing, PlayPending, Paused, PausePending };
+    struct LayerPropertyAnimation {
+        LayerPropertyAnimation(Ref<PlatformCAAnimation>&& caAnimation, const String& animationName, AnimatedPropertyID property, int index, int subIndex, Seconds timeOffset)
+            : m_animation(WTFMove(caAnimation))
+            , m_name(animationName)
+            , m_property(property)
+            , m_index(index)
+            , m_subIndex(subIndex)
+            , m_timeOffset(timeOffset)
+        { }
+
+        String animationIdentifier() const { return makeString(m_name, '_', static_cast<unsigned>(m_property), '_', m_index, '_', m_subIndex); }
+        Optional<Seconds> computedBeginTime() const
+        {
+            if (m_beginTime)
+                return m_beginTime - m_timeOffset;
+            return WTF::nullopt;
+        }
+
+        RefPtr<PlatformCAAnimation> m_animation;
+        String m_name;
+        AnimatedPropertyID m_property;
+        int m_index;
+        int m_subIndex;
+        Seconds m_timeOffset { 0_s };
+        Seconds m_beginTime { 0_s };
+        PlayState m_playState { PlayState::PlayPending };
+        bool m_pendingRemoval { false };
+    };
+
+    void setAnimationOnLayer(LayerPropertyAnimation&);
+    bool removeCAAnimationFromLayer(LayerPropertyAnimation&);
+    void pauseCAAnimationOnLayer(LayerPropertyAnimation&);
 
     enum MoveOrCopy { Move, Copy };
     static void moveOrCopyLayerAnimation(MoveOrCopy, const String& animationIdentifier, PlatformCALayer *fromLayer, PlatformCALayer *toLayer);
@@ -466,29 +498,8 @@ private:
         moveOrCopyAnimations(Copy, fromLayer, toLayer);
     }
 
-    // This represents the animation of a single property. There may be multiple transform animations for
-    // a single transition or keyframe animation, so index is used to distinguish these.
-    struct LayerPropertyAnimation {
-        LayerPropertyAnimation(Ref<PlatformCAAnimation>&& caAnimation, const String& animationName, AnimatedPropertyID property, int index, int subIndex, Seconds timeOffset)
-            : m_animation(WTFMove(caAnimation))
-            , m_name(animationName)
-            , m_property(property)
-            , m_index(index)
-            , m_subIndex(subIndex)
-            , m_timeOffset(timeOffset)
-        { }
-
-        RefPtr<PlatformCAAnimation> m_animation;
-        String m_name;
-        AnimatedPropertyID m_property;
-        int m_index;
-        int m_subIndex;
-        Seconds m_timeOffset;
-    };
-
     bool appendToUncommittedAnimations(const KeyframeValueList&, const TransformOperations*, const Animation*, const String& animationName, const FloatSize& boxSize, int animationIndex, Seconds timeOffset, bool isMatrixAnimation);
     bool appendToUncommittedAnimations(const KeyframeValueList&, const FilterOperation*, const Animation*, const String& animationName, int animationIndex, Seconds timeOffset);
-    void appendToUncommittedAnimations(LayerPropertyAnimation&&);
 
     enum LayerChange : uint64_t {
         NoChange                                = 0,
@@ -531,6 +542,10 @@ private:
         WindRuleChanged                         = 1LLU << 37,
         UserInteractionEnabledChanged           = 1LLU << 38,
         NeedsComputeVisibleAndCoverageRect      = 1LLU << 39,
+        EventRegionChanged                      = 1LLU << 40,
+#if ENABLE(SCROLLING_THREAD)
+        ScrollingNodeChanged                    = 1LLU << 41,
+#endif
     };
     typedef uint64_t LayerChangeFlags;
     void addUncommittedChanges(LayerChangeFlags);
@@ -548,24 +563,7 @@ private:
 
     void repaintLayerDirtyRects();
 
-    enum Action { Remove, Pause, Seek };
-    struct AnimationProcessingAction {
-        AnimationProcessingAction(Action action = Remove, Seconds timeOffset = 0_s)
-            : action(action)
-            , timeOffset(timeOffset)
-        {
-        }
-        Action action;
-        Seconds timeOffset; // Only used for pause.
-    };
-    void addProcessingActionForAnimation(const String&, AnimationProcessingAction);
-
-#if PLATFORM(WIN)
-    // FIXME: when initializing m_uncommittedChanges to a non-zero value, nothing is painted on Windows, see https://bugs.webkit.org/show_bug.cgi?id=168666.
     LayerChangeFlags m_uncommittedChanges { 0 };
-#else
-    LayerChangeFlags m_uncommittedChanges { CoverageRectChanged };
-#endif
 
     RefPtr<PlatformCALayer> m_layer; // The main layer
     RefPtr<PlatformCALayer> m_structuralLayer; // A layer used for structural reasons, like preserves-3d or replica-flattening. Is the parent of m_layer.
@@ -578,6 +576,7 @@ private:
 
     // References to clones of our layers, for replicated layers.
     struct LayerClones {
+        WTF_MAKE_STRUCT_FAST_ALLOCATED;
         LayerMap primaryLayerClones;
         LayerMap structuralLayerClones;
         LayerMap contentsLayerClones;
@@ -604,15 +603,8 @@ private:
     RetainPtr<CGImageRef> m_uncorrectedContentsImage;
     RetainPtr<CGImageRef> m_pendingContentsImage;
     
-    typedef HashMap<String, Vector<AnimationProcessingAction>> AnimationsToProcessMap;
-    typedef HashMap<String, Vector<LayerPropertyAnimation>> AnimationsMap;
-    struct LayerAnimations {
-        Vector<LayerPropertyAnimation> uncomittedAnimations;
-        AnimationsToProcessMap animationsToProcess;
-        AnimationsMap runningAnimations;
-    };
-    
-    std::unique_ptr<LayerAnimations> m_animations;
+    Vector<LayerPropertyAnimation> m_animations;
+    Vector<LayerPropertyAnimation> m_baseValueTransformAnimations;
 
     Vector<FloatRect> m_dirtyRects;
 
@@ -623,7 +615,7 @@ private:
 
     bool m_needsFullRepaint : 1;
     bool m_usingBackdropLayerType : 1;
-    bool m_isViewportConstrained : 1;
+    bool m_allowsBackingStoreDetaching : 1;
     bool m_intersectsCoverageRect : 1;
     bool m_hasEverPainted : 1;
     bool m_hasDescendantsWithRunningTransformAnimations : 1;

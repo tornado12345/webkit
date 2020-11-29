@@ -23,15 +23,15 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
+#import "config.h"
 
 #if WK_HAVE_C_SPI
 
-#include "PlatformUtilities.h"
-#include "PlatformWebView.h"
-#include "Test.h"
+#import "PlatformUtilities.h"
+#import "PlatformWebView.h"
+#import "Test.h"
 
-#include <WebKit/WKString.h>
+#import <WebKit/WKString.h>
 
 namespace TestWebKitAPI {
 
@@ -67,7 +67,7 @@ TEST(WebKit, PasteboardNotifications)
 
     PlatformWebView webView(context.get());
 
-    WKRetainPtr<WKPreferencesRef> preferences(AdoptWK, WKPreferencesCreate());
+    WKRetainPtr<WKPreferencesRef> preferences = adoptWK(WKPreferencesCreate());
     WKPreferencesSetJavaScriptCanAccessClipboard(preferences.get(), true);
 
     WKPageGroupRef pageGroup = WKPageGetPageGroup(webView.page());

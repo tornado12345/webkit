@@ -89,6 +89,7 @@ private:
 // CurlContext --------------------------------------------
 
 class CurlRequestScheduler;
+class CurlStreamScheduler;
 
 class CurlContext : public CurlGlobal {
     WTF_MAKE_NONCOPYABLE(CurlContext);
@@ -101,6 +102,7 @@ public:
     const CurlShareHandle& shareHandle() { return m_shareHandle; }
 
     CurlRequestScheduler& scheduler() { return *m_scheduler; }
+    CurlStreamScheduler& streamScheduler();
 
     // Proxy
     const CurlProxySettings& proxySettings() const { return m_proxySettings; }
@@ -125,6 +127,11 @@ public:
     bool isVerbose() const { return m_verbose; }
 #endif
 
+#if ENABLE(TLS_DEBUG)
+    bool shouldLogTLSKey() const { return !m_tlsKeyLogFilePath.isEmpty(); }
+    const String& tlsKeyLogFilePath() const { return m_tlsKeyLogFilePath; }
+#endif
+
 private:
     CurlContext();
     void initShareHandle();
@@ -142,11 +149,16 @@ private:
     FILE* m_logFile { nullptr };
     bool m_verbose { false };
 #endif
+
+#if ENABLE(TLS_DEBUG)
+    String m_tlsKeyLogFilePath;
+#endif
 };
 
 // CurlMultiHandle --------------------------------------------
 
 class CurlMultiHandle {
+    WTF_MAKE_FAST_ALLOCATED;
     WTF_MAKE_NONCOPYABLE(CurlMultiHandle);
 
 public:
@@ -202,6 +214,7 @@ class HTTPHeaderMap;
 class NetworkLoadMetrics;
 
 class CurlHandle {
+    WTF_MAKE_FAST_ALLOCATED;
     WTF_MAKE_NONCOPYABLE(CurlHandle);
 
 public:
@@ -253,6 +266,7 @@ public:
 
     void setHttpAuthUserPass(const String&, const String&, long authType = CURLAUTH_ANY);
 
+    void disableServerTrustEvaluation();
     void setCACertPath(const char*);
     void setSslVerifyPeer(VerifyPeer);
     void setSslVerifyHost(VerifyHost);
@@ -272,6 +286,7 @@ public:
     void setWriteCallbackFunction(curl_write_callback, void*);
     void setReadCallbackFunction(curl_read_callback, void*);
     void setSslCtxCallbackFunction(curl_ssl_ctx_callback, void*);
+    void setDebugCallbackFunction(curl_debug_callback, void*);
 
     // Status
     Optional<String> getProxyUrl();
@@ -288,6 +303,11 @@ public:
     Optional<CertificateInfo> certificateInfo() const;
 
     static long long maxCurlOffT();
+
+    // socket
+    Expected<curl_socket_t, CURLcode> getActiveSocket();
+    CURLcode send(const uint8_t*, size_t, size_t&);
+    CURLcode receive(uint8_t*, size_t, size_t&);
 
 #ifndef NDEBUG
     void enableVerboseIfUsed();
@@ -307,26 +327,6 @@ private:
     URL m_url;
     CurlSList m_requestHeaders;
     std::unique_ptr<CurlSSLVerifier> m_sslVerifier;
-};
-
-class CurlSocketHandle : public CurlHandle {
-    WTF_MAKE_NONCOPYABLE(CurlSocketHandle);
-
-public:
-    struct WaitResult {
-        bool readable { false };
-        bool writable { false };
-    };
-
-    CurlSocketHandle(const URL&, Function<void(CURLcode)>&& errorHandler);
-
-    bool connect();
-    size_t send(const uint8_t*, size_t);
-    Optional<size_t> receive(uint8_t*, size_t);
-    Optional<WaitResult> wait(const Seconds& timeout, bool alsoWaitForWrite);
-
-private:
-    Function<void(CURLcode)> m_errorHandler;
 };
 
 } // namespace WebCore

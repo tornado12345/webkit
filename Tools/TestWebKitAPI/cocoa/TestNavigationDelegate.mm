@@ -27,22 +27,41 @@
 #import "TestNavigationDelegate.h"
 
 #import "Utilities.h"
+#import <WebKit/WKWebViewPrivateForTesting.h>
 #import <wtf/RetainPtr.h>
 
 @implementation TestNavigationDelegate
 
-- (void)webView:(WKWebView *)webView decidePolicyForNavigationAction:(WKNavigationAction *)navigationAction decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler
+- (void)webView:(WKWebView *)webView decidePolicyForNavigationAction:(WKNavigationAction *)navigationAction preferences:(WKWebpagePreferences *)preferences decisionHandler:(void (^)(WKNavigationActionPolicy, WKWebpagePreferences *))decisionHandler
 {
-    if (_decidePolicyForNavigationAction)
-        _decidePolicyForNavigationAction(navigationAction, decisionHandler);
+    if (_decidePolicyForNavigationActionWithPreferences)
+        _decidePolicyForNavigationActionWithPreferences(navigationAction, preferences, decisionHandler);
+    else if (_decidePolicyForNavigationAction) {
+        _decidePolicyForNavigationAction(navigationAction, ^(WKNavigationActionPolicy action) {
+            decisionHandler(action, preferences);
+        });
+    } else
+        decisionHandler(WKNavigationActionPolicyAllow, preferences);
+}
+
+- (void)webView:(WKWebView *)webView decidePolicyForNavigationResponse:(WKNavigationResponse *)navigationResponse decisionHandler:(void (^)(WKNavigationResponsePolicy))decisionHandler
+{
+    if (_decidePolicyForNavigationResponse)
+        _decidePolicyForNavigationResponse(navigationResponse, decisionHandler);
     else
-        decisionHandler(WKNavigationActionPolicyAllow);
+        decisionHandler(WKNavigationResponsePolicyAllow);
 }
 
 - (void)webView:(WKWebView *)webView didStartProvisionalNavigation:(WKNavigation *)navigation
 {
     if (_didStartProvisionalNavigation)
         _didStartProvisionalNavigation(webView, navigation);
+}
+
+- (void)webView:(WKWebView *)webView didCommitNavigation:(WKNavigation *)navigation
+{
+    if (_didCommitNavigation)
+        _didCommitNavigation(webView, navigation);
 }
 
 - (void)webView:(WKWebView *)webView didFailProvisionalNavigation:(WKNavigation *)navigation withError:(NSError *)error
@@ -67,6 +86,14 @@
 {
     if (_renderingProgressDidChange)
         _renderingProgressDidChange(webView, progressEvents);
+}
+
+- (void)webView:(WKWebView *)webView didReceiveAuthenticationChallenge:(NSURLAuthenticationChallenge *)challenge completionHandler:(void (^)(NSURLSessionAuthChallengeDisposition, NSURLCredential *))completionHandler
+{
+    if (_didReceiveAuthenticationChallenge)
+        _didReceiveAuthenticationChallenge(webView, challenge, completionHandler);
+    else
+        completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, nil);
 }
 
 - (void)waitForDidStartProvisionalNavigation
@@ -97,6 +124,33 @@
     self.didFinishNavigation = nil;
 }
 
+- (void)waitForDidFinishNavigationWithPreferences:(WKWebpagePreferences *)preferences
+{
+    EXPECT_FALSE(self.decidePolicyForNavigationActionWithPreferences);
+    EXPECT_TRUE(!!preferences);
+
+    self.decidePolicyForNavigationActionWithPreferences = ^(WKNavigationAction *action, WKWebpagePreferences *, void (^handler)(WKNavigationActionPolicy, WKWebpagePreferences *)) {
+        handler(WKNavigationActionPolicyAllow, preferences);
+    };
+
+    [self waitForDidFinishNavigation];
+    self.decidePolicyForNavigationActionWithPreferences = nil;
+}
+
+- (void)waitForDidFailProvisionalNavigation
+{
+    EXPECT_FALSE(self.didFailProvisionalNavigation);
+
+    __block bool finished = false;
+    self.didFailProvisionalNavigation = ^(WKWebView *, WKNavigation *, NSError *) {
+        finished = true;
+    };
+
+    TestWebKitAPI::Util::run(&finished);
+
+    self.didFailProvisionalNavigation = nil;
+}
+
 @end
 
 @implementation WKWebView (TestWebKitAPIExtras)
@@ -108,6 +162,28 @@
     auto navigationDelegate = adoptNS([[TestNavigationDelegate alloc] init]);
     self.navigationDelegate = navigationDelegate.get();
     [navigationDelegate waitForDidStartProvisionalNavigation];
+
+    self.navigationDelegate = nil;
+}
+
+- (void)_test_waitForDidFinishNavigationWithoutPresentationUpdate
+{
+    EXPECT_FALSE(self.navigationDelegate);
+
+    auto navigationDelegate = adoptNS([[TestNavigationDelegate alloc] init]);
+    self.navigationDelegate = navigationDelegate.get();
+    [navigationDelegate waitForDidFinishNavigation];
+
+    self.navigationDelegate = nil;
+}
+
+- (void)_test_waitForDidFinishNavigationWithPreferences:(WKWebpagePreferences *)preferences
+{
+    EXPECT_FALSE(self.navigationDelegate);
+
+    auto navigationDelegate = adoptNS([[TestNavigationDelegate alloc] init]);
+    self.navigationDelegate = navigationDelegate.get();
+    [navigationDelegate waitForDidFinishNavigationWithPreferences:preferences];
 
     self.navigationDelegate = nil;
 }

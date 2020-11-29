@@ -7,56 +7,62 @@
 <canvas width="400" height="400"></canvas>
 <script src="js/webgpu-functions.js"></script>
 <script>
+if (window.testRunner)
+    testRunner.waitUntilDone();
+
 const shaderCode = `
-#include <metal_stdlib>
-    
-using namespace metal;
-
-struct Vertex
+vertex float4 vertex_main(uint vid : SV_VertexID) : SV_Position
 {
-    float4 position [[position]];
-};
-
-vertex Vertex vertex_main(uint vid [[vertex_id]])
-{
-    Vertex v;
+    float4 v;
     switch (vid) {
     case 0:
-        v.position = float4(-1, 1, 0, 1);
+        v = float4(-1, 1, 0, 1);
         break;
     case 1:
-        v.position = float4(-1, -1, 0, 1);
+        v = float4(-1, -1, 0, 1);
         break;
     case 2:
-        v.position = float4(1, 1, 0, 1);
+        v = float4(1, 1, 0, 1);
         break;
     default:
-        v.position = float4(1, -1, 0, 1);
+        v = float4(1, -1, 0, 1);
+        break;
     }
     return v;
 }
 
-fragment float4 fragment_main(Vertex vertexIn [[stage_in]])
+fragment float4 fragment_main() : SV_Target 0
 {
     return float4(0.0, 1.0, 0.0, 1.0);
 }
 `
 
-async function test() {
-    const device = await getBasicDevice();
-    const canvas = document.querySelector("canvas");
-    const context = createBasicContext(canvas, device);
+const canvas = document.querySelector("canvas");
+
+async function test(device) {
+    const swapChain = createBasicSwapChain(canvas, device);
     // FIXME: Replace with non-MSL shaders.
     const shaderModule = device.createShaderModule({ code: shaderCode });
     const pipeline = createBasicPipeline(shaderModule, device);
-    const commandBuffer = device.createCommandBuffer();
-    const passEncoder = beginBasicRenderPass(context, commandBuffer);
-    const endCommandBuffer = encodeBasicCommands(passEncoder, pipeline);
+    const commandEncoder = device.createCommandEncoder();
+    const passEncoder = beginBasicRenderPass(swapChain, commandEncoder);
+    encodeBasicCommands(passEncoder, pipeline);
     const queue = device.getQueue();
 
-    queue.submit([endCommandBuffer]);
-    context.present();
+    queue.submit([commandEncoder.finish()]);
 }
 
-test();
+getBasicDevice().then(function(device) {
+    test(device).then(function() {
+        if (window.testRunner)
+            testRunner.notifyDone();
+    }, function() {
+        if (window.testRunner)
+            testRunner.notifyDone();
+    });
+}, function() {
+    drawGreenSquareInSoftware(canvas);
+    if (window.testRunner)
+        testRunner.notifyDone();
+});
 </script>

@@ -11,10 +11,10 @@ ROWSPAN="2"	3,2	3,3	3,4
 AXRole: AXCell
 AXParent: AXRow
 AXChildren: 0
-AXPosition: { 156.000000, 9.000000 }
-AXSize: { 244.000000, 78.000000 }
-AXTitle: 
-AXDescription: 
+AXPosition: { 156.000, 9.00000 }
+AXSize: { 244.000, 78.0000 }
+AXTitle:
+AXDescription:
 AXValue: Cell A<\n>COLSPAN="2"<\n>ROWSPAN="2"
 AXFocusable: 0
 AXFocused: 0
@@ -33,10 +33,10 @@ AXPlatformAttributes: computed-role:cell, tag:td, toolkit:WebKitGtk
 AXRole: AXCell
 AXParent: AXRow
 AXChildren: 0
-AXPosition: { 156.000000, 9.000000 }
-AXSize: { 244.000000, 78.000000 }
-AXTitle: 
-AXDescription: 
+AXPosition: { 156.000, 9.00000 }
+AXSize: { 244.000, 78.0000 }
+AXTitle:
+AXDescription:
 AXValue: Cell A<\n>COLSPAN="2"<\n>ROWSPAN="2"
 AXFocusable: 0
 AXFocused: 0
@@ -55,10 +55,10 @@ AXPlatformAttributes: computed-role:cell, tag:td, toolkit:WebKitGtk
 AXRole: AXCell
 AXParent: AXRow
 AXChildren: 0
-AXPosition: { 149.000000, 87.000000 }
-AXSize: { 123.000000, 60.000000 }
-AXTitle: 
-AXDescription: 
+AXPosition: { 149.000, 87.0000 }
+AXSize: { 123.000, 60.0000 }
+AXTitle:
+AXDescription:
 AXValue: Cell C<\n>ROWSPAN="2"
 AXFocusable: 0
 AXFocused: 0
@@ -77,10 +77,10 @@ AXPlatformAttributes: computed-role:cell, tag:td, toolkit:WebKitGtk
 AXRole: AXCell
 AXParent: AXRow
 AXChildren: 0
-AXPosition: { 149.000000, 87.000000 }
-AXSize: { 123.000000, 60.000000 }
-AXTitle: 
-AXDescription: 
+AXPosition: { 149.000, 87.0000 }
+AXSize: { 123.000, 60.0000 }
+AXTitle:
+AXDescription:
 AXValue: Cell C<\n>ROWSPAN="2"
 AXFocusable: 0
 AXFocused: 0
@@ -99,10 +99,10 @@ AXPlatformAttributes: computed-role:cell, tag:td, toolkit:WebKitGtk
 AXRole: AXCell
 AXParent: AXRow
 AXChildren: 0
-AXPosition: { 514.000000, 87.000000 }
-AXSize: { 123.000000, 30.000000 }
-AXTitle: 
-AXDescription: 
+AXPosition: { 514.000, 87.0000 }
+AXSize: { 123.000, 30.0000 }
+AXTitle:
+AXDescription:
 AXValue: 3,4
 AXFocusable: 0
 AXFocused: 0

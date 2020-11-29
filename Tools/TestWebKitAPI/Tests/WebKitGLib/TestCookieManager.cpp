@@ -39,7 +39,7 @@ static const char* kCookieValueNew = "new-value";
 
 static const char* kIndexHtmlFormat =
     "<html><body>"
-    " <p>WebKitGTK+ Cookie Manager test</p>"
+    " <p>WebKitGTK Cookie Manager test</p>"
     " <img src='http://localhost:%u/image.png' width=5 height=5></img>"
     "</body></html>";
 
@@ -275,6 +275,26 @@ static void testCookieManagerAcceptPolicy(CookieManagerTest* test, gconstpointer
     domains = test->getDomains();
     g_assert_nonnull(domains);
     g_assert_cmpint(g_strv_length(domains), ==, 0);
+
+    // ITP never uses NO_THIRD_PARTY.
+    auto* manager = webkit_web_context_get_website_data_manager(test->m_webContext.get());
+    webkit_website_data_manager_set_itp_enabled(manager, TRUE);
+    g_assert_cmpint(test->getAcceptPolicy(), ==, WEBKIT_COOKIE_POLICY_ACCEPT_NEVER);
+    test->setAcceptPolicy(WEBKIT_COOKIE_POLICY_ACCEPT_NO_THIRD_PARTY);
+    g_assert_cmpint(test->getAcceptPolicy(), ==, WEBKIT_COOKIE_POLICY_ACCEPT_ALWAYS);
+    webkit_website_data_manager_set_itp_enabled(manager, FALSE);
+    g_assert_cmpint(test->getAcceptPolicy(), ==, WEBKIT_COOKIE_POLICY_ACCEPT_NO_THIRD_PARTY);
+    webkit_website_data_manager_set_itp_enabled(manager, TRUE);
+    g_assert_cmpint(test->getAcceptPolicy(), ==, WEBKIT_COOKIE_POLICY_ACCEPT_ALWAYS);
+    webkit_website_data_manager_set_itp_enabled(manager, FALSE);
+    g_assert_cmpint(test->getAcceptPolicy(), ==, WEBKIT_COOKIE_POLICY_ACCEPT_NO_THIRD_PARTY);
+    test->setAcceptPolicy(WEBKIT_COOKIE_POLICY_ACCEPT_ALWAYS);
+    webkit_website_data_manager_set_itp_enabled(manager, TRUE);
+    g_assert_cmpint(test->getAcceptPolicy(), ==, WEBKIT_COOKIE_POLICY_ACCEPT_ALWAYS);
+    test->setAcceptPolicy(WEBKIT_COOKIE_POLICY_ACCEPT_NEVER);
+    g_assert_cmpint(test->getAcceptPolicy(), ==, WEBKIT_COOKIE_POLICY_ACCEPT_NEVER);
+    webkit_website_data_manager_set_itp_enabled(manager, FALSE);
+    g_assert_cmpint(test->getAcceptPolicy(), ==, WEBKIT_COOKIE_POLICY_ACCEPT_NEVER);
 }
 
 static void testCookieManagerAddCookie(CookieManagerTest* test, gconstpointer)

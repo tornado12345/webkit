@@ -33,14 +33,16 @@
 #include "HTMLVideoElement.h"
 #include "Image.h"
 #include "ImageBitmap.h"
-#include "OffscreenCanvas.h"
 #include "SecurityOrigin.h"
 #include <wtf/HashSet.h>
+#include <wtf/IsoMallocInlines.h>
 #include <wtf/Lock.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/URL.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(CanvasRenderingContext);
 
 HashSet<CanvasRenderingContext*>& CanvasRenderingContext::instances(const LockHolder&)
 {
@@ -50,12 +52,8 @@ HashSet<CanvasRenderingContext*>& CanvasRenderingContext::instances(const LockHo
 
 Lock& CanvasRenderingContext::instancesMutex()
 {
-    static LazyNeverDestroyed<Lock> mutex;
-    static std::once_flag initializeMutex;
-    std::call_once(initializeMutex, [] {
-        mutex.construct();
-    });
-    return mutex.get();
+    static Lock mutex;
+    return mutex;
 }
 
 CanvasRenderingContext::CanvasRenderingContext(CanvasBase& canvas)

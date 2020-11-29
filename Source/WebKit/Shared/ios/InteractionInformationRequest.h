@@ -41,6 +41,10 @@ struct InteractionInformationRequest {
 
     bool includeSnapshot { false };
     bool includeLinkIndicator { false };
+    bool includeCaretContext { false };
+    bool includeHasDoubleClickHandler { true };
+
+    bool linkIndicatorShouldHaveLegacyMargins { false };
 
     InteractionInformationRequest() { }
     explicit InteractionInformationRequest(WebCore::IntPoint point)
@@ -48,11 +52,11 @@ struct InteractionInformationRequest {
         this->point = point;
     }
 
-    bool isValidForRequest(const InteractionInformationRequest&);
-    bool isApproximatelyValidForRequest(const InteractionInformationRequest& other);
+    bool isValidForRequest(const InteractionInformationRequest&, int radius = 0) const;
+    bool isApproximatelyValidForRequest(const InteractionInformationRequest&, int radius) const;
 
     void encode(IPC::Encoder&) const;
-    static bool decode(IPC::Decoder&, InteractionInformationRequest&);
+    static WARN_UNUSED_RETURN bool decode(IPC::Decoder&, InteractionInformationRequest&);
 };
 
 }

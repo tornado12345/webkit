@@ -25,33 +25,64 @@
 
 #pragma once
 
-#if ENABLE(WEBGPU)
+#if ENABLE(WHLSL_COMPILER)
 
-#include "WHLSLMappedBindings.h"
+#include "WHLSLError.h"
+#include "WHLSLMangledNames.h"
 #include "WHLSLPipelineDescriptor.h"
-#include <wtf/Optional.h>
+#include <wtf/UniqueRef.h>
+#include <wtf/text/StringBuilder.h>
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
 namespace WHLSL {
 
-// FIXME: Generate descriptive error messages and return them here.
-struct RenderPrepareResult {
-    String metalSource;
-    Metal::MappedBindGroups vertexMappedBindGroups;
-    Metal::MappedBindGroups fragmentMappedBindGroups;
+// Hide the contents of the ShaderModule. Clients of the compiler shouldn't care what's inside it.
+struct ShaderModule;
+
+}
+
+}
+
+namespace std {
+
+template<> struct default_delete<WebCore::WHLSL::ShaderModule> {
+    void operator()(WebCore::WHLSL::ShaderModule*) const;
 };
-Optional<RenderPrepareResult> prepare(String& whlslSource, RenderPipelineDescriptor&);
+
+}
+
+namespace WebCore {
+
+namespace WHLSL {
+
+constexpr bool dumpMetalCompileTimes = false;
+
+UniqueRef<ShaderModule> createShaderModule(const String& whlslSource);
+
+struct RenderPrepareResult {
+    StringBuilder metalSource;
+    Metal::MangledFunctionName mangledVertexEntryPointName;
+    Metal::MangledFunctionName mangledFragmentEntryPointName;
+};
+Expected<RenderPrepareResult, String> prepare(const ShaderModule& vertexShaderModule, const ShaderModule* fragmentShaderModule, RenderPipelineDescriptor&);
+
+struct ComputeDimensions {
+    unsigned width;
+    unsigned height;
+    unsigned depth;
+};
 
 struct ComputePrepareResult {
-    String metalSource;
-    Metal::MappedBindGroups mappedBindGroups;
+    StringBuilder metalSource;
+    Metal::MangledFunctionName mangledEntryPointName;
+    ComputeDimensions computeDimensions;
 };
-Optional<ComputePrepareResult> prepare(String& whlslSource, ComputePipelineDescriptor&);
+Expected<ComputePrepareResult, String> prepare(const ShaderModule&, ComputePipelineDescriptor&);
 
 } // namespace WHLSL
 
 } // namespace WebCore
 
-#endif // ENABLE(WEBGPU)
+#endif // ENABLE(WHLSL_COMPILER)

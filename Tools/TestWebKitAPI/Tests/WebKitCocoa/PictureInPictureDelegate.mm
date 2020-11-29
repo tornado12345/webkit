@@ -23,9 +23,9 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
+#import "config.h"
 
-#if PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 101300
+#if PLATFORM(MAC)
 
 #import "PlatformUtilities.h"
 #import "PlatformWebView.h"
@@ -38,12 +38,11 @@
 #import <WebKit/WKUIDelegatePrivate.h>
 #import <WebKit/WKURLCF.h>
 #import <WebKit/WKView.h>
-#import <WebKit/WKViewPrivate.h>
 #import <WebKit/WKWebViewConfigurationPrivate.h>
 #import <WebKit/WKWebViewPrivate.h>
+#import <WebKit/WKWebViewPrivateForTesting.h>
 #import <wtf/RetainPtr.h>
 #import <wtf/Seconds.h>
-#import <wtf/mac/AppKitCompatibilityDeclarations.h>
 
 static bool receivedLoadedMessage;
 
@@ -113,11 +112,12 @@ namespace TestWebKitAPI {
 TEST(PictureInPicture, WKUIDelegate)
 {
     RetainPtr<WKWebViewConfiguration> configuration = adoptNS([[WKWebViewConfiguration alloc] init]);
-    RetainPtr<WKWebView> webView = adoptNS([[WKWebView alloc] initWithFrame:NSMakeRect(0, 0, 640, 480) configuration:configuration.get()]);
     [configuration preferences]._fullScreenEnabled = YES;
     [configuration preferences]._allowsPictureInPictureMediaPlayback = YES;
     RetainPtr<PictureInPictureUIDelegate> handler = adoptNS([[PictureInPictureUIDelegate alloc] init]);
     [[configuration userContentController] addScriptMessageHandler:handler.get() name:@"pictureInPictureChangeHandler"];
+    RetainPtr<WKWebView> webView = adoptNS([[WKWebView alloc] initWithFrame:NSMakeRect(0, 0, 640, 480) configuration:configuration.get()]);
+
     [webView setUIDelegate:handler.get()];
 
 #if HAVE(TOUCH_BAR)
@@ -201,7 +201,7 @@ TEST(PictureInPicture, AudioCannotTogglePictureInPicture)
 TEST(PictureInPicture, WKPageUIClient)
 {
     WKRetainPtr<WKContextRef> context = adoptWK(WKContextCreateWithConfiguration(nullptr));
-    WKRetainPtr<WKPageGroupRef> pageGroup(AdoptWK, WKPageGroupCreateWithIdentifier(Util::toWK("PictureInPicture").get()));
+    WKRetainPtr<WKPageGroupRef> pageGroup = adoptWK(WKPageGroupCreateWithIdentifier(Util::toWK("PictureInPicture").get()));
     WKPreferencesRef preferences = WKPageGroupGetPreferences(pageGroup.get());
     WKPreferencesSetFullScreenEnabled(preferences, true);
     WKPreferencesSetAllowsPictureInPictureMediaPlayback(preferences, true);
@@ -226,7 +226,7 @@ TEST(PictureInPicture, WKPageUIClient)
     [window.get().contentView addSubview:webView.platformView()];
     
     receivedLoadedMessage = false;
-    WKRetainPtr<WKURLRef> url(AdoptWK, Util::createURLForResource("PictureInPictureDelegate", "html"));
+    WKRetainPtr<WKURLRef> url = adoptWK(Util::createURLForResource("PictureInPictureDelegate", "html"));
     WKPageLoadURL(webView.page(), url.get());
     TestWebKitAPI::Util::run(&receivedLoadedMessage);
     waitUntilOnLoadIsCompleted(webView.page());

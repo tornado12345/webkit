@@ -26,6 +26,8 @@
 #pragma once
 
 #include "RegistrableDomain.h"
+#include <wtf/CompletionHandler.h>
+#include <wtf/Forward.h>
 #include <wtf/Optional.h>
 #include <wtf/URL.h>
 #include <wtf/WallTime.h>
@@ -40,7 +42,7 @@ public:
     using ConversionData = uint32_t;
     using PriorityValue = uint32_t;
 
-    static constexpr uint32_t MaxEntropy = 64;
+    static constexpr uint32_t MaxEntropy = 63;
 
     struct Campaign {
         Campaign() = default;
@@ -51,7 +53,7 @@ public:
         
         bool isValid() const
         {
-            return id < MaxEntropy;
+            return id <= MaxEntropy;
         }
         
         CampaignId id { 0 };
@@ -134,11 +136,16 @@ public:
         {
         }
 
-        explicit Destination(const RegistrableDomain& domain)
-            : registrableDomain { domain }
+        explicit Destination(WTF::HashTableDeletedValueType)
+            : registrableDomain { WTF::HashTableDeletedValue }
         {
         }
 
+        explicit Destination(RegistrableDomain&& domain)
+            : registrableDomain { WTFMove(domain) }
+        {
+        }
+        
         bool operator==(const Destination& other) const
         {
             return registrableDomain == other.registrableDomain;
@@ -202,19 +209,23 @@ public:
     };
     
     struct Conversion {
-        explicit Conversion(ConversionData data, Priority priority)
+        enum class WasSent : bool { No, Yes };
+        
+        Conversion(ConversionData data, Priority priority, WasSent wasSent = WasSent::No)
             : data { data }
             , priority { priority.value }
+            , wasSent { wasSent }
         {
         }
 
         bool isValid() const
         {
-            return data < MaxEntropy && priority < MaxEntropy;
+            return data <= MaxEntropy && priority <= MaxEntropy;
         }
         
         ConversionData data;
         PriorityValue priority;
+        WasSent wasSent = WasSent::No;
 
         template<class Encoder> void encode(Encoder&) const;
         template<class Decoder> static Optional<Conversion> decode(Decoder&);
@@ -229,12 +240,21 @@ public:
     {
     }
 
-    WEBCORE_EXPORT void setConversion(Conversion&&);
+    WEBCORE_EXPORT static Expected<Conversion, String> parseConversionRequest(const URL& redirectURL);
+    WEBCORE_EXPORT Optional<Seconds> convertAndGetEarliestTimeToSend(Conversion&&);
+    WEBCORE_EXPORT bool hasHigherPriorityThan(const AdClickAttribution&) const;
     WEBCORE_EXPORT URL url() const;
+    WEBCORE_EXPORT URL urlForTesting(const URL& baseURLForTesting) const;
     WEBCORE_EXPORT URL referrer() const;
     const Source& source() const { return m_source; };
     const Destination& destination() const { return m_destination; };
     Optional<WallTime> earliestTimeToSend() const { return m_earliestTimeToSend; };
+    WEBCORE_EXPORT void markAsExpired();
+    WEBCORE_EXPORT bool hasExpired() const;
+    WEBCORE_EXPORT void markConversionAsSent();
+    WEBCORE_EXPORT bool wasConversionSent() const;
+
+    bool isEmpty() const { return m_source.registrableDomain.isEmpty(); };
 
     WEBCORE_EXPORT String toString() const;
 
@@ -243,6 +263,7 @@ public:
 
 private:
     bool isValid() const;
+    static bool debugModeEnabled();
 
     Campaign m_campaign;
     Source m_source;
@@ -302,7 +323,7 @@ Optional<AdClickAttribution> AdClickAttribution::decode(Decoder& decoder)
 template<class Encoder>
 void AdClickAttribution::Conversion::encode(Encoder& encoder) const
 {
-    encoder << data << priority;
+    encoder << data << priority << wasSent;
 }
 
 template<class Decoder>
@@ -318,7 +339,12 @@ Optional<AdClickAttribution::Conversion> AdClickAttribution::Conversion::decode(
     if (!priority)
         return WTF::nullopt;
     
-    return Conversion { WTFMove(*data), Priority { WTFMove(*priority) } };
+    Optional<WasSent> wasSent;
+    decoder >> wasSent;
+    if (!wasSent)
+        return WTF::nullopt;
+    
+    return Conversion { WTFMove(*data), Priority { *priority }, *wasSent };
 }
 
 } // namespace WebCore
@@ -326,18 +352,14 @@ Optional<AdClickAttribution::Conversion> AdClickAttribution::Conversion::decode(
 namespace WTF {
 template<typename T> struct DefaultHash;
 
-template<> struct DefaultHash<WebCore::AdClickAttribution::Source> {
-    typedef WebCore::AdClickAttribution::SourceHash Hash;
-};
+template<> struct DefaultHash<WebCore::AdClickAttribution::Source> : WebCore::AdClickAttribution::SourceHash { };
 template<> struct HashTraits<WebCore::AdClickAttribution::Source> : GenericHashTraits<WebCore::AdClickAttribution::Source> {
     static WebCore::AdClickAttribution::Source emptyValue() { return { }; }
     static void constructDeletedValue(WebCore::AdClickAttribution::Source& slot) { WebCore::AdClickAttribution::Source::constructDeletedValue(slot); }
     static bool isDeletedValue(const WebCore::AdClickAttribution::Source& slot) { return slot.isDeletedValue(); }
 };
 
-template<> struct DefaultHash<WebCore::AdClickAttribution::Destination> {
-    typedef WebCore::AdClickAttribution::DestinationHash Hash;
-};
+template<> struct DefaultHash<WebCore::AdClickAttribution::Destination> : WebCore::AdClickAttribution::DestinationHash { };
 template<> struct HashTraits<WebCore::AdClickAttribution::Destination> : GenericHashTraits<WebCore::AdClickAttribution::Destination> {
     static WebCore::AdClickAttribution::Destination emptyValue() { return { }; }
     static void constructDeletedValue(WebCore::AdClickAttribution::Destination& slot) { WebCore::AdClickAttribution::Destination::constructDeletedValue(slot); }

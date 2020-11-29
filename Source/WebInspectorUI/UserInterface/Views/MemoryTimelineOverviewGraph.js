@@ -52,6 +52,9 @@ WI.MemoryTimelineOverviewGraph = class MemoryTimelineOverviewGraph extends WI.Ti
         this._memoryPressureMarkerElements = [];
 
         this.reset();
+
+        for (let record of this._memoryTimeline.records)
+            this._processRecord(record);
     }
 
     // Protected
@@ -135,11 +138,10 @@ WI.MemoryTimelineOverviewGraph = class MemoryTimelineOverviewGraph extends WI.Ti
 
         let discontinuities = this.timelineOverview.discontinuitiesInTimeRange(graphStartTime, visibleEndTime);
 
-        // Don't include the record before the graph start if the graph start is within a gap.
-        let includeRecordBeforeStart = !discontinuities.length || discontinuities[0].startTime > graphStartTime;
-
-        // FIXME: <https://webkit.org/b/153759> Web Inspector: Memory Timelines should better extend to future data
-        let visibleRecords = this._memoryTimeline.recordsInTimeRange(graphStartTime, visibleEndTime, includeRecordBeforeStart);
+        let visibleRecords = this._memoryTimeline.recordsInTimeRange(graphStartTime, visibleEndTime, {
+            includeRecordBeforeStart: !discontinuities.length || discontinuities[0].startTime > graphStartTime,
+            includeRecordAfterEnd: true,
+        });
         if (!visibleRecords.length)
             return;
 
@@ -163,7 +165,7 @@ WI.MemoryTimelineOverviewGraph = class MemoryTimelineOverviewGraph extends WI.Ti
             if (!(previousRecord || nextRecord))
                 return;
 
-            let xStart = xScale(startDiscontinuity.startTime);
+            let xStart = xScale(previousRecord ? previousRecord.endTime : startDiscontinuity.startTime);
             let xEnd = xScale(endDiscontinuity.endTime);
 
             // Extend the previous record to the start of the discontinuity.
@@ -186,10 +188,10 @@ WI.MemoryTimelineOverviewGraph = class MemoryTimelineOverviewGraph extends WI.Ti
         // Points for visible records.
         let previousRecord = null;
         for (let record of visibleRecords) {
-            if (discontinuities.length && discontinuities[0].endTime < record.startTime) {
+            if (discontinuities.length && discontinuities[0].endTime <= record.startTime) {
                 let startDiscontinuity = discontinuities.shift();
                 let endDiscontinuity = startDiscontinuity;
-                while (discontinuities.length && discontinuities[0].endTime < record.startTime)
+                while (discontinuities.length && discontinuities[0].endTime <= record.startTime)
                     endDiscontinuity = discontinuities.shift();
                 insertDiscontinuity.call(this, previousRecord, startDiscontinuity, endDiscontinuity, record);
             }
@@ -206,7 +208,7 @@ WI.MemoryTimelineOverviewGraph = class MemoryTimelineOverviewGraph extends WI.Ti
             // Extend the last value to current / end time.
             let lastRecord = visibleRecords.lastValue;
             if (lastRecord.startTime <= visibleEndTime) {
-                let x = Math.floor(xScale(visibleEndTime));
+                let x = Math.floor(xScale(lastRecord.endTime));
                 this._chart.addPointSet(x, pointSetForRecord(lastRecord));
             }
         }
@@ -244,7 +246,15 @@ WI.MemoryTimelineOverviewGraph = class MemoryTimelineOverviewGraph extends WI.Ti
     _memoryTimelineRecordAdded(event)
     {
         let memoryTimelineRecord = event.data.record;
+        console.assert(memoryTimelineRecord instanceof WI.MemoryTimelineRecord);
 
+        this._processRecord(memoryTimelineRecord);
+
+        this.needsLayout();
+    }
+
+    _processRecord(memoryTimelineRecord)
+    {
         this._maxSize = Math.max(this._maxSize, memoryTimelineRecord.totalSize);
 
         if (!this._didInitializeCategories) {
@@ -254,8 +264,6 @@ WI.MemoryTimelineOverviewGraph = class MemoryTimelineOverviewGraph extends WI.Ti
                 types.push(category.type);
             this._chart.initializeSections(types);
         }
-
-        this.needsLayout();
     }
 
     _memoryTimelineMemoryPressureEventAdded(event)

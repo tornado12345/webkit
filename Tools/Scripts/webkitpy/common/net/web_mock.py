@@ -1,4 +1,5 @@
 # Copyright (C) 2011 Google Inc. All rights reserved.
+# Copyright (C) 2019 Apple Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are
@@ -26,8 +27,13 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import StringIO
-import urllib2
+from webkitcorepy import StringIO
+
+import sys
+if sys.version_info > (3, 0):
+    from urllib.error import HTTPError
+else:
+    from urllib2 import HTTPError
 
 class MockWeb(object):
     def __init__(self, urls=None, responses=[]):
@@ -52,7 +58,7 @@ class MockResponse(object):
         self.body = values.get('body', '')
 
         if int(self.status_code) >= 400:
-            raise urllib2.HTTPError(
+            raise HTTPError(
                 url=self.url,
                 code=self.status_code,
                 msg='Received error status code: {}'.format(self.status_code),
@@ -78,8 +84,11 @@ class MockBrowser(object):
     def __setitem__(self, key, value):
         self.params[key] = value
 
+    def __getitem__(self, key):
+        return self.params.get(key)
+
     def submit(self):
-        return StringIO.StringIO()
+        return StringIO()
 
     def set_handle_robots(self, value):
         pass

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -68,7 +68,6 @@ static const bool defaultMediaDataLoadsAutomatically = false;
 static const bool defaultShouldRespectImageOrientation = true;
 static const bool defaultImageSubsamplingEnabled = true;
 static const bool defaultScrollingTreeIncludesFrames = true;
-static const bool defaultMediaControlsScaleWithPageZoom = true;
 static const bool defaultQuickTimePluginReplacementEnabled = true;
 static const bool defaultRequiresUserGestureToLoadVideo = true;
 #else
@@ -82,32 +81,53 @@ static const bool defaultMediaDataLoadsAutomatically = true;
 static const bool defaultShouldRespectImageOrientation = false;
 static const bool defaultImageSubsamplingEnabled = false;
 static const bool defaultScrollingTreeIncludesFrames = false;
-static const bool defaultMediaControlsScaleWithPageZoom = true;
 static const bool defaultQuickTimePluginReplacementEnabled = false;
 static const bool defaultRequiresUserGestureToLoadVideo = false;
 #endif
 
-static const bool defaultAllowsPictureInPictureMediaPlayback = true;
-
-static const double defaultIncrementalRenderingSuppressionTimeoutInSeconds = 5;
 #if USE(UNIFIED_TEXT_CHECKING)
 static const bool defaultUnifiedTextCheckerEnabled = true;
 #else
 static const bool defaultUnifiedTextCheckerEnabled = false;
 #endif
-static const bool defaultSmartInsertDeleteEnabled = true;
-static const bool defaultSelectTrailingWhitespaceEnabled = false;
 
 #if ENABLE(VIDEO) && (USE(AVFOUNDATION) || USE(GSTREAMER) || USE(MEDIA_FOUNDATION))
 static const bool defaultMediaEnabled = true;
 #else
 static const bool defaultMediaEnabled = false;
 #endif
-    
-#if (PLATFORM(IOS_FAMILY) && __IPHONE_OS_VERSION_MIN_REQUIRED >= 120000) || (PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 101400) || PLATFORM(WATCHOS)
+
+// FIXME: Seems like this should be HAVE(CG_CONTEXT_DRAW_CONIC_GRADIENT).
+// FIXME: Can we change tvOS to be like the other Cocoa platforms?
+#if PLATFORM(COCOA) && !PLATFORM(APPLETV)
 static const bool defaultConicGradient = true;
 #else
 static const bool defaultConicGradient = false;
+#endif
+    
+#if ENABLE(APPLE_PAY_REMOTE_UI)
+static const bool defaultApplePayEnabled = true;
+#else
+static const bool defaultApplePayEnabled = false;
+#endif
+
+
+#if PLATFORM(COCOA)
+static constexpr const bool defaultPostLoadCPUUsageMeasurementEnabled = true;
+static constexpr const bool defaultPostLoadMemoryUsageMeasurementEnabled = true;
+#else
+static constexpr const bool defaultPostLoadCPUUsageMeasurementEnabled = false;
+static constexpr const bool defaultPostLoadMemoryUsageMeasurementEnabled = false;
+#endif
+
+#if PLATFORM(MAC)
+static constexpr const bool defaultPostBackgroundingCPUUsageMeasurementEnabled = true;
+static constexpr const bool defaultPerActivityStateCPUUsageMeasurementEnabled = true;
+static constexpr const bool defaultPostBackgroundingMemoryUsageMeasurementEnabled = true;
+#else
+static constexpr const bool defaultPostBackgroundingCPUUsageMeasurementEnabled = false;
+static constexpr const bool defaultPerActivityStateCPUUsageMeasurementEnabled = false;
+static constexpr const bool defaultPostBackgroundingMemoryUsageMeasurementEnabled = false;
 #endif
 
 }

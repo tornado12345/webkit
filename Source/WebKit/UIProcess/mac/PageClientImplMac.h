@@ -32,7 +32,7 @@
 #include "WebFullScreenManagerProxy.h"
 #include <WebCore/DOMPasteAccess.h>
 #include <wtf/CompletionHandler.h>
-#include <wtf/RetainPtr.h>
+#include <wtf/Forward.h>
 
 @class WKEditorUndoTarget;
 @class WKView;
@@ -65,7 +65,7 @@ private:
     // PageClient
     std::unique_ptr<DrawingAreaProxy> createDrawingAreaProxy(WebProcessProxy&) override;
     void setViewNeedsDisplay(const WebCore::Region&) override;
-    void requestScroll(const WebCore::FloatPoint& scrollPosition, const WebCore::IntPoint& scrollOrigin, bool isProgrammaticScroll) override;
+    void requestScroll(const WebCore::FloatPoint& scrollPosition, const WebCore::IntPoint& scrollOrigin) override;
     WebCore::FloatPoint viewScrollPosition() override;
 
     WebCore::IntSize viewSize() override;
@@ -88,7 +88,7 @@ private:
     void toolTipChanged(const String& oldToolTip, const String& newToolTip) override;
     void didCommitLoadForMainFrame(const String& mimeType, bool useCustomContentProvider) override;
     void didFinishLoadingDataForCustomContentProvider(const String& suggestedFilename, const IPC::DataReference&) override;
-    void handleDownloadRequest(DownloadProxy*) override;
+    void handleDownloadRequest(DownloadProxy&) override;
     void didChangeContentSize(const WebCore::IntSize&) override;
     void setCursor(const WebCore::Cursor&) override;
     void setCursorHiddenUntilMouseMoves(bool) override;
@@ -143,6 +143,10 @@ private:
     RefPtr<WebDataListSuggestionsDropdown> createDataListSuggestionsDropdown(WebPageProxy&) override;
 #endif
 
+#if ENABLE(DATE_AND_TIME_INPUT_TYPES)
+    RefPtr<WebDateTimePicker> createDateTimePicker(WebPageProxy&) override;
+#endif
+
     Ref<WebCore::ValidationBubble> createValidationBubble(const String& message, const WebCore::ValidationBubble::Settings&) final;
 
     void setTextIndicator(Ref<WebCore::TextIndicator>, WebCore::TextIndicatorWindowLifetime) override;
@@ -152,8 +156,9 @@ private:
     void enterAcceleratedCompositingMode(const LayerTreeContext&) override;
     void exitAcceleratedCompositingMode() override;
     void updateAcceleratedCompositingMode(const LayerTreeContext&) override;
+    void didFirstLayerFlush(const LayerTreeContext&) override;
 
-    RefPtr<ViewSnapshot> takeViewSnapshot() override;
+    RefPtr<ViewSnapshot> takeViewSnapshot(Optional<WebCore::IntRect>&&) override;
     void wheelEventWasNotHandledByWebCore(const NativeWebWheelEvent&) override;
 #if ENABLE(MAC_GESTURE_EVENTS)
     void gestureEventWasNotHandledByWebCore(const NativeWebGestureEvent&) override;
@@ -179,16 +184,17 @@ private:
 
     void intrinsicContentSizeDidChange(const WebCore::IntSize& intrinsicContentSize) override;
 
-#if USE(DICTATION_ALTERNATIVES)
-    uint64_t addDictationAlternatives(const RetainPtr<NSTextAlternatives>&) override;
-    void removeDictationAlternatives(uint64_t dictationContext) override;
-    void showDictationAlternativeUI(const WebCore::FloatRect& boundingBoxOfDictatedText, uint64_t dictationContext) override;
-    Vector<String> dictationAlternatives(uint64_t dictationContext) override;
-#endif
+    void showDictationAlternativeUI(const WebCore::FloatRect& boundingBoxOfDictatedText, WebCore::DictationContext) final;
+
     void setEditableElementIsFocused(bool) override;
 
-#if USE(INSERTION_UNDO_GROUPING)
     void registerInsertionUndoGrouping() override;
+
+#if ENABLE(UI_PROCESS_PDF_HUD)
+    void createPDFHUD(PDFPluginIdentifier, const WebCore::IntRect&) override;
+    void updatePDFHUDLocation(PDFPluginIdentifier, const WebCore::IntRect&) override;
+    void removePDFHUD(PDFPluginIdentifier) override;
+    void removeAllPDFHUDs() override;
 #endif
 
     // Auxiliary Client Creation
@@ -213,15 +219,15 @@ private:
     void willRecordNavigationSnapshot(WebBackForwardListItem&) override;
     void didRemoveNavigationGestureSnapshot() override;
 
-    void requestDOMPasteAccess(const WebCore::IntRect&, const String& originIdentifier, CompletionHandler<void(WebCore::DOMPasteAccessResponse)>&& completion) final { completion(WebCore::DOMPasteAccessResponse::DeniedForGesture); }
+    void requestDOMPasteAccess(const WebCore::IntRect&, const String&, CompletionHandler<void(WebCore::DOMPasteAccessResponse)>&&) final;
 
     NSView *activeView() const;
     NSWindow *activeWindow() const;
 
     void didStartProvisionalLoadForMainFrame() override;
     void didFirstVisuallyNonEmptyLayoutForMainFrame() override;
-    void didFinishLoadForMainFrame() override;
-    void didFailLoadForMainFrame() override;
+    void didFinishNavigation(API::Navigation*) override;
+    void didFailNavigation(API::Navigation*) override;
     void didSameDocumentNavigationForMainFrame(SameDocumentNavigationType) override;
     void handleControlledElementIDResponse(const String&) override;
 
@@ -241,6 +247,7 @@ private:
 
     WebCore::UserInterfaceLayoutDirection userInterfaceLayoutDirection() override;
     bool effectiveAppearanceIsDark() const override;
+    bool effectiveUserInterfaceLevelIsElevated() const override;
 
 #if ENABLE(DRAG_SUPPORT)
     void didPerformDragOperation(bool handled) final;
@@ -248,8 +255,6 @@ private:
 
     NSView *inspectorAttachmentView() override;
     _WKRemoteObjectRegistry *remoteObjectRegistry() override;
-
-    void didFinishProcessingAllPendingMouseEvents() final;
 
 #if ENABLE(WIRELESS_PLAYBACK_TARGET)
     WebCore::WebMediaSessionManager& mediaSessionManager() override;
@@ -263,13 +268,14 @@ private:
 
     void takeFocus(WebCore::FocusDirection) override;
 
+#if HAVE(APP_ACCENT_COLORS)
+    WebCore::Color accentColor() override;
+#endif
+
     NSView *m_view;
     WeakPtr<WebViewImpl> m_impl;
 #if USE(AUTOCORRECTION_PANEL)
     CorrectionPanel m_correctionPanel;
-#endif
-#if USE(DICTATION_ALTERNATIVES)
-    std::unique_ptr<WebCore::AlternativeTextUIController> m_alternativeTextUIController;
 #endif
 
     bool m_shouldSuppressFirstResponderChanges { false };

@@ -29,6 +29,7 @@
 #include "GraphicsContext.h"
 #include "LengthBox.h"
 #include "LengthSize.h"
+#include <wtf/Optional.h>
 
 namespace WebCore {
 
@@ -47,7 +48,7 @@ LengthSize Theme::controlSize(ControlPart, const FontCascade&, const LengthSize&
     return zoomedSize;
 }
 
-LengthSize Theme::minimumControlSize(ControlPart, const FontCascade&, float) const
+LengthSize Theme::minimumControlSize(ControlPart, const FontCascade&, const LengthSize&, float) const
 {
     return { { 0, Fixed }, { 0, Fixed } };
 }

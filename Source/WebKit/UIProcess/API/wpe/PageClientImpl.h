@@ -29,6 +29,7 @@
 #include "WebFullScreenManagerProxy.h"
 
 struct wpe_view_backend;
+typedef struct _AtkObject AtkObject;
 
 namespace WKWPE {
 class View;
@@ -40,7 +41,8 @@ enum class DOMPasteAccessResponse : uint8_t;
 
 namespace WebKit {
 
-class ScrollGestureController;
+struct InputMethodState;
+struct UserMessage;
 
 enum class UndoOrRedo : bool;
 
@@ -55,11 +57,18 @@ public:
 
     struct wpe_view_backend* viewBackend();
 
+#if ENABLE(ACCESSIBILITY)
+    AtkObject* accessible();
+#endif
+
+    void sendMessageToWebView(UserMessage&&, CompletionHandler<void(UserMessage&&)>&&);
+    void setInputMethodState(Optional<InputMethodState>&&);
+
 private:
     // PageClient
     std::unique_ptr<DrawingAreaProxy> createDrawingAreaProxy(WebProcessProxy&) override;
     void setViewNeedsDisplay(const WebCore::Region&) override;
-    void requestScroll(const WebCore::FloatPoint&, const WebCore::IntPoint&, bool) override;
+    void requestScroll(const WebCore::FloatPoint&, const WebCore::IntPoint&) override;
     WebCore::FloatPoint viewScrollPosition() override;
     WebCore::IntSize viewSize() override;
     bool isViewWindowActive() override;
@@ -74,7 +83,7 @@ private:
     void toolTipChanged(const String&, const String&) override;
 
     void didCommitLoadForMainFrame(const String&, bool) override;
-    void handleDownloadRequest(DownloadProxy*) override;
+    void handleDownloadRequest(DownloadProxy&) override;
 
     void didChangeContentSize(const WebCore::IntSize&) override;
 
@@ -118,9 +127,10 @@ private:
     void willRecordNavigationSnapshot(WebBackForwardListItem&) override;
     void didRemoveNavigationGestureSnapshot() override;
 
+    void didStartProvisionalLoadForMainFrame() override;
     void didFirstVisuallyNonEmptyLayoutForMainFrame() override;
-    void didFinishLoadForMainFrame() override;
-    void didFailLoadForMainFrame() override;
+    void didFinishNavigation(API::Navigation*) override;
+    void didFailNavigation(API::Navigation*) override;
     void didSameDocumentNavigationForMainFrame(SameDocumentNavigationType) override;
 
     void didChangeBackgroundColor() override;
@@ -147,16 +157,16 @@ private:
     void beganExitFullScreen(const WebCore::IntRect& initialFrame, const WebCore::IntRect& finalFrame) override;
 #endif
 
-    void didFinishProcessingAllPendingMouseEvents() final { }
-
     IPC::Attachment hostFileDescriptor() final;
     void requestDOMPasteAccess(const WebCore::IntRect&, const String&, CompletionHandler<void(WebCore::DOMPasteAccessResponse)>&&) final;
 
     WebCore::UserInterfaceLayoutDirection userInterfaceLayoutDirection() override;
 
-    WKWPE::View& m_view;
+    void didChangeWebPageID() const override;
 
-    std::unique_ptr<ScrollGestureController> m_scrollGestureController;
+    void selectionDidChange() override;
+
+    WKWPE::View& m_view;
 };
 
 } // namespace WebKit

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010-2019 Apple Inc. All rights reserved.
+ * Copyright (C) 2010-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,11 +29,13 @@
 #if PLATFORM(MAC)
 
 #import "APIUIClient.h"
-#import "AttributedString.h"
 #import "ColorSpaceData.h"
+#import "Connection.h"
 #import "DataReference.h"
-#import "EditingRange.h"
 #import "EditorState.h"
+#import "FontInfo.h"
+#import "FrameInfoData.h"
+#import "InsertTextOptions.h"
 #import "MenuUtilities.h"
 #import "NativeWebKeyboardEvent.h"
 #import "PDFContextMenu.h"
@@ -48,7 +50,7 @@
 #import "WebContextMenuProxyMac.h"
 #import "WebPageMessages.h"
 #import "WebProcessProxy.h"
-#import <WebCore/DictationAlternative.h>
+#import <WebCore/AttributedString.h>
 #import <WebCore/DictionaryLookup.h>
 #import <WebCore/DragItem.h>
 #import <WebCore/GraphicsLayer.h>
@@ -66,6 +68,7 @@
 
 #define MESSAGE_CHECK(assertion) MESSAGE_CHECK_BASE(assertion, process().connection())
 #define MESSAGE_CHECK_URL(url) MESSAGE_CHECK_BASE(checkURLReceivedFromCurrentOrPreviousWebProcess(m_process, url), m_process->connection())
+#define MESSAGE_CHECK_WITH_RETURN_VALUE(assertion, returnValue) MESSAGE_CHECK_WITH_RETURN_VALUE_BASE(assertion, process().connection(), returnValue)
 
 @interface NSApplication ()
 - (BOOL)isSpeaking;
@@ -126,15 +129,20 @@ void WebPageProxy::platformInitialize()
     setShouldUseImplicitRubberBandControl(clientExpectsLegacyImplicitRubberBandControl);
 }
 
+String WebPageProxy::userAgentForURL(const URL&)
+{
+    return userAgent();
+}
+
 String WebPageProxy::standardUserAgent(const String& applicationNameForUserAgent)
 {
     return standardUserAgentWithApplicationName(applicationNameForUserAgent);
 }
 
-void WebPageProxy::getIsSpeaking(bool& isSpeaking)
+void WebPageProxy::getIsSpeaking(CompletionHandler<void(bool)>&& completionHandler)
 {
     ASSERT(hasProcessPrivilege(ProcessPrivilege::CanCommunicateWithWindowServer));
-    isSpeaking = [NSApp isSpeaking];
+    completionHandler([NSApp isSpeaking]);
 }
 
 void WebPageProxy::speak(const String& string)
@@ -157,7 +165,7 @@ void WebPageProxy::searchWithSpotlight(const String& string)
 void WebPageProxy::searchTheWeb(const String& string)
 {
     NSPasteboard *pasteboard = [NSPasteboard pasteboardWithUniqueName];
-    [pasteboard declareTypes:[NSArray arrayWithObject:legacyStringPasteboardType()] owner:nil];
+    [pasteboard declareTypes:@[legacyStringPasteboardType()] owner:nil];
     [pasteboard setString:string forType:legacyStringPasteboardType()];
     
     NSPerformService(@"Search With %WebSearchProvider@", pasteboard);
@@ -165,62 +173,37 @@ void WebPageProxy::searchTheWeb(const String& string)
 
 void WebPageProxy::windowAndViewFramesChanged(const FloatRect& viewFrameInWindowCoordinates, const FloatPoint& accessibilityViewCoordinates)
 {
-    if (!isValid())
+    if (!hasRunningProcess())
         return;
 
     // In case the UI client overrides getWindowFrame(), we call it here to make sure we send the appropriate window frame.
     m_uiClient->windowFrame(*this, [this, protectedThis = makeRef(*this), viewFrameInWindowCoordinates, accessibilityViewCoordinates] (FloatRect windowFrameInScreenCoordinates) {
         FloatRect windowFrameInUnflippedScreenCoordinates = pageClient().convertToUserSpace(windowFrameInScreenCoordinates);
-        process().send(Messages::WebPage::WindowAndViewFramesChanged(windowFrameInScreenCoordinates, windowFrameInUnflippedScreenCoordinates, viewFrameInWindowCoordinates, accessibilityViewCoordinates), m_pageID);
+        send(Messages::WebPage::WindowAndViewFramesChanged(windowFrameInScreenCoordinates, windowFrameInUnflippedScreenCoordinates, viewFrameInWindowCoordinates, accessibilityViewCoordinates));
     });
 }
 
 void WebPageProxy::setMainFrameIsScrollable(bool isScrollable)
 {
-    if (!isValid())
+    if (!hasRunningProcess())
         return;
 
-    process().send(Messages::WebPage::SetMainFrameIsScrollable(isScrollable), m_pageID);
+    send(Messages::WebPage::SetMainFrameIsScrollable(isScrollable));
 }
 
-void WebPageProxy::insertDictatedTextAsync(const String& text, const EditingRange& replacementRange, const Vector<TextAlternativeWithRange>& dictationAlternativesWithRange, bool registerUndoGroup)
+void WebPageProxy::attributedSubstringForCharacterRangeAsync(const EditingRange& range, Function<void(const WebCore::AttributedString&, const EditingRange&, CallbackBase::Error)>&& callbackFunction)
 {
-#if USE(DICTATION_ALTERNATIVES)
-    if (!isValid())
-        return;
-
-    Vector<DictationAlternative> dictationAlternatives;
-
-    for (const TextAlternativeWithRange& alternativeWithRange : dictationAlternativesWithRange) {
-        uint64_t dictationContext = pageClient().addDictationAlternatives(alternativeWithRange.alternatives);
-        if (dictationContext)
-            dictationAlternatives.append(DictationAlternative(alternativeWithRange.range.location, alternativeWithRange.range.length, dictationContext));
-    }
-
-    if (dictationAlternatives.isEmpty()) {
-        insertTextAsync(text, replacementRange, registerUndoGroup);
+    if (!hasRunningProcess()) {
+        callbackFunction({ }, EditingRange(), CallbackBase::Error::Unknown);
         return;
     }
 
-    process().send(Messages::WebPage::InsertDictatedTextAsync(text, replacementRange, dictationAlternatives, registerUndoGroup), m_pageID);
-#else
-    insertTextAsync(text, replacementRange, registerUndoGroup);
-#endif
+    auto callbackID = m_callbacks.put(WTFMove(callbackFunction), m_process->throttler().backgroundActivity("WebPageProxy::attributedSubstringForCharacterRangeAsync"_s));
+
+    send(Messages::WebPage::AttributedSubstringForCharacterRangeAsync(range, callbackID));
 }
 
-void WebPageProxy::attributedSubstringForCharacterRangeAsync(const EditingRange& range, WTF::Function<void (const AttributedString&, const EditingRange&, CallbackBase::Error)>&& callbackFunction)
-{
-    if (!isValid()) {
-        callbackFunction(AttributedString(), EditingRange(), CallbackBase::Error::Unknown);
-        return;
-    }
-
-    auto callbackID = m_callbacks.put(WTFMove(callbackFunction), m_process->throttler().backgroundActivityToken());
-
-    process().send(Messages::WebPage::AttributedSubstringForCharacterRangeAsync(range, callbackID), m_pageID);
-}
-
-void WebPageProxy::attributedStringForCharacterRangeCallback(const AttributedString& string, const EditingRange& actualRange, CallbackID callbackID)
+void WebPageProxy::attributedStringForCharacterRangeCallback(const WebCore::AttributedString& string, const EditingRange& actualRange, CallbackID callbackID)
 {
     MESSAGE_CHECK(actualRange.isValid());
 
@@ -234,90 +217,96 @@ void WebPageProxy::attributedStringForCharacterRangeCallback(const AttributedStr
     callback->performCallbackWithReturnValue(string, actualRange);
 }
 
-void WebPageProxy::fontAtSelection(WTF::Function<void (const String&, double, bool, CallbackBase::Error)>&& callbackFunction)
+void WebPageProxy::fontAtSelection(Function<void(const FontInfo&, double, bool, CallbackBase::Error)>&& callback)
 {
-    if (!isValid()) {
-        callbackFunction(String(), 0, false, CallbackBase::Error::Unknown);
+    if (!hasRunningProcess()) {
+        callback({ }, 0, false, CallbackBase::Error::Unknown);
         return;
     }
-    
-    auto callbackID = m_callbacks.put(WTFMove(callbackFunction), m_process->throttler().backgroundActivityToken());
-    
-    process().send(Messages::WebPage::FontAtSelection(callbackID), m_pageID);
+
+    auto callbackID = m_callbacks.put(WTFMove(callback), m_process->throttler().backgroundActivity("WebPageProxy::fontAtSelection"_s));
+    send(Messages::WebPage::FontAtSelection(callbackID));
 }
 
-void WebPageProxy::fontAtSelectionCallback(const String& fontName, double fontSize, bool selectionHasMultipleFonts, CallbackID callbackID)
+void WebPageProxy::fontAtSelectionCallback(const FontInfo& fontInfo, double fontSize, bool selectionHasMultipleFonts, CallbackID callbackID)
 {
     auto callback = m_callbacks.take<FontAtSelectionCallback>(callbackID);
     if (!callback) {
         // FIXME: Log error or assert.
-        // this can validly happen if a load invalidated the callback, though
         return;
     }
-    
-    callback->performCallbackWithReturnValue(fontName, fontSize, selectionHasMultipleFonts);
+
+    callback->performCallbackWithReturnValue(fontInfo, fontSize, selectionHasMultipleFonts);
 }
 
 String WebPageProxy::stringSelectionForPasteboard()
 {
     String value;
-    if (!isValid())
+    if (!hasRunningProcess())
         return value;
     
     const Seconds messageTimeout(20);
-    process().sendSync(Messages::WebPage::GetStringSelectionForPasteboard(), Messages::WebPage::GetStringSelectionForPasteboard::Reply(value), m_pageID, messageTimeout);
+    sendSync(Messages::WebPage::GetStringSelectionForPasteboard(), Messages::WebPage::GetStringSelectionForPasteboard::Reply(value), messageTimeout);
     return value;
 }
 
 RefPtr<WebCore::SharedBuffer> WebPageProxy::dataSelectionForPasteboard(const String& pasteboardType)
 {
-    if (!isValid())
+    if (!hasRunningProcess())
         return nullptr;
-    SharedMemory::Handle handle;
-    uint64_t size = 0;
+
+    SharedMemory::IPCHandle ipcHandle;
     const Seconds messageTimeout(20);
-    process().sendSync(Messages::WebPage::GetDataSelectionForPasteboard(pasteboardType),
-                                                Messages::WebPage::GetDataSelectionForPasteboard::Reply(handle, size), m_pageID, messageTimeout);
-    if (handle.isNull())
+    sendSync(Messages::WebPage::GetDataSelectionForPasteboard(pasteboardType), Messages::WebPage::GetDataSelectionForPasteboard::Reply(ipcHandle), messageTimeout);
+    MESSAGE_CHECK_WITH_RETURN_VALUE(!ipcHandle.handle.isNull(), nullptr);
+
+    auto sharedMemoryBuffer = SharedMemory::map(ipcHandle.handle, SharedMemory::Protection::ReadOnly);
+    if (!sharedMemoryBuffer)
         return nullptr;
-    RefPtr<SharedMemory> sharedMemoryBuffer = SharedMemory::map(handle, SharedMemory::Protection::ReadOnly);
-    return SharedBuffer::create(static_cast<unsigned char *>(sharedMemoryBuffer->data()), size);
+    return SharedBuffer::create(static_cast<unsigned char *>(sharedMemoryBuffer->data()), ipcHandle.dataSize);
 }
 
 bool WebPageProxy::readSelectionFromPasteboard(const String& pasteboardName)
 {
-    if (!isValid())
+    if (!hasRunningProcess())
         return false;
 
     bool result = false;
     const Seconds messageTimeout(20);
-    process().sendSync(Messages::WebPage::ReadSelectionFromPasteboard(pasteboardName), Messages::WebPage::ReadSelectionFromPasteboard::Reply(result), m_pageID, messageTimeout);
+    sendSync(Messages::WebPage::ReadSelectionFromPasteboard(pasteboardName), Messages::WebPage::ReadSelectionFromPasteboard::Reply(result), messageTimeout);
     return result;
 }
 
 #if ENABLE(SERVICE_CONTROLS)
 void WebPageProxy::replaceSelectionWithPasteboardData(const Vector<String>& types, const IPC::DataReference& data)
 {
-    process().send(Messages::WebPage::ReplaceSelectionWithPasteboardData(types, data), m_pageID);
+    send(Messages::WebPage::ReplaceSelectionWithPasteboardData(types, data));
 }
 #endif
 
 #if ENABLE(DRAG_SUPPORT)
 
-void WebPageProxy::setPromisedDataForImage(const String& pasteboardName, const SharedMemory::Handle& imageHandle, uint64_t imageSize, const String& filename, const String& extension,
-                                   const String& title, const String& url, const String& visibleURL, const SharedMemory::Handle& archiveHandle, uint64_t archiveSize)
+void WebPageProxy::setPromisedDataForImage(const String& pasteboardName, const SharedMemory::IPCHandle& imageHandle, const String& filename, const String& extension,
+    const String& title, const String& url, const String& visibleURL, const SharedMemory::IPCHandle& archiveHandle)
 {
     MESSAGE_CHECK_URL(url);
     MESSAGE_CHECK_URL(visibleURL);
-    RefPtr<SharedMemory> sharedMemoryImage = SharedMemory::map(imageHandle, SharedMemory::Protection::ReadOnly);
-    auto imageBuffer = SharedBuffer::create(static_cast<unsigned char*>(sharedMemoryImage->data()), imageSize);
+    MESSAGE_CHECK(!imageHandle.handle.isNull());
+
+    auto sharedMemoryImage = SharedMemory::map(imageHandle.handle, SharedMemory::Protection::ReadOnly);
+    if (!sharedMemoryImage)
+        return;
+
+    auto imageBuffer = SharedBuffer::create(static_cast<unsigned char*>(sharedMemoryImage->data()), static_cast<size_t>(imageHandle.dataSize));
     RefPtr<SharedBuffer> archiveBuffer;
-    
-    if (!archiveHandle.isNull()) {
-        RefPtr<SharedMemory> sharedMemoryArchive = SharedMemory::map(archiveHandle, SharedMemory::Protection::ReadOnly);
-        archiveBuffer = SharedBuffer::create(static_cast<unsigned char*>(sharedMemoryArchive->data()), archiveSize);
+
+    if (!archiveHandle.handle.isNull()) {
+        auto sharedMemoryArchive = SharedMemory::map(archiveHandle.handle, SharedMemory::Protection::ReadOnly);
+        if (!sharedMemoryArchive)
+            return;
+        archiveBuffer = SharedBuffer::create(static_cast<unsigned char*>(sharedMemoryArchive->data()), static_cast<size_t>(archiveHandle.dataSize));
     }
-    pageClient().setPromisedDataForImage(pasteboardName, WTFMove(imageBuffer), filename, extension, title, url, visibleURL, WTFMove(archiveBuffer));
+    pageClient().setPromisedDataForImage(pasteboardName, WTFMove(imageBuffer), ResourceResponseBase::sanitizeSuggestedFilename(filename), extension, title, url, visibleURL, WTFMove(archiveBuffer));
 }
 
 #endif
@@ -325,25 +314,25 @@ void WebPageProxy::setPromisedDataForImage(const String& pasteboardName, const S
 // Complex text input support for plug-ins.
 void WebPageProxy::sendComplexTextInputToPlugin(uint64_t pluginComplexTextInputIdentifier, const String& textInput)
 {
-    if (!isValid())
+    if (!hasRunningProcess())
         return;
     
-    process().send(Messages::WebPage::SendComplexTextInputToPlugin(pluginComplexTextInputIdentifier, textInput), m_pageID);
+    send(Messages::WebPage::SendComplexTextInputToPlugin(pluginComplexTextInputIdentifier, textInput));
 }
 
 void WebPageProxy::uppercaseWord()
 {
-    process().send(Messages::WebPage::UppercaseWord(), m_pageID);
+    send(Messages::WebPage::UppercaseWord());
 }
 
 void WebPageProxy::lowercaseWord()
 {
-    process().send(Messages::WebPage::LowercaseWord(), m_pageID);
+    send(Messages::WebPage::LowercaseWord());
 }
 
 void WebPageProxy::capitalizeWord()
 {
-    process().send(Messages::WebPage::CapitalizeWord(), m_pageID);
+    send(Messages::WebPage::CapitalizeWord());
 }
 
 void WebPageProxy::setSmartInsertDeleteEnabled(bool isSmartInsertDeleteEnabled)
@@ -353,7 +342,7 @@ void WebPageProxy::setSmartInsertDeleteEnabled(bool isSmartInsertDeleteEnabled)
 
     TextChecker::setSmartInsertDeleteEnabled(isSmartInsertDeleteEnabled);
     m_isSmartInsertDeleteEnabled = isSmartInsertDeleteEnabled;
-    process().send(Messages::WebPage::SetSmartInsertDeleteEnabled(isSmartInsertDeleteEnabled), m_pageID);
+    send(Messages::WebPage::SetSmartInsertDeleteEnabled(isSmartInsertDeleteEnabled));
 }
 
 void WebPageProxy::didPerformDictionaryLookup(const DictionaryPopupInfo& dictionaryPopupInfo)
@@ -363,7 +352,7 @@ void WebPageProxy::didPerformDictionaryLookup(const DictionaryPopupInfo& diction
     
 void WebPageProxy::registerWebProcessAccessibilityToken(const IPC::DataReference& data)
 {
-    if (!isValid())
+    if (!hasRunningProcess())
         return;
     
     pageClient().accessibilityWebProcessTokenReceived(data);
@@ -386,10 +375,10 @@ ColorSpaceData WebPageProxy::colorSpace()
 
 void WebPageProxy::registerUIProcessAccessibilityTokens(const IPC::DataReference& elementToken, const IPC::DataReference& windowToken)
 {
-    if (!isValid())
+    if (!hasRunningProcess())
         return;
 
-    process().send(Messages::WebPage::RegisterUIProcessAccessibilityTokens(elementToken, windowToken), m_pageID);
+    send(Messages::WebPage::RegisterUIProcessAccessibilityTokens(elementToken, windowToken));
 }
 
 void WebPageProxy::pluginFocusOrWindowFocusChanged(uint64_t pluginComplexTextInputIdentifier, bool pluginHasFocusAndWindowHasFocus)
@@ -404,11 +393,11 @@ void WebPageProxy::setPluginComplexTextInputState(uint64_t pluginComplexTextInpu
     pageClient().setPluginComplexTextInputState(pluginComplexTextInputIdentifier, static_cast<PluginComplexTextInputState>(pluginComplexTextInputState));
 }
 
-void WebPageProxy::executeSavedCommandBySelector(const String& selector, bool& handled)
+void WebPageProxy::executeSavedCommandBySelector(const String& selector, CompletionHandler<void(bool)>&& completionHandler)
 {
     MESSAGE_CHECK(isValidKeypressCommandName(selector));
 
-    handled = pageClient().executeSavedCommandBySelector(selector);
+    completionHandler(pageClient().executeSavedCommandBySelector(selector));
 }
 
 bool WebPageProxy::shouldDelayWindowOrderingForEvent(const WebKit::WebMouseEvent& event)
@@ -418,24 +407,19 @@ bool WebPageProxy::shouldDelayWindowOrderingForEvent(const WebKit::WebMouseEvent
 
     bool result = false;
     const Seconds messageTimeout(3);
-    process().sendSync(Messages::WebPage::ShouldDelayWindowOrderingEvent(event), Messages::WebPage::ShouldDelayWindowOrderingEvent::Reply(result), m_pageID, messageTimeout);
+    sendSync(Messages::WebPage::ShouldDelayWindowOrderingEvent(event), Messages::WebPage::ShouldDelayWindowOrderingEvent::Reply(result), messageTimeout);
     return result;
 }
 
 bool WebPageProxy::acceptsFirstMouse(int eventNumber, const WebKit::WebMouseEvent& event)
 {
-    if (!isValid())
+    if (!hasRunningProcess())
         return false;
 
     bool result = false;
     const Seconds messageTimeout(3);
-    process().sendSync(Messages::WebPage::AcceptsFirstMouse(eventNumber, event), Messages::WebPage::AcceptsFirstMouse::Reply(result), m_pageID, messageTimeout);
+    sendSync(Messages::WebPage::AcceptsFirstMouse(eventNumber, event), Messages::WebPage::AcceptsFirstMouse::Reply(result), messageTimeout);
     return result;
-}
-
-void WebPageProxy::intrinsicContentSizeDidChange(const IntSize& intrinsicContentSize)
-{
-    pageClient().intrinsicContentSizeDidChange(intrinsicContentSize);
 }
 
 void WebPageProxy::setRemoteLayerTreeRootNode(RemoteLayerTreeNode* rootNode)
@@ -493,65 +477,70 @@ static NSString *pathToPDFOnDisk(const String& suggestedFilename)
     return path;
 }
 
-void WebPageProxy::savePDFToTemporaryFolderAndOpenWithNativeApplicationRaw(const String& suggestedFilename, const String& originatingURLString, const uint8_t* data, unsigned long size, const String& pdfUUID)
-{
-    // FIXME: Write originatingURLString to the file's originating URL metadata (perhaps FileSystem::setMetadataURL()?).
-    UNUSED_PARAM(originatingURLString);
-
-    if (!suggestedFilename.endsWithIgnoringASCIICase(".pdf")) {
-        WTFLogAlways("Cannot save file without .pdf extension to the temporary directory.");
-        return;
-    }
-
-    if (!size) {
-        WTFLogAlways("Cannot save empty PDF file to the temporary directory.");
-        return;
-    }
-
-    NSString *nsPath = pathToPDFOnDisk(suggestedFilename);
-
-    if (!nsPath)
-        return;
-
-    RetainPtr<NSNumber> permissions = adoptNS([[NSNumber alloc] initWithInt:S_IRUSR]);
-    RetainPtr<NSDictionary> fileAttributes = adoptNS([[NSDictionary alloc] initWithObjectsAndKeys:permissions.get(), NSFilePosixPermissions, nil]);
-    RetainPtr<NSData> nsData = adoptNS([[NSData alloc] initWithBytesNoCopy:(void*)data length:size freeWhenDone:NO]);
-
-    if (![[NSFileManager defaultManager] createFileAtPath:nsPath contents:nsData.get() attributes:fileAttributes.get()]) {
-        WTFLogAlways("Cannot create PDF file in the temporary directory (%s).", suggestedFilename.utf8().data());
-        return;
-    }
-
-    m_temporaryPDFFiles.add(pdfUUID, nsPath);
-
-    [[NSWorkspace sharedWorkspace] openFile:nsPath];
-}
-
-void WebPageProxy::savePDFToTemporaryFolderAndOpenWithNativeApplication(const String& suggestedFilename, const String& originatingURLString, const IPC::DataReference& data, const String& pdfUUID)
+void WebPageProxy::savePDFToTemporaryFolderAndOpenWithNativeApplication(const String& suggestedFilename, FrameInfoData&& frameInfo, const IPC::DataReference& data, const String& pdfUUID)
 {
     if (data.isEmpty()) {
         WTFLogAlways("Cannot save empty PDF file to the temporary directory.");
         return;
     }
 
-    savePDFToTemporaryFolderAndOpenWithNativeApplicationRaw(suggestedFilename, originatingURLString, data.data(), data.size(), pdfUUID);
+    auto sanitizedFilename = ResourceResponseBase::sanitizeSuggestedFilename(suggestedFilename);
+    if (!sanitizedFilename.endsWithIgnoringASCIICase(".pdf")) {
+        WTFLogAlways("Cannot save file without .pdf extension to the temporary directory.");
+        return;
+    }
+
+    auto nsPath = retainPtr(pathToPDFOnDisk(sanitizedFilename));
+
+    if (!nsPath)
+        return;
+
+    auto permissions = adoptNS([[NSNumber alloc] initWithInt:S_IRUSR]);
+    auto fileAttributes = adoptNS([[NSDictionary alloc] initWithObjectsAndKeys:permissions.get(), NSFilePosixPermissions, nil]);
+    auto nsData = adoptNS([[NSData alloc] initWithBytesNoCopy:(void*)data.data() length:data.size() freeWhenDone:NO]);
+
+    if (![[NSFileManager defaultManager] createFileAtPath:nsPath.get() contents:nsData.get() attributes:fileAttributes.get()]) {
+        WTFLogAlways("Cannot create PDF file in the temporary directory (%s).", sanitizedFilename.utf8().data());
+        return;
+    }
+    auto originatingURLString = frameInfo.request.url().string();
+    FileSystem::setMetadataURL(nsPath.get(), originatingURLString);
+
+    if (TemporaryPDFFileMap::isValidKey(pdfUUID))
+        m_temporaryPDFFiles.add(pdfUUID, nsPath.get());
+
+    auto pdfFileURL = URL::fileURLWithFileSystemPath(String(nsPath.get()));
+    m_uiClient->confirmPDFOpening(*this, pdfFileURL, WTFMove(frameInfo), [pdfFileURL] (bool allowed) {
+        if (!allowed)
+            return;
+        [[NSWorkspace sharedWorkspace] openURL:pdfFileURL];
+    });
 }
 
-void WebPageProxy::openPDFFromTemporaryFolderWithNativeApplication(const String& pdfUUID)
+#if ENABLE(PDFKIT_PLUGIN) && !ENABLE(UI_PROCESS_PDF_HUD)
+void WebPageProxy::openPDFFromTemporaryFolderWithNativeApplication(FrameInfoData&& frameInfo, const String& pdfUUID)
 {
+    MESSAGE_CHECK(TemporaryPDFFileMap::isValidKey(pdfUUID));
+
     String pdfFilename = m_temporaryPDFFiles.get(pdfUUID);
 
     if (!pdfFilename.endsWithIgnoringASCIICase(".pdf"))
         return;
 
-    [[NSWorkspace sharedWorkspace] openFile:pdfFilename];
+    auto pdfFileURL = URL::fileURLWithFileSystemPath(pdfFilename);
+    m_uiClient->confirmPDFOpening(*this, pdfFileURL, WTFMove(frameInfo), [pdfFileURL] (bool allowed) {
+        if (!allowed)
+            return;
+        [[NSWorkspace sharedWorkspace] openURL:pdfFileURL];
+    });
 }
+#endif
 
 #if ENABLE(PDFKIT_PLUGIN)
-void WebPageProxy::showPDFContextMenu(const WebKit::PDFContextMenu& contextMenu, Optional<int32_t>& selectedIndex)
+void WebPageProxy::showPDFContextMenu(const WebKit::PDFContextMenu& contextMenu, CompletionHandler<void(Optional<int32_t>&&)>&& completionHandler)
 {
     if (!contextMenu.m_items.size())
-        return;
+        return completionHandler(WTF::nullopt);
     
     RetainPtr<WKPDFMenuTarget> menuTarget = adoptNS([[WKPDFMenuTarget alloc] init]);
     RetainPtr<NSMenu> nsMenu = adoptNS([[NSMenu alloc] init]);
@@ -584,7 +573,8 @@ void WebPageProxy::showPDFContextMenu(const WebKit::PDFContextMenu& contextMenu,
     [NSMenu popUpContextMenu:nsMenu.get() withEvent:event forView:view];
 
     if (auto selectedMenuItem = [menuTarget selectedMenuItem])
-        selectedIndex = [selectedMenuItem tag];
+        return completionHandler([selectedMenuItem tag]);
+    completionHandler(WTF::nullopt);
 }
 #endif
 
@@ -611,7 +601,7 @@ bool WebPageProxy::appleMailLinesClampEnabled()
     return MacApplication::isAppleMail();
 }
 
-void WebPageProxy::editorStateChanged(const EditorState& editorState)
+void WebPageProxy::updateEditorState(const EditorState& editorState)
 {
     bool couldChangeSecureInputState = m_editorState.isInPasswordField != editorState.isInPasswordField || m_editorState.selectionIsNone;
     
@@ -635,7 +625,7 @@ void WebPageProxy::startWindowDrag()
 
 NSWindow *WebPageProxy::platformWindow()
 {
-    return pageClient().platformWindow();
+    return m_pageClient ? m_pageClient->platformWindow() : nullptr;
 }
 
 void WebPageProxy::rootViewToWindow(const WebCore::IntRect& viewRect, WebCore::IntRect& windowRect)
@@ -668,9 +658,73 @@ NSWindow *WebPageProxy::paymentCoordinatorPresentingWindow(const WebPaymentCoord
 
 #endif
 
+#if ENABLE(CONTEXT_MENUS)
+
+void WebPageProxy::platformDidSelectItemFromActiveContextMenu(const WebContextMenuItemData& item)
+{
+    if (item.action() == ContextMenuItemTagPaste)
+        grantAccessToCurrentPasteboardData(NSPasteboardNameGeneral);
+}
+
+#endif
+
+void WebPageProxy::willPerformPasteCommand()
+{
+    grantAccessToCurrentPasteboardData(NSPasteboardNameGeneral);
+}
+
+PlatformView* WebPageProxy::platformView() const
+{
+    return [pageClient().platformWindow() contentView];
+}
+
+#if ENABLE(UI_PROCESS_PDF_HUD)
+
+void WebPageProxy::createPDFHUD(PDFPluginIdentifier identifier, const WebCore::IntRect& rect)
+{
+    pageClient().createPDFHUD(identifier, rect);
+}
+
+void WebPageProxy::removePDFHUD(PDFPluginIdentifier identifier)
+{
+    pageClient().removePDFHUD(identifier);
+}
+
+void WebPageProxy::updatePDFHUDLocation(PDFPluginIdentifier identifier, const WebCore::IntRect& rect)
+{
+    pageClient().updatePDFHUDLocation(identifier, rect);
+}
+
+void WebPageProxy::pdfZoomIn(PDFPluginIdentifier identifier)
+{
+    send(Messages::WebPage::ZoomPDFIn(identifier));
+}
+
+void WebPageProxy::pdfZoomOut(PDFPluginIdentifier identifier)
+{
+    send(Messages::WebPage::ZoomPDFOut(identifier));
+}
+
+void WebPageProxy::pdfSaveToPDF(PDFPluginIdentifier identifier)
+{
+    sendWithAsyncReply(Messages::WebPage::SavePDF(identifier), [this, protectedThis = makeRef(*this)] (String&& suggestedFilename, URL&& originatingURL, const IPC::DataReference& dataReference) {
+        savePDFToFileInDownloadsFolder(WTFMove(suggestedFilename), WTFMove(originatingURL), dataReference);
+    });
+}
+
+void WebPageProxy::pdfOpenWithPreview(PDFPluginIdentifier identifier)
+{
+    sendWithAsyncReply(Messages::WebPage::OpenPDFWithPreview(identifier), [this, protectedThis = makeRef(*this)] (String&& suggestedFilename, FrameInfoData&& frameInfo, const IPC::DataReference& data, const String& pdfUUID) {
+        savePDFToTemporaryFolderAndOpenWithNativeApplication(WTFMove(suggestedFilename), WTFMove(frameInfo), data, pdfUUID);
+    });
+}
+
+#endif // ENABLE(UI_PROCESS_PDF_HUD)
+
 } // namespace WebKit
 
 #endif // PLATFORM(MAC)
 
-#undef MESSAGE_CHECK
+#undef MESSAGE_CHECK_WITH_RETURN_VALUE
 #undef MESSAGE_CHECK_URL
+#undef MESSAGE_CHECK

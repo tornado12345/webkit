@@ -40,15 +40,15 @@
 #import <WebCore/MemoryCache.h>
 #import <WebCore/NetworkStorageSession.h>
 #import <WebCore/StorageSessionProvider.h>
+#import <WebCore/WebCoreJITOperations.h>
 #import <wtf/MainThread.h>
 #import <wtf/RunLoop.h>
 
 #if PLATFORM(IOS_FAMILY)
-#import "MemoryMeasure.h"
 #import "WebFrameInternal.h"
+#import <WebCore/BackForwardCache.h>
 #import <WebCore/CachedImage.h>
 #import <WebCore/Frame.h>
-#import <WebCore/PageCache.h>
 #import <WebCore/WebCoreThreadRun.h>
 #endif
 
@@ -64,58 +64,57 @@ class DefaultStorageSessionProvider : public WebCore::StorageSessionProvider {
 + (void)initialize
 {
 #if !PLATFORM(IOS_FAMILY)
-    JSC::initializeThreading();
-    WTF::initializeMainThreadToProcessMainThread();
-    RunLoop::initializeMainRunLoop();
+    JSC::initialize();
+    WTF::initializeMainThread();
+    WebCore::populateJITOperations();
 #endif
 }
 
 + (NSArray *)statistics
 {
-    WebCore::MemoryCache::Statistics s = WebCore::MemoryCache::singleton().getStatistics();
-
-    return [NSArray arrayWithObjects:
-        [NSDictionary dictionaryWithObjectsAndKeys:
-            [NSNumber numberWithInt:s.images.count], @"Images",
-            [NSNumber numberWithInt:s.cssStyleSheets.count], @"CSS",
+    auto s = WebCore::MemoryCache::singleton().getStatistics();
+    return @[
+        @{
+            @"Images": @(s.images.count),
+            @"CSS": @(s.cssStyleSheets.count),
 #if ENABLE(XSLT)
-            [NSNumber numberWithInt:s.xslStyleSheets.count], @"XSL",
+            @"XSL": @(s.xslStyleSheets.count),
 #else
-            [NSNumber numberWithInt:0], @"XSL",
+            @"XSL": @(0),
 #endif
-            [NSNumber numberWithInt:s.scripts.count], @"JavaScript",
-            nil],
-        [NSDictionary dictionaryWithObjectsAndKeys:
-            [NSNumber numberWithInt:s.images.size], @"Images",
-            [NSNumber numberWithInt:s.cssStyleSheets.size] ,@"CSS",
+            @"JavaScript": @(s.scripts.count),
+        },
+        @{
+            @"Images": @(s.images.size),
+            @"CSS": @(s.cssStyleSheets.size),
 #if ENABLE(XSLT)
-            [NSNumber numberWithInt:s.xslStyleSheets.size], @"XSL",
+            @"XSL": @(s.xslStyleSheets.size),
 #else
-            [NSNumber numberWithInt:0], @"XSL",
+            @"XSL": @(0),
 #endif
-            [NSNumber numberWithInt:s.scripts.size], @"JavaScript",
-            nil],
-        [NSDictionary dictionaryWithObjectsAndKeys:
-            [NSNumber numberWithInt:s.images.liveSize], @"Images",
-            [NSNumber numberWithInt:s.cssStyleSheets.liveSize] ,@"CSS",
+            @"JavaScript": @(s.scripts.size),
+        },
+        @{
+            @"Images": @(s.images.liveSize),
+            @"CSS": @(s.cssStyleSheets.liveSize),
 #if ENABLE(XSLT)
-            [NSNumber numberWithInt:s.xslStyleSheets.liveSize], @"XSL",
+            @"XSL": @(s.xslStyleSheets.liveSize),
 #else
-            [NSNumber numberWithInt:0], @"XSL",
+            @"XSL": @(0),
 #endif
-            [NSNumber numberWithInt:s.scripts.liveSize], @"JavaScript",
-            nil],
-        [NSDictionary dictionaryWithObjectsAndKeys:
-            [NSNumber numberWithInt:s.images.decodedSize], @"Images",
-            [NSNumber numberWithInt:s.cssStyleSheets.decodedSize] ,@"CSS",
+            @"JavaScript": @(s.scripts.liveSize),
+        },
+        @{
+            @"Images": @(s.images.decodedSize),
+            @"CSS": @(s.cssStyleSheets.decodedSize),
 #if ENABLE(XSLT)
-            [NSNumber numberWithInt:s.xslStyleSheets.decodedSize], @"XSL",
+            @"XSL": @(s.xslStyleSheets.decodedSize),
 #else
-            [NSNumber numberWithInt:0], @"XSL",
+            @"XSL": @(0),
 #endif
-            [NSNumber numberWithInt:s.scripts.decodedSize], @"JavaScript",
-            nil],
-        nil];
+            @"JavaScript": @(s.scripts.decodedSize),
+        },
+    ];
 }
 
 + (void)empty
@@ -133,6 +132,7 @@ class DefaultStorageSessionProvider : public WebCore::StorageSessionProvider {
 }
 
 #if PLATFORM(IOS_FAMILY)
+
 + (void)emptyInMemoryResources
 {
     // This method gets called from MobileSafari after it calls [WebView
@@ -140,8 +140,6 @@ class DefaultStorageSessionProvider : public WebCore::StorageSessionProvider {
     // schedule this method on the WebThread as well so as to pick up all the
     // dead resources left behind after closing the WebViews
     WebThreadRun(^{
-        WebKit::MemoryMeasure measurer("[WebCache emptyInMemoryResources]");
-
         // Toggling the cache model like this forces the cache to evict all its in-memory resources.
         WebCacheModel cacheModel = [WebView _cacheModel];
         [WebView _setCacheModel:WebCacheModelDocumentViewer];
@@ -162,33 +160,6 @@ class DefaultStorageSessionProvider : public WebCore::StorageSessionProvider {
 #endif
                      + (stats.scripts.size - stats.scripts.liveSize);
     }
-}
-
-+ (bool)addImageToCache:(CGImageRef)image forURL:(NSURL *)url
-{
-    return [WebCache addImageToCache:image forURL:url forFrame:nil];
-}
-
-+ (bool)addImageToCache:(CGImageRef)image forURL:(NSURL *)url forFrame:(WebFrame *)frame
-{
-    if (!image || !url || ![[url absoluteString] length])
-        return false;
-
-    auto provider = adoptRef(*new DefaultStorageSessionProvider);
-    return WebCore::MemoryCache::singleton().addImageToCache(RetainPtr<CGImageRef>(image), url, frame ? core(frame)->document()->domainForCachePartition() : emptyString(), PAL::SessionID::defaultSessionID(), WebCore::CookieJar::create(WTFMove(provider)).ptr());
-}
-
-+ (void)removeImageFromCacheForURL:(NSURL *)url
-{
-    [WebCache removeImageFromCacheForURL:url forFrame:nil];
-}
-
-+ (void)removeImageFromCacheForURL:(NSURL *)url forFrame:(WebFrame *)frame
-{
-    if (!url)
-        return;
-
-    return WebCore::MemoryCache::singleton().removeImageFromCache(url, frame ? core(frame)->document()->domainForCachePartition() : emptyString());
 }
 
 + (CGImageRef)imageForURL:(NSURL *)url

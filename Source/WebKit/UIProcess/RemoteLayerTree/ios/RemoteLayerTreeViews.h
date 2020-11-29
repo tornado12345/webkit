@@ -23,24 +23,23 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#pragma once
-
 #if PLATFORM(IOS_FAMILY)
 
 #import "UIKitSPI.h"
 #import <WebCore/GraphicsLayer.h>
 
 namespace WebKit {
+class RemoteLayerTreeHost;
 class WebPageProxy;
 }
 
 @protocol WKNativelyInteractible <NSObject>
 @end
 
-@interface WKCompositingView : UIView
+@protocol WKContentControlled <NSObject>
 @end
 
-@interface WKTiledBackingView : WKCompositingView
+@interface WKCompositingView : UIView <WKContentControlled>
 @end
 
 @interface WKTransformView : WKCompositingView
@@ -58,21 +57,24 @@ class WebPageProxy;
 
 @end
 
-@interface WKUIRemoteView : _UIRemoteView
+@interface WKUIRemoteView : _UIRemoteView <WKContentControlled>
 @end
 
-@interface WKBackdropView : _UIBackdropView
+@interface WKBackdropView : _UIBackdropView <WKContentControlled>
 @end
 
-@interface WKChildScrollView : UIScrollView
+@interface WKChildScrollView : UIScrollView <WKContentControlled>
 @end
 
-@interface WKEmbeddedView : UIView
+namespace WebKit {
 
-- (instancetype)initWithEmbeddedViewID:(WebCore::GraphicsLayer::EmbeddedViewID)embeddedViewID;
+OptionSet<WebCore::TouchAction> touchActionsForPoint(UIView *rootView, const WebCore::IntPoint&);
+UIScrollView *findActingScrollParent(UIScrollView *, const RemoteLayerTreeHost&);
 
-@property (nonatomic, readonly, assign) WebCore::GraphicsLayer::EmbeddedViewID embeddedViewID;
+#if ENABLE(EDITABLE_REGION)
+bool mayContainEditableElementsInRect(UIView *rootView, const WebCore::FloatRect&);
+#endif
 
-@end
+}
 
 #endif // PLATFORM(IOS_FAMILY)

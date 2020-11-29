@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013, 2015 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2013-2019 Apple Inc. All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,14 +28,15 @@
 
 #if ENABLE(REMOTE_INSPECTOR)
 
-#import "EventLoop.h"
+#import "JSGlobalObjectDebugger.h"
 #import "RemoteAutomationTarget.h"
 #import "RemoteInspectionTarget.h"
 #import "RemoteInspector.h"
 #import <dispatch/dispatch.h>
 #import <wtf/Optional.h>
+#import <wtf/RunLoop.h>
 
-#if PLATFORM(IOS_FAMILY)
+#if USE(WEB_THREAD)
 #import <wtf/ios/WebCoreThread.h>
 #endif
 
@@ -87,7 +88,9 @@ static void RemoteTargetInitializeGlobalQueue()
 
         // Add to the default run loop mode for default handling, and the JSContext remote inspector run loop mode when paused.
         CFRunLoopAddSource(CFRunLoopGetMain(), rwiRunLoopSource, kCFRunLoopDefaultMode);
-        CFRunLoopAddSource(CFRunLoopGetMain(), rwiRunLoopSource, EventLoop::remoteInspectorRunLoopMode());
+        auto mode = JSGlobalObjectDebugger::runLoopMode();
+        if (mode != DefaultRunLoopMode)
+            CFRunLoopAddSource(CFRunLoopGetMain(), rwiRunLoopSource, mode);
     });
 }
 
@@ -120,9 +123,9 @@ RemoteConnectionToTarget::~RemoteConnectionToTarget()
     teardownRunLoop();
 }
 
-Optional<unsigned> RemoteConnectionToTarget::targetIdentifier() const
+Optional<TargetID> RemoteConnectionToTarget::targetIdentifier() const
 {
-    return m_target ? Optional<unsigned>(m_target->targetIdentifier()) : WTF::nullopt;
+    return m_target ? Optional<TargetID>(m_target->targetIdentifier()) : WTF::nullopt;
 }
 
 NSString *RemoteConnectionToTarget::connectionIdentifier() const
@@ -142,7 +145,7 @@ void RemoteConnectionToTarget::dispatchAsyncOnTarget(void (^block)())
         return;
     }
 
-#if PLATFORM(IOS_FAMILY)
+#if USE(WEB_THREAD)
     if (WebCoreWebThreadIsEnabled && WebCoreWebThreadIsEnabled()) {
         WebCoreWebThreadRun(block);
         return;
@@ -159,7 +162,7 @@ bool RemoteConnectionToTarget::setup(bool isAutomaticInspection, bool automatica
     if (!m_target)
         return false;
 
-    unsigned targetIdentifier = this->targetIdentifier().valueOr(0);
+    auto targetIdentifier = this->targetIdentifier().valueOr(0);
     
     ref();
     dispatchAsyncOnTarget(^{
@@ -198,7 +201,7 @@ void RemoteConnectionToTarget::targetClosed()
 
 void RemoteConnectionToTarget::close()
 {
-    unsigned targetIdentifier = m_target ? m_target->targetIdentifier() : 0;
+    auto targetIdentifier = m_target ? m_target->targetIdentifier() : 0;
     
     ref();
     dispatchAsyncOnTarget(^{
@@ -258,7 +261,9 @@ void RemoteConnectionToTarget::setupRunLoop()
     m_runLoopSource = adoptCF(CFRunLoopSourceCreate(kCFAllocatorDefault, 1, &runLoopSourceContext));
 
     CFRunLoopAddSource(m_runLoop.get(), m_runLoopSource.get(), kCFRunLoopDefaultMode);
-    CFRunLoopAddSource(m_runLoop.get(), m_runLoopSource.get(), EventLoop::remoteInspectorRunLoopMode());
+    auto mode = JSGlobalObjectDebugger::runLoopMode();
+    if (mode != DefaultRunLoopMode)
+        CFRunLoopAddSource(m_runLoop.get(), m_runLoopSource.get(), mode);
 }
 
 void RemoteConnectionToTarget::teardownRunLoop()
@@ -267,7 +272,9 @@ void RemoteConnectionToTarget::teardownRunLoop()
         return;
 
     CFRunLoopRemoveSource(m_runLoop.get(), m_runLoopSource.get(), kCFRunLoopDefaultMode);
-    CFRunLoopRemoveSource(m_runLoop.get(), m_runLoopSource.get(), EventLoop::remoteInspectorRunLoopMode());
+    auto mode = JSGlobalObjectDebugger::runLoopMode();
+    if (mode != DefaultRunLoopMode)
+        CFRunLoopRemoveSource(m_runLoop.get(), m_runLoopSource.get(), mode);
 
     m_runLoop = nullptr;
     m_runLoopSource = nullptr;

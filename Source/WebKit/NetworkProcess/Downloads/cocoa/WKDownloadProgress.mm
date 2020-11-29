@@ -39,45 +39,48 @@ static NSString * const countOfBytesReceivedKeyPath = @"countOfBytesReceived";
 
 @implementation WKDownloadProgress {
     RetainPtr<NSURLSessionDownloadTask> m_task;
-    WebKit::Download* m_download;
+    WeakPtr<WebKit::Download> m_download;
     RefPtr<WebKit::SandboxExtension> m_sandboxExtension;
 }
 
-- (instancetype)initWithDownloadTask:(NSURLSessionDownloadTask *)task download:(WebKit::Download*)download URL:(NSURL *)fileURL sandboxExtension:(RefPtr<WebKit::SandboxExtension>)sandboxExtension
+- (void)performCancel
+{
+    if (m_download)
+        m_download->cancel([](auto&) { }, WebKit::Download::IgnoreDidFailCallback::No);
+    m_download = nullptr;
+}
+
+- (instancetype)initWithDownloadTask:(NSURLSessionDownloadTask *)task download:(WebKit::Download&)download URL:(NSURL *)fileURL sandboxExtension:(RefPtr<WebKit::SandboxExtension>)sandboxExtension
 {
     if (!(self = [self initWithParent:nil userInfo:nil]))
         return nil;
 
     m_task = task;
-    m_download = download;
+    m_download = makeWeakPtr(download);
 
     [task addObserver:self forKeyPath:countOfBytesExpectedToReceiveKeyPath options:NSKeyValueObservingOptionNew | NSKeyValueObservingOptionInitial context:WKDownloadProgressBytesExpectedToReceiveCountContext];
     [task addObserver:self forKeyPath:countOfBytesReceivedKeyPath options:NSKeyValueObservingOptionNew | NSKeyValueObservingOptionInitial context:WKDownloadProgressBytesReceivedContext];
 
     self.kind = NSProgressKindFile;
-#if !PLATFORM(MAC) || __MAC_OS_X_VERSION_MIN_REQUIRED >= 101300
     self.fileOperationKind = NSProgressFileOperationKindDownloading;
     self.fileURL = fileURL;
-#else
-    [self setUserInfoObject:NSProgressFileOperationKindDownloading forKey:NSProgressFileOperationKindKey];
-    [self setUserInfoObject:fileURL forKey:NSProgressFileURLKey];
-#endif
     m_sandboxExtension = sandboxExtension;
 
     self.cancellable = YES;
-    self.cancellationHandler = makeBlockPtr([weakSelf = WeakObjCPtr<WKDownloadProgress> { self }] {
-        auto strongSelf = weakSelf.get();
-        if (!strongSelf)
+    self.cancellationHandler = makeBlockPtr([weakSelf = WeakObjCPtr<WKDownloadProgress> { self }] () mutable {
+        if (!RunLoop::isMain()) {
+            RunLoop::main().dispatch([weakSelf = WTFMove(weakSelf)] {
+                [weakSelf performCancel];
+            });
             return;
-
-        if (auto* download = strongSelf.get()->m_download)
-            download->cancel();
+        }
+        [weakSelf performCancel];
     }).get();
 
     return self;
 }
 
-#if USE(NSPROGRESS_PUBLISHING_SPI)
+#if HAVE(NSPROGRESS_PUBLISHING_SPI)
 - (void)_publish
 #else
 - (void)publish
@@ -86,20 +89,20 @@ static NSString * const countOfBytesReceivedKeyPath = @"countOfBytesReceived";
     BOOL consumedExtension = m_sandboxExtension->consume();
     ASSERT_UNUSED(consumedExtension, consumedExtension);
 
-#if USE(NSPROGRESS_PUBLISHING_SPI)
+#if HAVE(NSPROGRESS_PUBLISHING_SPI)
     [super _publish];
 #else
     [super publish];
 #endif
 }
 
-#if USE(NSPROGRESS_PUBLISHING_SPI)
+#if HAVE(NSPROGRESS_PUBLISHING_SPI)
 - (void)_unpublish
 #else
 - (void)unpublish
 #endif
 {
-#if USE(NSPROGRESS_PUBLISHING_SPI)
+#if HAVE(NSPROGRESS_PUBLISHING_SPI)
     [super _unpublish];
 #else
     [super unpublish];

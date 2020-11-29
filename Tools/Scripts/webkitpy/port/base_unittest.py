@@ -1,4 +1,5 @@
 # Copyright (C) 2010 Google Inc. All rights reserved.
+# Copyright (C) 2020 Apple Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are
@@ -33,17 +34,21 @@ import unittest
 from webkitpy.common.system.executive import ScriptError
 from webkitpy.common.system import executive_mock
 from webkitpy.common.system.filesystem_mock import MockFileSystem
-from webkitpy.common.system.outputcapture import OutputCapture
 from webkitpy.common.system.executive_mock import MockExecutive2
 from webkitpy.common.system.systemhost_mock import MockSystemHost
-
+from webkitpy.common.host_mock import MockHost
 from webkitpy.port import Port
 from webkitpy.port.test import add_unit_tests_to_mock_filesystem, TestPort
 
+from webkitcorepy import OutputCapture
+
+
+def cmp(a, b):
+    return (a > b) - (a < b)
 
 class PortTest(unittest.TestCase):
     def make_port(self, executive=None, with_tests=False, port_name=None, **kwargs):
-        host = MockSystemHost()
+        host = MockHost(create_stub_repository_files=True)
         if executive:
             host.executive = executive
         if with_tests:
@@ -63,15 +68,13 @@ class PortTest(unittest.TestCase):
 
     def test_pretty_patch_os_error(self):
         port = self.make_port(executive=executive_mock.MockExecutive2(exception=OSError))
-        oc = OutputCapture()
-        oc.capture_output()
-        self.assertEqual(port.pretty_patch.pretty_patch_text("patch.txt"),
-                         port.pretty_patch.pretty_patch_error_html)
+        with OutputCapture():
+            self.assertEqual(port.pretty_patch.pretty_patch_text("patch.txt"),
+                             port.pretty_patch.pretty_patch_error_html)
 
-        # This tests repeated calls to make sure we cache the result.
-        self.assertEqual(port.pretty_patch.pretty_patch_text("patch.txt"),
-                         port.pretty_patch.pretty_patch_error_html)
-        oc.restore_output()
+            # This tests repeated calls to make sure we cache the result.
+            self.assertEqual(port.pretty_patch.pretty_patch_text("patch.txt"),
+                             port.pretty_patch.pretty_patch_error_html)
 
     def test_pretty_patch_script_error(self):
         # FIXME: This is some ugly white-box test hacking ...
@@ -105,7 +108,7 @@ class PortTest(unittest.TestCase):
 
         t1 = "A\n\nB"
         t2 = "A\n\nB\n\n\n"
-        t3 = "--- exp.txt\n+++ act.txt\n@@ -1,3 +1,5 @@\n A\n \n-B\n\ No newline at end of file\n+B\n+\n+\n"
+        t3 = "--- exp.txt\n+++ act.txt\n@@ -1,3 +1,5 @@\n A\n \n-B\n No newline at end of file\n+B\n+\n+\n"
         self.assertEqual(t3, port.diff_text(t1, t2, 'exp.txt', 'act.txt'))
 
         # And make sure we actually get diff output.
@@ -288,13 +291,18 @@ class PortTest(unittest.TestCase):
 
     def test_parse_reftest_list(self):
         port = self.make_port(with_tests=True)
-        port.host.filesystem.files['bar/reftest.list'] = "\n".join(["== test.html test-ref.html",
-        "",
-        "# some comment",
-        "!= test-2.html test-notref.html # more comments",
-        "== test-3.html test-ref.html",
-        "== test-3.html test-ref2.html",
-        "!= test-3.html test-notref.html"])
+        port.host.filesystem.write_text_file(
+            'bar/reftest.list',
+            "\n".join([
+                "== test.html test-ref.html",
+                "",
+                "# some comment",
+                "!= test-2.html test-notref.html # more comments",
+                "== test-3.html test-ref.html",
+                "== test-3.html test-ref2.html",
+                "!= test-3.html test-notref.html",
+            ]),
+        )
 
         reftest_list = Port._parse_reftest_list(port.host.filesystem, 'bar')
         self.assertEqual(reftest_list, {'bar/test.html': [('==', 'bar/test-ref.html')],
@@ -321,20 +329,16 @@ class PortTest(unittest.TestCase):
     def test_check_httpd_success(self):
         port = self.make_port(executive=MockExecutive2())
         port._path_to_apache = lambda: '/usr/sbin/httpd'
-        capture = OutputCapture()
-        capture.capture_output()
-        self.assertTrue(port.check_httpd())
-        _, _, logs = capture.restore_output()
-        self.assertEqual('', logs)
+        with OutputCapture() as captured:
+            self.assertTrue(port.check_httpd())
+        self.assertEqual('', captured.root.log.getvalue())
 
     def test_httpd_returns_error_code(self):
         port = self.make_port(executive=MockExecutive2(exit_code=1))
         port._path_to_apache = lambda: '/usr/sbin/httpd'
-        capture = OutputCapture()
-        capture.capture_output()
-        self.assertFalse(port.check_httpd())
-        _, _, logs = capture.restore_output()
-        self.assertEqual('httpd seems broken. Cannot run http tests.\n', logs)
+        with OutputCapture() as captured:
+            self.assertFalse(port.check_httpd())
+        self.assertEqual('httpd seems broken. Cannot run http tests.\n', captured.root.log.getvalue())
 
     def test_test_exists(self):
         port = self.make_port(with_tests=True)
@@ -426,6 +430,10 @@ class PortTest(unittest.TestCase):
             [('!=', '/mock-checkout/LayoutTests/platform/foo/fast/ref-expected-mismatch.html')],
             port.reference_files('fast/ref.html'),
         )
+
+    def test_commits_for_upload(self):
+        port = self.make_port(port_name='foo')
+        self.assertEqual([{'repository_id': 'webkit', 'id': '2738499', 'branch': 'trunk'}], port.commits_for_upload())
 
 
 class NaturalCompareTest(unittest.TestCase):

@@ -8,7 +8,6 @@ features: [class-methods-private, class-fields-private, class, class-fields-publ
 flags: [generated, async]
 includes: [propertyHelper.js]
 info: |
-    
     ClassElement :
       MethodDefinition
       ...
@@ -133,4 +132,4 @@ c.m().then(function(v) {
   }
 
   return Promise.resolve(assertions());
-}, $DONE).then($DONE, $DONE);
+}).then($DONE, $DONE);

@@ -30,7 +30,10 @@
 #include "ArgumentCoders.h"
 #include "InteractionInformationRequest.h"
 #include "ShareableBitmap.h"
+#include <WebCore/Cursor.h>
+#include <WebCore/ElementContext.h>
 #include <WebCore/IntPoint.h>
+#include <WebCore/ScrollTypes.h>
 #include <WebCore/SelectionRect.h>
 #include <WebCore/TextIndicator.h>
 #include <wtf/URL.h>
@@ -49,11 +52,9 @@ struct InteractionInformationAtPosition {
     InteractionInformationRequest request;
 
     bool canBeValid { true };
-    bool nodeAtPositionIsFocusedElement { false };
-#if ENABLE(DATA_INTERACTION)
-    bool hasSelectionAtPosition { false };
-#endif
+    Optional<bool> nodeAtPositionHasDoubleClickHandler;
     bool isSelectable { false };
+    bool prefersDraggingOverTextSelection { false };
     bool isNearMarkedText { false };
     bool touchCalloutEnabled { true };
     bool isLink { false };
@@ -61,24 +62,31 @@ struct InteractionInformationAtPosition {
     bool isAttachment { false };
     bool isAnimatedImage { false };
     bool isElement { false };
+    WebCore::ScrollingNodeID containerScrollingNodeID { 0 };
 #if ENABLE(DATA_DETECTION)
     bool isDataDetectorLink { false };
 #endif
 #if ENABLE(DATALIST_ELEMENT)
     bool preventTextInteraction { false };
 #endif
+    bool shouldNotUseIBeamInEditableContent { false };
     WebCore::FloatPoint adjustedPointForNodeRespondingToClickEvents;
     URL url;
     URL imageURL;
     String title;
     String idAttribute;
     WebCore::IntRect bounds;
-#if PLATFORM(IOSMAC)
+#if PLATFORM(MACCATALYST)
     WebCore::IntRect caretRect;
 #endif
     RefPtr<ShareableBitmap> image;
     String textBefore;
     String textAfter;
+
+    float caretHeight { 0 };
+    WebCore::FloatRect lineCaretExtent;
+
+    Optional<WebCore::Cursor> cursor;
 
     WebCore::TextIndicatorData linkIndicator;
 #if ENABLE(DATA_DETECTION)
@@ -86,13 +94,15 @@ struct InteractionInformationAtPosition {
     RetainPtr<NSArray> dataDetectorResults;
 #endif
 
+    Optional<WebCore::ElementContext> elementContext;
+
     // Copy compatible optional bits forward (for example, if we have a InteractionInformationAtPosition
     // with snapshots in it, and perform another request for the same point without requesting the snapshots,
     // we can fetch the cheap information and copy the snapshots into the new response).
     void mergeCompatibleOptionalInformation(const InteractionInformationAtPosition& oldInformation);
 
     void encode(IPC::Encoder&) const;
-    static bool decode(IPC::Decoder&, InteractionInformationAtPosition&);
+    static WARN_UNUSED_RETURN bool decode(IPC::Decoder&, InteractionInformationAtPosition&);
 };
 
 }

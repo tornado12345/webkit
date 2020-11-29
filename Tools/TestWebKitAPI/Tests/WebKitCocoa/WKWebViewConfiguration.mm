@@ -28,6 +28,7 @@
 #import "PlatformUtilities.h"
 #import <WebKit/WKWebView.h>
 #import <WebKit/WKWebViewConfigurationPrivate.h>
+#import <WebKit/WKWebsiteDataStore.h>
 #import <wtf/Function.h>
 #import <wtf/RetainPtr.h>
 
@@ -62,6 +63,14 @@ TEST(WebKit, InvalidConfiguration)
         [configuration _setVisitedLinkStore:nil];
     });
 #pragma clang diagnostic pop
+
+    // Related WebViews cannot use different data stores.
+    auto configurationForEphemeralView = adoptNS([[WKWebViewConfiguration alloc] init]);
+    configurationForEphemeralView.get().websiteDataStore = [WKWebsiteDataStore nonPersistentDataStore];
+    auto ephemeralWebView = adoptNS([[WKWebView alloc] initWithFrame:NSMakeRect(0, 0, 800, 600) configuration:configurationForEphemeralView.get()]);
+    shouldThrowExceptionWhenUsed([&](WKWebViewConfiguration *configuration) {
+        [configuration _setRelatedWebView:ephemeralWebView.get()];
+    });
 }
 
 TEST(WebKit, ConfigurationGroupIdentifierIsCopied)
@@ -71,4 +80,18 @@ TEST(WebKit, ConfigurationGroupIdentifierIsCopied)
 
     auto configuationCopy = adoptNS([configuration copy]);
     EXPECT_STREQ([configuration _groupIdentifier].UTF8String, [configuationCopy _groupIdentifier].UTF8String);
+}
+
+TEST(WebKit, DefaultConfigurationEME)
+{
+    auto configuration = adoptNS([WKWebViewConfiguration new]);
+    EXPECT_TRUE([configuration _legacyEncryptedMediaAPIEnabled]);
+    auto webView = adoptNS([[WKWebView alloc] initWithFrame:CGRectMake(0, 0, 100, 100) configuration:configuration.get()]);
+    [webView loadHTMLString:@"<html>hi</html>" baseURL:nil];
+    __block bool done = false;
+    [webView evaluateJavaScript:@"window.WebKitMediaKeys ? 'ENABLED' : 'DISABLED'" completionHandler:^(id result, NSError *){
+        EXPECT_TRUE([result isEqualToString:@"ENABLED"]);
+        done = true;
+    }];
+    TestWebKitAPI::Util::run(&done);
 }

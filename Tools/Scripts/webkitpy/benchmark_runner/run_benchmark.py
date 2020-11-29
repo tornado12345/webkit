@@ -3,14 +3,13 @@
 import argparse
 import json
 import logging
-import platform
 import os
 import sys
 
-from browser_driver.browser_driver_factory import BrowserDriverFactory
-from benchmark_runner import BenchmarkRunner
-from webdriver_benchmark_runner import WebDriverBenchmarkRunner
-from webserver_benchmark_runner import WebServerBenchmarkRunner
+from webkitpy.benchmark_runner.browser_driver.browser_driver_factory import BrowserDriverFactory
+from webkitpy.benchmark_runner.benchmark_runner import BenchmarkRunner
+from webkitpy.benchmark_runner.webdriver_benchmark_runner import WebDriverBenchmarkRunner
+from webkitpy.benchmark_runner.webserver_benchmark_runner import WebServerBenchmarkRunner
 
 
 _log = logging.getLogger(__name__)
@@ -41,12 +40,13 @@ def parse_args():
     mutual_group.add_argument('--read-results-json', dest='json_file', help='Instead of running a benchmark, format the output saved in JSON_FILE.')
     parser.add_argument('--output-file', default=None, help='Save detailed results to OUTPUT in JSON format. By default, results will not be saved.')
     parser.add_argument('--count', type=int, help='Number of times to run the benchmark (e.g. 5).')
-    parser.add_argument('--driver', default=WebServerBenchmarkRunner.name, choices=benchmark_runner_subclasses.keys(), help='Use the specified benchmark driver. Defaults to %s.' % WebServerBenchmarkRunner.name)
+    parser.add_argument('--driver', default=WebServerBenchmarkRunner.name, choices=list(benchmark_runner_subclasses.keys()), help='Use the specified benchmark driver. Defaults to %s.' % WebServerBenchmarkRunner.name)
     parser.add_argument('--browser', default=default_browser(), choices=BrowserDriverFactory.available_browsers(), help='Browser to run the nechmark in. Defaults to %s.' % default_browser())
     parser.add_argument('--platform', default=default_platform(), choices=BrowserDriverFactory.available_platforms(), help='Platform that this script is running on. Defaults to %s.' % default_platform())
     parser.add_argument('--local-copy', help='Path to a local copy of the benchmark (e.g. PerformanceTests/SunSpider/).')
     parser.add_argument('--device-id', default=None, help='Undocumented option for mobile device testing.')
     parser.add_argument('--debug', action='store_true', help='Enable debug logging.')
+    parser.add_argument('--diagnose-directory', dest='diagnose_dir', default=None, help='Directory for storing diagnose information on test failure. It\'s up to browser driver implementation when this option is not specified.')
     parser.add_argument('--no-adjust-unit', dest='scale_unit', action='store_false', help="Don't convert to scientific notation.")
     parser.add_argument('--show-iteration-values', dest='show_iteration_values', action='store_true', help="Show the measured value for each iteration in addition to averages.")
 
@@ -68,7 +68,7 @@ def parse_args():
 
 def run_benchmark_plan(args, plan):
     benchmark_runner_class = benchmark_runner_subclasses[args.driver]
-    runner = benchmark_runner_class(plan, args.local_copy, args.count, args.build_dir, args.output_file, args.platform, args.browser, args.browser_path, args.scale_unit, args.show_iteration_values, args.device_id)
+    runner = benchmark_runner_class(plan, args.local_copy, args.count, args.build_dir, args.output_file, args.platform, args.browser, args.browser_path, args.scale_unit, args.show_iteration_values, args.device_id, args.diagnose_dir)
     runner.execute()
 
 

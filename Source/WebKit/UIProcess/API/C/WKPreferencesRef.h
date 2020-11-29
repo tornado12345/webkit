@@ -27,6 +27,7 @@
 #define WKPreferencesRef_h
 
 #include <WebKit/WKBase.h>
+#include <WebKit/WKDeprecated.h>
 
 #ifndef __cplusplus
 #include <stdbool.h>
@@ -45,7 +46,9 @@ typedef enum WKStorageBlockingPolicy WKStorageBlockingPolicy;
 
 enum WKDebugOverlayRegionFlags {
     kWKNonFastScrollableRegion = 1 << 0,
-    kWKWheelEventHandlerRegion = 1 << 1
+    kWKWheelEventHandlerRegion = 1 << 1,
+    kWKTouchActionRegion = 1 << 2,
+    kWKEditableElementRegion = 1 << 3,
 };
 typedef unsigned WKDebugOverlayRegions;
 
@@ -55,9 +58,9 @@ enum _WKUserInterfaceDirectionPolicy {
 };
 typedef enum _WKUserInterfaceDirectionPolicy _WKUserInterfaceDirectionPolicy;
 
-WK_EXPORT WKTypeID WKPreferencesGetTypeID();
+WK_EXPORT WKTypeID WKPreferencesGetTypeID(void);
 
-WK_EXPORT WKPreferencesRef WKPreferencesCreate();
+WK_EXPORT WKPreferencesRef WKPreferencesCreate(void);
 WK_EXPORT WKPreferencesRef WKPreferencesCreateWithIdentifier(WKStringRef identifier);
 
 // Defaults to true.
@@ -108,10 +111,6 @@ WK_EXPORT bool WKPreferencesGetJavaEnabled(WKPreferencesRef preferences);
 WK_EXPORT void WKPreferencesSetJavaScriptCanOpenWindowsAutomatically(WKPreferencesRef preferences, bool javaScriptCanOpenWindowsAutomatically);
 WK_EXPORT bool WKPreferencesGetJavaScriptCanOpenWindowsAutomatically(WKPreferencesRef preferences);
 
-// Defaults to false.
-WK_EXPORT void WKPreferencesSetStorageAccessPromptsEnabled(WKPreferencesRef preferencesRef, bool enabled);
-WK_EXPORT bool WKPreferencesGetStorageAccessPromptsEnabled(WKPreferencesRef preferencesRef);
-
 // Defaults to true.
 WK_EXPORT void WKPreferencesSetHyperlinkAuditingEnabled(WKPreferencesRef preferences, bool hyperlinkAuditingEnabled);
 WK_EXPORT bool WKPreferencesGetHyperlinkAuditingEnabled(WKPreferencesRef preferences);
@@ -153,8 +152,8 @@ WK_EXPORT void WKPreferencesSetDefaultTextEncodingName(WKPreferencesRef preferen
 WK_EXPORT WKStringRef WKPreferencesCopyDefaultTextEncodingName(WKPreferencesRef preferencesRef);
 
 // Defaults to false.
-WK_EXPORT void WKPreferencesSetPrivateBrowsingEnabled(WKPreferencesRef preferencesRef, bool enabled);
-WK_EXPORT bool WKPreferencesGetPrivateBrowsingEnabled(WKPreferencesRef preferencesRef);
+WK_EXPORT void WKPreferencesSetPrivateBrowsingEnabled(WKPreferencesRef preferencesRef, bool enabled) WK_C_API_DEPRECATED;
+WK_EXPORT bool WKPreferencesGetPrivateBrowsingEnabled(WKPreferencesRef preferencesRef) WK_C_API_DEPRECATED;
 
 // Defaults to false.
 WK_EXPORT void WKPreferencesSetDeveloperExtrasEnabled(WKPreferencesRef preferencesRef, bool enabled);
@@ -248,6 +247,10 @@ WK_EXPORT bool WKPreferencesGetEncodingDetectorEnabled(WKPreferencesRef preferen
 WK_EXPORT void WKPreferencesSetTextAutosizingEnabled(WKPreferencesRef preferences, bool textAutosizingEnabled);
 WK_EXPORT bool WKPreferencesGetTextAutosizingEnabled(WKPreferencesRef preferences);
 
+// Defaults to false.
+WK_EXPORT void WKPreferencesSetTextAutosizingUsesIdempotentMode(WKPreferencesRef preferences, bool textAutosizingUsesIdempotentModeEnabled);
+WK_EXPORT bool WKPreferencesGetTextAutosizingUsesIdempotentMode(WKPreferencesRef preferences);
+
 // Defaults to true.
 WK_EXPORT void WKPreferencesSetQTKitEnabled(WKPreferencesRef preferencesRef, bool enabled);
 WK_EXPORT bool WKPreferencesGetQTKitEnabled(WKPreferencesRef preferencesRef);
@@ -320,9 +323,9 @@ WK_EXPORT void WKPreferencesSetMediaCapabilitiesEnabled(WKPreferencesRef prefere
 WK_EXPORT bool WKPreferencesGetRestrictedHTTPResponseAccess(WKPreferencesRef preferencesRef);
 WK_EXPORT void WKPreferencesSetRestrictedHTTPResponseAccess(WKPreferencesRef preferencesRef, bool allow);
 
-// Defaults to false.
-WK_EXPORT bool WKPreferencesGetCrossOriginResourcePolicyEnabled(WKPreferencesRef preferencesRef);
-WK_EXPORT void WKPreferencesSetCrossOriginResourcePolicyEnabled(WKPreferencesRef preferencesRef, bool allow);
+// Obsolete. Always returns true.
+WK_EXPORT bool WKPreferencesGetCrossOriginResourcePolicyEnabled(WKPreferencesRef preferencesRef) WK_C_API_DEPRECATED;
+WK_EXPORT void WKPreferencesSetCrossOriginResourcePolicyEnabled(WKPreferencesRef preferencesRef, bool allow) WK_C_API_DEPRECATED;
 
 // Defaults to false.
 WK_EXPORT bool WKPreferencesGetProcessSwapOnNavigationEnabled(WKPreferencesRef preferencesRef);
@@ -334,8 +337,20 @@ WK_EXPORT void WKPreferencesSetWebSQLDisabled(WKPreferencesRef preferencesRef, b
 
 WK_EXPORT void WKPreferencesSetCaptureAudioInUIProcessEnabled(WKPreferencesRef preferencesRef, bool flag);
 WK_EXPORT bool WKPreferencesGetCaptureAudioInUIProcessEnabled(WKPreferencesRef preferencesRef);
+WK_EXPORT void WKPreferencesSetCaptureAudioInGPUProcessEnabled(WKPreferencesRef preferencesRef, bool flag);
+WK_EXPORT bool WKPreferencesGetCaptureAudioInGPUProcessEnabled(WKPreferencesRef preferencesRef);
 WK_EXPORT void WKPreferencesSetCaptureVideoInUIProcessEnabled(WKPreferencesRef preferencesRef, bool flag);
 WK_EXPORT bool WKPreferencesGetCaptureVideoInUIProcessEnabled(WKPreferencesRef preferencesRef);
+WK_EXPORT void WKPreferencesSetCaptureVideoInGPUProcessEnabled(WKPreferencesRef preferencesRef, bool flag);
+WK_EXPORT bool WKPreferencesGetCaptureVideoInGPUProcessEnabled(WKPreferencesRef preferencesRef);
+
+// Defaults to false.
+WK_EXPORT bool WKPreferencesGetRemotePlaybackEnabled(WKPreferencesRef preferencesRef);
+WK_EXPORT void WKPreferencesSetRemotePlaybackEnabled(WKPreferencesRef preferencesRef, bool enabled);
+
+// Defaults to false.
+WK_EXPORT bool WKPreferencesGetShouldUseServiceWorkerShortTimeout(WKPreferencesRef preferencesRef);
+WK_EXPORT void WKPreferencesSetShouldUseServiceWorkerShortTimeout(WKPreferencesRef preferencesRef, bool enabled);
 
 #ifdef __cplusplus
 }

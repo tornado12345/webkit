@@ -25,7 +25,7 @@
 
 #pragma once
 
-#if ENABLE(DRAG_SUPPORT) && PLATFORM(IOS_FAMILY)
+#if PLATFORM(IOS_FAMILY) && ENABLE(DRAG_SUPPORT)
 
 #import "UIKitSPI.h"
 #import <WebCore/DragActions.h>
@@ -40,12 +40,13 @@
 
 namespace WebCore {
 struct DragItem;
+struct TextIndicatorData;
 }
 
 namespace WebKit {
 
 struct DragSourceState {
-    WebCore::DragSourceAction action { WebCore::DragSourceActionNone };
+    OptionSet<WebCore::DragSourceAction> action;
     CGPoint adjustedOrigin { CGPointZero };
     CGRect dragPreviewFrameInRootViewCoordinates { CGRectZero };
     RetainPtr<UIImage> image;
@@ -56,6 +57,16 @@ struct DragSourceState {
     bool possiblyNeedsDragPreviewUpdate { true };
 
     NSInteger itemIdentifier { 0 };
+};
+
+struct ItemAndPreview {
+    RetainPtr<UIDragItem> item;
+    RetainPtr<UITargetedDragPreview> preview;
+};
+
+struct ItemAndPreviewProvider {
+    RetainPtr<UIDragItem> item;
+    BlockPtr<void(UITargetedDragPreview *)> provider;
 };
 
 class DragDropInteractionState {
@@ -92,9 +103,17 @@ public:
     BlockPtr<void()> takeDragCancelSetDownBlock() { return WTFMove(m_dragCancelSetDownBlock); }
     BlockPtr<void(NSArray<UIDragItem *> *)> takeAddDragItemCompletionBlock() { return WTFMove(m_addDragItemCompletionBlock); }
 
+    void setDefaultDropPreview(UIDragItem *, UITargetedDragPreview *);
+    void prepareForDelayedDropPreview(UIDragItem *, void(^provider)(UITargetedDragPreview *preview));
+    void deliverDelayedDropPreview(UIView *contentView, UIView *previewContainer, const WebCore::TextIndicatorData&);
+    void deliverDelayedDropPreview(UIView *contentView, CGRect unobscuredContentRect, NSArray<UIDragItem *> *, const Vector<WebCore::IntRect>& placeholderRects);
+    void clearAllDelayedItemPreviewProviders();
+
 private:
     void updatePreviewsForActiveDragSources();
     Optional<DragSourceState> activeDragSourceForItem(UIDragItem *) const;
+    UITargetedDragPreview *defaultDropPreview(UIDragItem *) const;
+    BlockPtr<void(UITargetedDragPreview *)> dropPreviewProvider(UIDragItem *);
 
     CGPoint m_lastGlobalPosition { CGPointZero };
     CGPoint m_adjustedPositionForDragEnd { CGPointZero };
@@ -108,8 +127,10 @@ private:
 
     Optional<DragSourceState> m_stagedDragSource;
     Vector<DragSourceState> m_activeDragSources;
+    Vector<ItemAndPreviewProvider> m_delayedItemPreviewProviders;
+    Vector<ItemAndPreview> m_defaultDropPreviews;
 };
 
 } // namespace WebKit
 
-#endif // ENABLE(DRAG_SUPPORT) && PLATFORM(IOS_FAMILY)
+#endif // PLATFORM(IOS_FAMILY) && ENABLE(DRAG_SUPPORT)

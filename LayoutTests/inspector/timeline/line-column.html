@@ -33,12 +33,18 @@ function willEvaluateScriptTest() {
     console.profileEnd();
 }
 
-function test() {
-    ProtocolTest.debug();
-
+function test()
+{
     let suite = ProtocolTest.createAsyncSuite("Timeline.LineColumn");
 
+    InspectorProtocol.sendCommand("Page.enable", {});
+    InspectorProtocol.sendCommand("Timeline.enable");
+
+    // To avoid flakiness print only events that we always expect.
+    const eventWhitelist = new Set(["RenderingFrame", "ConsoleProfile", "EventDispatch", "FunctionCall"]);
     function replacer(key, value) {
+        if (key === "children" && this.startTime)
+            return value.filter(e => eventWhitelist.has(e.type));
         if (key === "startTime" || key === "endTime" || key === "scriptId" || key === "frameId")
             return "<filtered>";
         if (key === "url" || key === "scriptName")
@@ -75,11 +81,11 @@ function test() {
                     ProtocolTest.log(JSON.stringify(event.params.record, replacer, 2));
                 });
 
-                handleEvent("Timeline.programmaticCaptureStarted", () => {
+                handleEvent("Timeline.recordingStarted", () => {
                     ProtocolTest.pass("Capturing started.");
                 });
 
-                handleEvent("Timeline.programmaticCaptureStopped", () => {
+                handleEvent("Timeline.recordingStopped", () => {
                     ProtocolTest.pass("Capturing stopped.");
 
                     for (let eventName of eventNames)

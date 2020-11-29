@@ -30,7 +30,6 @@
 #include "RenderSVGInlineText.h"
 #include "RenderSVGResource.h"
 #include "ShadowRoot.h"
-#include "SVGDocument.h"
 #include "SVGDocumentExtensions.h"
 #include "SVGNames.h"
 #include "ScriptDisallowedScope.h"
@@ -172,7 +171,7 @@ void SVGTRefElement::detachTarget()
         document().accessSVGExtensions().addPendingResource(target.identifier, *this);
 }
 
-void SVGTRefElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
+void SVGTRefElement::parseAttribute(const QualifiedName& name, const AtomString& value)
 {
     SVGTextPositioningElement::parseAttribute(name, value);
     SVGURIReference::parseAttribute(name, value);
@@ -205,9 +204,7 @@ bool SVGTRefElement::rendererIsNeeded(const RenderStyle& style)
 {
     if (parentNode()
         && (parentNode()->hasTagName(SVGNames::aTag)
-#if ENABLE(SVG_FONTS)
             || parentNode()->hasTagName(SVGNames::altGlyphTag)
-#endif
             || parentNode()->hasTagName(SVGNames::textTag)
             || parentNode()->hasTagName(SVGNames::textPathTag)
             || parentNode()->hasTagName(SVGNames::tspanTag)))

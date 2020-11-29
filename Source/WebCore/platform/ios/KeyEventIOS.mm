@@ -172,8 +172,10 @@ int windowsKeyCodeForKeyCode(uint16_t keyCode)
         /* 0x80 */ VK_VOLUME_UP, // Volume Up
         /* 0x81 */ VK_VOLUME_DOWN, // Volume Down
     };
-    // Check if key is a modifier.
+    // Check if key is a modifier or the keypad comma (on JIS keyboard).
     switch (keyCode) {
+    case kHIDUsage_KeypadComma:
+        return VK_SEPARATOR;
     case kHIDUsage_KeyboardLeftControl:
         return VK_LCONTROL;
     case kHIDUsage_KeyboardLeftShift:
@@ -197,9 +199,6 @@ int windowsKeyCodeForKeyCode(uint16_t keyCode)
     return 0; // Unknown key
 }
 
-// This function is only used to map software keyboard events because they lack a key code.
-// When !USE(UIKIT_KEYBOARD_ADDITIONS), this function is also used to map hardware keyboard
-// keyup events because they lack a key code.
 int windowsKeyCodeForCharCode(unichar charCode)
 {
     switch (charCode) {
@@ -245,7 +244,6 @@ int windowsKeyCodeForCharCode(unichar charCode)
     case 'y': case 'Y': return VK_Y;
     case 'z': case 'Z': return VK_Z;
 
-#if !USE(UIKIT_KEYBOARD_ADDITIONS)
     case 0x1B: return VK_ESCAPE; // WebKit generated code for Escape.
 
     // WebKit uses Unicode PUA codes in the OpenStep reserve range for some special keys.
@@ -255,7 +253,6 @@ int windowsKeyCodeForCharCode(unichar charCode)
     case NSRightArrowFunctionKey: return VK_RIGHT;
     case NSPageUpFunctionKey: return VK_PRIOR;
     case NSPageDownFunctionKey: return VK_NEXT;
-#endif
 
     // This is for U.S. keyboard mapping, and doesn't necessarily make sense for different keyboard layouts.
     // For example, '"' on Windows Russian layout is VK_2, not VK_OEM_7.

@@ -1,6 +1,6 @@
-CONSOLE MESSAGE: line 8: Test started
-CONSOLE MESSAGE: line 1: ApplicationCache is deprecated. Please use ServiceWorkers instead.
-CONSOLE MESSAGE: line 18: PASS
+CONSOLE MESSAGE: Test started
+CONSOLE MESSAGE: ApplicationCache is deprecated. Please use ServiceWorkers instead.
+CONSOLE MESSAGE: PASS
 This test passes if the application cache does not load while in private browsing
 
 
@@ -8,4 +8,6 @@ This test passes if the application cache does not load while in private browsin
 --------
 Frame: '<!--frame1-->'
 --------
+Application cache loaded
+Application cache not loaded
 

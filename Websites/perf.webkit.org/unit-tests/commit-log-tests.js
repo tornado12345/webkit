@@ -148,7 +148,7 @@ describe('CommitLog', function () {
         });
 
         it('should truncate a Git hash at 8th character', function () {
-            assert.equal(gitWebKitCommit().label(), '6f8b0dbb');
+            assert.equal(gitWebKitCommit().label(), '6f8b0dbbda95');
         });
 
         it('should not modify OS X version', function () {
@@ -162,7 +162,7 @@ describe('CommitLog', function () {
         });
 
         it('should truncate a Git hash at 8th character', function () {
-            assert.equal(gitWebKitCommit().title(), 'WebKit at 6f8b0dbb');
+            assert.equal(gitWebKitCommit().title(), 'WebKit at 6f8b0dbbda95');
         });
 
         it('should not modify OS X version', function () {
@@ -188,7 +188,7 @@ describe('CommitLog', function () {
             });
 
             assert.deepEqual(gitWebKitCommit().diff(), {
-                label: '6f8b0dbb',
+                label: '6f8b0dbbda95',
                 url: 'http://trac.webkit.org/changeset/6f8b0dbbda95a440503b88db1dd03dad3a7b07fb',
                 repository: MockModels.webkit,
             });
@@ -210,7 +210,7 @@ describe('CommitLog', function () {
 
         it('should truncate a Git hash at 8th character', function () {
             assert.deepEqual(gitWebKitCommit().diff(oldGitWebKitCommit()), {
-                label: 'ffda14e6..6f8b0dbb',
+                label: 'ffda14e6db07..6f8b0dbbda95',
                 url: '',
                 repository: MockModels.webkit
             });
@@ -539,5 +539,19 @@ describe('CommitLog', function () {
 
             assert.notEqual(commits[0], newCommits[0]);
         });
+
+        it('should allow to fetch commit with prefix', async () => {
+            CommitLog.fetchForSingleRevision(MockModels.webkit, '236643', true);
+            const requests = MockRemoteAPI.requests;
+            assert.equal(requests.length, 1);
+            assert.equal(requests[0].url, `/api/commits/${MockModels.webkit.id()}/236643?prefix-match=true`);
+        });
+
+        it('should not set prefix-match when "prefixMatch" is false', async () => {
+            CommitLog.fetchForSingleRevision(MockModels.webkit, '236643', false);
+            const requests = MockRemoteAPI.requests;
+            assert.equal(requests.length, 1);
+            assert.equal(requests[0].url, `/api/commits/${MockModels.webkit.id()}/236643`);
+        })
     });
 });

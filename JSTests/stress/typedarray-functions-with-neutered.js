@@ -1,3 +1,4 @@
+//@ skip if $architecture == "mips"
 typedArrays = [Int8Array, Uint8Array, Uint8ClampedArray, Int16Array, Uint16Array, Int32Array, Uint32Array, Float32Array, Float64Array];
 
 proto = Int8Array.prototype.__proto__;
@@ -63,7 +64,7 @@ function checkProtoFunc(testArgs) {
     }
 
     if (!arrays.every(throwsCorrectError))
-        throw "bad" + testArgs.func.name;
+        throw new Error("bad " + testArgs.func.name);
 }
 
 function test() {
@@ -76,22 +77,13 @@ for (var i = 0; i < 1000; i++)
 // Test that we handle neutering for any toInteger neutering the arraybuffer.
 prototypeFunctions = [
     { func:proto.copyWithin, args:["prim", "prim", "prim"] },
-    { func:proto.every, args:["func"] },
     { func:proto.fill, args:["prim", "prim", "prim"] },
-    { func:proto.filter, args:["func"] },
-    { func:proto.find, args:["func"] },
-    { func:proto.findIndex, args:["func"] },
-    { func:proto.forEach, args:["func"] },
     { func:proto.indexOf, args:["na", "prim"] },
     { func:proto.includes, args:["na", "prim"] },
     { func:proto.join, args:["prim"] },
     { func:proto.lastIndexOf, args:["na", "prim"] },
-    { func:proto.map, args:["func"] },
-    { func:proto.reduce, args:["func"] },
-    { func:proto.reduceRight, args:["func"] },
     { func:proto.set, args:["array", "prim"] },
     { func:proto.slice, args:["prim", "prim"] },
-    { func:proto.some, args:["func"] },
     { func:proto.sort, args:["func"] },
     { func:proto.subarray, args:["prim", "prim"] },
 ];

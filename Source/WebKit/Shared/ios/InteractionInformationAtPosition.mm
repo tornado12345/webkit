@@ -29,7 +29,6 @@
 #import "ArgumentCodersCocoa.h"
 #import "WebCoreArgumentCoders.h"
 #import <pal/spi/cocoa/DataDetectorsCoreSPI.h>
-#import <pal/spi/cocoa/NSKeyedArchiverSPI.h>
 #import <wtf/SoftLinking.h>
 
 SOFT_LINK_PRIVATE_FRAMEWORK(DataDetectorsCore)
@@ -44,11 +43,9 @@ void InteractionInformationAtPosition::encode(IPC::Encoder& encoder) const
     encoder << request;
 
     encoder << canBeValid;
-    encoder << nodeAtPositionIsFocusedElement;
-#if ENABLE(DATA_INTERACTION)
-    encoder << hasSelectionAtPosition;
-#endif
+    encoder << nodeAtPositionHasDoubleClickHandler;
     encoder << isSelectable;
+    encoder << prefersDraggingOverTextSelection;
     encoder << isNearMarkedText;
     encoder << touchCalloutEnabled;
     encoder << isLink;
@@ -56,17 +53,21 @@ void InteractionInformationAtPosition::encode(IPC::Encoder& encoder) const
     encoder << isAttachment;
     encoder << isAnimatedImage;
     encoder << isElement;
+    encoder << containerScrollingNodeID;
     encoder << adjustedPointForNodeRespondingToClickEvents;
     encoder << url;
     encoder << imageURL;
     encoder << title;
     encoder << idAttribute;
     encoder << bounds;
-#if PLATFORM(IOSMAC)
+#if PLATFORM(MACCATALYST)
     encoder << caretRect;
 #endif
     encoder << textBefore;
     encoder << textAfter;
+    encoder << caretHeight;
+    encoder << lineCaretExtent;
+    encoder << cursor;
     encoder << linkIndicator;
 
     ShareableBitmap::Handle handle;
@@ -83,6 +84,8 @@ void InteractionInformationAtPosition::encode(IPC::Encoder& encoder) const
 #if ENABLE(DATALIST_ELEMENT)
     encoder << preventTextInteraction;
 #endif
+    encoder << shouldNotUseIBeamInEditableContent;
+    encoder << elementContext;
 }
 
 bool InteractionInformationAtPosition::decode(IPC::Decoder& decoder, InteractionInformationAtPosition& result)
@@ -93,15 +96,13 @@ bool InteractionInformationAtPosition::decode(IPC::Decoder& decoder, Interaction
     if (!decoder.decode(result.canBeValid))
         return false;
 
-    if (!decoder.decode(result.nodeAtPositionIsFocusedElement))
+    if (!decoder.decode(result.nodeAtPositionHasDoubleClickHandler))
         return false;
-
-#if ENABLE(DATA_INTERACTION)
-    if (!decoder.decode(result.hasSelectionAtPosition))
-        return false;
-#endif
 
     if (!decoder.decode(result.isSelectable))
+        return false;
+
+    if (!decoder.decode(result.prefersDraggingOverTextSelection))
         return false;
 
     if (!decoder.decode(result.isNearMarkedText))
@@ -125,6 +126,9 @@ bool InteractionInformationAtPosition::decode(IPC::Decoder& decoder, Interaction
     if (!decoder.decode(result.isElement))
         return false;
 
+    if (!decoder.decode(result.containerScrollingNodeID))
+        return false;
+
     if (!decoder.decode(result.adjustedPointForNodeRespondingToClickEvents))
         return false;
 
@@ -143,7 +147,7 @@ bool InteractionInformationAtPosition::decode(IPC::Decoder& decoder, Interaction
     if (!decoder.decode(result.bounds))
         return false;
     
-#if PLATFORM(IOSMAC)
+#if PLATFORM(MACCATALYST)
     if (!decoder.decode(result.caretRect))
         return false;
 #endif
@@ -152,6 +156,15 @@ bool InteractionInformationAtPosition::decode(IPC::Decoder& decoder, Interaction
         return false;
     
     if (!decoder.decode(result.textAfter))
+        return false;
+
+    if (!decoder.decode(result.caretHeight))
+        return false;
+
+    if (!decoder.decode(result.lineCaretExtent))
+        return false;
+
+    if (!decoder.decode(result.cursor))
         return false;
     
     Optional<WebCore::TextIndicatorData> linkIndicator;
@@ -187,6 +200,12 @@ bool InteractionInformationAtPosition::decode(IPC::Decoder& decoder, Interaction
     if (!decoder.decode(result.preventTextInteraction))
         return false;
 #endif
+
+    if (!decoder.decode(result.shouldNotUseIBeamInEditableContent))
+        return false;
+
+    if (!decoder.decode(result.elementContext))
+        return false;
 
     return true;
 }

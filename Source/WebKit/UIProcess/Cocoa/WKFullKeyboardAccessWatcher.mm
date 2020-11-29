@@ -30,7 +30,7 @@
 
 #import "WebProcessPool.h"
 
-#if ENABLE(ACCESSIBILITY_EVENTS)
+#if PLATFORM(IOS_FAMILY)
 #import "AccessibilitySupportSPI.h"
 #endif
 

@@ -25,7 +25,7 @@
 
 #pragma once
 
-#if ENABLE(VIDEO) && USE(GSTREAMER) && ENABLE(VIDEO_TRACK)
+#if ENABLE(VIDEO) && USE(GSTREAMER)
 
 #include "GStreamerCommon.h"
 #include "TrackPrivateBaseGStreamer.h"
@@ -43,35 +43,33 @@ public:
     {
         return adoptRef(*new VideoTrackPrivateGStreamer(player, index, pad));
     }
-#if GST_CHECK_VERSION(1, 10, 0)
+
     static Ref<VideoTrackPrivateGStreamer> create(WeakPtr<MediaPlayerPrivateGStreamer> player, gint index, GRefPtr<GstStream> stream)
     {
         return adoptRef(*new VideoTrackPrivateGStreamer(player, index, stream));
     }
+
     Kind kind() const final;
-#endif
 
     void disconnect() override;
 
-    void markAsActive();
     void setSelected(bool) override;
     void setActive(bool enabled) override { setSelected(enabled); }
 
     int trackIndex() const override { return m_index; }
 
-    AtomicString id() const override { return m_id; }
-    AtomicString label() const override { return m_label; }
-    AtomicString language() const override { return m_language; }
+    AtomString id() const override { return m_id; }
+    AtomString label() const override { return m_label; }
+    AtomString language() const override { return m_language; }
 
 private:
     VideoTrackPrivateGStreamer(WeakPtr<MediaPlayerPrivateGStreamer>, gint index, GRefPtr<GstPad>);
-#if GST_CHECK_VERSION(1, 10, 0)
     VideoTrackPrivateGStreamer(WeakPtr<MediaPlayerPrivateGStreamer>, gint index, GRefPtr<GstStream>);
-#endif
-    AtomicString m_id;
+
+    AtomString m_id;
     WeakPtr<MediaPlayerPrivateGStreamer> m_player;
 };
 
 } // namespace WebCore
 
-#endif // ENABLE(VIDEO) && USE(GSTREAMER) && ENABLE(VIDEO_TRACK)
+#endif // ENABLE(VIDEO) && USE(GSTREAMER)

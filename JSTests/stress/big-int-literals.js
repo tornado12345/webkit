@@ -1,5 +1,3 @@
-//@ runBigIntEnabled
-
 function assert(a) {
     if (!a)
         throw new Error("Bad assertion");
@@ -16,9 +14,6 @@ function assertThrowSyntaxError(input) {
 
 // Test 0 conversions
 let n = 0n;
-assert(n === 0n);
-
-n = 00n;
 assert(n === 0n);
 
 // Binary representation
@@ -104,10 +99,7 @@ assertThrowSyntaxError("0xfnn");
 assertThrowSyntaxError("100nn");
 assertThrowSyntaxError("1a0nn");
 assertThrowSyntaxError("10E20n");
-
-try {
-    eval("--10n");
-    assert(false);
-} catch(e) {
-    assert(e instanceof ReferenceError);
-}
+assertThrowSyntaxError("--10n");
+assertThrowSyntaxError("00n");
+assertThrowSyntaxError("01n");
+assertThrowSyntaxError("09n");

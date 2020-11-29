@@ -42,25 +42,25 @@ static bool validateBufferBindingType(const GPUBuffer* buffer, const GPUBindGrou
 #endif
 
     switch (binding.type) {
-    case GPUBindGroupLayoutBinding::BindingType::UniformBuffer:
+    case GPUBindingType::UniformBuffer:
         if (!buffer->isUniform()) {
-            LOG(WebGPU, "%s: GPUBuffer resource for binding %lu does not have UNIFORM usage!", functionName, binding.binding);
+            LOG(WebGPU, "%s: GPUBuffer resource for binding %u does not have UNIFORM usage!", functionName, binding.binding);
             return false;
         }
         return true;
-    case GPUBindGroupLayoutBinding::BindingType::StorageBuffer:
+    case GPUBindingType::StorageBuffer:
         if (!buffer->isStorage()) {
-            LOG(WebGPU, "%s: GPUBuffer resource for binding %lu does not have STORAGE usage!", functionName, binding.binding);
+            LOG(WebGPU, "%s: GPUBuffer resource for binding %u does not have STORAGE usage!", functionName, binding.binding);
             return false;
         }
         return true;
     default:
-        LOG(WebGPU, "%s: Layout binding %lu is not a buffer-type resource!", functionName, binding.binding);
+        LOG(WebGPU, "%s: Layout binding %u is not a buffer-type resource!", functionName, binding.binding);
         return false;
     }
 }
 
-Optional<GPUBindGroupDescriptor> WebGPUBindGroupDescriptor::asGPUBindGroupDescriptor() const
+Optional<GPUBindGroupDescriptor> WebGPUBindGroupDescriptor::tryCreateGPUBindGroupDescriptor() const
 {
     const char* const functionName = "GPUDevice::createBindGroup()";
 
@@ -82,7 +82,7 @@ Optional<GPUBindGroupDescriptor> WebGPUBindGroupDescriptor::asGPUBindGroupDescri
     for (const auto& binding : bindings) {
         auto iterator = layoutMap.find(binding.binding);
         if (iterator == layoutMap.end()) {
-            LOG(WebGPU, "%s: GPUBindGroupLayoutBinding %lu not found in GPUBindGroupLayout!", functionName, binding.binding);
+            LOG(WebGPU, "%s: GPUBindGroupLayoutBinding %u not found in GPUBindGroupLayout!", functionName, binding.binding);
             return WTF::nullopt;
         }
 
@@ -103,7 +103,7 @@ Optional<GPUBindGroupDescriptor> WebGPUBindGroupDescriptor::asGPUBindGroupDescri
             if (!texture)
                 return WTF::nullopt;
 
-            return static_cast<GPUBindingResource>(texture.releaseNonNull());
+            return static_cast<GPUBindingResource>(makeRef(*texture));
         }, [&layoutBinding, functionName] (WebGPUBufferBinding bufferBinding) -> Optional<GPUBindingResource> {
             if (!bufferBinding.buffer)
                 return WTF::nullopt;
@@ -111,22 +111,22 @@ Optional<GPUBindGroupDescriptor> WebGPUBindGroupDescriptor::asGPUBindGroupDescri
             if (!buffer)
                 return WTF::nullopt;
 
-            if (!validateBufferBindingType(buffer.get(), layoutBinding, functionName))
+            if (!validateBufferBindingType(buffer, layoutBinding.externalBinding, functionName))
                 return WTF::nullopt;
 
-            return static_cast<GPUBindingResource>(GPUBufferBinding { buffer.releaseNonNull(), bufferBinding.offset, bufferBinding.size });
+            return static_cast<GPUBindingResource>(GPUBufferBinding { makeRef(*buffer), bufferBinding.offset, bufferBinding.size });
         });
 
         auto bindingResource = WTF::visit(bindingResourceVisitor, binding.resource);
         if (!bindingResource) {
-            LOG(WebGPU, "%s: Invalid resource for binding %lu!", functionName, layoutBinding.binding);
+            LOG(WebGPU, "%s: Invalid resource for binding %u!", functionName, layoutBinding.externalBinding.binding);
             return WTF::nullopt;
         }
 
         bindGroupBindings.uncheckedAppend(GPUBindGroupBinding { binding.binding, WTFMove(bindingResource.value()) });
     }
 
-    return GPUBindGroupDescriptor { layout->bindGroupLayout().releaseNonNull(), WTFMove(bindGroupBindings) };
+    return GPUBindGroupDescriptor { makeRef(*layout->bindGroupLayout()), WTFMove(bindGroupBindings) };
 }
 
 } // namespace WebCore

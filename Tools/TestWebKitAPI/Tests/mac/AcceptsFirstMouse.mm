@@ -23,11 +23,10 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
-#include "WebKitAgnosticTest.h"
+#import "config.h"
+#import "WebKitAgnosticTest.h"
 
-#include <wtf/RetainPtr.h>
-#include <wtf/mac/AppKitCompatibilityDeclarations.h>
+#import <wtf/RetainPtr.h>
 
 @interface NSApplication (TestWebKitAPINSApplicationDetails)
 - (void)_setCurrentEvent:(NSEvent *)event;

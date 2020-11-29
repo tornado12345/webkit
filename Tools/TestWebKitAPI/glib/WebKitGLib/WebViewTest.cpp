@@ -20,10 +20,12 @@
 
 #include "config.h"
 #include "WebViewTest.h"
+#include "WebKitWebViewInternal.h"
 
 #include <JavaScriptCore/JSRetainPtr.h>
 
 bool WebViewTest::shouldInitializeWebViewInConstructor = true;
+bool WebViewTest::shouldCreateEphemeralWebView = false;
 
 WebViewTest::WebViewTest()
     : m_userContentManager(adoptGRef(webkit_user_content_manager_new()))
@@ -41,6 +43,7 @@ WebViewTest::~WebViewTest()
         webkit_javascript_result_unref(m_javascriptResult);
     if (m_surface)
         cairo_surface_destroy(m_surface);
+    s_dbusConnectionPageMap.remove(webkit_web_view_get_page_id(m_webView));
     g_object_unref(m_webView);
     g_main_loop_unref(m_mainLoop);
 }
@@ -55,6 +58,7 @@ void WebViewTest::initializeWebView()
 #endif
         "web-context", m_webContext.get(),
         "user-content-manager", m_userContentManager.get(),
+        "is-ephemeral", shouldCreateEphemeralWebView,
         nullptr));
     platformInitializeWebView();
     assertObjectIsDeletedWhenTestFinishes(G_OBJECT(m_webView));
@@ -233,6 +237,24 @@ void WebViewTest::setEditable(bool editable)
     webkit_web_view_set_editable(m_webView, editable);
 }
 
+static void directoryChangedCallback(GFileMonitor*, GFile* file, GFile*, GFileMonitorEvent event, WebViewTest* test)
+{
+    if (event == test->m_expectedFileChangeEvent && g_file_equal(file, test->m_monitoredFile.get()))
+        test->quitMainLoop();
+}
+
+void WebViewTest::waitUntilFileChanged(const char* filename, GFileMonitorEvent event)
+{
+    m_monitoredFile = adoptGRef(g_file_new_for_path(filename));
+    m_expectedFileChangeEvent = event;
+    GRefPtr<GFile> directory = adoptGRef(g_file_get_parent(m_monitoredFile.get()));
+    GRefPtr<GFileMonitor> monitor = adoptGRef(g_file_monitor_directory(directory.get(), G_FILE_MONITOR_NONE, nullptr, nullptr));
+    g_assert(monitor.get());
+    g_signal_connect(monitor.get(), "changed", G_CALLBACK(directoryChangedCallback), this);
+    if (!g_file_query_exists(m_monitoredFile.get(), nullptr))
+        g_main_loop_run(m_mainLoop);
+}
+
 static void resourceGetDataCallback(GObject* object, GAsyncResult* result, gpointer userData)
 {
     size_t dataSize;
@@ -309,6 +331,18 @@ WebKitJavascriptResult* WebViewTest::runJavaScriptInWorldAndWaitUntilFinished(co
     m_javascriptResult = 0;
     m_javascriptError = error;
     webkit_web_view_run_javascript_in_world(m_webView, javascript, world, nullptr, reinterpret_cast<GAsyncReadyCallback>(runJavaScriptInWorldReadyCallback), this);
+    g_main_loop_run(m_mainLoop);
+
+    return m_javascriptResult;
+}
+
+WebKitJavascriptResult* WebViewTest::runJavaScriptWithoutForcedUserGesturesAndWaitUntilFinished(const char* javascript, GError** error)
+{
+    if (m_javascriptResult)
+        webkit_javascript_result_unref(m_javascriptResult);
+    m_javascriptResult = 0;
+    m_javascriptError = error;
+    webkitWebViewRunJavascriptWithoutForcedUserGestures(m_webView, javascript, 0, reinterpret_cast<GAsyncReadyCallback>(runJavaScriptReadyCallback), this);
     g_main_loop_run(m_mainLoop);
 
     return m_javascriptResult;
@@ -392,4 +426,35 @@ bool WebViewTest::runWebProcessTest(const char* suiteName, const char* testName,
     loadURI("about:blank");
     waitUntilLoadFinished();
     return javascriptResultToBoolean(javascriptResult);
+}
+
+GRefPtr<GDBusProxy> WebViewTest::extensionProxy()
+{
+    GDBusConnection* connection = nullptr;
+
+    // If nothing has been loaded yet, load about:blank to force the web process to be spawned.
+    if (!webkit_web_view_get_uri(m_webView)) {
+        loadURI("about:blank");
+        waitUntilLoadFinished();
+
+        connection = s_dbusConnectionPageMap.get(webkit_web_view_get_page_id(m_webView));
+        if (!connection) {
+            // Wait for page created signal.
+            g_idle_add([](gpointer userData) -> gboolean {
+                auto* test = static_cast<WebViewTest*>(userData);
+                if (!s_dbusConnectionPageMap.get(webkit_web_view_get_page_id(test->m_webView)))
+                    return TRUE;
+
+                test->quitMainLoop();
+                return FALSE;
+            }, this);
+            g_main_loop_run(m_mainLoop);
+            // FIXME: we can cache this once we can monitor the page id on the web view.
+            connection = s_dbusConnectionPageMap.get(webkit_web_view_get_page_id(m_webView));
+        }
+    } else
+        connection = s_dbusConnectionPageMap.get(webkit_web_view_get_page_id(m_webView));
+
+    return adoptGRef(g_dbus_proxy_new_sync(connection, static_cast<GDBusProxyFlags>(G_DBUS_PROXY_FLAGS_DO_NOT_LOAD_PROPERTIES | G_DBUS_PROXY_FLAGS_DO_NOT_CONNECT_SIGNALS),
+        nullptr, nullptr, "/org/webkit/gtk/WebExtensionTest", "org.webkit.gtk.WebExtensionTest", nullptr, nullptr));
 }

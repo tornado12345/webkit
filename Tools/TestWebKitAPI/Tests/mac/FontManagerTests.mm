@@ -122,6 +122,7 @@ TEST(FontManagerTests, ToggleBoldAndItalicWithMenuItems)
     auto webView = webViewForFontManagerTesting(fontManager);
 
     [webView selectWord:nil];
+    [webView waitForNextPresentationUpdate];
     [fontManager addFontTrait:menuItemCellForFontAction(NSBoldFontMask).autorelease()];
     EXPECT_WK_STREQ("bold", [webView stylePropertyAtSelectionStart:@"font-weight"]);
     EXPECT_WK_STREQ("bold", [webView stylePropertyAtSelectionEnd:@"font-weight"]);
@@ -153,12 +154,14 @@ TEST(FontManagerTests, ChangeFontSizeWithMenuItems)
 
     // Select "foo" and increase font size.
     [webView selectWord:nil];
+    [webView waitForNextPresentationUpdate];
     [fontManager modifyFont:sizeIncreaseMenuItemCell.get()];
     [fontManager modifyFont:sizeIncreaseMenuItemCell.get()];
 
     // Now select "baz" and decrease font size.
     [webView moveToEndOfParagraph:nil];
     [webView selectWord:nil];
+    [webView waitForNextPresentationUpdate];
     [fontManager modifyFont:sizeDecreaseMenuItemCell.get()];
     [fontManager modifyFont:sizeDecreaseMenuItemCell.get()];
 
@@ -168,6 +171,7 @@ TEST(FontManagerTests, ChangeFontSizeWithMenuItems)
 
     [webView moveToBeginningOfParagraph:nil];
     [webView selectWord:nil];
+    [webView waitForNextPresentationUpdate];
     EXPECT_WK_STREQ(@"foo", [webView selectedText]);
     EXPECT_WK_STREQ(@"18px", [webView stylePropertyAtSelectionStart:@"font-size"]);
     EXPECT_WK_STREQ(@"18px", [webView stylePropertyAtSelectionEnd:@"font-size"]);
@@ -190,6 +194,7 @@ TEST(FontManagerTests, ChangeFontWithPanel)
 
     NSFontPanel *fontPanel = [fontManager fontPanel:YES];
     [fontPanel setIsVisible:YES];
+    [webView waitForNextPresentationUpdate];
 
     NSFont *largeHelveticaFont = [NSFont fontWithName:@"Helvetica" size:20];
     [fontPanel setPanelFont:largeHelveticaFont isMultiple:NO];
@@ -239,6 +244,7 @@ TEST(FontManagerTests, ChangeAttributesWithFontEffectsBox)
 
     NSFontPanel *fontPanel = [fontManager fontPanel:YES];
     [fontPanel setIsVisible:YES];
+    [webView waitForNextPresentationUpdate];
 
     auto textDecorationsAroundSelection = [webView] {
         NSString *decorationsAtStart = [webView stylePropertyAtSelectionStart:@"-webkit-text-decorations-in-effect"];
@@ -279,11 +285,11 @@ TEST(FontManagerTests, ChangeAttributesWithFontEffectsBox)
     fontPanel.shadowOpacity = 1;
     [fontPanel toggleShadow];
     EXPECT_WK_STREQ("baz", [webView selectedText]);
-    EXPECT_WK_STREQ("rgb(0, 0, 0) 0px 1px 8px", textShadowAroundSelection());
+    EXPECT_WK_STREQ("rgb(0, 0, 0) 0px 1.25px 8px", textShadowAroundSelection());
     {
         NSShadow *shadow = [webView typingAttributes][NSShadowAttributeName];
         EXPECT_EQ(shadow.shadowOffset.width, 0);
-        EXPECT_EQ(shadow.shadowOffset.height, 1);
+        EXPECT_EQ(shadow.shadowOffset.height, 1.25);
         EXPECT_EQ(shadow.shadowBlurRadius, 8);
         EXPECT_TRUE([shadow.shadowColor isEqual:[NSColor colorWithRed:0 green:0 blue:0 alpha:1]]);
     }
@@ -300,7 +306,7 @@ TEST(FontManagerTests, ChangeAttributesWithFontEffectsBox)
     [fontPanel chooseUnderlineMenuItemWithTitle:@"single"];
     [fontPanel chooseStrikeThroughMenuItemWithTitle:@"single"];
     EXPECT_WK_STREQ("foo bar baz", [webView selectedText]);
-    EXPECT_WK_STREQ("rgba(0, 0, 0, 0.2) 0px 1px 5px", textShadowAroundSelection());
+    EXPECT_WK_STREQ("rgba(0, 0, 0, 0.2) 0px 1.25px 5px", textShadowAroundSelection());
     EXPECT_WK_STREQ("underline line-through", textDecorationsAroundSelection());
     {
         NSDictionary *typingAttributes = [webView typingAttributes];
@@ -309,7 +315,7 @@ TEST(FontManagerTests, ChangeAttributesWithFontEffectsBox)
 
         NSShadow *shadow = typingAttributes[NSShadowAttributeName];
         EXPECT_EQ(shadow.shadowOffset.width, 0);
-        EXPECT_EQ(shadow.shadowOffset.height, 1);
+        EXPECT_EQ(shadow.shadowOffset.height, 1.25);
         EXPECT_EQ(shadow.shadowBlurRadius, 5);
         EXPECT_TRUE([shadow.shadowColor isEqual:[NSColor colorWithRed:0 green:0 blue:0 alpha:0.2]]);
     }
@@ -339,6 +345,7 @@ TEST(FontManagerTests, ChangeFontColorWithColorPanel)
     // 1. Select "foo" and turn it red; verify that the font element is used for fully opaque colors.
     colorPanel.color = [NSColor colorWithRed:1 green:0 blue:0 alpha:1];
     [webView selectWord:nil];
+    [webView waitForNextPresentationUpdate];
     [webView changeColor:colorPanel];
     checkFontColorAtStartAndEndWithInputEvents("rgb(255, 0, 0)");
     EXPECT_TRUE([[webView objectByEvaluatingJavaScript:@"!!foo.querySelector('font')"] boolValue]);
@@ -346,6 +353,7 @@ TEST(FontManagerTests, ChangeFontColorWithColorPanel)
     // 2. Now select "bar" and try a few different colors, starting with a color with alpha.
     colorPanel.color = [NSColor colorWithWhite:1 alpha:0.2];
     [webView selectNextWord];
+    [webView waitForNextPresentationUpdate];
     [webView changeColor:colorPanel];
     checkFontColorAtStartAndEndWithInputEvents("rgba(255, 255, 255, 0.2)");
     EXPECT_FALSE([[webView objectByEvaluatingJavaScript:@"!!bar.querySelector('font')"] boolValue]);
@@ -460,11 +468,12 @@ TEST(FontManagerTests, AddFontShadowUsingFontOptions)
     auto webView = webViewForFontManagerTesting(NSFontManager.sharedFontManager);
 
     [webView selectWord:nil];
+    [webView waitForNextPresentationUpdate];
     options.shadowWidth = 3;
     options.shadowHeight = -3;
     options.hasShadow = YES;
 
-    EXPECT_WK_STREQ("rgba(0, 0, 0, 0.333333) 3px -3px 0px", [webView stylePropertyAtSelectionStart:@"text-shadow"]);
+    EXPECT_WK_STREQ("rgba(0, 0, 0, 0.333) 3px -3px 0px", [webView stylePropertyAtSelectionStart:@"text-shadow"]);
     [webView waitForNextPresentationUpdate];
     NSShadow *shadow = [webView typingAttributes][NSShadowAttributeName];
     EXPECT_EQ(shadow.shadowOffset.width, 3);
@@ -476,6 +485,7 @@ TEST(FontManagerTests, AddAndRemoveColorsUsingFontOptions)
     TestFontOptions *options = TestFontOptions.sharedInstance;
     auto webView = webViewForFontManagerTesting(NSFontManager.sharedFontManager, @"<body contenteditable>hello</body>");
     [webView selectWord:nil];
+    [webView waitForNextPresentationUpdate];
 
     options.backgroundColor = [NSColor colorWithRed:1 green:0 blue:0 alpha:0.2];
     options.foregroundColor = [NSColor colorWithRed:0 green:0 blue:1 alpha:1];
@@ -494,6 +504,37 @@ TEST(FontManagerTests, AddAndRemoveColorsUsingFontOptions)
     attributes = [webView typingAttributes];
     EXPECT_NULL(attributes[NSForegroundColorAttributeName]);
     EXPECT_NULL(attributes[NSBackgroundColorAttributeName]);
+}
+
+TEST(FontManagerTests, SetSelectedSystemFontAfterTogglingBold)
+{
+    NSFontManager *fontManager = NSFontManager.sharedFontManager;
+
+    auto webView = webViewForFontManagerTesting(NSFontManager.sharedFontManager, @"<body style='font-family: system-ui;' contenteditable>Foo</body>");
+    [webView selectWord:nil];
+    [webView waitForNextPresentationUpdate];
+    [webView waitForNextPresentationUpdate];
+    auto initialSelectedFont = retainPtr([fontManager selectedFont]);
+
+    [webView _synchronouslyExecuteEditCommand:@"ToggleBold" argument:nil];
+    [webView waitForNextPresentationUpdate];
+    auto selectedFontAfterBolding = retainPtr([fontManager selectedFont]);
+
+    [webView _synchronouslyExecuteEditCommand:@"ToggleBold" argument:nil];
+    [webView waitForNextPresentationUpdate];
+    auto selectedFontAfterUnbolding = retainPtr([fontManager selectedFont]);
+
+    [webView _synchronouslyExecuteEditCommand:@"ToggleBold" argument:nil];
+    [webView waitForNextPresentationUpdate];
+    auto selectedFontAfterBoldingAgain = retainPtr([fontManager selectedFont]);
+
+    EXPECT_WK_STREQ([initialSelectedFont fontName], [selectedFontAfterUnbolding fontName]);
+    EXPECT_WK_STREQ([selectedFontAfterBolding fontName], [selectedFontAfterBoldingAgain fontName]);
+    EXPECT_FALSE([[initialSelectedFont fontName] isEqual:[selectedFontAfterBolding fontName]]);
+    EXPECT_EQ([initialSelectedFont pointSize], 16.);
+    EXPECT_EQ([selectedFontAfterBolding pointSize], 16.);
+    EXPECT_EQ([selectedFontAfterUnbolding pointSize], 16.);
+    EXPECT_EQ([selectedFontAfterBoldingAgain pointSize], 16.);
 }
 
 } // namespace TestWebKitAPI

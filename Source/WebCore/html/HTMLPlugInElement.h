@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2004-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2004-2019 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -83,6 +83,8 @@ public:
 
     bool isUserObservable() const;
 
+    WEBCORE_EXPORT bool isBelowSizeThreshold() const;
+
     // Return whether or not the replacement content for blocked plugins is accessible to the user.
     WEBCORE_EXPORT bool setReplacement(RenderEmbeddedObject::PluginUnavailabilityReason, const String& unavailabilityDescription);
 
@@ -93,7 +95,7 @@ protected:
 
     void willDetachRenderers() override;
     bool isPresentationAttribute(const QualifiedName&) const override;
-    void collectStyleForPresentationAttribute(const QualifiedName&, const AtomicString&, MutableStyleProperties&) override;
+    void collectStyleForPresentationAttribute(const QualifiedName&, const AtomString&, MutableStyleProperties&) override;
 
     virtual bool useFallbackContent() const { return false; }
 
@@ -107,6 +109,9 @@ protected:
     bool guardedDispatchBeforeLoadEvent(const String& sourceURL);
 
     bool m_inBeforeLoadEventHandler;
+    
+    // This will load the plugin if necessary.
+    virtual RenderWidget* renderWidgetLoadingPlugin() const;
 
 private:
     void swapRendererTimerFired();
@@ -114,13 +119,11 @@ private:
 
     bool dispatchBeforeLoadEvent(const String& sourceURL) = delete; // Generate a compile error if someone calls this by mistake.
 
-    // This will load the plugin if necessary.
-    virtual RenderWidget* renderWidgetLoadingPlugin() const = 0;
-
     bool supportsFocus() const override;
 
     bool isKeyboardFocusable(KeyboardEvent*) const override;
     bool isPluginElement() const final;
+    bool canLoadScriptURL(const URL&) const final;
 
     RefPtr<JSC::Bindings::Instance> m_instance;
     Timer m_swapRendererTimer;

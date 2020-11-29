@@ -31,12 +31,20 @@
 #import "APIUIClient.h"
 #import "PaymentAuthorizationPresenter.h"
 #import "WebPageProxy.h"
-#import <PassKit/PassKit.h>
 #import <UIKit/UIViewController.h>
 #import <WebCore/PaymentAuthorizationStatus.h>
 #import <pal/cocoa/PassKitSoftLink.h>
 
 namespace WebKit {
+
+void WebPaymentCoordinatorProxy::platformCanMakePayments(CompletionHandler<void(bool)>&& completionHandler)
+{
+    m_canMakePaymentsQueue->dispatch([theClass = retainPtr(PAL::getPKPaymentAuthorizationControllerClass()), completionHandler = WTFMove(completionHandler)]() mutable {
+        RunLoop::main().dispatch([canMakePayments = [theClass canMakePayments], completionHandler = WTFMove(completionHandler)]() mutable {
+            completionHandler(canMakePayments);
+        });
+    });
+}
 
 void WebPaymentCoordinatorProxy::platformShowPaymentUI(const URL& originatingURL, const Vector<URL>& linkIconURLStrings, const WebCore::ApplePaySessionPaymentRequest& request, CompletionHandler<void(bool)>&& completionHandler)
 {
@@ -50,10 +58,10 @@ void WebPaymentCoordinatorProxy::platformShowPaymentUI(const URL& originatingURL
     m_authorizationPresenter->present(m_client.paymentCoordinatorPresentingViewController(*this), WTFMove(completionHandler));
 }
 
-void WebPaymentCoordinatorProxy::hidePaymentUI()
+void WebPaymentCoordinatorProxy::platformHidePaymentUI()
 {
-    m_authorizationPresenter->dismiss();
-    m_authorizationPresenter = nullptr;
+    if (m_authorizationPresenter)
+        m_authorizationPresenter->dismiss();
 }
 
 }

@@ -37,12 +37,14 @@ create a final report.
 import json
 import logging
 import random
+import shutil
 import sys
 import time
 from collections import defaultdict, OrderedDict
 
 from webkitpy.common.checkout.scm.detection import SCMDetector
 from webkitpy.common.net.file_uploader import FileUploader
+from webkitpy.common.iteration_compatibility import iteritems, itervalues
 from webkitpy.layout_tests.controllers.layout_test_finder import LayoutTestFinder
 from webkitpy.layout_tests.controllers.layout_test_runner import LayoutTestRunner
 from webkitpy.layout_tests.controllers.test_result_writer import TestResultWriter
@@ -55,6 +57,7 @@ from webkitpy.layout_tests.models import test_run_results
 from webkitpy.layout_tests.models.test_input import TestInput
 from webkitpy.layout_tests.models.test_run_results import INTERRUPTED_EXIT_STATUS
 from webkitpy.tool.grammar import pluralize
+from webkitpy.results.upload import Upload
 from webkitpy.xcode.device_type import DeviceType
 
 _log = logging.getLogger(__name__)
@@ -142,9 +145,9 @@ class Manager(object):
 
     def _get_test_inputs(self, tests_to_run, repeat_each, iterations, device_type=None):
         test_inputs = []
-        for _ in xrange(iterations):
+        for _ in range(iterations):
             for test in tests_to_run:
-                for _ in xrange(repeat_each):
+                for _ in range(repeat_each):
                     test_inputs.append(self._test_input_for_file(test, device_type=device_type))
         return test_inputs
 
@@ -157,7 +160,7 @@ class Manager(object):
         # This must be started before we check the system dependencies,
         # since the helper may do things to make the setup correct.
         self._printer.write_update("Starting helper ...")
-        if not self._port.start_helper(self._options.pixel_tests):
+        if not self._port.start_helper(pixel_tests=self._options.pixel_tests, prefer_integrated_gpu=self._options.prefer_integrated_gpu):
             return False
 
         self._update_worker_count(test_names, device_type=device_type)
@@ -174,6 +177,7 @@ class Manager(object):
         return True
 
     def run(self, args):
+        num_failed_uploads = 0
         total_tests = set()
         aggregate_test_names = set()
         aggregate_tests = set()
@@ -182,15 +186,15 @@ class Manager(object):
         device_type_list = self._port.supported_device_types()
         for device_type in device_type_list:
             """Run the tests and return a RunDetails object with the results."""
-            for_device_type = 'for {} '.format(device_type) if device_type else ''
-            self._printer.write_update('Collecting tests {}...'.format(for_device_type))
+            for_device_type = u'for {} '.format(device_type) if device_type else ''
+            self._printer.write_update(u'Collecting tests {}...'.format(for_device_type))
             try:
                 paths, test_names = self._collect_tests(args, device_type=device_type)
             except IOError:
                 # This is raised if --test-list doesn't exist
                 return test_run_results.RunDetails(exit_code=-1)
 
-            self._printer.write_update('Parsing expectations {}...'.format(for_device_type))
+            self._printer.write_update(u'Parsing expectations {}...'.format(for_device_type))
             self._expectations[device_type] = test_expectations.TestExpectations(self._port, test_names, force_expectations_pass=self._options.force, device_type=device_type)
             self._expectations[device_type].parse_all_expectations()
 
@@ -203,20 +207,26 @@ class Manager(object):
             tests_to_run_by_device[device_type] = [test for test in tests_to_run if test not in aggregate_tests]
             aggregate_tests.update(tests_to_run)
 
+        # If a test is marked skipped, but was explicitly requested, run it anyways
+        if self._options.skipped != 'always':
+            for arg in args:
+                if arg in total_tests and arg not in aggregate_tests:
+                    tests_to_run_by_device[device_type_list[0]].append(arg)
+                    aggregate_tests.add(arg)
+
         tests_to_skip = total_tests - aggregate_tests
         self._printer.print_found(len(aggregate_test_names), len(aggregate_tests), self._options.repeat_each, self._options.iterations)
         start_time = time.time()
 
-        # Check to make sure we're not skipping every test.
-        if not sum([len(tests) for tests in tests_to_run_by_device.itervalues()]):
+        # Check to see if all tests we are running are skipped.
+        if tests_to_skip == total_tests:
+            _log.error("All tests skipped.")
+            return test_run_results.RunDetails(exit_code=0, skipped_all_tests=True)
+
+        # Check to make sure we have no tests to run that are not skipped.
+        if not sum([len(tests) for tests in itervalues(tests_to_run_by_device)]):
             _log.critical('No tests to run.')
             return test_run_results.RunDetails(exit_code=-1)
-
-        needs_http = any((self._is_http_test(test) and not self._needs_web_platform_test(test)) for tests in tests_to_run_by_device.itervalues() for test in tests)
-        needs_web_platform_test_server = any(self._needs_web_platform_test(test) for tests in tests_to_run_by_device.itervalues() for test in tests)
-        needs_websockets = any(self._is_websocket_test(test) for tests in tests_to_run_by_device.itervalues() for test in tests)
-        self._runner = LayoutTestRunner(self._options, self._port, self._printer, self._results_directory, self._test_is_slow,
-                                        needs_http=needs_http, needs_web_platform_test_server=needs_web_platform_test_server, needs_websockets=needs_websockets)
 
         self._printer.write_update("Checking build ...")
         if not self._port.check_build():
@@ -229,12 +239,19 @@ class Manager(object):
         # Create the output directory if it doesn't already exist.
         self._port.host.filesystem.maybe_make_directory(self._results_directory)
 
+        needs_http = any((self._is_http_test(test) and not self._needs_web_platform_test(test)) for tests in itervalues(tests_to_run_by_device) for test in tests)
+        needs_web_platform_test_server = any(self._needs_web_platform_test(test) for tests in itervalues(tests_to_run_by_device) for test in tests)
+        needs_websockets = any(self._is_websocket_test(test) for tests in itervalues(tests_to_run_by_device) for test in tests)
+        self._runner = LayoutTestRunner(self._options, self._port, self._printer, self._results_directory, self._test_is_slow,
+                                        needs_http=needs_http, needs_web_platform_test_server=needs_web_platform_test_server, needs_websockets=needs_websockets)
+
         initial_results = None
         retry_results = None
         enabled_pixel_tests_in_retry = False
 
         max_child_processes_for_run = 1
         child_processes_option_value = self._options.child_processes
+        uploads = []
 
         for device_type in device_type_list:
             self._runner._test_is_slow = lambda test_file: self._test_is_slow(test_file, device_type=device_type)
@@ -250,17 +267,51 @@ class Manager(object):
 
             self._printer.print_baseline_search_path(device_type=device_type)
 
-            _log.info('Running {}{}'.format(pluralize(len(tests_to_run_by_device[device_type]), 'test'), ' for {}'.format(str(device_type)) if device_type else ''))
+            _log.info(u'Running {}{}'.format(pluralize(len(tests_to_run_by_device[device_type]), 'test'), u' for {}'.format(device_type) if device_type else ''))
             _log.info('')
+            start_time_for_device = time.time()
             if not tests_to_run_by_device[device_type]:
                 continue
             if not self._set_up_run(tests_to_run_by_device[device_type], device_type=device_type):
                 return test_run_results.RunDetails(exit_code=-1)
 
+            configuration = self._port.configuration_for_upload(self._port.target_host(0))
+            if not configuration.get('flavor', None):  # The --result-report-flavor argument should override wk1/wk2
+                configuration['flavor'] = 'wk2' if self._options.webkit_test_runner else 'wk1'
             temp_initial_results, temp_retry_results, temp_enabled_pixel_tests_in_retry = self._run_test_subset(tests_to_run_by_device[device_type], tests_to_skip, device_type=device_type)
+
+            if self._options.report_urls:
+                self._printer.writeln('\n')
+                self._printer.write_update('Preparing upload data ...')
+
+                upload = Upload(
+                    suite=self._options.suite or 'layout-tests',
+                    configuration=configuration,
+                    details=Upload.create_details(options=self._options),
+                    commits=self._port.commits_for_upload(),
+                    timestamp=start_time,
+                    run_stats=Upload.create_run_stats(
+                        start_time=start_time_for_device,
+                        end_time=time.time(),
+                        tests_skipped=temp_initial_results.remaining + temp_initial_results.expected_skips,
+                    ),
+                    results=self._results_to_upload_json_trie(self._expectations[device_type], temp_initial_results),
+                )
+                for hostname in self._options.report_urls:
+                    self._printer.write_update('Uploading to {} ...'.format(hostname))
+                    if not upload.upload(hostname, log_line_func=self._printer.writeln):
+                        num_failed_uploads += 1
+                    else:
+                        uploads.append(upload)
+                self._printer.writeln('Uploads completed!')
+
             initial_results = initial_results.merge(temp_initial_results) if initial_results else temp_initial_results
             retry_results = retry_results.merge(temp_retry_results) if retry_results else temp_retry_results
             enabled_pixel_tests_in_retry |= temp_enabled_pixel_tests_in_retry
+
+            if (initial_results and (initial_results.interrupted or initial_results.keyboard_interrupted)) or \
+                    (retry_results and (retry_results.interrupted or retry_results.keyboard_interrupted)):
+                break
 
         # Used for final logging, max_child_processes_for_run is most relevant here.
         self._options.child_processes = max_child_processes_for_run
@@ -268,7 +319,25 @@ class Manager(object):
         self._runner.stop_servers()
 
         end_time = time.time()
-        return self._end_test_run(start_time, end_time, initial_results, retry_results, enabled_pixel_tests_in_retry)
+        result = self._end_test_run(start_time, end_time, initial_results, retry_results, enabled_pixel_tests_in_retry)
+
+        if self._options.report_urls and uploads:
+            self._printer.writeln('\n')
+            self._printer.write_update('Preparing to upload test archive ...')
+
+            with self._filesystem.mkdtemp() as temp:
+                archive = self._filesystem.join(temp, 'test-archive')
+                shutil.make_archive(archive, 'zip', self._results_directory)
+
+                for upload in uploads:
+                    for hostname in self._options.report_urls:
+                        self._printer.write_update('Uploading archive to {} ...'.format(hostname))
+                        if not upload.upload_archive(hostname, self._filesystem.open_binary_file_for_reading(archive + '.zip'), log_line_func=self._printer.writeln):
+                            num_failed_uploads += 1
+
+        if num_failed_uploads:
+            result.exit_code = -1
+        return result
 
     def _run_test_subset(self, tests_to_run, tests_to_skip, device_type=None):
         try:
@@ -364,7 +433,7 @@ class Manager(object):
                logs after that time.
         """
         crashed_processes = []
-        for test, result in run_results.unexpected_results_by_name.iteritems():
+        for test, result in run_results.unexpected_results_by_name.items():
             if (result.type != test_expectations.CRASH):
                 continue
             for failure in result.failures:
@@ -374,13 +443,13 @@ class Manager(object):
 
         sample_files = self._port.look_for_new_samples(crashed_processes, start_time)
         if sample_files:
-            for test, sample_file in sample_files.iteritems():
+            for test, sample_file in sample_files.items():
                 writer = TestResultWriter(self._port._filesystem, self._port, self._port.results_directory(), test)
                 writer.copy_sample_file(sample_file)
 
         crash_logs = self._port.look_for_new_crash_logs(crashed_processes, start_time)
         if crash_logs:
-            for test, crash_log in crash_logs.iteritems():
+            for test, crash_log in crash_logs.items():
                 writer = TestResultWriter(self._port._filesystem, self._port, self._port.results_directory(), test)
                 writer.write_crash_log(crash_log)
 
@@ -393,16 +462,9 @@ class Manager(object):
                     _log.debug("Adding results for other crash: " + str(test))
 
     def _clobber_old_results(self):
-        # Just clobber the actual test results directories since the other
-        # files in the results directory are explicitly used for cross-run
-        # tracking.
-        self._printer.write_update("Clobbering old results in %s" %
-                                   self._results_directory)
-        layout_tests_dir = self._port.layout_tests_dir()
-        possible_dirs = self._port.test_dirs()
-        for dirname in possible_dirs:
-            if self._filesystem.isdir(self._filesystem.join(layout_tests_dir, dirname)):
-                self._filesystem.rmtree(self._filesystem.join(self._results_directory, dirname))
+        self._printer.write_update("Deleting results directory {}".format(self._results_directory))
+        if self._filesystem.isdir(self._results_directory):
+            self._filesystem.rmtree(self._results_directory)
 
     def _tests_to_retry(self, run_results, include_crashes):
         return [result.test_name for result in run_results.unexpected_results_by_name.values() if
@@ -414,6 +476,42 @@ class Manager(object):
         perf_metrics_json = json_results_generator.perf_metrics_for_test(run_time, initial_results.results_by_name.values())
         perf_metrics_path = self._filesystem.join(self._results_directory, "layout_test_perf_metrics.json")
         self._filesystem.write_text_file(perf_metrics_path, json.dumps(perf_metrics_json))
+
+    def _results_to_upload_json_trie(self, expectations, results):
+        FAILURE_TO_TEXT = {
+            test_expectations.PASS: Upload.Expectations.PASS,
+            test_expectations.CRASH: Upload.Expectations.CRASH,
+            test_expectations.TIMEOUT: Upload.Expectations.TIMEOUT,
+            test_expectations.IMAGE: Upload.Expectations.IMAGE,
+            test_expectations.TEXT: Upload.Expectations.TEXT,
+            test_expectations.AUDIO: Upload.Expectations.AUDIO,
+            test_expectations.MISSING: Upload.Expectations.WARNING,
+            test_expectations.IMAGE_PLUS_TEXT: ' '.join([Upload.Expectations.IMAGE, Upload.Expectations.TEXT]),
+        }
+
+        results_trie = {}
+        for result in itervalues(results.results_by_name):
+            if result.type == test_expectations.SKIP:
+                continue
+
+            expected = expectations.filtered_expectations_for_test(
+                result.test_name,
+                self._options.pixel_tests or bool(result.reftest_type),
+                self._options.world_leaks,
+            )
+            if expected == {test_expectations.PASS}:
+                expected = None
+            else:
+                expected = ' '.join([FAILURE_TO_TEXT.get(e, Upload.Expectations.FAIL) for e in expected])
+
+            json_results_generator.add_path_to_trie(
+                result.test_name,
+                Upload.create_test_result(
+                    expected=expected,
+                    actual=FAILURE_TO_TEXT.get(result.type, Upload.Expectations.FAIL) if result.type else None,
+                    time=int(result.test_run_time * 1000),
+                ), results_trie)
+        return results_trie
 
     def _upload_json_files(self, summarized_results, initial_results, results_including_passes=None, start_time=None, end_time=None):
         """Writes the results of the test run as JSON files into the results
@@ -477,8 +575,8 @@ class Manager(object):
         master_name = self._options.master_name
         builder_name = self._options.builder_name
         build_number = self._options.build_number
-        build_slave = self._options.build_slave
-        if not master_name or not builder_name or not build_number or not build_slave:
+        build_worker = self._options.build_slave
+        if not master_name or not builder_name or not build_number or not build_worker:
             _log.error("--results-server-host was set, but --master-name, --builder-name, --build-number, or --build-slave was not. Not uploading JSON files.")
             return
 
@@ -490,13 +588,13 @@ class Manager(object):
             revisions[name] = {'revision': revision, 'timestamp': scm.timestamp_of_native_revision(path, revision)}
 
         for hostname in self._options.results_server_host:
-            _log.info("Uploading JSON files for master: %s builder: %s build: %s slave: %s to %s", master_name, builder_name, build_number, build_slave, hostname)
+            _log.info("Uploading JSON files for master: {} builder: {} build: {} worker: {} to {}".format(master_name, builder_name, build_number, build_worker, hostname))
 
             attrs = [
                 ('master', 'build.webkit.org' if master_name == 'webkit.org' else master_name),  # FIXME: Pass in build.webkit.org.
                 ('builder_name', builder_name),
                 ('build_number', build_number),
-                ('build_slave', build_slave),
+                ('build_slave', build_worker),
                 ('revisions', json.dumps(revisions)),
                 ('start_time', str(start_time)),
                 ('end_time', str(end_time)),
@@ -546,7 +644,7 @@ class Manager(object):
             if result.type != test_expectations.SKIP:
                 stats[result.test_name] = {'results': (_worker_number(result.worker_name), result.test_number, result.pid, int(result.test_run_time * 1000), int(result.total_run_time * 1000))}
         stats_trie = {}
-        for name, value in stats.iteritems():
+        for name, value in iteritems(stats):
             json_results_generator.add_path_to_trie(name, value, stats_trie)
         return stats_trie
 

@@ -43,11 +43,14 @@ class WebOpenPanelResultListenerProxy;
 - (instancetype)initWithView:(WKContentView *)view;
 - (void)presentWithParameters:(API::OpenPanelParameters*)parameters resultListener:(WebKit::WebOpenPanelResultListenerProxy*)listener;
 - (void)dismiss;
+
+- (NSArray<NSString *> *)currentAvailableActionTitles;
 @end
 
 @protocol WKFileUploadPanelDelegate <NSObject>
 @optional
 - (void)fileUploadPanelDidDismiss:(WKFileUploadPanel *)fileUploadPanel;
+- (BOOL)fileUploadPanelDestinationIsManaged:(WKFileUploadPanel *)fileUploadPanel;
 @end
 
 #endif // PLATFORM(IOS_FAMILY)

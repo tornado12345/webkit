@@ -23,12 +23,14 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
+#import "config.h"
 
 #import "PlatformUtilities.h"
 #import "Test.h"
 #import "TestWKWebView.h"
 #import <WebKit/WKProcessPoolPrivate.h>
+#import <WebKit/WKWebsiteDataStorePrivate.h>
+#import <WebKit/_WKWebsiteDataStoreConfiguration.h>
 #import <wtf/RetainPtr.h>
 
 static bool done;
@@ -55,13 +57,13 @@ static bool done;
 
 @end
 
-TEST(WebKit, NetworkProcessCrashNonPersistentDataStore)
+static void checkRecoveryAfterCrash(WKWebsiteDataStore *dataStore)
 {
     NSURL *simple = [[NSBundle mainBundle] URLForResource:@"simple" withExtension:@"html" subdirectory:@"TestWebKitAPI.resources"];
     NSURL *simple2 = [[NSBundle mainBundle] URLForResource:@"simple2" withExtension:@"html" subdirectory:@"TestWebKitAPI.resources"];
     
     auto configuration = adoptNS([[WKWebViewConfiguration alloc] init]);
-    [configuration setWebsiteDataStore:[WKWebsiteDataStore nonPersistentDataStore]];
+    [configuration setWebsiteDataStore:dataStore];
     auto webView = adoptNS([[WKWebView alloc] initWithFrame:NSMakeRect(0, 0, 800, 600) configuration:configuration.get()]);
     auto delegate = adoptNS([[CrashDelegate alloc] init]);
     [webView setNavigationDelegate:delegate.get()];
@@ -70,7 +72,17 @@ TEST(WebKit, NetworkProcessCrashNonPersistentDataStore)
     TestWebKitAPI::Util::run(&done);
     done = false;
 
-    [[webView configuration].processPool _terminateNetworkProcess];
+    [[webView configuration].websiteDataStore _terminateNetworkProcess];
     [webView loadRequest:[NSURLRequest requestWithURL:simple2]];
     TestWebKitAPI::Util::run(&done);
+}
+
+TEST(WebKit, NetworkProcessCrashNonPersistentDataStore)
+{
+    checkRecoveryAfterCrash([WKWebsiteDataStore nonPersistentDataStore]);
+}
+
+TEST(WebKit, NetworkProcessCrashNonDefaultPersistentDataStore)
+{
+    checkRecoveryAfterCrash([[[WKWebsiteDataStore alloc] _initWithConfiguration:[[[_WKWebsiteDataStoreConfiguration alloc] init] autorelease]] autorelease]);
 }

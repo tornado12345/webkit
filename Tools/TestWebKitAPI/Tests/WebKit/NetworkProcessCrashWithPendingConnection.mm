@@ -32,6 +32,7 @@
 #import <WebKit/WKProcessGroupPrivate.h>
 #import <WebKit/WKProcessPoolPrivate.h>
 #import <WebKit/WKWebViewPrivate.h>
+#import <WebKit/WKWebsiteDataStorePrivate.h>
 #import <WebKit/WebKit.h>
 #import <wtf/RetainPtr.h>
 
@@ -39,7 +40,6 @@ static bool loadedOrCrashed = false;
 static bool loaded = false;
 static bool webProcessCrashed = false;
 static bool networkProcessCrashed = false;
-static pid_t pid;
 static WKWebView* testView;
 
 @interface MonitorWebContentCrashNavigationDelegate : NSObject <WKNavigationDelegate>
@@ -88,7 +88,7 @@ TEST(WebKit, NetworkProcessCrashWithPendingConnection)
     pid_t webView2PID = [webView2.get() _webProcessIdentifier];
     EXPECT_NE(webView1PID, webView2PID);
 
-    pid_t initialNetworkProcessIdentififer = [processPool.get() _networkProcessIdentifier];
+    pid_t initialNetworkProcessIdentififer = [configuration.get().websiteDataStore _networkProcessIdentifier];
     EXPECT_NE(initialNetworkProcessIdentififer, 0);
     kill(initialNetworkProcessIdentififer, SIGKILL);
     Util::run(&networkProcessCrashed);
@@ -97,7 +97,7 @@ TEST(WebKit, NetworkProcessCrashWithPendingConnection)
     [webView1.get() loadRequest:[NSURLRequest requestWithURL:[[NSBundle mainBundle] URLForResource:@"simple" withExtension:@"html" subdirectory:@"TestWebKitAPI.resources"]]];
     [webView1.get() _test_waitForDidFinishNavigation];
 
-    pid_t relaunchedNetworkProcessIdentifier = [processPool.get() _networkProcessIdentifier];
+    pid_t relaunchedNetworkProcessIdentifier = [configuration.get().websiteDataStore _networkProcessIdentifier];
     EXPECT_NE(initialNetworkProcessIdentififer, relaunchedNetworkProcessIdentifier);
     EXPECT_FALSE(networkProcessCrashed);
 
@@ -138,8 +138,6 @@ TEST(WebKit, NetworkProcessRelaunchOnLaunchFailure)
     WKContextClientV0 client;
     memset(&client, 0, sizeof(client));
     client.networkProcessDidCrash = [](WKContextRef context, const void* clientInfo) {
-        pid = [testView _webProcessIdentifier];
-        EXPECT_GT(pid, 0); // The WebProcess is already launched when the network process crashes.
         networkProcessCrashed = true;
     };
     WKContextSetClient(static_cast<WKContextRef>(processPool.get()), &client.base);
@@ -149,8 +147,8 @@ TEST(WebKit, NetworkProcessRelaunchOnLaunchFailure)
 
     // Constucting a WebView starts a network process so terminate this one. The page load below will then request a network process and we
     // make this new network process launch crash on startup.
-    [processPool _terminateNetworkProcess];
-    [processPool _makeNextNetworkProcessLaunchFailForTesting];
+    [WKWebsiteDataStore _makeNextNetworkProcessLaunchFailForTesting];
+    [configuration.get().websiteDataStore _terminateNetworkProcess];
 
     auto delegate = adoptNS([[MonitorWebContentCrashNavigationDelegate alloc] init]);
     [webView setNavigationDelegate:delegate.get()];
@@ -161,8 +159,7 @@ TEST(WebKit, NetworkProcessRelaunchOnLaunchFailure)
     EXPECT_TRUE(networkProcessCrashed);
     EXPECT_FALSE(webProcessCrashed);
     EXPECT_GT([webView _webProcessIdentifier], 0);
-    EXPECT_EQ(pid, [webView _webProcessIdentifier]);
-    EXPECT_GT([processPool.get() _networkProcessIdentifier], 0);
+    EXPECT_GT([configuration.get().websiteDataStore _networkProcessIdentifier], 0);
 }
 
 } // namespace TestWebKitAPI

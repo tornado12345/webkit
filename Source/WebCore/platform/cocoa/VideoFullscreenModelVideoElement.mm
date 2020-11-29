@@ -24,24 +24,24 @@
  */
 
 #import "config.h"
-
-#if PLATFORM(IOS_FAMILY) || (PLATFORM(MAC) && ENABLE(VIDEO_PRESENTATION_MODE))
 #import "VideoFullscreenModelVideoElement.h"
 
+#if ENABLE(VIDEO_PRESENTATION_MODE)
+
 #import "DOMWindow.h"
+#import "Event.h"
+#import "EventListener.h"
+#import "EventNames.h"
+#import "HTMLElement.h"
+#import "HTMLVideoElement.h"
 #import "History.h"
 #import "Logging.h"
 #import "MediaControlsHost.h"
+#import "Page.h"
 #import "PlaybackSessionModelMediaElement.h"
+#import "TextTrackList.h"
+#import "TimeRanges.h"
 #import <QuartzCore/CoreAnimation.h>
-#import <WebCore/Event.h>
-#import <WebCore/EventListener.h>
-#import <WebCore/EventNames.h>
-#import <WebCore/HTMLElement.h>
-#import <WebCore/HTMLVideoElement.h>
-#import <WebCore/Page.h>
-#import <WebCore/TextTrackList.h>
-#import <WebCore/TimeRanges.h>
 #import <wtf/NeverDestroyed.h>
 #import <wtf/SoftLinking.h>
 
@@ -90,7 +90,7 @@ void VideoFullscreenModelVideoElement::handleEvent(WebCore::ScriptExecutionConte
     updateForEventName(event.type());
 }
 
-void VideoFullscreenModelVideoElement::updateForEventName(const WTF::AtomicString& eventName)
+void VideoFullscreenModelVideoElement::updateForEventName(const WTF::AtomString& eventName)
 {
     if (m_clients.isEmpty())
         return;
@@ -108,6 +108,13 @@ void VideoFullscreenModelVideoElement::willExitFullscreen()
 {
     if (m_videoElement)
         m_videoElement->willExitFullscreen();
+}
+
+RetainPtr<PlatformLayer> VideoFullscreenModelVideoElement::createVideoFullscreenLayer()
+{
+    if (m_videoElement)
+        return m_videoElement->createVideoFullscreenLayer();
+    return nullptr;
 }
 
 void VideoFullscreenModelVideoElement::setVideoFullscreenLayer(PlatformLayer* videoLayer, WTF::Function<void()>&& completionHandler)
@@ -145,10 +152,10 @@ void VideoFullscreenModelVideoElement::waitForPreparedForInlineThen(WTF::Functio
 
 void VideoFullscreenModelVideoElement::requestFullscreenMode(HTMLMediaElementEnums::VideoFullscreenMode mode, bool finishedWithMedia)
 {
-    if (m_videoElement && m_videoElement->fullscreenMode() != mode)
-        m_videoElement->setFullscreenMode(mode);
+    if (m_videoElement)
+        m_videoElement->setPresentationMode(HTMLVideoElement::toPresentationMode(mode));
 
-    if (m_videoElement && finishedWithMedia && mode == MediaPlayerEnums::VideoFullscreenModeNone) {
+    if (m_videoElement && finishedWithMedia && mode == MediaPlayer::VideoFullscreenModeNone) {
         if (m_videoElement->document().isMediaDocument()) {
             if (auto* window = m_videoElement->document().domWindow())
                 window->history().back();
@@ -164,27 +171,27 @@ void VideoFullscreenModelVideoElement::setVideoLayerFrame(FloatRect rect)
         m_videoElement->setVideoFullscreenFrame(rect);
 }
 
-void VideoFullscreenModelVideoElement::setVideoLayerGravity(MediaPlayerEnums::VideoGravity gravity)
+void VideoFullscreenModelVideoElement::setVideoLayerGravity(MediaPlayer::VideoGravity gravity)
 {
     m_videoElement->setVideoFullscreenGravity(gravity);
 }
 
-const Vector<AtomicString>& VideoFullscreenModelVideoElement::observedEventNames()
+const Vector<AtomString>& VideoFullscreenModelVideoElement::observedEventNames()
 {
-    static const auto names = makeNeverDestroyed(Vector<AtomicString> { eventNames().resizeEvent });
+    static const auto names = makeNeverDestroyed(Vector<AtomString> { eventNames().resizeEvent });
     return names;
 }
 
-const AtomicString& VideoFullscreenModelVideoElement::eventNameAll()
+const AtomString& VideoFullscreenModelVideoElement::eventNameAll()
 {
-    static NeverDestroyed<AtomicString> sEventNameAll = "allEvents";
+    static MainThreadNeverDestroyed<const AtomString> sEventNameAll = "allEvents";
     return sEventNameAll;
 }
 
 void VideoFullscreenModelVideoElement::fullscreenModeChanged(HTMLMediaElementEnums::VideoFullscreenMode videoFullscreenMode)
 {
     if (m_videoElement)
-        m_videoElement->fullscreenModeChanged(videoFullscreenMode);
+        m_videoElement->setPresentationMode(HTMLVideoElement::toPresentationMode(videoFullscreenMode));
 }
 
 void VideoFullscreenModelVideoElement::requestRouteSharingPolicyAndContextUID(CompletionHandler<void(RouteSharingPolicy, String)>&& completionHandler)
@@ -212,7 +219,7 @@ void VideoFullscreenModelVideoElement::setHasVideo(bool hasVideo)
 
     m_hasVideo = hasVideo;
 
-    for (auto& client : m_clients)
+    for (auto& client : copyToVector(m_clients))
         client->hasVideoChanged(m_hasVideo);
 }
 
@@ -223,37 +230,37 @@ void VideoFullscreenModelVideoElement::setVideoDimensions(const FloatSize& video
 
     m_videoDimensions = videoDimensions;
 
-    for (auto& client : m_clients)
+    for (auto& client : copyToVector(m_clients))
         client->videoDimensionsChanged(m_videoDimensions);
 }
 
 void VideoFullscreenModelVideoElement::willEnterPictureInPicture()
 {
-    for (auto& client : m_clients)
+    for (auto& client : copyToVector(m_clients))
         client->willEnterPictureInPicture();
 }
 
 void VideoFullscreenModelVideoElement::didEnterPictureInPicture()
 {
-    for (auto& client : m_clients)
+    for (auto& client : copyToVector(m_clients))
         client->didEnterPictureInPicture();
 }
 
 void VideoFullscreenModelVideoElement::failedToEnterPictureInPicture()
 {
-    for (auto& client : m_clients)
+    for (auto& client : copyToVector(m_clients))
         client->failedToEnterPictureInPicture();
 }
 
 void VideoFullscreenModelVideoElement::willExitPictureInPicture()
 {
-    for (auto& client : m_clients)
+    for (auto& client : copyToVector(m_clients))
         client->willExitPictureInPicture();
 }
 
 void VideoFullscreenModelVideoElement::didExitPictureInPicture()
 {
-    for (auto& client : m_clients)
+    for (auto& client : copyToVector(m_clients))
         client->didExitPictureInPicture();
 }
 

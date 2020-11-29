@@ -28,9 +28,9 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
-from webkitpy.layout_tests.models import test_expectations
-
 from webkitpy.common.net import resultsjsonparser
+from webkitpy.common.iteration_compatibility import iteritems
+from webkitpy.layout_tests.models import test_expectations
 
 
 TestExpectations = test_expectations.TestExpectations
@@ -39,7 +39,7 @@ TestExpectationParser = test_expectations.TestExpectationParser
 
 class BuildBotPrinter(object):
     # This output is parsed by buildbots and must only be changed in coordination with buildbot scripts (see webkit.org's
-    # Tools/BuildSlaveSupport/build.webkit.org-config/master.cfg: RunWebKitTests._parseNewRunWebKitTestsOutput
+    # Tools/CISupport/build-webkit-org/master.cfg: RunWebKitTests._parseNewRunWebKitTestsOutput
     # and chromium.org's buildbot/master.chromium/scripts/master/log_parser/webkit_test_command.py).
 
     def __init__(self, stream, debug_logging):
@@ -56,7 +56,7 @@ class BuildBotPrinter(object):
 
     def print_run_results(self, run_results):
         failed = run_results.total_failures
-        total = run_results.total
+        total = run_results.total - run_results.expected_skips
         passed = total - failed - run_results.remaining
         percent_passed = 0.0
         if total > 0:
@@ -128,7 +128,7 @@ class BuildBotPrinter(object):
         if len(passes) or len(flaky) or len(regressions):
             self._print("")
         if len(passes):
-            for key, tests in passes.iteritems():
+            for key, tests in iteritems(passes):
                 self._print("%s: (%d)" % (key, len(tests)))
                 tests.sort()
                 for test in tests:
@@ -138,7 +138,7 @@ class BuildBotPrinter(object):
 
         if len(flaky):
             descriptions = TestExpectations.EXPECTATION_DESCRIPTIONS
-            for key, tests in flaky.iteritems():
+            for key, tests in iteritems(flaky):
                 result = TestExpectations.EXPECTATIONS[key.lower()]
                 self._print("Unexpected flakiness: %s (%d)" % (descriptions[result], len(tests)))
                 tests.sort()
@@ -156,7 +156,7 @@ class BuildBotPrinter(object):
 
         if len(regressions):
             descriptions = TestExpectations.EXPECTATION_DESCRIPTIONS
-            for key, tests in regressions.iteritems():
+            for key, tests in iteritems(regressions):
                 result = TestExpectations.EXPECTATIONS[key.lower()]
                 self._print("Regressions: Unexpected %s (%d)" % (descriptions[result], len(tests)))
                 tests.sort()

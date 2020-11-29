@@ -64,8 +64,6 @@ public:
     void didReceivePluginProxyMessage(IPC::Connection&, IPC::Decoder&);
     void didReceiveSyncPluginProxyMessage(IPC::Connection&, IPC::Decoder&, std::unique_ptr<IPC::Encoder>&);
 
-    bool isBeingAsynchronouslyInitialized() const override { return m_waitingOnAsynchronousInitialization; }
-
 private:
     explicit PluginProxy(uint64_t pluginProcessToken, bool isRestartedProcess);
 
@@ -232,7 +230,7 @@ private:
 
 } // namespace WebKit
 
-SPECIALIZE_TYPE_TRAITS_PLUGIN(PluginProxy, PluginProxyType)
+SPECIALIZE_TYPE_TRAITS_PLUGIN(PluginProxy, isPluginProxy())
 
 #endif // ENABLE(NETSCAPE_PLUGIN_API)
 

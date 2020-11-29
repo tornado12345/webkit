@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc.
+ * Copyright (C) 2017-2019 Apple Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted, provided that the following conditions
@@ -36,7 +36,7 @@
 
 ALLOW_UNUSED_PARAMETERS_BEGIN
 
-#include <webrtc/api/mediastreaminterface.h>
+#include <webrtc/api/media_stream_interface.h>
 #include <webrtc/common_video/include/i420_buffer_pool.h>
 
 ALLOW_UNUSED_PARAMETERS_END
@@ -51,6 +51,7 @@ class RealtimeOutgoingVideoSource
     : public ThreadSafeRefCounted<RealtimeOutgoingVideoSource, WTF::DestructionThread::Main>
     , public webrtc::VideoTrackSourceInterface
     , private MediaStreamTrackPrivate::Observer
+    , private RealtimeMediaSource::VideoSampleObserver
 #if !RELEASE_LOG_DISABLED
     , private LoggerHelper
 #endif
@@ -59,8 +60,9 @@ public:
     static Ref<RealtimeOutgoingVideoSource> create(Ref<MediaStreamTrackPrivate>&& videoSource);
     ~RealtimeOutgoingVideoSource();
 
+    void start() { observeSource(); }
     void stop();
-    bool setSource(Ref<MediaStreamTrackPrivate>&&);
+    void setSource(Ref<MediaStreamTrackPrivate>&&);
     MediaStreamTrackPrivate& source() const { return m_videoSource.get(); }
 
     void AddRef() const final { ref(); }
@@ -70,11 +72,7 @@ public:
         return rtc::RefCountReleaseStatus::kOtherRefsRemained;
     }
 
-    void setApplyRotation(bool shouldApplyRotation) { m_shouldApplyRotation = shouldApplyRotation; }
-
-#if !RELEASE_LOG_DISABLED
-    void setLogger(Ref<const Logger>&& logger) { m_logger = WTFMove(logger); }
-#endif
+    void applyRotation();
 
 protected:
     explicit RealtimeOutgoingVideoSource(Ref<MediaStreamTrackPrivate>&&);
@@ -89,7 +87,7 @@ protected:
 
 #if !RELEASE_LOG_DISABLED
     // LoggerHelper API
-    const Logger& logger() const final;
+    const Logger& logger() const final { return m_logger.get(); }
     const void* logIdentifier() const final { return m_logIdentifier; }
     const char* logClassName() const final { return "RealtimeOutgoingVideoSource"; }
     WTFLogChannel& logChannel() const final;
@@ -103,6 +101,9 @@ private:
 
     void observeSource();
     void unobserveSource();
+
+    using MediaStreamTrackPrivate::Observer::weakPtrFactory;
+    using WeakValueType = MediaStreamTrackPrivate::Observer::WeakValueType;
 
     // Notifier API
     void RegisterObserver(webrtc::ObserverInterface*) final { }
@@ -128,16 +129,18 @@ private:
     void trackMutedChanged(MediaStreamTrackPrivate&) final { sourceMutedChanged(); }
     void trackEnabledChanged(MediaStreamTrackPrivate&) final { sourceEnabledChanged(); }
     void trackSettingsChanged(MediaStreamTrackPrivate&) final { initializeFromSource(); }
-    void sampleBufferUpdated(MediaStreamTrackPrivate&, MediaSample&) override { }
     void trackEnded(MediaStreamTrackPrivate&) final { }
 
+    // RealtimeMediaSource::VideoSampleObserver API
+    void videoSampleAvailable(MediaSample&) override { }
+
     Ref<MediaStreamTrackPrivate> m_videoSource;
-    Optional<RealtimeMediaSourceSettings> m_initialSettings;
     Timer m_blackFrameTimer;
     rtc::scoped_refptr<webrtc::VideoFrameBuffer> m_blackFrame;
 
     mutable RecursiveLock m_sinksLock;
     HashSet<rtc::VideoSinkInterface<webrtc::VideoFrame>*> m_sinks;
+    bool m_areSinksAskingToApplyRotation { false };
 
     bool m_enabled { true };
     bool m_muted { false };
@@ -145,8 +148,10 @@ private:
     uint32_t m_height { 0 };
 
 #if !RELEASE_LOG_DISABLED
-    mutable RefPtr<const Logger> m_logger;
+    Ref<const Logger> m_logger;
     const void* m_logIdentifier;
+    MonotonicTime m_lastFrameLogTime;
+    unsigned m_frameCount { 0 };
 #endif
 };
 

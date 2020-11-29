@@ -1,7 +1,5 @@
 <!DOCTYPE html>
 
-<!-- webkit-test-runner [ experimental:DarkModeCSSEnabled=true ] -->
-
 <script src="../resources/testharness.js"></script>
 <script src="../resources/testharnessreport.js"></script>
 
@@ -36,7 +34,7 @@ test(function() {
 
 test(function() {
     let styleElement = document.createElement("style");
-    styleElement.textContent = ":root { supported-color-schemes: light dark; }";
+    styleElement.textContent = ":root { color-scheme: light dark; }";
     document.head.appendChild(styleElement);
 }, "Set prefers-color-schemes: light dark on the body");
 

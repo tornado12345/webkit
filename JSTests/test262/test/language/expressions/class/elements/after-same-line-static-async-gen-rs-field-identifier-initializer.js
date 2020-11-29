@@ -8,7 +8,6 @@ features: [class-fields-public, class, async-iteration]
 flags: [generated, async]
 includes: [propertyHelper.js]
 info: |
-    
     ClassElement :
       ...
       FieldDefinition ;
@@ -94,4 +93,4 @@ C.m().next().then(function(v) {
   }
 
   return Promise.resolve(assertions());
-}, $DONE).then($DONE, $DONE);
+}).then($DONE, $DONE);

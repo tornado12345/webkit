@@ -51,6 +51,7 @@ RealtimeMediaSourceCenter& RealtimeMediaSourceCenter::singleton()
 
 RealtimeMediaSourceCenter::RealtimeMediaSourceCenter()
 {
+    m_supportedConstraints.setSupportsEchoCancellation(true);
     m_supportedConstraints.setSupportsWidth(true);
     m_supportedConstraints.setSupportsHeight(true);
     m_supportedConstraints.setSupportsAspectRatio(true);
@@ -62,52 +63,63 @@ RealtimeMediaSourceCenter::RealtimeMediaSourceCenter()
 
 RealtimeMediaSourceCenter::~RealtimeMediaSourceCenter() = default;
 
-void RealtimeMediaSourceCenter::createMediaStream(NewMediaStreamHandler&& completionHandler, String&& hashSalt, CaptureDevice&& audioDevice, CaptureDevice&& videoDevice, const MediaStreamRequest& request)
+void RealtimeMediaSourceCenter::createMediaStream(Ref<const Logger>&& logger, NewMediaStreamHandler&& completionHandler, String&& hashSalt, CaptureDevice&& audioDevice, CaptureDevice&& videoDevice, const MediaStreamRequest& request)
 {
     Vector<Ref<RealtimeMediaSource>> audioSources;
     Vector<Ref<RealtimeMediaSource>> videoSources;
     String invalidConstraint;
 
+    RefPtr<RealtimeMediaSource> audioSource;
     if (audioDevice) {
-        auto audioSource = audioCaptureFactory().createAudioCaptureSource(WTFMove(audioDevice), String { hashSalt }, &request.audioConstraints);
-        if (audioSource)
-            audioSources.append(audioSource.source());
-        else {
-#if !LOG_DISABLED
-            if (!audioSource.errorMessage.isEmpty())
-                LOG(Media, "RealtimeMediaSourceCenter::createMediaStream(%p), audio constraints failed to apply: %s", this, audioSource.errorMessage.utf8().data());
-#endif
-            completionHandler(nullptr);
+        auto source = audioCaptureFactory().createAudioCaptureSource(WTFMove(audioDevice), String { hashSalt }, &request.audioConstraints);
+        if (!source) {
+            completionHandler(makeUnexpected(makeString("Failed to create MediaStream audio source: ", source.errorMessage)));
             return;
         }
+        audioSource = source.source();
     }
 
+    RefPtr<RealtimeMediaSource> videoSource;
     if (videoDevice) {
-        CaptureSourceOrError videoSource;
+        CaptureSourceOrError source;
         if (videoDevice.type() == CaptureDevice::DeviceType::Camera)
-            videoSource = videoCaptureFactory().createVideoCaptureSource(WTFMove(videoDevice), WTFMove(hashSalt), &request.videoConstraints);
+            source = videoCaptureFactory().createVideoCaptureSource(WTFMove(videoDevice), WTFMove(hashSalt), &request.videoConstraints);
         else
-            videoSource = displayCaptureFactory().createDisplayCaptureSource(WTFMove(videoDevice), &request.videoConstraints);
+            source = displayCaptureFactory().createDisplayCaptureSource(WTFMove(videoDevice), &request.videoConstraints);
 
-        if (videoSource)
-            videoSources.append(videoSource.source());
-        else {
-#if !LOG_DISABLED
-            if (!videoSource.errorMessage.isEmpty())
-                LOG(Media, "RealtimeMediaSourceCenter::createMediaStream(%p), video constraints failed to apply: %s", this, videoSource.errorMessage.utf8().data());
-#endif
-            completionHandler(nullptr);
+        if (!source) {
+            completionHandler(makeUnexpected(makeString("Failed to create MediaStream video source: ", source.errorMessage)));
             return;
         }
+        videoSource = source.source();
     }
 
-    completionHandler(MediaStreamPrivate::create(audioSources, videoSources));
+    CompletionHandler<void(String&&)> whenAudioSourceReady = [audioSource, videoSource = WTFMove(videoSource), logger = WTFMove(logger), completionHandler = WTFMove(completionHandler)](auto&& errorMessage) mutable {
+        if (!errorMessage.isEmpty())
+            return completionHandler(makeUnexpected(makeString("Failed to create MediaStream audio source: ", errorMessage)));
+        if (!videoSource)
+            return completionHandler(MediaStreamPrivate::create(WTFMove(logger), WTFMove(audioSource), WTFMove(videoSource)));
+
+        CompletionHandler<void(String&&)> whenVideoSourceReady = [audioSource = WTFMove(audioSource), videoSource, logger = WTFMove(logger), completionHandler = WTFMove(completionHandler)](auto&& errorMessage) mutable {
+            if (!errorMessage.isEmpty())
+                return completionHandler(makeUnexpected(makeString("Failed to create MediaStream video source: ", errorMessage)));
+            completionHandler(MediaStreamPrivate::create(WTFMove(logger), WTFMove(audioSource), WTFMove(videoSource)));
+        };
+        videoSource->whenReady(WTFMove(whenVideoSourceReady));
+    };
+    if (!audioSource)
+        return whenAudioSourceReady({ });
+    audioSource->whenReady(WTFMove(whenAudioSourceReady));
 }
 
 Vector<CaptureDevice> RealtimeMediaSourceCenter::getMediaStreamDevices()
 {
     Vector<CaptureDevice> result;
     for (auto& device : audioCaptureFactory().audioCaptureDeviceManager().captureDevices()) {
+        if (device.enabled())
+            result.append(device);
+    }
+    for (auto& device : audioCaptureFactory().speakerDevices()) {
         if (device.enabled())
             result.append(device);
     }
@@ -238,7 +250,18 @@ void RealtimeMediaSourceCenter::validateRequestConstraints(ValidConstraintsHandl
     else
         getUserMediaDevices(request, String { deviceIdentifierHashSalt }, audioDeviceInfo, videoDeviceInfo, firstInvalidConstraint);
 
-    if ((request.audioConstraints.isValid && audioDeviceInfo.isEmpty()) || (request.videoConstraints.isValid && videoDeviceInfo.isEmpty())) {
+    if (request.audioConstraints.isValid && audioDeviceInfo.isEmpty()) {
+        WTFLogAlways("Audio capture was requested but no device was found amongst %zu devices", audioCaptureFactory().audioCaptureDeviceManager().captureDevices().size());
+        request.audioConstraints.mandatoryConstraints.forEach([](auto& constraint) { constraint.log(); });
+
+        invalidHandler(firstInvalidConstraint);
+        return;
+    }
+
+    if (request.videoConstraints.isValid && videoDeviceInfo.isEmpty()) {
+        WTFLogAlways("Video capture was requested but no device was found amongst %zu devices", videoCaptureFactory().videoCaptureDeviceManager().captureDevices().size());
+        request.videoConstraints.mandatoryConstraints.forEach([](auto& constraint) { constraint.log(); });
+
         invalidHandler(firstInvalidConstraint);
         return;
     }
@@ -260,11 +283,6 @@ void RealtimeMediaSourceCenter::validateRequestConstraints(ValidConstraintsHandl
     }
 
     validHandler(WTFMove(audioDevices), WTFMove(videoDevices), WTFMove(deviceIdentifierHashSalt));
-}
-
-void RealtimeMediaSourceCenter::setVideoCapturePageState(bool interrupted, bool pageMuted)
-{
-    videoCaptureFactory().setVideoCapturePageState(interrupted, pageMuted);
 }
 
 void RealtimeMediaSourceCenter::setAudioCaptureFactory(AudioCaptureFactory& factory)
@@ -316,6 +334,13 @@ DisplayCaptureFactory& RealtimeMediaSourceCenter::displayCaptureFactory()
 {
     return m_displayCaptureFactoryOverride ? *m_displayCaptureFactoryOverride : defaultDisplayCaptureFactory();
 }
+
+#if !PLATFORM(COCOA)
+bool RealtimeMediaSourceCenter::shouldInterruptAudioOnPageVisibilityChange()
+{
+    return false;
+}
+#endif
 
 } // namespace WebCore
 

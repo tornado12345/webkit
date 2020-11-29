@@ -3,11 +3,9 @@
 
 /*---
 info: Operator use ToString
-es5id: 15.1.2.2_A1_T3
-es6id: 18.2.5
 esid: sec-parseint-string-radix
 description: Checking for undefined and null
 ---*/
 
-assert.sameValue(parseInt(undefined), NaN, "undefined");
-assert.sameValue(parseInt(null), NaN, "null");
+assert.sameValue(parseInt(undefined), NaN, 'parseInt(undefined) must return NaN');
+assert.sameValue(parseInt(null), NaN, 'parseInt(null) must return NaN');

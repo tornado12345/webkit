@@ -41,21 +41,40 @@ SOFT_LINK_CLASS(WebContentAnalysis, WebFilterEvaluator);
 
 namespace WebCore {
 
+#if PLATFORM(IOS)
+ParentalControlsContentFilter::SandboxExtensionState ParentalControlsContentFilter::m_sandboxExtensionState = SandboxExtensionState::NotSet;
+#endif
+
 bool ParentalControlsContentFilter::enabled()
 {
+#if PLATFORM(IOS)
+    bool enabled = false;
+    switch (m_sandboxExtensionState) {
+    case SandboxExtensionState::Consumed:
+        enabled = true;
+        break;
+    case SandboxExtensionState::NotConsumed:
+        enabled = false;
+        break;
+    case SandboxExtensionState::NotSet:
+        enabled = [getWebFilterEvaluatorClass() isManagedSession];
+        break;
+    }
+#else
     bool enabled = [getWebFilterEvaluatorClass() isManagedSession];
+#endif
     LOG(ContentFiltering, "ParentalControlsContentFilter is %s.\n", enabled ? "enabled" : "not enabled");
     return enabled;
 }
 
-std::unique_ptr<ParentalControlsContentFilter> ParentalControlsContentFilter::create()
+UniqueRef<ParentalControlsContentFilter> ParentalControlsContentFilter::create()
 {
-    return std::make_unique<ParentalControlsContentFilter>();
+    return makeUniqueRef<ParentalControlsContentFilter>();
 }
 
 static inline bool canHandleResponse(const ResourceResponse& response)
 {
-#if PLATFORM(MAC) || PLATFORM(IOSMAC)
+#if PLATFORM(MAC) || PLATFORM(MACCATALYST)
     return response.url().protocolIs("https");
 #else
     return response.url().protocolIsInHTTPFamily();
@@ -127,6 +146,16 @@ void ParentalControlsContentFilter::updateFilterState()
         LOG(ContentFiltering, "ParentalControlsContentFilter stopped buffering with state %d and replacement data length %zu.\n", m_state, [m_replacementData length]);
 #endif
 }
+
+#if PLATFORM(IOS)
+void ParentalControlsContentFilter::setHasConsumedSandboxExtension(bool hasConsumedSandboxExtension)
+{
+    if (m_sandboxExtensionState == SandboxExtensionState::Consumed)
+        return;
+
+    m_sandboxExtensionState = (hasConsumedSandboxExtension ? SandboxExtensionState::Consumed : SandboxExtensionState::NotConsumed);
+}
+#endif
 
 } // namespace WebCore
 

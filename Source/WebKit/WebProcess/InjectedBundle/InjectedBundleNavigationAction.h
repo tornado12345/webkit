@@ -23,20 +23,19 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef InjectedBundleNavigationAction_h
-#define InjectedBundleNavigationAction_h
+#pragma once
 
 #include "APIObject.h"
 #include "InjectedBundleHitTestResult.h"
 #include "InjectedBundleNodeHandle.h"
-#include "WebEvent.h"
+#include "WebMouseEvent.h"
 #include <WebCore/FrameLoaderTypes.h>
 #include <wtf/Ref.h>
 #include <wtf/RefPtr.h>
 
 namespace WebCore {
-    class FormState;
-    class NavigationAction;
+class FormState;
+class NavigationAction;
 }
 
 namespace WebKit {
@@ -62,7 +61,7 @@ public:
 
     bool shouldOpenExternalURLs() const { return m_shouldOpenExternalURLs; }
     bool shouldTryAppLinks() const { return m_shouldTryAppLinks; }
-    AtomicString downloadAttribute() const { return m_downloadAttribute; }
+    AtomString downloadAttribute() const { return m_downloadAttribute; }
 
 private:
     InjectedBundleNavigationAction(WebFrame*, const WebCore::NavigationAction&, RefPtr<WebCore::FormState>&&);
@@ -74,11 +73,9 @@ private:
     WebCore::FloatPoint m_clickLocationInRootViewCoordinates;
     RefPtr<InjectedBundleHitTestResult> m_hitTestResult;
     RefPtr<InjectedBundleNodeHandle> m_formElement;
-    AtomicString m_downloadAttribute;
+    AtomString m_downloadAttribute;
     bool m_shouldOpenExternalURLs;
     bool m_shouldTryAppLinks;
 };
 
 } // namespace WebKit
-
-#endif // InjectedBundleNavigationAction_h

@@ -11,6 +11,19 @@ TestPage.registerInitializer(() => {
             if (regex.test(resource.url))
                 return resource.scripts[0];
         }
+        return null;
+    }
+
+    window.findResource = function(regex) {
+        for (let frame of WI.networkManager.frames) {
+            if (regex.test(frame.mainResource.url))
+                return frame.mainResource;
+            for (let resource of frame.resourceCollection) {
+                if (regex.test(resource.url))
+                    return resource;
+            }            
+        }
+        return null;
     }
 
     window.loadLinesFromSourceCode = function(sourceCode) {
@@ -141,6 +154,10 @@ TestPage.registerInitializer(() => {
         case "out":
             InspectorTest.log("ACTION: step-out");
             WI.debuggerManager.stepOut();
+            break;
+        case "next":
+            InspectorTest.log("ACTION: step-next");
+            WI.debuggerManager.stepNext();
             break;
         case "resume":
             InspectorTest.log("ACTION: resume");

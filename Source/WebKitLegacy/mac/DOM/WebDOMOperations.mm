@@ -41,18 +41,22 @@
 #import "WebKitNSStringExtras.h"
 #import <JavaScriptCore/APICast.h>
 #import <JavaScriptCore/JSCJSValue.h>
+#import <JavaScriptCore/JSGlobalObjectInlines.h>
 #import <JavaScriptCore/JSLock.h>
 #import <WebCore/Document.h>
 #import <WebCore/Frame.h>
 #import <WebCore/FrameLoader.h>
 #import <WebCore/HTMLInputElement.h>
 #import <WebCore/HTMLParserIdioms.h>
+#import <WebCore/HTMLTextFormControlElement.h>
 #import <WebCore/JSElement.h>
 #import <WebCore/LegacyWebArchive.h>
 #import <WebCore/PlatformWheelEvent.h>
+#import <WebCore/Range.h>
 #import <WebCore/RenderElement.h>
 #import <WebCore/RenderTreeAsText.h>
 #import <WebCore/ShadowRoot.h>
+#import <WebCore/SimpleRange.h>
 #import <WebCore/WheelEvent.h>
 #import <WebCore/markup.h>
 #import <WebKitLegacy/DOMExtensions.h>
@@ -72,9 +76,9 @@ using namespace JSC;
     if (!value)
         return 0;
 
-    ExecState* exec = toJS(context);
-    JSLockHolder lock(exec);
-    return kit(JSElement::toWrapped(exec->vm(), toJS(exec, value)));
+    JSGlobalObject* lexicalGlobalObject = toJS(context);
+    JSLockHolder lock(lexicalGlobalObject);
+    return kit(JSElement::toWrapped(lexicalGlobalObject->vm(), toJS(lexicalGlobalObject, value)));
 }
 
 @end
@@ -96,6 +100,7 @@ using namespace JSC;
 }
 
 #if PLATFORM(IOS_FAMILY)
+
 - (BOOL)isHorizontalWritingMode
 {
     Node* node = core(self);
@@ -111,24 +116,16 @@ using namespace JSC;
 
 - (void)hidePlaceholder
 {
-    if (![self isKindOfClass:[DOMHTMLInputElement class]]
-        && ![self isKindOfClass:[DOMHTMLTextAreaElement class]])
-        return;
-    
-    Node *node = core(self);
-    HTMLTextFormControlElement *formControl = static_cast<HTMLTextFormControlElement *>(node);
-    formControl->hidePlaceholder();
+    if (auto node = core(self); is<HTMLTextFormControlElement>(node))
+        downcast<HTMLTextFormControlElement>(*node).setCanShowPlaceholder(false);
 }
 
 - (void)showPlaceholderIfNecessary
 {
-    if (![self isKindOfClass:[DOMHTMLInputElement class]]
-        && ![self isKindOfClass:[DOMHTMLTextAreaElement class]])
-        return;
-    
-    HTMLTextFormControlElement *formControl = static_cast<HTMLTextFormControlElement *>(core(self));
-    formControl->showPlaceholderIfNecessary();
+    if (auto node = core(self); is<HTMLTextFormControlElement>(node))
+        downcast<HTMLTextFormControlElement>(*node).setCanShowPlaceholder(true);
 }
+
 #endif
 
 @end
@@ -189,13 +186,13 @@ using namespace JSC;
 
 - (WebArchive *)webArchive
 {
-    return [[[WebArchive alloc] _initWithCoreLegacyWebArchive:LegacyWebArchive::create(core(self))] autorelease];
+    return [[[WebArchive alloc] _initWithCoreLegacyWebArchive:LegacyWebArchive::create(makeSimpleRange(*core(self)))] autorelease];
 }
 
 - (NSString *)markupString
 {
-    auto& range = *core(self);
-    return String { documentTypeString(range.startContainer().document()) + serializePreservingVisualAppearance(range, nullptr, AnnotateForInterchange::Yes) };
+    auto range = makeSimpleRange(*core(self));
+    return String { documentTypeString(range.start.document()) + serializePreservingVisualAppearance(range, nullptr, AnnotateForInterchange::Yes) };
 }
 
 @end
@@ -225,9 +222,19 @@ using namespace JSC;
     return downcast<HTMLInputElement>(core((DOMElement *)self))->isAutoFilled();
 }
 
+- (BOOL)_isAutoFilledAndViewable
+{
+    return downcast<HTMLInputElement>(core((DOMElement *)self))->isAutoFilledAndViewable();
+}
+
 - (void)_setAutofilled:(BOOL)autofilled
 {
     downcast<HTMLInputElement>(core((DOMElement *)self))->setAutoFilled(autofilled);
+}
+
+- (void)_setAutoFilledAndViewable:(BOOL)autoFilledAndViewable
+{
+    downcast<HTMLInputElement>(core((DOMElement *)self))->setAutoFilledAndViewable(autoFilledAndViewable);
 }
 
 @end

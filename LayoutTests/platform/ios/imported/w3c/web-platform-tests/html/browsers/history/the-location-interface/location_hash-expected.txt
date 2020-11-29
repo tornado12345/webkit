@@ -1,4 +1,8 @@
 
-PASS location hash 
-FAIL Setting location.hash on srcdoc iframe assert_true: Should have scrolled by more than one viewport height expected true got false
+PASS location hash
+PASS Setting location.hash on srcdoc iframe
+PASS Setting hash should automatically include hash character
+PASS Setting hash should encode incompatible characters
+PASS Setting hash to an already encoded value should not double encode it
+PASS Setting hash which is partially encoded should only encode incompatible characters
 

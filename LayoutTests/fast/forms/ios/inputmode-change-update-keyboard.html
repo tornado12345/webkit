@@ -30,6 +30,9 @@ if (!window.testRunner) {
 }
 
 async function runTest() {
+    if (window.testRunner)
+        await UIHelper.setHardwareKeyboardAttached(false);
+
     debug('inputmode="text"');
 
     let didResize = () => { };

@@ -36,6 +36,8 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <sys/time.h>
+#else
+#include <windows.h>
 #endif
 
 #if PLATFORM(IOS_FAMILY) && !PLATFORM(IOS_FAMILY_SIMULATOR)
@@ -51,44 +53,13 @@
 namespace WebKit {
 namespace NetworkCache {
 
-#if !OS(WINDOWS)
-static DirectoryEntryType directoryEntryType(uint8_t dtype)
-{
-    switch (dtype) {
-    case DT_DIR:
-        return DirectoryEntryType::Directory;
-    case DT_REG:
-        return DirectoryEntryType::File;
-    default:
-        ASSERT_NOT_REACHED();
-        return DirectoryEntryType::File;
-    }
-    return DirectoryEntryType::File;
-}
-#endif
-
 void traverseDirectory(const String& path, const Function<void (const String&, DirectoryEntryType)>& function)
 {
-#if !OS(WINDOWS)
-    DIR* dir = opendir(FileSystem::fileSystemRepresentation(path).data());
-    if (!dir)
-        return;
-    dirent* dp;
-    while ((dp = readdir(dir))) {
-        if (dp->d_type != DT_DIR && dp->d_type != DT_REG)
-            continue;
-        const char* name = dp->d_name;
-        if (!strcmp(name, ".") || !strcmp(name, ".."))
-            continue;
-        auto nameString = String::fromUTF8(name);
-        if (nameString.isNull())
-            continue;
-        function(nameString, directoryEntryType(dp->d_type));
+    auto entries = FileSystem::listDirectory(path, "*"_s);
+    for (auto& entry : entries) {
+        auto type = FileSystem::fileIsDirectory(entry, FileSystem::ShouldFollowSymbolicLinks::No) ? DirectoryEntryType::Directory : DirectoryEntryType::File;
+        function(FileSystem::pathGetFileName(entry), type);
     }
-    closedir(dir);
-#else
-    function(String(), DirectoryEntryType::File);
-#endif
 }
 
 void deleteDirectoryRecursively(const String& path)
@@ -127,7 +98,9 @@ FileTimes fileTimes(const String& path)
     return { WallTime::fromRawSeconds(g_ascii_strtoull(birthtimeString, nullptr, 10)),
         WallTime::fromRawSeconds(g_file_info_get_attribute_uint64(fileInfo.get(), "time::modified")) };
 #elif OS(WINDOWS)
-    return FileTimes();
+    auto createTime = FileSystem::getFileCreationTime(path);
+    auto modifyTime = FileSystem::getFileModificationTime(path);
+    return { createTime.valueOr(WallTime()), modifyTime.valueOr(WallTime()) };
 #endif
 }
 
@@ -142,37 +115,14 @@ void updateFileModificationTimeIfNeeded(const String& path)
 #if !OS(WINDOWS)
     // This really updates both the access time and the modification time.
     utimes(FileSystem::fileSystemRepresentation(path).data(), nullptr);
-#endif
-}
-
-bool isSafeToUseMemoryMapForPath(const String& path)
-{
-#if PLATFORM(IOS_FAMILY) && !PLATFORM(IOS_FAMILY_SIMULATOR)
-    struct {
-        uint32_t length;
-        uint32_t protectionClass;
-    } attrBuffer;
-
-    attrlist attrList = { };
-    attrList.bitmapcount = ATTR_BIT_MAP_COUNT;
-    attrList.commonattr = ATTR_CMN_DATA_PROTECT_FLAGS;
-    int32_t error = getattrlist(FileSystem::fileSystemRepresentation(path).data(), &attrList, &attrBuffer, sizeof(attrBuffer), FSOPT_NOFOLLOW);
-    if (error) {
-        RELEASE_LOG_ERROR(Network, "Unable to get cache directory protection class, disabling use of shared mapped memory");
-        return false;
-    }
-
-    // For stricter protection classes shared maps could disappear when device is locked.
-    const uint32_t fileProtectionCompleteUntilFirstUserAuthentication = 3;
-    bool isSafe = attrBuffer.protectionClass >= fileProtectionCompleteUntilFirstUserAuthentication;
-
-    if (!isSafe)
-        RELEASE_LOG(Network, "Disallowing use of shared mapped memory due to container protection class %u", attrBuffer.protectionClass);
-
-    return isSafe;
 #else
-    UNUSED_PARAM(path);
-    return true;
+    FILETIME time;
+    GetSystemTimeAsFileTime(&time);
+    auto file = CreateFile(path.wideCharacters().data(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+        return;
+    SetFileTime(file, &time, &time, &time);
+    CloseHandle(file);
 #endif
 }
 

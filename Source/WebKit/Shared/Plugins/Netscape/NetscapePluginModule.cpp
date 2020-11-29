@@ -151,7 +151,7 @@ RefPtr<NetscapePluginModule> NetscapePluginModule::getOrCreate(const String& plu
     if (!pluginModule->load())
         return nullptr;
     
-    return WTFMove(pluginModule);
+    return pluginModule;
 }
 
 void NetscapePluginModule::incrementLoadCount()
@@ -200,17 +200,13 @@ bool NetscapePluginModule::load()
 #if PLATFORM(GTK)
 static bool moduleMixesGtkSymbols(Module* module)
 {
-#ifdef GTK_API_VERSION_2
-    return module->functionPointer<gpointer>("gtk_application_get_type");
-#else
     return module->functionPointer<gpointer>("gtk_object_get_type");
-#endif
 }
 #endif
 
 bool NetscapePluginModule::tryLoad()
 {
-    m_module = std::make_unique<Module>(m_pluginPath);
+    m_module = makeUnique<Module>(m_pluginPath);
     if (!m_module->load())
         return false;
 

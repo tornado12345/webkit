@@ -8,7 +8,6 @@ features: [class-static-methods-private, class, class-fields-public, async-funct
 flags: [generated, async]
 includes: [propertyHelper.js]
 info: |
-    
     ClassElement :
       MethodDefinition
       static MethodDefinition
@@ -137,9 +136,9 @@ c.m().then(function(v) {
       assert.sameValue(results[4], 1);
       assert.sameValue(results[5], 1);
 
-    }, $DONE).then($DONE, $DONE);
+    }).then($DONE, $DONE);
 
   }
 
   return Promise.resolve(assertions());
-}, $DONE).then($DONE, $DONE);
+}).then($DONE, $DONE);

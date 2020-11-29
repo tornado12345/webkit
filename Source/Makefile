@@ -1,45 +1,43 @@
-LIBWEBRTC_MODULE = 
 WEBINSPECTORUI_MODULE =
 
-ifeq (iosmac,$(SDK_VARIANT))
-	DISABLE_LIBWEBRTC = 1
-endif
-
 ifneq (,$(SDKROOT))
-	ifneq (,$(findstring iphone,$(SDKROOT)))
-		LIBWEBRTC_MODULE = ThirdParty/libwebrtc
-	endif
 	ifneq (,$(findstring macosx,$(SDKROOT)))
-		LIBWEBRTC_MODULE = ThirdParty/libwebrtc
 		WEBINSPECTORUI_MODULE = WebInspectorUI
 	endif
 else
-	LIBWEBRTC_MODULE = ThirdParty/libwebrtc
 	WEBINSPECTORUI_MODULE = WebInspectorUI
 endif
 
-ifneq (,$(DISABLE_LIBWEBRTC))
-	LIBWEBRTC_MODULE =
-endif
+MODULES = bmalloc WTF JavaScriptCore ThirdParty WebCore $(WEBINSPECTORUI_MODULE) WebKitLegacy WebKit
 
-MODULES = bmalloc WTF JavaScriptCore ThirdParty/ANGLE $(LIBWEBRTC_MODULE) WebCore $(WEBINSPECTORUI_MODULE) WebKitLegacy WebKit
+define build_target_for_each_module
+	for dir in $(MODULES); do \
+		${MAKE} $@ -C $$dir PATH_FROM_ROOT=$(PATH_FROM_ROOT)/$${dir}; \
+		exit_status=$$?; \
+		[ $$exit_status -ne 0 ] && exit $$exit_status; \
+	done; true
+endef
 
 all:
-	@for dir in $(MODULES); do ${MAKE} $@ -C $$dir; exit_status=$$?; \
-	if [ $$exit_status -ne 0 ]; then exit $$exit_status; fi; done
+	@$(build_target_for_each_module)
 
 debug d:
-	@for dir in $(MODULES); do ${MAKE} $@ -C $$dir; exit_status=$$?; \
-	if [ $$exit_status -ne 0 ]; then exit $$exit_status; fi; done
+	@$(build_target_for_each_module)
 
 release r:
-	@for dir in $(MODULES); do ${MAKE} $@ -C $$dir; exit_status=$$?; \
-	if [ $$exit_status -ne 0 ]; then exit $$exit_status; fi; done
+	@$(build_target_for_each_module)
+
+release+assert ra:
+	@$(build_target_for_each_module)
+
+testing t:
+	@$(build_target_for_each_module)
 
 analyze:
-	@for dir in $(MODULES); do ${MAKE} $@ -C $$dir; exit_status=$$?; \
-	if [ $$exit_status -ne 0 ]; then exit $$exit_status; fi; done
+	@$(build_target_for_each_module)
 
 clean:
-	@for dir in $(MODULES); do ${MAKE} $@ -C $$dir; exit_status=$$?; \
-	if [ $$exit_status -ne 0 ]; then exit $$exit_status; fi; done
+	@$(build_target_for_each_module)
+
+installsrc:
+	@$(build_target_for_each_module)

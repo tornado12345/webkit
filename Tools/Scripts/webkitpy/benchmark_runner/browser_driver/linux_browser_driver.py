@@ -34,7 +34,7 @@ try:
 except ImportError:
     pass
 from webkitpy.benchmark_runner.utils import force_remove
-from browser_driver import BrowserDriver
+from webkitpy.benchmark_runner.browser_driver.browser_driver import BrowserDriver
 
 
 _log = logging.getLogger(__name__)
@@ -58,8 +58,14 @@ class LinuxBrowserDriver(BrowserDriver):
         self._test_environ = dict(os.environ)
         self._test_environ['HOME'] = self._temp_profiledir
 
+    def prepare_initial_env(self, config):
+        pass
+
     def restore_env(self):
         force_remove(self._temp_profiledir)
+
+    def restore_env_after_all_testing(self):
+        pass
 
     def close_browsers(self):
         if self._browser_process:

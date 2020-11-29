@@ -1,3 +1,4 @@
+<!DOCTYPE html><!-- webkit-test-runner [ useFlexibleViewport=true ] -->
 <html>
 <head>
 <title>This tests the case when visible content change happens on touchstart</title>
@@ -45,7 +46,11 @@ tapthis.addEventListener("mouseover", function( event ) {
         testRunner.notifyDone();
 }, false);
 
-becomesVisible.addEventListener("click", function( event ) {   
+tapthis.addEventListener("mouseout", function( event ) {
+    result.innerHTML = result.innerHTML + " mouseout should NOT be triggered ";
+}, false);
+
+becomesVisible.addEventListener("click", function( event ) {
     result.innerHTML = "clicked hidden";
 }, false);
 

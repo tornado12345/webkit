@@ -28,6 +28,7 @@
 #import "TabViewController.h"
 #import <WebKit/WKNavigation.h>
 #import <WebKit/WKNavigationDelegate.h>
+#import <WebKit/WKPreferencesPrivate.h>
 #import <WebKit/WKWebView.h>
 #import <WebKit/WKWebViewConfiguration.h>
 
@@ -75,7 +76,9 @@ void* URLContext = &URLContext;
     self.tabViewController.parent = self;
     self.tabViewController.modalPresentationStyle = UIModalPresentationPopover;
 
-    [self setCurrentWebView:[self createWebView]];
+    WKWebView *webView = [self createWebView];
+    [webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://webkit.org"]]];
+    [self setCurrentWebView:webView];
 }
 
 
@@ -173,6 +176,9 @@ void* URLContext = &URLContext;
 - (WKWebView *)createWebView
 {
     WKWebViewConfiguration *configuration = [[WKWebViewConfiguration alloc] init];
+
+    configuration.preferences._mockCaptureDevicesEnabled = YES;
+
     WKWebView *webView = [[WKWebView alloc] initWithFrame:self.webViewContainer.bounds configuration:configuration];
     webView.navigationDelegate = self;
     webView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;

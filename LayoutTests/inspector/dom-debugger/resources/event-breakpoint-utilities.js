@@ -2,9 +2,13 @@ TestPage.registerInitializer(() => {
     InspectorTest.EventBreakpoint = {};
 
     InspectorTest.EventBreakpoint.teardown = function(resolve, reject) {
-        let breakpoints = WI.domDebuggerManager.eventBreakpoints;
-        for (let breakpoint of breakpoints)
-            WI.domDebuggerManager.removeEventBreakpoint(breakpoint);
+        WI.domDebuggerManager.allAnimationFramesBreakpoint?.remove();
+        WI.domDebuggerManager.allIntervalsBreakpoint?.remove();
+        WI.domDebuggerManager.allListenersBreakpoint?.remove();
+        WI.domDebuggerManager.allTimeoutsBreakpoint?.remove();
+
+        for (let breakpoint of WI.domDebuggerManager.listenerBreakpoints)
+            breakpoint.remove();
 
         resolve();
     };
@@ -17,7 +21,8 @@ TestPage.registerInitializer(() => {
 
             let targetData = WI.debuggerManager.dataForTarget(WI.debuggerManager.activeCallFrame.target);
             InspectorTest.assert(targetData.pauseReason === pauseReason, `Pause reason should be "${pauseReason}".`);
-            InspectorTest.assert(targetData.pauseData.eventName === eventName, `Pause data eventName should be "${eventName}".`);
+            if (targetData.pauseData.eventName)
+                InspectorTest.assert(targetData.pauseData.eventName === eventName, `Pause data eventName should be "${eventName}".`);
 
             InspectorTest.fail(message);
             logActiveStackTrace();
@@ -37,16 +42,22 @@ TestPage.registerInitializer(() => {
         });
     };
 
-    InspectorTest.EventBreakpoint.addBreakpoint = function(type, eventName) {
-        InspectorTest.log(`Adding "${eventName}" Event Breakpoint...`);
+    InspectorTest.EventBreakpoint.createBreakpoint = function(type, {eventName} = {}) {
+        if (type !== WI.EventBreakpoint.Type.Listener)
+            eventName = null;
 
+        InspectorTest.log(`Creating "${eventName || type}" Event Breakpoint...`);
+        return InspectorTest.EventBreakpoint.addBreakpoint(new WI.EventBreakpoint(type, {eventName}));
+    };
+
+    InspectorTest.EventBreakpoint.addBreakpoint = function(breakpoint) {
+        InspectorTest.log(`Adding "${breakpoint.type + (breakpoint.eventName ? ":" + breakpoint.eventName : "")}" Event Breakpoint...`);
+
+        breakpoint.disabled = false;
         return new Promise((resolve, reject) => {
-            let breakpoint = new WI.EventBreakpoint(type, eventName);
-
             WI.domDebuggerManager.awaitEvent(WI.DOMDebuggerManager.Event.EventBreakpointAdded)
             .then((event) => {
-                InspectorTest.assert(event.data.breakpoint.type === type, `Breakpoint should be for expected type "${type}".`);
-                InspectorTest.assert(event.data.breakpoint.eventName === eventName, `Breakpoint should be for expected event name "${eventName}".`);
+                InspectorTest.assert(event.data.breakpoint === breakpoint, "Added Breakpoint should be expected object.");
                 InspectorTest.assert(!event.data.breakpoint.disabled, "Breakpoint should not be disabled initially.");
                 resolve(breakpoint);
             });
@@ -56,22 +67,22 @@ TestPage.registerInitializer(() => {
     };
 
     InspectorTest.EventBreakpoint.removeBreakpoint = function(breakpoint) {
-        InspectorTest.log(`Removing "${breakpoint.eventName}" Event Breakpoint...`);
+        InspectorTest.log(`Removing "${breakpoint.type + (breakpoint.eventName ? ":" + breakpoint.eventName : "")}" Event Breakpoint...`);
 
         return new Promise((resolve, reject) => {
             WI.domDebuggerManager.awaitEvent(WI.DOMDebuggerManager.Event.EventBreakpointRemoved)
             .then((event) => {
                 InspectorTest.assert(event.data.breakpoint === breakpoint, "Removed Breakpoint should be expected object.");
-                InspectorTest.assert(!WI.domDebuggerManager.eventBreakpoints.includes(breakpoint), "Breakpoint should not be in the list of breakpoints.");
+                InspectorTest.assert(!WI.domDebuggerManager.listenerBreakpoints.includes(breakpoint), "Breakpoint should not be in the list of breakpoints.");
                 resolve(breakpoint);
             });
 
-            WI.domDebuggerManager.removeEventBreakpoint(breakpoint);
+            breakpoint.remove();
         });
     };
 
     InspectorTest.EventBreakpoint.disableBreakpoint = function(breakpoint) {
-        InspectorTest.log(`Disabling "${breakpoint.eventName}" Event Breakpoint...`);
+        InspectorTest.log(`Disabling "${breakpoint.type + (breakpoint.eventName ? ":" + breakpoint.eventName : "")}" Event Breakpoint...`);
 
         breakpoint.disabled = true;
         return breakpoint;

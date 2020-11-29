@@ -58,37 +58,39 @@ private:
     // DrawingArea
     void setNeedsDisplay() override;
     void setNeedsDisplayInRect(const WebCore::IntRect&) override;
-    void scroll(const WebCore::IntRect& scrollRect, const WebCore::IntSize& scrollDelta) override;
+    void scroll(const WebCore::IntRect& scrollRect, const WebCore::IntSize& scrollDelta) override { }
 
     void forceRepaint() override;
     bool forceRepaintAsync(CallbackID) override;
     void setLayerTreeStateIsFrozen(bool) override;
     bool layerTreeStateIsFrozen() const override;
     void setRootCompositingLayer(WebCore::GraphicsLayer*) override;
-    void scheduleInitialDeferredPaint() override;
-    void scheduleCompositingLayerFlush() override;
-    void scheduleCompositingLayerFlushImmediately() override;
+    void triggerRenderingUpdate() override;
 
     void updatePreferences(const WebPreferencesStore&) override;
     void mainFrameContentSizeChanged(const WebCore::IntSize&) override;
 
     void setViewExposedRect(Optional<WebCore::FloatRect>) override;
-    Optional<WebCore::FloatRect> viewExposedRect() const override { return m_scrolledViewExposedRect; }
+    Optional<WebCore::FloatRect> viewExposedRect() const override { return m_viewExposedRect; }
 
-    bool supportsAsyncScrolling() override { return true; }
+    WebCore::FloatRect exposedContentRect() const override;
+    void setExposedContentRect(const WebCore::FloatRect&) override;
+
+    bool supportsAsyncScrolling() const override { return true; }
 
     void dispatchAfterEnsuringUpdatedScrollPosition(WTF::Function<void ()>&&) override;
 
-    bool shouldUseTiledBackingForFrameView(const WebCore::FrameView&) override;
+    bool shouldUseTiledBackingForFrameView(const WebCore::FrameView&) const override;
 
     void activityStateDidChange(OptionSet<WebCore::ActivityState::Flag> changed, ActivityStateChangeID, const Vector<CallbackID>&) override;
-    void didUpdateActivityStateTimerFired();
 
     void attachViewOverlayGraphicsLayer(WebCore::GraphicsLayer*) override;
 
-    bool dispatchDidReachLayoutMilestone(OptionSet<WebCore::LayoutMilestone>) override;
+    bool addMilestonesToDispatch(OptionSet<WebCore::LayoutMilestone> paintMilestones) override;
 
-    void flushLayers();
+    void addCommitHandlers();
+    enum class UpdateRenderingType { Normal, TransientZoom };
+    void updateRendering(UpdateRenderingType = UpdateRenderingType::Normal);
 
     // Message handlers.
     void updateGeometry(const WebCore::IntSize& viewSize, bool flushSynchronously, const WTF::MachSendRight& fencePort) override;
@@ -102,7 +104,10 @@ private:
     void addTransactionCallbackID(CallbackID) override;
     void setShouldScaleViewToFitDocument(bool) override;
 
-    void sendEnterAcceleratedCompositingModeIfNeeded();
+    void sendEnterAcceleratedCompositingModeIfNeeded() override;
+    void sendDidFirstLayerFlushIfNeeded();
+    void handleActivityStateChangeCallbacksIfNeeded();
+    void handleActivityStateChangeCallbacks();
 
     void adjustTransientZoom(double scale, WebCore::FloatPoint origin) override;
     void commitTransientZoom(double scale, WebCore::FloatPoint origin) override;
@@ -120,67 +125,57 @@ private:
     WebCore::TiledBacking* mainFrameTiledBacking() const;
     void updateDebugInfoLayer(bool showLayer);
 
-    void updateIntrinsicContentSizeIfNeeded();
-    void updateScrolledExposedRect();
     void scaleViewToFitDocumentIfNeeded();
 
-    void sendPendingNewlyReachedLayoutMilestones();
+    void sendPendingNewlyReachedPaintingMilestones();
 
-    void layerFlushRunLoopCallback();
-    void invalidateLayerFlushRunLoopObserver();
-    void scheduleLayerFlushRunLoopObserver();
+    void updateRenderingRunLoopCallback();
+    void invalidateRenderingUpdateRunLoopObserver();
+    void scheduleRenderingUpdateRunLoopObserver();
 
-    bool adjustLayerFlushThrottling(WebCore::LayerFlushThrottleState::Flags) override;
-    bool layerFlushThrottlingIsActive() const override;
-
-    void startLayerFlushThrottlingTimer();
-    void layerFlushThrottlingTimerFired();
-
-    bool m_layerTreeStateIsFrozen;
+    void startRenderThrottlingTimer();
+    void renderThrottlingTimerFired();
 
     std::unique_ptr<LayerHostingContext> m_layerHostingContext;
 
     RetainPtr<CALayer> m_hostingLayer;
     RetainPtr<CALayer> m_rootLayer;
     RetainPtr<CALayer> m_debugInfoLayer;
-
     RetainPtr<CALayer> m_pendingRootLayer;
 
-    bool m_isPaintingSuspended;
-
     Optional<WebCore::FloatRect> m_viewExposedRect;
-    Optional<WebCore::FloatRect> m_scrolledViewExposedRect;
 
-    WebCore::IntSize m_lastSentIntrinsicContentSize;
-    bool m_inUpdateGeometry;
+    WebCore::IntSize m_lastViewSizeForScaleToFit;
+    WebCore::IntSize m_lastDocumentSizeForScaleToFit;
 
-    double m_transientZoomScale;
+    double m_transientZoomScale { 1 };
     WebCore::FloatPoint m_transientZoomOrigin;
 
-    WebCore::TransformationMatrix m_transform;
-
-    RunLoop::Timer<TiledCoreAnimationDrawingArea> m_sendDidUpdateActivityStateTimer;
     Vector<CallbackID> m_nextActivityStateChangeCallbackIDs;
     ActivityStateChangeID m_activityStateChangeID { ActivityStateChangeAsynchronous };
 
     RefPtr<WebCore::GraphicsLayer> m_viewOverlayRootLayer;
 
-    bool m_shouldScaleViewToFitDocument { false };
-    bool m_isScalingViewToFitDocument { false };
-    WebCore::IntSize m_lastViewSizeForScaleToFit;
-    WebCore::IntSize m_lastDocumentSizeForScaleToFit;
-
-    OptionSet<WebCore::LayoutMilestone> m_pendingNewlyReachedLayoutMilestones;
+    OptionSet<WebCore::LayoutMilestone> m_pendingNewlyReachedPaintingMilestones;
     Vector<CallbackID> m_pendingCallbackIDs;
 
-    std::unique_ptr<WebCore::RunLoopObserver> m_layerFlushRunLoopObserver;
+    std::unique_ptr<WebCore::RunLoopObserver> m_renderUpdateRunLoopObserver;
 
-    bool m_isThrottlingLayerFlushes { false };
-    bool m_isLayerFlushThrottlingTemporarilyDisabledForInteraction { false };
+    bool m_isPaintingSuspended { false };
+    bool m_inUpdateGeometry { false };
+    bool m_layerTreeStateIsFrozen { false };
+    bool m_shouldScaleViewToFitDocument { false };
+    bool m_isScalingViewToFitDocument { false };
     bool m_needsSendEnterAcceleratedCompositingMode { true };
-
-    WebCore::Timer m_layerFlushThrottlingTimer;
+    bool m_needsSendDidFirstLayerFlush { true };
+    bool m_shouldHandleActivityStateChangeCallbacks { false };
 };
+
+inline bool TiledCoreAnimationDrawingArea::addMilestonesToDispatch(OptionSet<WebCore::LayoutMilestone> paintMilestones)
+{
+    m_pendingNewlyReachedPaintingMilestones.add(paintMilestones);
+    return true;
+}
 
 } // namespace WebKit
 

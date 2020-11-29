@@ -27,6 +27,8 @@
 
 #if ENABLE(DEVICE_ORIENTATION)
 
+#include "DeviceOrientationOrMotionPermissionState.h"
+#include "ExceptionOr.h"
 #include <wtf/Function.h>
 #include <wtf/Vector.h>
 #include <wtf/WeakPtr.h>
@@ -40,15 +42,13 @@ class DeviceOrientationAndMotionAccessController : public CanMakeWeakPtr<DeviceO
 public:
     explicit DeviceOrientationAndMotionAccessController(Document&);
 
-    const Optional<bool>& accessState() const { return m_accessState; }
-    void shouldAllowAccess(Function<void(bool granted)>&&);
+
+    DeviceOrientationOrMotionPermissionState accessState() const { return m_accessState; }
+    void shouldAllowAccess(Function<void(DeviceOrientationOrMotionPermissionState)>&&);
 
 private:
-    void setAccessState(bool);
-
     Document& m_document;
-    Optional<bool> m_accessState;
-    Vector<Function<void(bool)>> m_pendingRequests;
+    DeviceOrientationOrMotionPermissionState m_accessState { DeviceOrientationOrMotionPermissionState::Prompt };
 };
 
 } // namespace WebCore

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005, 2008, 2010, 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2005-2020 Apple Inc. All rights reserved.
  * Copyright (C) 2006 Alexey Proskuryakov
  *
  * Redistribution and use in source and binary forms, with or without
@@ -33,19 +33,19 @@
 #if PLATFORM(COCOA)
 #include <pal/spi/cocoa/CoreTextSPI.h>
 #endif
+#include "CachedFont.h"
+#include "CharacterProperties.h"
 #include "FontCache.h"
 #include "FontCascade.h"
+#include "FontCustomPlatformData.h"
 #include "OpenTypeMathData.h"
+#include "SharedBuffer.h"
 #include <wtf/MathExtras.h>
 #include <wtf/NeverDestroyed.h>
-#include <wtf/text/AtomicStringHash.h>
+#include <wtf/text/AtomStringHash.h>
 
 #if ENABLE(OPENTYPE_VERTICAL)
 #include "OpenTypeVerticalData.h"
-#endif
-
-#if USE(DIRECT2D)
-#include <dwrite.h>
 #endif
 
 namespace WebCore {
@@ -54,6 +54,17 @@ unsigned GlyphPage::s_count = 0;
 
 const float smallCapsFontSizeMultiplier = 0.7f;
 const float emphasisMarkFontSizeMultiplier = 0.5f;
+
+DEFINE_ALLOCATOR_WITH_HEAP_IDENTIFIER(Font);
+
+Ref<Font> Font::create(Ref<SharedBuffer>&& fontFaceData, Font::Origin origin, float fontSize, bool syntheticBold, bool syntheticItalic)
+{
+    bool wrapping;
+    auto customFontData = CachedFont::createCustomFontData(fontFaceData.get(), { }, wrapping);
+    FontDescription description;
+    description.setComputedSize(fontSize);
+    return Font::create(CachedFont::platformDataFromCustomData(*customFontData, description, syntheticBold, syntheticItalic, { }, { }), origin);
+}
 
 Font::Font(const FontPlatformData& platformData, Origin origin, Interstitial interstitial, Visibility visibility, OrientationFallback orientationFallback)
     : m_platformData(platformData)
@@ -65,6 +76,7 @@ Font::Font(const FontPlatformData& platformData, Origin origin, Interstitial int
     , m_isBrokenIdeographFallback(false)
     , m_hasVerticalGlyphs(false)
     , m_isUsedInSystemFallbackCache(false)
+    , m_allowsAntialiasing(true)
 #if PLATFORM(IOS_FAMILY)
     , m_shouldNotBeUsedForArabic(false)
 #endif
@@ -102,33 +114,43 @@ void Font::initCharWidths()
 
 void Font::platformGlyphInit()
 {
-    auto* glyphPageZero = glyphPage(0);
+#if USE(FREETYPE)
+    auto* glyphPageZeroWidthSpace = glyphPage(GlyphPage::pageNumberForCodePoint(zeroWidthSpace));
+    UChar32 zeroWidthSpaceCharacter = zeroWidthSpace;
+#else
+    // Ask for the glyph for 0 to avoid paging in ZERO WIDTH SPACE. Control characters, including 0,
+    // are mapped to the ZERO WIDTH SPACE glyph for non FreeType based ports.
+    auto* glyphPageZeroWidthSpace = glyphPage(0);
+    UChar32 zeroWidthSpaceCharacter = 0;
+#endif
     auto* glyphPageCharacterZero = glyphPage(GlyphPage::pageNumberForCodePoint('0'));
     auto* glyphPageSpace = glyphPage(GlyphPage::pageNumberForCodePoint(space));
 
-    // Ask for the glyph for 0 to avoid paging in ZERO WIDTH SPACE. Control characters, including 0,
-    // are mapped to the ZERO WIDTH SPACE glyph.
-    if (glyphPageZero)
-        m_zeroWidthSpaceGlyph = glyphPageZero->glyphDataForCharacter(0).glyph;
+    if (glyphPageZeroWidthSpace)
+        m_zeroWidthSpaceGlyph = glyphPageZeroWidthSpace->glyphDataForCharacter(zeroWidthSpaceCharacter).glyph;
 
     // Nasty hack to determine if we should round or ceil space widths.
     // If the font is monospace or fake monospace we ceil to ensure that 
     // every character and the space are the same width. Otherwise we round.
     if (glyphPageSpace)
         m_spaceGlyph = glyphPageSpace->glyphDataForCharacter(space).glyph;
-    float width = widthForGlyph(m_spaceGlyph);
-    m_spaceWidth = width;
     if (glyphPageCharacterZero)
         m_zeroGlyph = glyphPageCharacterZero->glyphDataForCharacter('0').glyph;
-    m_fontMetrics.setZeroWidth(widthForGlyph(m_zeroGlyph));
-    determinePitch();
-    m_adjustedSpaceWidth = m_treatAsFixedPitch ? ceilf(width) : roundf(width);
 
     // Force the glyph for ZERO WIDTH SPACE to have zero width, unless it is shared with SPACE.
     // Helvetica is an example of a non-zero width ZERO WIDTH SPACE glyph.
     // See <http://bugs.webkit.org/show_bug.cgi?id=13178> and Font::isZeroWidthSpaceGlyph()
     if (m_zeroWidthSpaceGlyph == m_spaceGlyph)
         m_zeroWidthSpaceGlyph = 0;
+
+    float width = widthForGlyph(m_spaceGlyph);
+    m_spaceWidth = width;
+    m_fontMetrics.setZeroWidth(widthForGlyph(m_zeroGlyph));
+    auto amountToAdjustLineGap = std::min(m_fontMetrics.floatLineGap(), 0.0f);
+    m_fontMetrics.setLineGap(m_fontMetrics.floatLineGap() - amountToAdjustLineGap);
+    m_fontMetrics.setLineSpacing(m_fontMetrics.floatLineSpacing() - amountToAdjustLineGap);
+    determinePitch();
+    m_adjustedSpaceWidth = m_treatAsFixedPitch ? ceilf(width) : roundf(width);
 }
 
 Font::~Font()
@@ -288,7 +310,6 @@ static void overrideControlCharacters(Vector<UChar>& buffer, unsigned start, uns
     overwriteCodePoint('\n', space);
     overwriteCodePoint('\t', space);
     overwriteCodePoint(noBreakSpace, space);
-    overwriteCodePoint(narrowNoBreakSpace, zeroWidthSpace);
     overwriteCodePoint(leftToRightMark, zeroWidthSpace);
     overwriteCodePoint(rightToLeftMark, zeroWidthSpace);
     overwriteCodePoint(leftToRightEmbed, zeroWidthSpace);
@@ -351,7 +372,7 @@ static RefPtr<GlyphPage> createAndFillGlyphPage(unsigned pageNumber, const Font&
     if (!haveGlyphs)
         return nullptr;
 
-    return WTFMove(glyphPage);
+    return glyphPage;
 }
 
 const GlyphPage* Font::glyphPage(unsigned pageNumber) const
@@ -387,7 +408,7 @@ GlyphData Font::glyphDataForCharacter(UChar32 character) const
 auto Font::ensureDerivedFontData() const -> DerivedFonts&
 {
     if (!m_derivedFontData)
-        m_derivedFontData = std::make_unique<DerivedFonts>();
+        m_derivedFontData = makeUnique<DerivedFonts>();
     return *m_derivedFontData;
 }
 
@@ -462,6 +483,16 @@ const Font& Font::brokenIdeographFont() const
     return *derivedFontData.brokenIdeographFont;
 }
 
+#if !USE(CORE_TEXT)
+
+bool Font::isProbablyOnlyUsedToRenderIcons() const
+{
+    // FIXME: Not implemented yet.
+    return false;
+}
+
+#endif
+
 #if !LOG_DISABLED
 String Font::description() const
 {
@@ -489,20 +520,11 @@ RefPtr<Font> Font::createScaledFont(const FontDescription& fontDescription, floa
     return platformCreateScaledFont(fontDescription, scaleFactor);
 }
 
-bool Font::applyTransforms(GlyphBufferGlyph* glyphs, GlyphBufferAdvance* advances, size_t glyphCount, bool enableKerning, bool requiresShaping) const
+#if !USE(CORE_TEXT)
+void Font::applyTransforms(GlyphBuffer&, unsigned, unsigned, bool, bool, const AtomString&, StringView, TextDirection) const
 {
-#if PLATFORM(COCOA)
-    CTFontTransformOptions options = (enableKerning ? kCTFontTransformApplyPositioning : 0) | (requiresShaping ? kCTFontTransformApplyShaping : 0);
-    return CTFontTransformGlyphs(m_platformData.ctFont(), glyphs, reinterpret_cast<CGSize*>(advances), glyphCount, options);
-#else
-    UNUSED_PARAM(glyphs);
-    UNUSED_PARAM(advances);
-    UNUSED_PARAM(glyphCount);
-    UNUSED_PARAM(enableKerning);
-    UNUSED_PARAM(requiresShaping);
-    return false;
-#endif
 }
+#endif
 
 class CharacterFallbackMapKey {
 public:
@@ -510,7 +532,7 @@ public:
     {
     }
 
-    CharacterFallbackMapKey(const AtomicString& locale, UChar32 character, IsForPlatformFont isForPlatformFont)
+    CharacterFallbackMapKey(const AtomString& locale, UChar32 character, IsForPlatformFont isForPlatformFont)
         : locale(locale)
         , character(character)
         , isForPlatformFont(isForPlatformFont == IsForPlatformFont::Yes)
@@ -534,7 +556,7 @@ public:
 private:
     friend struct CharacterFallbackMapKeyHash;
 
-    AtomicString locale;
+    AtomString locale;
     UChar32 character { 0 };
     bool isForPlatformFont { false };
 };
@@ -577,7 +599,7 @@ RefPtr<Font> Font::systemFallbackFontForCharacter(UChar32 character, const FontD
         return FontCache::singleton().systemFallbackForCharacters(description, this, isForPlatformFont, FontCache::PreferColoredFont::No, &codeUnit, 1);
     }
 
-    auto key = CharacterFallbackMapKey(description.locale(), character, isForPlatformFont);
+    auto key = CharacterFallbackMapKey(description.computedLocale(), character, isForPlatformFont);
     auto characterAddResult = fontAddResult.iterator->value.add(WTFMove(key), nullptr);
 
     Font*& fallbackFont = characterAddResult.iterator->value;
@@ -634,11 +656,6 @@ bool Font::variantCapsSupportsCharacterForSynthesis(FontVariantCaps fontVariantC
         return true;
     }
 }
-
-bool Font::platformSupportsCodePoint(UChar32 character) const
-{
-    return glyphForCharacter(character);
-}
 #endif
 
 bool Font::supportsCodePoint(UChar32 character) const
@@ -665,7 +682,23 @@ bool Font::canRenderCombiningCharacterSequence(const UChar* characters, size_t l
 {
     ASSERT(isMainThread());
 
-    for (UChar32 codePoint : StringView(characters, length).codePoints()) {
+    auto codePoints = StringView(characters, length).codePoints();
+    auto it = codePoints.begin();
+    auto end = codePoints.end();
+    while (it != end) {
+        auto codePoint = *it;
+        ++it;
+
+        if (it != end && isVariationSelector(*it)) {
+            if (!platformSupportsCodePoint(codePoint, *it)) {
+                // Try the characters individually.
+                if (!supportsCodePoint(codePoint) || !supportsCodePoint(*it))
+                    return false;
+            }
+            ++it;
+            continue;
+        }
+
         if (!supportsCodePoint(codePoint))
             return false;
     }

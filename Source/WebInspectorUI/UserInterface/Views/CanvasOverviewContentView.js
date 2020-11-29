@@ -29,7 +29,8 @@ WI.CanvasOverviewContentView = class CanvasOverviewContentView extends WI.Collec
     {
         console.assert(representedObject instanceof WI.CanvasCollection);
 
-        let contentPlaceholder = WI.createMessageTextView(WI.UIString("No Canvas Contexts"));
+        let contentPlaceholder = WI.animationManager.supported ? document.createElement("div") : WI.createMessageTextView(WI.UIString("No Canvas Contexts"));
+
         let descriptionElement = contentPlaceholder.appendChild(document.createElement("div"));
         descriptionElement.className = "description";
         descriptionElement.textContent = WI.UIString("Waiting for canvas contexts created by script or CSS.");
@@ -61,38 +62,28 @@ WI.CanvasOverviewContentView = class CanvasOverviewContentView extends WI.Collec
             this._updateRecordingAutoCaptureCheckboxLabel(frameCount);
         }
 
-        this._importButtonNavigationItem = new WI.ButtonNavigationItem("import-recording", WI.UIString("Import"), "Images/Import.svg", 15, 15);
-        this._importButtonNavigationItem.toolTip = WI.UIString("Import");
-        this._importButtonNavigationItem.buttonStyle = WI.ButtonNavigationItem.Style.ImageAndText;
-
-        this._refreshButtonNavigationItem = new WI.ButtonNavigationItem("refresh-all", WI.UIString("Refresh all"), "Images/ReloadFull.svg", 13, 13);
-        this._refreshButtonNavigationItem.enabled = false;
-        this._refreshButtonNavigationItem.addEventListener(WI.ButtonNavigationItem.Event.Clicked, this._refreshPreviews, this);
-
-        this._showGridButtonNavigationItem = new WI.ActivateButtonNavigationItem("show-grid", WI.UIString("Show transparency grid"), WI.UIString("Hide Grid"), "Images/NavigationItemCheckers.svg", 13, 13);
-        this._showGridButtonNavigationItem.activated = !!WI.settings.showImageGrid.value;
-        this._showGridButtonNavigationItem.enabled = false;
-        this._showGridButtonNavigationItem.addEventListener(WI.ButtonNavigationItem.Event.Clicked, this._showGridButtonClicked, this);
-
         importNavigationItem.addEventListener(WI.ButtonNavigationItem.Event.Clicked, this._handleImportButtonNavigationItemClicked, this);
-        this._importButtonNavigationItem.addEventListener(WI.ButtonNavigationItem.Event.Clicked, this._handleImportButtonNavigationItemClicked, this);
+
+        this._savedRecordingsContentView = null;
+        this._savedRecordingsTreeOutline = null;
     }
 
     // Public
 
     get navigationItems()
     {
-        let navigationItems = [this._importButtonNavigationItem, new WI.DividerNavigationItem, this._refreshButtonNavigationItem, this._showGridButtonNavigationItem];
-        if (WI.CanvasManager.supportsRecordingAutoCapture())
-            navigationItems.unshift(this._recordingAutoCaptureNavigationItem, new WI.DividerNavigationItem);
+        let navigationItems = [];
+        if (this._recordingAutoCaptureNavigationItem)
+            navigationItems.push(this._recordingAutoCaptureNavigationItem);
         return navigationItems;
     }
 
-    hidden()
+    handleRefreshButtonClicked()
     {
-        WI.domManager.hideDOMNodeHighlight();
-
-        super.hidden();
+        for (let subview of this.subviews) {
+            if (subview instanceof WI.CanvasContentView)
+                subview.handleRefreshButtonClicked();
+        }
     }
 
     // Protected
@@ -102,64 +93,52 @@ WI.CanvasOverviewContentView = class CanvasOverviewContentView extends WI.Collec
         contentView.element.addEventListener("mouseenter", this._contentViewMouseEnter);
         contentView.element.addEventListener("mouseleave", this._contentViewMouseLeave);
 
-        this._updateNavigationItems();
+        if (this._savedRecordingsContentView) {
+            // Ensure that the imported recordings are always last.
+            this.removeSubview(this._savedRecordingsContentView);
+            this.addSubview(this._savedRecordingsContentView);
+        }
     }
 
     contentViewRemoved(contentView)
     {
         contentView.element.removeEventListener("mouseenter", this._contentViewMouseEnter);
         contentView.element.removeEventListener("mouseleave", this._contentViewMouseLeave);
-
-        this._updateNavigationItems();
     }
 
     attached()
     {
         super.attached();
 
-        WI.settings.showImageGrid.addEventListener(WI.Setting.Event.Changed, this._updateShowImageGrid, this);
         WI.settings.canvasRecordingAutoCaptureEnabled.addEventListener(WI.Setting.Event.Changed, this._handleCanvasRecordingAutoCaptureEnabledChanged, this);
         WI.settings.canvasRecordingAutoCaptureFrameCount.addEventListener(WI.Setting.Event.Changed, this._handleCanvasRecordingAutoCaptureFrameCountChanged, this);
+
+        WI.canvasManager.addEventListener(WI.CanvasManager.Event.RecordingSaved, this._handleRecordingSaved, this);
+
+        if (this._savedRecordingsTreeOutline)
+            this._savedRecordingsTreeOutline.removeChildren();
+        for (let recording of WI.canvasManager.savedRecordings)
+            this._addSavedRecording(recording);
+
+        for (let subview of this.subviews) {
+            if (subview instanceof WI.CanvasContentView)
+                subview.refreshPreview();
+        }
     }
 
     detached()
     {
+        WI.domManager.hideDOMNodeHighlight();
+
+        WI.canvasManager.removeEventListener(null, null, this);
+
         WI.settings.canvasRecordingAutoCaptureFrameCount.removeEventListener(null, null, this);
         WI.settings.canvasRecordingAutoCaptureEnabled.removeEventListener(null, null, this);
-        WI.settings.showImageGrid.removeEventListener(null, null, this);
 
         super.detached();
     }
 
     // Private
-
-    get _itemMargin()
-    {
-        return parseInt(window.getComputedStyle(this.element).getPropertyValue("--item-margin"));
-    }
-
-    _refreshPreviews()
-    {
-        for (let canvasContentView of this.subviews)
-            canvasContentView.refresh();
-    }
-
-    _updateNavigationItems()
-    {
-        let hasItems = !!this.representedObject.size;
-        this._refreshButtonNavigationItem.enabled = hasItems;
-        this._showGridButtonNavigationItem.enabled = hasItems;
-    }
-
-    _showGridButtonClicked(event)
-    {
-        WI.settings.showImageGrid.value = !this._showGridButtonNavigationItem.activated;
-    }
-
-    _updateShowImageGrid()
-    {
-        this._showGridButtonNavigationItem.activated = !!WI.settings.showImageGrid.value;
-    }
 
     _contentViewMouseEnter(event)
     {
@@ -168,9 +147,9 @@ WI.CanvasOverviewContentView = class CanvasOverviewContentView extends WI.Collec
             return;
 
         let canvas = contentView.representedObject;
-        if (canvas.cssCanvasName) {
-            canvas.requestCSSCanvasClientNodes((cssCanvasClientNodes) => {
-                WI.domManager.highlightDOMNodeList(cssCanvasClientNodes.map((node) => node.id));
+        if (canvas.cssCanvasName || canvas.contextType === WI.Canvas.ContextType.WebGPU) {
+            canvas.requestClientNodes((clientNodes) => {
+                WI.domManager.highlightDOMNodeList(clientNodes);
             });
             return;
         }
@@ -178,7 +157,7 @@ WI.CanvasOverviewContentView = class CanvasOverviewContentView extends WI.Collec
         canvas.requestNode().then((node) => {
             if (!node || !node.ownerDocument)
                 return;
-            WI.domManager.highlightDOMNode(node.id);
+            node.highlight();
         });
     }
 
@@ -242,20 +221,36 @@ WI.CanvasOverviewContentView = class CanvasOverviewContentView extends WI.Collec
             this._recordingAutoCaptureFrameCountInputElementValue = frameCount;
         }
 
-        WI.ImageUtilities.scratchCanvasContext2D((context) => {
-            if (!this._recordingAutoCaptureFrameCountInputElement.__cachedFont) {
-                let computedStyle = window.getComputedStyle(this._recordingAutoCaptureFrameCountInputElement);
-                this._recordingAutoCaptureFrameCountInputElement.__cachedFont = computedStyle.font;
-            }
-
-            const recordingAutoCaptureInputMargin = 8; // Keep this in sync with `--recording-auto-capture-input-margin`.
-
-            context.font = this._recordingAutoCaptureFrameCountInputElement.__cachedFont;
-            let textMetrics = context.measureText(this._recordingAutoCaptureFrameCountInputElement.value || this._recordingAutoCaptureFrameCountInputElement.placeholder);
-            this._recordingAutoCaptureFrameCountInputElement.style.setProperty("width", (textMetrics.width + recordingAutoCaptureInputMargin) + "px");
-        });
+        this._recordingAutoCaptureFrameCountInputElement.autosize();
 
         return frameCount;
+    }
+
+    _addSavedRecording(recording)
+    {
+        console.assert(!recording.source);
+
+        if (!this._savedRecordingsContentView) {
+            this._savedRecordingsContentView = new WI.ContentView;
+            this._savedRecordingsContentView.element.classList.add("canvas", "saved-recordings");
+            this.addSubview(this._savedRecordingsContentView);
+
+            let header = this._savedRecordingsContentView.element.appendChild(document.createElement("header"));
+            header.textContent = WI.UIString("Saved Recordings");
+
+            this.hideContentPlaceholder();
+        }
+
+        if (!this._savedRecordingsTreeOutline) {
+            const selectable = false;
+            this._savedRecordingsTreeOutline = new WI.TreeOutline(selectable);
+            this._savedRecordingsTreeOutline.addEventListener(WI.TreeOutline.Event.ElementClicked, this._handleSavedRecordingClicked, this);
+            this._savedRecordingsContentView.element.appendChild(this._savedRecordingsTreeOutline.element);
+        }
+
+        let recordingTreeElement = new WI.GeneralTreeElement(["recording"], recording.displayName, WI.Recording.displayNameForRecordingType(recording.type), recording);
+        recordingTreeElement.selectable = false;
+        this._savedRecordingsTreeOutline.appendChild(recordingTreeElement);
     }
 
     _handleRecordingAutoCaptureInput(event)
@@ -287,6 +282,16 @@ WI.CanvasOverviewContentView = class CanvasOverviewContentView extends WI.Collec
 
     _handleImportButtonNavigationItemClicked(event)
     {
-        WI.FileUtilities.importJSON((result) => WI.canvasManager.processJSON(result));
+        WI.FileUtilities.importJSON((result) => WI.canvasManager.processJSON(result), {multiple: true});
+    }
+
+    _handleRecordingSaved(event)
+    {
+        this._addSavedRecording(event.data.recording);
+    }
+
+    _handleSavedRecordingClicked(event)
+    {
+        WI.showRepresentedObject(event.data.treeElement.representedObject);
     }
 };

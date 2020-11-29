@@ -1,4 +1,5 @@
 # Copyright (C) 2010 Chris Jerdonek (cjerdonek@webkit.org)
+# Copyright (C) 2019, 2020 Apple Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -23,14 +24,16 @@
 """Supports checking WebKit style in Python files."""
 
 import re
-from StringIO import StringIO
+import sys
+
+from webkitcorepy import StringIO
 
 from webkitpy.common.system.filesystem import FileSystem
 from webkitpy.common.webkit_finder import WebKitFinder
-from webkitpy.thirdparty.autoinstalled import pep8
-from webkitpy.thirdparty.autoinstalled.pylint import lint
-from webkitpy.thirdparty.autoinstalled.pylint.reporters.text import ParseableTextReporter
 
+import pycodestyle
+
+from webkitcorepy import OutputCapture
 
 class PythonChecker(object):
     """Processes text lines for checking style."""
@@ -39,29 +42,32 @@ class PythonChecker(object):
         self._handle_style_error = handle_style_error
 
     def check(self, lines):
-        self._check_pep8(lines)
-        self._check_pylint(lines)
+        self._check_pycodestyle(lines)
+        # FIXME: https://bugs.webkit.org/show_bug.cgi?id=204133
+        # Pylint can't live happily in python 2 and 3 world, we need to pick one
+        if sys.version_info < (3, 0):
+            self._check_pylint(lines)
 
-    def _check_pep8(self, lines):
-        # Initialize pep8.options, which is necessary for
+    def _check_pycodestyle(self, lines):
+        # Initialize pycodestyle.options, which is necessary for
         # Checker.check_all() to execute.
-        pep8.process_options(arglist=[self._file_path])
+        pycodestyle.process_options(arglist=[self._file_path])
 
-        pep8_checker = pep8.Checker(self._file_path)
+        pycodestyle_checker = pycodestyle.Checker(self._file_path)
 
-        def _pep8_handle_error(line_number, offset, text, check):
+        def _pycodestyle_handle_error(line_number, offset, text, check):
             # FIXME: Incorporate the character offset into the error output.
             #        This will require updating the error handler __call__
             #        signature to include an optional "offset" parameter.
-            pep8_code = text[:4]
-            pep8_message = text[5:]
+            pycodestyle_code = text[:4]
+            pycodestyle_message = text[5:]
 
-            category = "pep8/" + pep8_code
+            category = "pep8/" + pycodestyle_code
 
-            self._handle_style_error(line_number, category, 5, pep8_message)
+            self._handle_style_error(line_number, category, 5, pycodestyle_message)
 
-        pep8_checker.report_error = _pep8_handle_error
-        pep8_errors = pep8_checker.check_all()
+        pycodestyle_checker.report_error = _pycodestyle_handle_error
+        pycodestyle_errors = pycodestyle_checker.check_all()
 
     def _check_pylint(self, lines):
         pylinter = Pylinter()
@@ -70,10 +76,11 @@ class PythonChecker(object):
         # filtering warnings using the rules in style/checker.py instead.
         output = pylinter.run(['-E', self._file_path])
 
-        lint_regex = re.compile('([^:]+):([^:]+): \[([^]]+)\] (.*)')
+        lint_regex = re.compile(r'([^:]+):([^:]+): \[([^]]+)\] (.*)')
         for error in output.getvalue().splitlines():
             match_obj = lint_regex.match(error)
-            assert(match_obj)
+            if not match_obj:
+                continue
             line_number = int(match_obj.group(2))
             category_and_method = match_obj.group(3).split(', ')
             category = 'pylint/' + (category_and_method[0])
@@ -103,7 +110,11 @@ class Pylinter(object):
 
     def run(self, argv):
         output = _FilteredStringIO(self.FALSE_POSITIVES)
-        lint.Run(['--rcfile', self._pylintrc] + argv, reporter=ParseableTextReporter(output=output), exit=False)
+        with OutputCapture():
+            from pylint import lint
+            from pylint.reporters.text import ParseableTextReporter
+
+            lint.Run(['--rcfile', self._pylintrc] + argv, reporter=ParseableTextReporter(output=output), exit=False)
         return output
 
 
@@ -127,3 +138,28 @@ class _FilteredStringIO(StringIO):
             if msg == '\n':
                 return True
         return False
+
+
+class Python3Checker(object):
+    def __init__(self, file_path, handle_style_error):
+        self._file_path = file_path
+        self._handle_style_error = handle_style_error
+
+    def check(self, lines):
+        from webkitpy.thirdparty.autoinstalled import pycodestyle
+
+        def handler(line_number, offset, text, check):
+            # Text is of the form 'E### <description of error>'
+            code = text[:4]
+            message = text[5:]
+            category = "pycodestyle/" + code
+            self._handle_style_error(
+                line_number=line_number,
+                category=category,
+                confidence=5,
+                message=message,
+            )
+
+        checker = pycodestyle.Checker(self._file_path)
+        checker.report_error = handler
+        checker.check_all()

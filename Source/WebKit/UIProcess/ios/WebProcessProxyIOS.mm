@@ -28,10 +28,44 @@
 
 #if PLATFORM(IOS_FAMILY)
 
+#import "AccessibilitySupportSPI.h"
 #import "WKFullKeyboardAccessWatcher.h"
+#import "WKMouseDeviceObserver.h"
+#import "WKStylusDeviceObserver.h"
 #import "WebProcessMessages.h"
 
 namespace WebKit {
+
+void WebProcessProxy::platformInitialize()
+{
+#if HAVE(UIKIT_WITH_MOUSE_SUPPORT) && PLATFORM(IOS)
+    [[WKMouseDeviceObserver sharedInstance] start];
+#endif
+#if HAVE(PENCILKIT_TEXT_INPUT)
+    [[WKStylusDeviceObserver sharedInstance] start];
+#endif
+}
+
+void WebProcessProxy::platformDestroy()
+{
+#if HAVE(UIKIT_WITH_MOUSE_SUPPORT) && PLATFORM(IOS)
+    [[WKMouseDeviceObserver sharedInstance] stop];
+#endif
+#if HAVE(PENCILKIT_TEXT_INPUT)
+    [[WKStylusDeviceObserver sharedInstance] stop];
+#endif
+}
+
+#if HAVE(UIKIT_WITH_MOUSE_SUPPORT) && PLATFORM(IOS)
+
+void WebProcessProxy::notifyHasMouseDeviceChanged()
+{
+    bool hasMouseDevice = [[WKMouseDeviceObserver sharedInstance] hasMouseDevice];
+    for (auto* webProcessProxy : WebProcessProxy::allProcesses().values())
+        webProcessProxy->send(Messages::WebProcess::SetHasMouseDevice(hasMouseDevice), 0);
+}
+
+#endif // HAVE(UIKIT_WITH_MOUSE_SUPPORT)
 
 bool WebProcessProxy::fullKeyboardAccessEnabled()
 {

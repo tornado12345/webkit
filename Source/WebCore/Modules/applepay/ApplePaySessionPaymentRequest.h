@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,6 +28,8 @@
 #if ENABLE(APPLE_PAY)
 
 #include "PaymentContact.h"
+#include "PaymentInstallmentConfigurationWebCore.h"
+#include <wtf/EnumTraits.h>
 #include <wtf/Optional.h>
 #include <wtf/Vector.h>
 #include <wtf/text/WTFString.h>
@@ -84,7 +86,7 @@ public:
     void setMerchantCapabilities(const MerchantCapabilities& merchantCapabilities) { m_merchantCapabilities = merchantCapabilities; }
 
     struct LineItem {
-        enum class Type {
+        enum class Type : bool {
             Pending,
             Final,
         } type { Type::Final };
@@ -129,13 +131,18 @@ public:
     const Vector<String>& supportedCountries() const { return m_supportedCountries; }
     void setSupportedCountries(Vector<String>&& supportedCountries) { m_supportedCountries = WTFMove(supportedCountries); }
 
-    enum class Requester {
+    enum class Requester : bool {
         ApplePayJS,
         PaymentRequest,
     };
 
     Requester requester() const { return m_requester; }
     void setRequester(Requester requester) { m_requester = requester; }
+
+#if HAVE(PASSKIT_INSTALLMENTS)
+    const PaymentInstallmentConfiguration& installmentConfiguration() const { return m_installmentConfiguration; }
+    void setInstallmentConfiguration(PaymentInstallmentConfiguration&& installmentConfiguration) { m_installmentConfiguration = WTFMove(installmentConfiguration); }
+#endif
 
 private:
     unsigned m_version { 0 };
@@ -162,6 +169,10 @@ private:
     Vector<String> m_supportedCountries;
 
     Requester m_requester { Requester::ApplePayJS };
+
+#if HAVE(PASSKIT_INSTALLMENTS)
+    PaymentInstallmentConfiguration m_installmentConfiguration;
+#endif
 };
 
 struct PaymentError {
@@ -198,10 +209,6 @@ struct PaymentAuthorizationResult {
     Vector<PaymentError> errors;
 };
 
-struct PaymentMethodUpdate {
-    ApplePaySessionPaymentRequest::TotalAndLineItems newTotalAndLineItems;
-};
-
 struct ShippingContactUpdate {
     Vector<PaymentError> errors;
 
@@ -215,9 +222,19 @@ struct ShippingMethodUpdate {
 
 WEBCORE_EXPORT bool isFinalStateResult(const Optional<PaymentAuthorizationResult>&);
 
-}
+} // namespace WebCore
 
 namespace WTF {
+
+template<> struct EnumTraits<WebCore::ApplePaySessionPaymentRequest::ShippingType> {
+    using values = EnumValues<
+        WebCore::ApplePaySessionPaymentRequest::ShippingType,
+        WebCore::ApplePaySessionPaymentRequest::ShippingType::Shipping,
+        WebCore::ApplePaySessionPaymentRequest::ShippingType::Delivery,
+        WebCore::ApplePaySessionPaymentRequest::ShippingType::StorePickup,
+        WebCore::ApplePaySessionPaymentRequest::ShippingType::ServicePickup
+    >;
+};
 
 template<> struct EnumTraits<WebCore::PaymentError::Code> {
     using values = EnumValues<
@@ -248,6 +265,6 @@ template<> struct EnumTraits<WebCore::PaymentError::ContactField> {
     >;
 };
 
-}
+} // namespace WTF
 
 #endif

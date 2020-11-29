@@ -23,12 +23,13 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
-#include "APIContentRuleListStore.h"
+#import "config.h"
+#import "APIContentRuleListStore.h"
 
 #if ENABLE(CONTENT_EXTENSIONS)
 
-#include "SandboxUtilities.h"
+#import "SandboxUtilities.h"
+#import <WebCore/SharedBuffer.h>
 
 namespace API {
 

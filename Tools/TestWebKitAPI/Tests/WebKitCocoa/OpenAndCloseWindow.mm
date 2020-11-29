@@ -23,13 +23,14 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
+#import "config.h"
 
 #import "PlatformUtilities.h"
+#import "TestWKWebView.h"
 #import <WebKit/WKPreferences.h>
 #import <WebKit/WKUIDelegatePrivate.h>
-#import <WebKit/WKWebView.h>
 #import <WebKit/WKWebViewConfiguration.h>
+#import <WebKit/WKWebViewPrivate.h>
 #import <WebKit/WKWindowFeaturesPrivate.h>
 #import <wtf/RetainPtr.h>
 
@@ -281,4 +282,70 @@ TEST(WebKit, OpenWindowFeatures)
     EXPECT_FALSE([openWindowFeatures _scrollbarsVisibility].boolValue);
     EXPECT_FALSE([openWindowFeatures _fullscreenDisplay].boolValue);
     openWindowFeatures = nullptr;
+}
+
+@interface OpenWindowThenDocumentOpenUIDelegate : NSObject <WKUIDelegate>
+@end
+
+@implementation OpenWindowThenDocumentOpenUIDelegate
+
+- (WKWebView *)webView:(WKWebView *)webView createWebViewWithConfiguration:(WKWebViewConfiguration *)configuration forNavigationAction:(WKNavigationAction *)navigationAction windowFeatures:(WKWindowFeatures *)windowFeatures
+{
+    openedWebView = adoptNS([[WKWebView alloc] initWithFrame:NSMakeRect(0, 0, 800, 600) configuration:configuration]);
+    [openedWebView setUIDelegate:sharedUIDelegate.get()];
+    return openedWebView.get();
+}
+
+@end
+
+TEST(WebKit, OpenWindowThenDocumentOpen)
+{
+    resetToConsistentState();
+
+    auto webView = adoptNS([[WKWebView alloc] initWithFrame:NSMakeRect(0, 0, 800, 600)]);
+
+    auto uiDelegate = adoptNS([[OpenWindowThenDocumentOpenUIDelegate alloc] init]);
+    [webView setUIDelegate:uiDelegate.get()];
+    [webView configuration].preferences.javaScriptCanOpenWindowsAutomatically = YES;
+
+    NSURLRequest *request = [NSURLRequest requestWithURL:[[NSBundle mainBundle] URLForResource:@"open-window-then-write-to-it" withExtension:@"html" subdirectory:@"TestWebKitAPI.resources"]];
+    [webView loadRequest:request];
+
+    while (!openedWebView)
+        TestWebKitAPI::Util::sleep(0.1);
+
+    // Both WebViews should have the same URL because of document.open().
+    while (![[[openedWebView URL] absoluteString] isEqualToString:[[webView URL] absoluteString]])
+        TestWebKitAPI::Util::sleep(0.1);
+
+    EXPECT_TRUE([[[openedWebView _mainFrameURL] absoluteString] isEqualToString:[[webView URL] absoluteString]]);
+}
+
+TEST(WebKit, OpenFileURLWithHost)
+{
+    resetToConsistentState();
+
+    auto webView = adoptNS([[WKWebView alloc] initWithFrame:NSMakeRect(0, 0, 800, 600)]);
+
+    auto uiDelegate = adoptNS([[OpenWindowThenDocumentOpenUIDelegate alloc] init]);
+    [webView setUIDelegate:uiDelegate.get()];
+    [webView configuration].preferences.javaScriptCanOpenWindowsAutomatically = YES;
+
+    NSURLRequest *request = [NSURLRequest requestWithURL:[[NSBundle mainBundle] URLForResource:@"open-window-with-file-url-with-host" withExtension:@"html" subdirectory:@"TestWebKitAPI.resources"]];
+    [webView loadRequest:request];
+
+    while (![[[webView URL] absoluteString] hasSuffix:@"#test"])
+        TestWebKitAPI::Util::spinRunLoop();
+
+    while (![[[webView URL] absoluteString] hasPrefix:@"file:///"])
+        TestWebKitAPI::Util::spinRunLoop();
+}
+
+TEST(WebKit, TryClose)
+{
+    auto webView = adoptNS([TestWKWebView new]);
+    [webView synchronouslyLoadHTMLString:@"load something"];
+    EXPECT_TRUE([webView _tryClose]);
+    [webView synchronouslyLoadHTMLString:@"<body onunload='runScriptThatDoesNotNeedToExist()'/>"];
+    EXPECT_FALSE([webView _tryClose]);
 }

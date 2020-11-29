@@ -31,6 +31,7 @@
 #import "PlatformCALayerRemote.h"
 #import "WebCoreArgumentCoders.h"
 #import <QuartzCore/QuartzCore.h>
+#import <WebCore/EventRegion.h>
 #import <WebCore/LengthFunctions.h>
 #import <WebCore/TimingFunction.h>
 #import <wtf/text/CString.h>
@@ -38,10 +39,12 @@
 
 namespace WebKit {
 
+RemoteLayerTreeTransaction::RemoteLayerTreeTransaction(RemoteLayerTreeTransaction&&) = default;
+RemoteLayerTreeTransaction& RemoteLayerTreeTransaction::operator=(RemoteLayerTreeTransaction&&) = default;
+
 RemoteLayerTreeTransaction::LayerCreationProperties::LayerCreationProperties()
     : layerID(0)
     , type(WebCore::PlatformCALayer::LayerTypeLayer)
-    , embeddedViewID(0)
     , hostingContextID(0)
     , hostingDeviceScaleFactor(1)
 {
@@ -50,8 +53,7 @@ RemoteLayerTreeTransaction::LayerCreationProperties::LayerCreationProperties()
 void RemoteLayerTreeTransaction::LayerCreationProperties::encode(IPC::Encoder& encoder) const
 {
     encoder << layerID;
-    encoder.encodeEnum(type);
-    encoder << embeddedViewID;
+    encoder << type;
     encoder << hostingContextID;
     encoder << hostingDeviceScaleFactor;
 }
@@ -62,10 +64,7 @@ auto RemoteLayerTreeTransaction::LayerCreationProperties::decode(IPC::Decoder& d
     if (!decoder.decode(result.layerID))
         return WTF::nullopt;
 
-    if (!decoder.decodeEnum(result.type))
-        return WTF::nullopt;
-
-    if (!decoder.decode(result.embeddedViewID))
+    if (!decoder.decode(result.type))
         return WTF::nullopt;
 
     if (!decoder.decode(result.hostingContextID))
@@ -88,7 +87,7 @@ RemoteLayerTreeTransaction::LayerProperties::LayerProperties()
     , cornerRadius(0)
     , borderWidth(0)
     , opacity(1)
-    , backgroundColor(WebCore::Color::transparent)
+    , backgroundColor(WebCore::Color::transparentBlack)
     , borderColor(WebCore::Color::black)
     , edgeAntialiasingMask(kCALayerLeftEdge | kCALayerRightEdge | kCALayerBottomEdge | kCALayerTopEdge)
     , customAppearance(WebCore::GraphicsLayer::CustomAppearance::None)
@@ -142,18 +141,19 @@ RemoteLayerTreeTransaction::LayerProperties::LayerProperties(const LayerProperti
     , opaque(other.opaque)
     , contentsHidden(other.contentsHidden)
     , userInteractionEnabled(other.userInteractionEnabled)
+    , eventRegion(other.eventRegion)
 {
     // FIXME: LayerProperties should reference backing store by ID, so that two layers can have the same backing store (for clones).
     // FIXME: LayerProperties shouldn't be copyable; PlatformCALayerRemote::clone should copy the relevant properties.
 
     if (other.transform)
-        transform = std::make_unique<WebCore::TransformationMatrix>(*other.transform);
+        transform = makeUnique<WebCore::TransformationMatrix>(*other.transform);
 
     if (other.sublayerTransform)
-        sublayerTransform = std::make_unique<WebCore::TransformationMatrix>(*other.sublayerTransform);
+        sublayerTransform = makeUnique<WebCore::TransformationMatrix>(*other.sublayerTransform);
 
     if (other.filters)
-        filters = std::make_unique<WebCore::FilterOperations>(*other.filters);
+        filters = makeUnique<WebCore::FilterOperations>(*other.filters);
 }
 
 void RemoteLayerTreeTransaction::LayerProperties::encode(IPC::Encoder& encoder) const
@@ -238,16 +238,16 @@ void RemoteLayerTreeTransaction::LayerProperties::encode(IPC::Encoder& encoder) 
         encoder << shapePath;
 
     if (changedProperties & MinificationFilterChanged)
-        encoder.encodeEnum(minificationFilter);
+        encoder << minificationFilter;
 
     if (changedProperties & MagnificationFilterChanged)
-        encoder.encodeEnum(magnificationFilter);
+        encoder << magnificationFilter;
 
     if (changedProperties & BlendModeChanged)
-        encoder.encodeEnum(blendMode);
+        encoder << blendMode;
 
     if (changedProperties & WindRuleChanged)
-        encoder.encodeEnum(windRule);
+        encoder << windRule;
 
     if (changedProperties & SpeedChanged)
         encoder << speed;
@@ -272,10 +272,13 @@ void RemoteLayerTreeTransaction::LayerProperties::encode(IPC::Encoder& encoder) 
         encoder << edgeAntialiasingMask;
 
     if (changedProperties & CustomAppearanceChanged)
-        encoder.encodeEnum(customAppearance);
+        encoder << customAppearance;
 
     if (changedProperties & UserInteractionEnabledChanged)
         encoder << userInteractionEnabled;
+
+    if (changedProperties & EventRegionChanged)
+        encoder << eventRegion;
 }
 
 bool RemoteLayerTreeTransaction::LayerProperties::decode(IPC::Decoder& decoder, LayerProperties& result)
@@ -346,7 +349,7 @@ bool RemoteLayerTreeTransaction::LayerProperties::decode(IPC::Decoder& decoder, 
         if (!decoder.decode(transform))
             return false;
         
-        result.transform = std::make_unique<WebCore::TransformationMatrix>(transform);
+        result.transform = makeUnique<WebCore::TransformationMatrix>(transform);
     }
 
     if (result.changedProperties & SublayerTransformChanged) {
@@ -354,7 +357,7 @@ bool RemoteLayerTreeTransaction::LayerProperties::decode(IPC::Decoder& decoder, 
         if (!decoder.decode(transform))
             return false;
 
-        result.sublayerTransform = std::make_unique<WebCore::TransformationMatrix>(transform);
+        result.sublayerTransform = makeUnique<WebCore::TransformationMatrix>(transform);
     }
 
     if (result.changedProperties & HiddenChanged) {
@@ -417,7 +420,7 @@ bool RemoteLayerTreeTransaction::LayerProperties::decode(IPC::Decoder& decoder, 
         if (!decoder.decode(roundedRect))
             return false;
         
-        result.shapeRoundedRect = std::make_unique<WebCore::FloatRoundedRect>(roundedRect);
+        result.shapeRoundedRect = makeUnique<WebCore::FloatRoundedRect>(roundedRect);
     }
 
     if (result.changedProperties & ShapePathChanged) {
@@ -429,22 +432,22 @@ bool RemoteLayerTreeTransaction::LayerProperties::decode(IPC::Decoder& decoder, 
     }
 
     if (result.changedProperties & MinificationFilterChanged) {
-        if (!decoder.decodeEnum(result.minificationFilter))
+        if (!decoder.decode(result.minificationFilter))
             return false;
     }
 
     if (result.changedProperties & MagnificationFilterChanged) {
-        if (!decoder.decodeEnum(result.magnificationFilter))
+        if (!decoder.decode(result.magnificationFilter))
             return false;
     }
 
     if (result.changedProperties & BlendModeChanged) {
-        if (!decoder.decodeEnum(result.blendMode))
+        if (!decoder.decode(result.blendMode))
             return false;
     }
 
     if (result.changedProperties & WindRuleChanged) {
-        if (!decoder.decodeEnum(result.windRule))
+        if (!decoder.decode(result.windRule))
             return false;
     }
 
@@ -463,7 +466,7 @@ bool RemoteLayerTreeTransaction::LayerProperties::decode(IPC::Decoder& decoder, 
         if (!decoder.decode(hasFrontBuffer))
             return false;
         if (hasFrontBuffer) {
-            auto backingStore = std::make_unique<RemoteLayerBackingStore>(nullptr);
+            auto backingStore = makeUnique<RemoteLayerBackingStore>(nullptr);
             if (!decoder.decode(*backingStore))
                 return false;
             
@@ -478,7 +481,7 @@ bool RemoteLayerTreeTransaction::LayerProperties::decode(IPC::Decoder& decoder, 
     }
 
     if (result.changedProperties & FiltersChanged) {
-        auto filters = std::make_unique<WebCore::FilterOperations>();
+        auto filters = makeUnique<WebCore::FilterOperations>();
         if (!decoder.decode(*filters))
             return false;
         result.filters = WTFMove(filters);
@@ -490,13 +493,21 @@ bool RemoteLayerTreeTransaction::LayerProperties::decode(IPC::Decoder& decoder, 
     }
 
     if (result.changedProperties & CustomAppearanceChanged) {
-        if (!decoder.decodeEnum(result.customAppearance))
+        if (!decoder.decode(result.customAppearance))
             return false;
     }
 
     if (result.changedProperties & UserInteractionEnabledChanged) {
         if (!decoder.decode(result.userInteractionEnabled))
             return false;
+    }
+
+    if (result.changedProperties & EventRegionChanged) {
+        Optional<WebCore::EventRegion> eventRegion;
+        decoder >> eventRegion;
+        if (!eventRegion)
+            return false;
+        result.eventRegion = WTFMove(*eventRegion);
     }
 
     return true;
@@ -546,7 +557,7 @@ void RemoteLayerTreeTransaction::encode(IPC::Encoder& encoder) const
     encoder << m_transactionID;
     encoder << m_activityStateChangeID;
 
-    encoder << m_newlyReachedLayoutMilestones;
+    encoder << m_newlyReachedPaintingMilestones;
 
     encoder << m_scaleWasSetByUIProcess;
     encoder << m_allowsUserScaling;
@@ -586,7 +597,7 @@ bool RemoteLayerTreeTransaction::decode(IPC::Decoder& decoder, RemoteLayerTreeTr
         if (!decoder.decode(layerID))
             return false;
 
-        std::unique_ptr<LayerProperties> layerProperties = std::make_unique<LayerProperties>();
+        std::unique_ptr<LayerProperties> layerProperties = makeUnique<LayerProperties>();
         if (!decoder.decode(*layerProperties))
             return false;
 
@@ -657,7 +668,7 @@ bool RemoteLayerTreeTransaction::decode(IPC::Decoder& decoder, RemoteLayerTreeTr
     if (!decoder.decode(result.m_activityStateChangeID))
         return false;
 
-    if (!decoder.decode(result.m_newlyReachedLayoutMilestones))
+    if (!decoder.decode(result.m_newlyReachedPaintingMilestones))
         return false;
 
     if (!decoder.decode(result.m_scaleWasSetByUIProcess))
@@ -877,10 +888,10 @@ static void dumpChangedLayers(TextStream& ts, const RemoteLayerTreeTransaction::
 
 void RemoteLayerTreeTransaction::dump() const
 {
-    fprintf(stderr, "%s", description().data());
+    fprintf(stderr, "%s", description().utf8().data());
 }
 
-CString RemoteLayerTreeTransaction::description() const
+String RemoteLayerTreeTransaction::description() const
 {
     TextStream ts;
 
@@ -948,7 +959,7 @@ CString RemoteLayerTreeTransaction::description() const
 
     ts.endGroup();
 
-    return ts.release().utf8();
+    return ts.release();
 }
 
 #endif // !defined(NDEBUG) || !LOG_DISABLED

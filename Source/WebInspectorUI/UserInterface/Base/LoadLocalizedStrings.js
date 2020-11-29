@@ -27,7 +27,7 @@
     if (WI.dontLocalizeUserInterface)
         return;
 
-    let localizedStringsURL = InspectorFrontendHost.localizedStringsURL();
+    let localizedStringsURL = InspectorFrontendHost.localizedStringsURL;
     console.assert(localizedStringsURL);
     if (localizedStringsURL)
         document.write("<script src=\"" + localizedStringsURL + "\"></script>");
@@ -43,8 +43,16 @@ WI.unlocalizedString = function(string)
 
 WI.UIString = function(string, key, comment)
 {
+    "use strict";
+
     if (WI.dontLocalizeUserInterface)
         return string;
+
+    // UIString(string, comment)
+    if (arguments.length === 2) {
+        comment = key;
+        key = undefined;
+    }
 
     key = key || string;
 
@@ -63,4 +71,70 @@ WI.UIString = function(string, key, comment)
     }
 
     return "LOCALIZED STRING NOT FOUND";
+};
+
+WI.repeatedUIString = {};
+
+WI.repeatedUIString.timelineRecordLayout = function() {
+    return WI.UIString("Layout", "Layout @ Timeline record", "Layout phase timeline records");
+};
+
+WI.repeatedUIString.timelineRecordPaint = function() {
+    return WI.UIString("Paint", "Paint @ Timeline record", "Paint (render) phase timeline records");
+};
+
+WI.repeatedUIString.timelineRecordComposite = function() {
+    return WI.UIString("Composite", "Composite @ Timeline record", "Composite phase timeline records, where graphic layers are combined");
+};
+
+WI.repeatedUIString.debuggerStatements = function() {
+    return WI.UIString("Debugger Statements", "Debugger Statements @ JavaScript Breakpoint", "Break (pause) on debugger statements");
+};
+
+WI.repeatedUIString.allExceptions = function() {
+    return WI.UIString("All Exceptions", "All Exceptions @ JavaScript Breakpoint", "Break (pause) on all exceptions");
+};
+
+WI.repeatedUIString.uncaughtExceptions = function() {
+    return WI.UIString("Uncaught Exceptions", "Uncaught Exceptions @ JavaScript Breakpoint", "Break (pause) on uncaught (unhandled) exceptions");
+};
+
+WI.repeatedUIString.assertionFailures = function() {
+    return WI.UIString("Assertion Failures", "Assertion Failures @ JavaScript Breakpoint", "Break (pause) when console.assert() fails");
+};
+
+WI.repeatedUIString.allMicrotasks = function() {
+    return WI.UIString("All Microtasks", "All Microtasks @ JavaScript Breakpoint", "Break (pause) on all microtasks");
+};
+
+WI.repeatedUIString.allAnimationFrames = function() {
+    return WI.UIString("All Animation Frames", "All Animation Frames @ Event Breakpoint", "Break (pause) on All animation frames");
+};
+
+WI.repeatedUIString.allIntervals = function() {
+    return WI.UIString("All Intervals", "All Intervals @ Event Breakpoint", "Break (pause) on all intervals");
+};
+
+WI.repeatedUIString.allEvents = function() {
+    return WI.UIString("All Events", "All Events @ Event Breakpoint", "Break (pause) on all events");
+};
+
+WI.repeatedUIString.allTimeouts = function() {
+    return WI.UIString("All Timeouts", "All Timeouts @ Event Breakpoint", "Break (pause) on all timeouts");
+};
+
+WI.repeatedUIString.allRequests = function() {
+    return WI.UIString("All Requests", "A submenu item of 'Break on' that breaks (pauses) before all network requests");
+};
+
+WI.repeatedUIString.fetch = function() {
+    return WI.UIString("Fetch", "Resource loaded via 'fetch' method");
+};
+
+WI.repeatedUIString.revealInDOMTree = function() {
+    return WI.UIString("Reveal in DOM Tree", "Open Elements tab and select this node in DOM tree");
+};
+
+WI.repeatedUIString.showTransparencyGridTooltip = function() {
+    return WI.UIString("Show transparency grid", "Show transparency grid (tooltip)", "Tooltip for showing the checkered transparency grid under images and canvases")
 };

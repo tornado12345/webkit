@@ -33,11 +33,13 @@
 
 namespace WebCore {
 
-struct MediaCapabilitiesInfo;
+struct MediaCapabilitiesDecodingInfo;
+struct MediaCapabilitiesEncodingInfo;
 struct MediaDecodingConfiguration;
+struct MediaEncodingConfiguration;
 
-extern void createMediaPlayerDecodingConfigurationGStreamer(MediaDecodingConfiguration&, WTF::Function<void(MediaCapabilitiesInfo&&)>&&);
-
+extern void createMediaPlayerDecodingConfigurationGStreamer(MediaDecodingConfiguration&&, WTF::Function<void(MediaCapabilitiesDecodingInfo&&)>&&);
+extern void createMediaPlayerEncodingConfigurationGStreamer(MediaEncodingConfiguration&&, WTF::Function<void(MediaCapabilitiesEncodingInfo&&)>&&);
 }
 
 #endif

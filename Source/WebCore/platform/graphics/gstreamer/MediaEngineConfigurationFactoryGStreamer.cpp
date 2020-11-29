@@ -31,8 +31,10 @@
 #if USE(GSTREAMER)
 
 #include "GStreamerRegistryScanner.h"
-#include "MediaCapabilitiesInfo.h"
+#include "MediaCapabilitiesDecodingInfo.h"
+#include "MediaCapabilitiesEncodingInfo.h"
 #include "MediaDecodingConfiguration.h"
+#include "MediaEncodingConfiguration.h"
 #include "MediaPlayer.h"
 #include <wtf/Function.h>
 
@@ -42,25 +44,37 @@
 
 namespace WebCore {
 
-void createMediaPlayerDecodingConfigurationGStreamer(MediaDecodingConfiguration& configuration, WTF::Function<void(MediaCapabilitiesInfo&&)>&& callback)
+void createMediaPlayerDecodingConfigurationGStreamer(MediaDecodingConfiguration&& configuration, WTF::Function<void(MediaCapabilitiesDecodingInfo&&)>&& callback)
 {
     bool isMediaSource = configuration.type == MediaDecodingType::MediaSource;
 #if ENABLE(MEDIA_SOURCE)
     auto& scanner = isMediaSource ? GStreamerRegistryScannerMSE::singleton() : GStreamerRegistryScanner::singleton();
 #else
     if (isMediaSource) {
-        callback({ });
+        callback({{ }, WTFMove(configuration)});
         return;
     }
     auto& scanner = GStreamerRegistryScanner::singleton();
 #endif
     auto lookupResult = scanner.isDecodingSupported(configuration);
-    MediaCapabilitiesInfo info;
+    MediaCapabilitiesDecodingInfo info;
     info.supported = lookupResult.isSupported;
     info.powerEfficient = lookupResult.isUsingHardware;
+    info.supportedConfiguration = WTFMove(configuration);
 
     callback(WTFMove(info));
 }
 
+void createMediaPlayerEncodingConfigurationGStreamer(MediaEncodingConfiguration&& configuration, WTF::Function<void(MediaCapabilitiesEncodingInfo&&)>&& callback)
+{
+    auto& scanner = GStreamerRegistryScanner::singleton();
+    auto lookupResult = scanner.isEncodingSupported(configuration);
+    MediaCapabilitiesEncodingInfo info;
+    info.supported = lookupResult.isSupported;
+    info.powerEfficient = lookupResult.isUsingHardware;
+    info.supportedConfiguration = WTFMove(configuration);
+
+    callback(WTFMove(info));
+}
 }
 #endif

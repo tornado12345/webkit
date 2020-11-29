@@ -70,9 +70,9 @@ NSString * const WKActionFrameNameKey = @"WKActionFrameNameKey";
 NSString * const WKActionOriginatingFrameURLKey = @"WKActionOriginatingFrameURLKey";
 NSString * const WKActionCanShowMIMETypeKey = @"WKActionCanShowMIMETypeKey";
 
-IGNORE_WARNINGS_BEGIN("deprecated-implementations")
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 @implementation WKBrowsingContextController {
-IGNORE_WARNINGS_END
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
     RefPtr<WebKit::WebPageProxy> _page;
     std::unique_ptr<WebKit::PageLoadStateObserver> _pageLoadStateObserver;
 
@@ -102,12 +102,24 @@ ALLOW_DEPRECATED_DECLARATIONS_END
 
 + (void)registerSchemeForCustomProtocol:(NSString *)scheme
 {
-    WebKit::WebProcessPool::registerGlobalURLSchemeAsHavingCustomProtocolHandlers(scheme);
+    if ([NSThread isMainThread])
+        WebKit::WebProcessPool::registerGlobalURLSchemeAsHavingCustomProtocolHandlers(scheme);
+    else {
+        dispatch_async(dispatch_get_main_queue(), makeBlockPtr([scheme = retainPtr(scheme)] {
+            WebKit::WebProcessPool::registerGlobalURLSchemeAsHavingCustomProtocolHandlers(scheme.get());
+        }).get());
+    }
 }
 
 + (void)unregisterSchemeForCustomProtocol:(NSString *)scheme
 {
-    WebKit::WebProcessPool::unregisterGlobalURLSchemeAsHavingCustomProtocolHandlers(scheme);
+    if ([NSThread isMainThread])
+        WebKit::WebProcessPool::unregisterGlobalURLSchemeAsHavingCustomProtocolHandlers(scheme);
+    else {
+        dispatch_async(dispatch_get_main_queue(), makeBlockPtr([scheme = retainPtr(scheme)] {
+            WebKit::WebProcessPool::unregisterGlobalURLSchemeAsHavingCustomProtocolHandlers(scheme.get());
+        }).get());
+    }
 }
 
 - (void)loadRequest:(NSURLRequest *)request
@@ -199,6 +211,7 @@ ALLOW_DEPRECATED_DECLARATIONS_END
 
 - (void)setApplicationNameForUserAgent:(NSString *)applicationNameForUserAgent
 {
+    _page->setApplicationNameForDesktopUserAgent(applicationNameForUserAgent);
     _page->setApplicationNameForUserAgent(applicationNameForUserAgent);
 }
 
@@ -490,7 +503,7 @@ static void setUpPagePolicyClient(WKBrowsingContextController *browsingContext, 
 
             if (originatingFrame) {
                 actionDictionary = [[actionDictionary mutableCopy] autorelease];
-                [(NSMutableDictionary *)actionDictionary setObject:[NSURL _web_URLWithWTFString:WebKit::toImpl(originatingFrame)->url()] forKey:WKActionOriginatingFrameURLKey];
+                [(NSMutableDictionary *)actionDictionary setObject:[NSURL _web_URLWithWTFString:WebKit::toImpl(originatingFrame)->url().string()] forKey:WKActionOriginatingFrameURLKey];
             }
             
             [policyDelegate browsingContextController:browsingContext decidePolicyForNavigationAction:actionDictionary decisionHandler:makePolicyDecisionBlock(listener)];
@@ -601,7 +614,7 @@ static void setUpPagePolicyClient(WKBrowsingContextController *browsingContext, 
 
     _page = WebKit::toImpl(pageRef);
 
-    _pageLoadStateObserver = std::make_unique<WebKit::PageLoadStateObserver>(self);
+    _pageLoadStateObserver = makeUnique<WebKit::PageLoadStateObserver>(self);
     _page->pageLoadState().addObserver(*_pageLoadStateObserver);
 
     ASSERT(!browsingContextControllerMap().contains(_page.get()));
@@ -618,9 +631,9 @@ static void setUpPagePolicyClient(WKBrowsingContextController *browsingContext, 
 @end
 
 ALLOW_DEPRECATED_DECLARATIONS_BEGIN
-IGNORE_WARNINGS_BEGIN("deprecated-implementations")
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 @implementation WKBrowsingContextController (Private)
-IGNORE_WARNINGS_END
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 
 - (WKPageRef)_pageRef
 {
@@ -719,7 +732,7 @@ IGNORE_WARNINGS_END
 
 - (WKBrowsingContextHandle *)handle
 {
-    return [[[WKBrowsingContextHandle alloc] _initWithPageID:_page->pageID()] autorelease];
+    return [[[WKBrowsingContextHandle alloc] _initWithPageProxy:*_page] autorelease];
 }
 
 - (_WKRemoteObjectRegistry *)_remoteObjectRegistry

@@ -35,6 +35,7 @@
 
 #define DECLARE_PREFERENCE_GETTER_AND_SETTERS(KeyUpper, KeyLower, TypeName, Type, DefaultValue, HumanReadableName, HumanReadableDescription) \
     void set##KeyUpper(const Type& value); \
+    void delete##KeyUpper(); \
     Type KeyLower() const;
 
 namespace WebKit {
@@ -58,6 +59,7 @@ public:
 
     const WebPreferencesStore& store() const { return m_store; }
 
+    // Implemented in generated file WebPreferencesGetterSetters.cpp.
     FOR_EACH_WEBKIT_PREFERENCE(DECLARE_PREFERENCE_GETTER_AND_SETTERS)
     FOR_EACH_WEBKIT_DEBUG_PREFERENCE(DECLARE_PREFERENCE_GETTER_AND_SETTERS)
     FOR_EACH_WEBKIT_INTERNAL_DEBUG_FEATURE_PREFERENCE(DECLARE_PREFERENCE_GETTER_AND_SETTERS)
@@ -76,9 +78,11 @@ public:
     void resetAllInternalDebugFeatures();
 
     // Exposed for WebKitTestRunner use only.
+    void setBoolValueForKey(const String&, bool value);
+    void setDoubleValueForKey(const String&, double value);
+    void setUInt32ValueForKey(const String&, uint32_t value);
+    void setStringValueForKey(const String&, const String& value);
     void forceUpdate() { update(); }
-
-    static bool anyPagesAreUsingPrivateBrowsing();
 
 private:
     void platformInitializeStore();
@@ -98,7 +102,8 @@ private:
     void platformUpdateDoubleValueForKey(const String& key, double value);
     void platformUpdateFloatValueForKey(const String& key, float value);
 
-    void updatePrivateBrowsingValue(bool value);
+    void deleteKey(const String& key);
+    void platformDeleteKey(const String& key);
 
     void registerDefaultBoolValueForKey(const String&, bool);
     void registerDefaultUInt32ValueForKey(const String&, uint32_t);

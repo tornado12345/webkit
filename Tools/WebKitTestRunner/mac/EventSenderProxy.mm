@@ -27,6 +27,7 @@
 #import "config.h"
 #import "EventSenderProxy.h"
 
+#import "CoreGraphicsTestSPI.h"
 #import "PlatformWebView.h"
 #import "StringFunctions.h"
 #import "TestController.h"
@@ -37,7 +38,6 @@
 #import <WebKit/WKPagePrivate.h>
 #import <WebKit/WKWebView.h>
 #import <wtf/RetainPtr.h>
-#import <wtf/mac/AppKitCompatibilityDeclarations.h>
 
 @interface NSApplication (Details)
 - (void)_setCurrentEvent:(NSEvent *)event;
@@ -45,6 +45,7 @@
 
 @interface NSEvent (ForTestRunner)
 - (void)_postDelayed;
+- (instancetype)_initWithCGEvent:(CGEventRef)event eventRef:(void *)eventRef;
 @end
 
 @interface EventSenderSyntheticEvent : NSEvent {
@@ -69,9 +70,42 @@
 
 @implementation EventSenderSyntheticEvent
 
-- (id)initPressureEventAtLocation:(NSPoint)location globalLocation:(NSPoint)globalLocation stage:(NSInteger)stage pressure:(float)pressure stageTransition:(float)stageTransition phase:(NSEventPhase)phase time:(NSTimeInterval)time eventNumber:(NSInteger)eventNumber window:(NSWindow *)window
+- (instancetype)initPressureEventAtLocation:(NSPoint)location globalLocation:(NSPoint)globalLocation stage:(NSInteger)stage pressure:(float)pressure stageTransition:(float)stageTransition phase:(NSEventPhase)phase time:(NSTimeInterval)time eventNumber:(NSInteger)eventNumber window:(NSWindow *)window
 {
-    self = [super init];
+    CGSGesturePhase gesturePhase;
+    switch (phase) {
+    case NSEventPhaseMayBegin:
+        gesturePhase = kCGSGesturePhaseMayBegin;
+        break;
+    case NSEventPhaseBegan:
+        gesturePhase = kCGSGesturePhaseBegan;
+        break;
+    case NSEventPhaseChanged:
+        gesturePhase = kCGSGesturePhaseChanged;
+        break;
+    case NSEventPhaseCancelled:
+        gesturePhase = kCGSGesturePhaseCancelled;
+        break;
+    case NSEventPhaseEnded:
+        gesturePhase = kCGSGesturePhaseEnded;
+        break;
+    case NSEventPhaseNone:
+    default:
+        gesturePhase = kCGSGesturePhaseNone;
+        break;
+    }
+
+    CGEventRef cgEvent = CGEventCreate(nullptr);
+    CGEventSetType(cgEvent, (CGEventType)kCGSEventGesture);
+    CGEventSetIntegerValueField(cgEvent, kCGEventGestureHIDType, 32);
+    CGEventSetIntegerValueField(cgEvent, kCGEventGesturePhase, gesturePhase);
+    CGEventSetDoubleValueField(cgEvent, kCGEventStagePressure, pressure);
+    CGEventSetDoubleValueField(cgEvent, kCGEventTransitionProgress, pressure);
+    CGEventSetIntegerValueField(cgEvent, kCGEventGestureStage, stageTransition);
+    CGEventSetIntegerValueField(cgEvent, kCGEventGestureBehavior, kCGSGestureBehaviorDeepPress);
+
+    self = [super _initWithCGEvent:cgEvent eventRef:nullptr];
+    CFRelease(cgEvent);
 
     if (!self)
         return nil;
@@ -85,10 +119,7 @@
     _eventSender_timestamp = time;
     _eventSender_eventNumber = eventNumber;
     _eventSender_window = window;
-#if defined(__LP64__)
-    self->_type = NSEventTypePressure;
     _eventSender_type = NSEventTypePressure;
-#endif
 
     return self;
 }
@@ -173,7 +204,7 @@ enum MouseButton {
     LeftMouseButton = 0,
     MiddleMouseButton = 1,
     RightMouseButton = 2,
-    NoMouseButton = -1
+    NoMouseButton = -2
 };
 
 struct KeyMappingEntry {
@@ -241,20 +272,10 @@ static NSTimeInterval absoluteTimeForEventTime(double currentEventTime)
 
 EventSenderProxy::EventSenderProxy(TestController* testController)
     : m_testController(testController)
-    , m_time(0)
-    , m_position()
-    , m_leftMouseButtonDown(false)
-    , m_clickCount(0)
-    , m_clickTime(0)
-    , m_clickPosition()
-    , m_clickButton(kWKEventMouseButtonNoButton)
-    , eventNumber(0)
 {
 }
 
-EventSenderProxy::~EventSenderProxy()
-{
-}
+EventSenderProxy::~EventSenderProxy() = default;
 
 void EventSenderProxy::updateClickCountForButton(int button)
 {
@@ -270,8 +291,15 @@ void EventSenderProxy::updateClickCountForButton(int button)
     m_clickButton = button;
 }
 
+static NSUInteger swizzledEventPressedMouseButtons()
+{
+    return TestController::singleton().eventSenderProxy()->mouseButtonsCurrentlyDown();
+}
+
 void EventSenderProxy::mouseDown(unsigned buttonNumber, WKEventModifiers modifiers)
 {
+    m_mouseButtonsCurrentlyDown |= (1 << buttonNumber);
+
     updateClickCountForButton(buttonNumber);
 
     NSEventType eventType = eventTypeForMouseButtonAndAction(buttonNumber, MouseDown);
@@ -287,6 +315,7 @@ void EventSenderProxy::mouseDown(unsigned buttonNumber, WKEventModifiers modifie
 
     NSView *targetView = [m_testController->mainWebView()->platformView() hitTest:[event locationInWindow]];
     if (targetView) {
+        auto eventPressedMouseButtonsSwizzler = makeUnique<ClassMethodSwizzler>([NSEvent class], @selector(pressedMouseButtons), reinterpret_cast<IMP>(swizzledEventPressedMouseButtons));
         [NSApp _setCurrentEvent:event];
         [targetView mouseDown:event];
         [NSApp _setCurrentEvent:nil];
@@ -297,6 +326,8 @@ void EventSenderProxy::mouseDown(unsigned buttonNumber, WKEventModifiers modifie
 
 void EventSenderProxy::mouseUp(unsigned buttonNumber, WKEventModifiers modifiers)
 {
+    m_mouseButtonsCurrentlyDown &= ~(1 << buttonNumber);
+
     NSEventType eventType = eventTypeForMouseButtonAndAction(buttonNumber, MouseUp);
     NSEvent *event = [NSEvent mouseEventWithType:eventType
                                         location:NSMakePoint(m_position.x, m_position.y)
@@ -316,6 +347,7 @@ void EventSenderProxy::mouseUp(unsigned buttonNumber, WKEventModifiers modifiers
         targetView = m_testController->mainWebView()->platformView();
 
     ASSERT(targetView);
+    auto eventPressedMouseButtonsSwizzler = makeUnique<ClassMethodSwizzler>([NSEvent class], @selector(pressedMouseButtons), reinterpret_cast<IMP>(swizzledEventPressedMouseButtons));
     [NSApp _setCurrentEvent:event];
     [targetView mouseUp:event];
     [NSApp _setCurrentEvent:nil];
@@ -325,7 +357,6 @@ void EventSenderProxy::mouseUp(unsigned buttonNumber, WKEventModifiers modifiers
     m_clickPosition = m_position;
 }
 
-#if defined(__LP64__)
 void EventSenderProxy::sendMouseDownToStartPressureEvents()
 {
     updateClickCountForButton(0);
@@ -353,7 +384,7 @@ static void handleForceEventSynchronously(NSEvent *event)
 
 RetainPtr<NSEvent> EventSenderProxy::beginPressureEvent(int stage)
 {
-    RetainPtr<EventSenderSyntheticEvent> event = adoptNS([[EventSenderSyntheticEvent alloc] initPressureEventAtLocation:NSMakePoint(m_position.x, m_position.y)
+    auto event = adoptNS([[EventSenderSyntheticEvent alloc] initPressureEventAtLocation:NSMakePoint(m_position.x, m_position.y)
         globalLocation:([m_testController->mainWebView()->platformWindow() convertRectToScreen:NSMakeRect(m_position.x, m_position.y, 1, 1)].origin)
         stage:stage
         pressure:0.5
@@ -368,7 +399,7 @@ RetainPtr<NSEvent> EventSenderProxy::beginPressureEvent(int stage)
 
 RetainPtr<NSEvent> EventSenderProxy::pressureChangeEvent(int stage, float pressure, EventSenderProxy::PressureChangeDirection direction)
 {
-    RetainPtr<EventSenderSyntheticEvent> event = adoptNS([[EventSenderSyntheticEvent alloc] initPressureEventAtLocation:NSMakePoint(m_position.x, m_position.y)
+    auto event = adoptNS([[EventSenderSyntheticEvent alloc] initPressureEventAtLocation:NSMakePoint(m_position.x, m_position.y)
         globalLocation:([m_testController->mainWebView()->platformWindow() convertRectToScreen:NSMakeRect(m_position.x, m_position.y, 1, 1)].origin)
         stage:stage
         pressure:pressure
@@ -390,10 +421,10 @@ void EventSenderProxy::mouseForceClick()
 {
     sendMouseDownToStartPressureEvents();
 
-    RetainPtr<NSEvent> beginPressure = beginPressureEvent(1);
-    RetainPtr<NSEvent> preForceClick = pressureChangeEvent(1, PressureChangeDirection::Increasing);
-    RetainPtr<NSEvent> forceClick = pressureChangeEvent(2, PressureChangeDirection::Increasing);
-    RetainPtr<NSEvent> releasingPressure = pressureChangeEvent(1, PressureChangeDirection::Decreasing);
+    auto beginPressure = beginPressureEvent(1);
+    auto preForceClick = pressureChangeEvent(1, PressureChangeDirection::Increasing);
+    auto forceClick = pressureChangeEvent(2, PressureChangeDirection::Increasing);
+    auto releasingPressure = pressureChangeEvent(1, PressureChangeDirection::Decreasing);
     NSEvent *mouseUp = [NSEvent mouseEventWithType:NSEventTypeLeftMouseUp
         location:NSMakePoint(m_position.x, m_position.y)
         modifierFlags:0
@@ -427,9 +458,9 @@ void EventSenderProxy::startAndCancelMouseForceClick()
 {
     sendMouseDownToStartPressureEvents();
 
-    RetainPtr<NSEvent> beginPressure = beginPressureEvent(1);
-    RetainPtr<NSEvent> increasingPressure = pressureChangeEvent(1, PressureChangeDirection::Increasing);
-    RetainPtr<NSEvent> releasingPressure = pressureChangeEvent(1, PressureChangeDirection::Decreasing);
+    auto beginPressure = beginPressureEvent(1);
+    auto increasingPressure = pressureChangeEvent(1, PressureChangeDirection::Increasing);
+    auto releasingPressure = pressureChangeEvent(1, PressureChangeDirection::Decreasing);
     NSEvent *mouseUp = [NSEvent mouseEventWithType:NSEventTypeLeftMouseUp
         location:NSMakePoint(m_position.x, m_position.y)
         modifierFlags:0
@@ -462,9 +493,9 @@ void EventSenderProxy::mouseForceDown()
 {
     sendMouseDownToStartPressureEvents();
 
-    RetainPtr<NSEvent> beginPressure = beginPressureEvent(1);
-    RetainPtr<NSEvent> preForceClick = pressureChangeEvent(1, PressureChangeDirection::Increasing);
-    RetainPtr<NSEvent> forceMouseDown = pressureChangeEvent(2, PressureChangeDirection::Increasing);
+    auto beginPressure = beginPressureEvent(1);
+    auto preForceClick = pressureChangeEvent(1, PressureChangeDirection::Increasing);
+    auto forceMouseDown = pressureChangeEvent(2, PressureChangeDirection::Increasing);
 
     NSView *targetView = [m_testController->mainWebView()->platformView() hitTest:[beginPressure locationInWindow]];
     targetView = targetView ? targetView : m_testController->mainWebView()->platformView();
@@ -485,9 +516,9 @@ void EventSenderProxy::mouseForceDown()
 
 void EventSenderProxy::mouseForceUp()
 {
-    RetainPtr<NSEvent> beginPressure = beginPressureEvent(2);
-    RetainPtr<NSEvent> stageTwoEvent = pressureChangeEvent(2, PressureChangeDirection::Decreasing);
-    RetainPtr<NSEvent> stageOneEvent = pressureChangeEvent(1, PressureChangeDirection::Decreasing);
+    auto beginPressure = beginPressureEvent(2);
+    auto stageTwoEvent = pressureChangeEvent(2, PressureChangeDirection::Decreasing);
+    auto stageOneEvent = pressureChangeEvent(1, PressureChangeDirection::Decreasing);
 
     // Since AppKit does not implement forceup/down as mouse events, we need to send two pressure events to detect
     // the change in stage that marks those moments.
@@ -510,8 +541,8 @@ void EventSenderProxy::mouseForceChanged(float force)
 {
     int stage = force < 1 ? 1 : 2;
     float pressure = force < 1 ? force : force - 1;
-    RetainPtr<NSEvent> beginPressure = beginPressureEvent(stage);
-    RetainPtr<NSEvent> pressureChangedEvent = pressureChangeEvent(stage, pressure, PressureChangeDirection::Increasing);
+    auto beginPressure = beginPressureEvent(stage);
+    auto pressureChangedEvent = pressureChangeEvent(stage, pressure, PressureChangeDirection::Increasing);
 
     NSView *targetView = [m_testController->mainWebView()->platformView() hitTest:[beginPressure locationInWindow]];
     targetView = targetView ? targetView : m_testController->mainWebView()->platformView();
@@ -525,49 +556,6 @@ void EventSenderProxy::mouseForceChanged(float force)
     [targetView pressureChangeWithEvent:nil];
     IGNORE_NULL_CHECK_WARNINGS_END
 }
-#else
-
-#if PLATFORM(COCOA)
-RetainPtr<NSEvent> EventSenderProxy::beginPressureEvent(int)
-{
-    return nil;
-}
-
-RetainPtr<NSEvent> EventSenderProxy::pressureChangeEvent(int, PressureChangeDirection)
-{
-    return nil;
-}
-
-RetainPtr<NSEvent> EventSenderProxy::pressureChangeEvent(int, float, PressureChangeDirection)
-{
-    return nil;
-}
-#endif // PLATFORM(COCOA)
-
-void EventSenderProxy::sendMouseDownToStartPressureEvents()
-{
-}
-
-void EventSenderProxy::mouseForceDown()
-{
-}
-
-void EventSenderProxy::mouseForceUp()
-{
-}
-
-void EventSenderProxy::mouseForceChanged(float)
-{
-}
-
-void EventSenderProxy::mouseForceClick()
-{
-}
-
-void EventSenderProxy::startAndCancelMouseForceClick()
-{
-}
-#endif // defined(__LP64__)
 
 void EventSenderProxy::mouseMoveTo(double x, double y)
 {
@@ -595,6 +583,7 @@ void EventSenderProxy::mouseMoveTo(double x, double y)
     // Always target drags at the WKWebView to allow for drag-scrolling outside the view.
     NSView *targetView = isDrag ? m_testController->mainWebView()->platformView() : [m_testController->mainWebView()->platformView() hitTest:windowLocation];
     if (targetView) {
+        auto eventPressedMouseButtonsSwizzler = makeUnique<ClassMethodSwizzler>([NSEvent class], @selector(pressedMouseButtons), reinterpret_cast<IMP>(swizzledEventPressedMouseButtons));
         [NSApp _setCurrentEvent:event];
         if (isDrag)
             [targetView mouseDragged:event];
@@ -612,8 +601,7 @@ void EventSenderProxy::leapForward(int milliseconds)
 
 void EventSenderProxy::keyDown(WKStringRef key, WKEventModifiers modifiers, unsigned keyLocation)
 {
-    NSString* character = [NSString stringWithCString:toSTD(key).c_str()
-                                   encoding:[NSString defaultCStringEncoding]];
+    NSString* character = toWTFString(key);
 
     NSString *eventCharacter = character;
     unsigned short keyCode = 0;
@@ -747,6 +735,12 @@ void EventSenderProxy::keyDown(WKStringRef key, WKEventModifiers modifiers, unsi
         keyCode = 0x0E;
     else if ([character isEqualToString:@"\x1b"])
         keyCode = 0x1B;
+    else if ([character isEqualToString:@":"])
+        keyCode = 0x29;
+    else if ([character isEqualToString:@";"])
+        keyCode = 0x29;
+    else if ([character isEqualToString:@","])
+        keyCode = 0x2B;
 
     KeyMappingEntry table[] = {
         {0x2F, 0x41, '.', nil},
@@ -827,7 +821,7 @@ void EventSenderProxy::keyDown(WKStringRef key, WKEventModifiers modifiers, unsi
 
 void EventSenderProxy::mouseScrollBy(int x, int y)
 {
-    RetainPtr<CGEventRef> cgScrollEvent = adoptCF(CGEventCreateScrollWheelEvent(0, kCGScrollEventUnitLine, 2, y, x));
+    auto cgScrollEvent = adoptCF(CGEventCreateScrollWheelEvent2(0, kCGScrollEventUnitLine, 2, y, x, 0));
 
     // Set the CGEvent location in flipped coords relative to the first screen, which
     // compensates for the behavior of +[NSEvent eventWithCGEvent:] when the event has
@@ -854,7 +848,7 @@ void EventSenderProxy::continuousMouseScrollBy(int x, int y, bool paged)
 
 void EventSenderProxy::mouseScrollByWithWheelAndMomentumPhases(int x, int y, int phase, int momentum)
 {
-    RetainPtr<CGEventRef> cgScrollEvent = adoptCF(CGEventCreateScrollWheelEvent(0, kCGScrollEventUnitLine, 2, y, x));
+    auto cgScrollEvent = adoptCF(CGEventCreateScrollWheelEvent2(0, kCGScrollEventUnitLine, 2, y, x, 0));
 
     // Set the CGEvent location in flipped coords relative to the first screen, which
     // compensates for the behavior of +[NSEvent eventWithCGEvent:] when the event has

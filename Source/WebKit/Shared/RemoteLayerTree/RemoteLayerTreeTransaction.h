@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012 Apple Inc. All rights reserved.
+ * Copyright (C) 2012-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,6 +31,7 @@
 #include "GenericCallback.h"
 #include "PlatformCAAnimationRemote.h"
 #include "RemoteLayerBackingStore.h"
+#include "TransactionID.h"
 #include <WebCore/Color.h>
 #include <WebCore/FilterOperations.h>
 #include <WebCore/FloatPoint3D.h>
@@ -50,9 +51,8 @@ class Encoder;
 
 namespace WebKit {
 
-class PlatformCALayerRemote;
-
 class RemoteLayerTreeTransaction {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     enum LayerChange {
         NameChanged                     = 1LLU << 1,
@@ -92,9 +92,11 @@ public:
         EdgeAntialiasingMaskChanged     = 1LLU << 35,
         CustomAppearanceChanged         = 1LLU << 36,
         UserInteractionEnabledChanged   = 1LLU << 37,
+        EventRegionChanged              = 1LLU << 38,
     };
 
     struct LayerCreationProperties {
+        WTF_MAKE_STRUCT_FAST_ALLOCATED;
         LayerCreationProperties();
 
         void encode(IPC::Encoder&) const;
@@ -103,18 +105,17 @@ public:
         WebCore::GraphicsLayer::PlatformLayerID layerID;
         WebCore::PlatformCALayer::LayerType type;
 
-        WebCore::GraphicsLayer::EmbeddedViewID embeddedViewID;
-
         uint32_t hostingContextID;
         float hostingDeviceScaleFactor;
     };
 
     struct LayerProperties {
+        WTF_MAKE_STRUCT_FAST_ALLOCATED;
         LayerProperties();
         LayerProperties(const LayerProperties& other);
 
         void encode(IPC::Encoder&) const;
-        static bool decode(IPC::Decoder&, LayerProperties&);
+        static WARN_UNUSED_RETURN bool decode(IPC::Decoder&, LayerProperties&);
 
         void notePropertiesChanged(OptionSet<LayerChange> changeFlags)
         {
@@ -171,13 +172,16 @@ public:
         bool opaque;
         bool contentsHidden;
         bool userInteractionEnabled;
+        WebCore::EventRegion eventRegion;
     };
 
     explicit RemoteLayerTreeTransaction();
     ~RemoteLayerTreeTransaction();
+    RemoteLayerTreeTransaction(RemoteLayerTreeTransaction&&);
+    RemoteLayerTreeTransaction& operator=(RemoteLayerTreeTransaction&&);
 
     void encode(IPC::Encoder&) const;
-    static bool decode(IPC::Decoder&, RemoteLayerTreeTransaction&);
+    static WARN_UNUSED_RETURN bool decode(IPC::Decoder&, RemoteLayerTreeTransaction&);
 
     WebCore::GraphicsLayer::PlatformLayerID rootLayerID() const { return m_rootLayerID; }
     void setRootLayerID(WebCore::GraphicsLayer::PlatformLayerID);
@@ -187,7 +191,7 @@ public:
     void setLayerIDsWithNewlyUnreachableBackingStore(Vector<WebCore::GraphicsLayer::PlatformLayerID>);
 
 #if !defined(NDEBUG) || !LOG_DISABLED
-    WTF::CString description() const;
+    String description() const;
     void dump() const;
 #endif
 
@@ -259,8 +263,8 @@ public:
     bool avoidsUnsafeArea() const { return m_avoidsUnsafeArea; }
     void setAvoidsUnsafeArea(bool avoidsUnsafeArea) { m_avoidsUnsafeArea = avoidsUnsafeArea; }
 
-    uint64_t transactionID() const { return m_transactionID; }
-    void setTransactionID(uint64_t transactionID) { m_transactionID = transactionID; }
+    TransactionID transactionID() const { return m_transactionID; }
+    void setTransactionID(TransactionID transactionID) { m_transactionID = transactionID; }
 
     ActivityStateChangeID activityStateChangeID() const { return m_activityStateChangeID; }
     void setActivityStateChangeID(ActivityStateChangeID activityStateChangeID) { m_activityStateChangeID = activityStateChangeID; }
@@ -269,8 +273,8 @@ public:
     const Vector<TransactionCallbackID>& callbackIDs() const { return m_callbackIDs; }
     void setCallbackIDs(Vector<TransactionCallbackID>&& callbackIDs) { m_callbackIDs = WTFMove(callbackIDs); }
 
-    OptionSet<WebCore::LayoutMilestone> newlyReachedLayoutMilestones() const { return m_newlyReachedLayoutMilestones; }
-    void setNewlyReachedLayoutMilestones(OptionSet<WebCore::LayoutMilestone> milestones) { m_newlyReachedLayoutMilestones = milestones; }
+    OptionSet<WebCore::LayoutMilestone> newlyReachedPaintingMilestones() const { return m_newlyReachedPaintingMilestones; }
+    void setNewlyReachedPaintingMilestones(OptionSet<WebCore::LayoutMilestone> milestones) { m_newlyReachedPaintingMilestones = milestones; }
 
     bool hasEditorState() const { return !!m_editorState; }
     const EditorState& editorState() const { return m_editorState.value(); }
@@ -304,9 +308,9 @@ private:
     double m_initialScaleFactor { 1 };
     double m_viewportMetaTagWidth { -1 };
     uint64_t m_renderTreeSize { 0 };
-    uint64_t m_transactionID { 0 };
+    TransactionID m_transactionID;
     ActivityStateChangeID m_activityStateChangeID { ActivityStateChangeAsynchronous };
-    OptionSet<WebCore::LayoutMilestone> m_newlyReachedLayoutMilestones;
+    OptionSet<WebCore::LayoutMilestone> m_newlyReachedPaintingMilestones;
     bool m_scaleWasSetByUIProcess { false };
     bool m_allowsUserScaling { false };
     bool m_avoidsUnsafeArea { true };
@@ -319,3 +323,51 @@ private:
 };
 
 } // namespace WebKit
+
+namespace WTF {
+
+template<> struct EnumTraits<WebKit::RemoteLayerTreeTransaction::LayerChange> {
+    using values = EnumValues<
+        WebKit::RemoteLayerTreeTransaction::LayerChange,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::NameChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::ChildrenChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::PositionChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::BoundsChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::BackgroundColorChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::AnchorPointChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::BorderWidthChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::BorderColorChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::OpacityChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::TransformChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::SublayerTransformChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::HiddenChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::GeometryFlippedChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::DoubleSidedChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::MasksToBoundsChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::OpaqueChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::ContentsHiddenChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::MaskLayerChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::ClonedContentsChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::ContentsRectChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::ContentsScaleChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::CornerRadiusChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::ShapeRoundedRectChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::ShapePathChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::MinificationFilterChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::MagnificationFilterChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::BlendModeChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::WindRuleChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::SpeedChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::TimeOffsetChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::BackingStoreChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::BackingStoreAttachmentChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::FiltersChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::AnimationsChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::EdgeAntialiasingMaskChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::CustomAppearanceChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::UserInteractionEnabledChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::EventRegionChanged
+    >;
+};
+
+} // namespace WTF

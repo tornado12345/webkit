@@ -25,7 +25,7 @@
 
 #include "config.h"
 
-#if ENABLE(VIDEO) && USE(GSTREAMER) && ENABLE(VIDEO_TRACK)
+#if ENABLE(VIDEO) && USE(GSTREAMER)
 
 #include "InbandTextTrackPrivateGStreamer.h"
 
@@ -40,7 +40,7 @@ GST_DEBUG_CATEGORY_EXTERN(webkit_media_player_debug);
 namespace WebCore {
 
 InbandTextTrackPrivateGStreamer::InbandTextTrackPrivateGStreamer(gint index, GRefPtr<GstPad> pad)
-    : InbandTextTrackPrivate(WebVTT)
+    : InbandTextTrackPrivate(CueFormat::WebVTT)
     , TrackPrivateBaseGStreamer(this, index, pad)
 {
     m_eventProbe = gst_pad_add_probe(m_pad.get(), GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM, [] (GstPad*, GstPadProbeInfo* info, gpointer userData) -> GstPadProbeReturn {
@@ -58,15 +58,13 @@ InbandTextTrackPrivateGStreamer::InbandTextTrackPrivateGStreamer(gint index, GRe
     notifyTrackOfStreamChanged();
 }
 
-#if GST_CHECK_VERSION(1, 10, 0)
 InbandTextTrackPrivateGStreamer::InbandTextTrackPrivateGStreamer(gint index, GRefPtr<GstStream> stream)
-    : InbandTextTrackPrivate(WebVTT)
+    : InbandTextTrackPrivate(CueFormat::WebVTT)
     , TrackPrivateBaseGStreamer(this, index, stream)
 {
     m_streamId = gst_stream_get_stream_id(stream.get());
     GST_INFO("Track %d got stream start for stream %s.", m_index, m_streamId.utf8().data());
 }
-#endif
 
 void InbandTextTrackPrivateGStreamer::disconnect()
 {
@@ -112,16 +110,16 @@ void InbandTextTrackPrivateGStreamer::notifyTrackOfSample()
             GST_WARNING("Track %d got sample with no buffer.", m_index);
             continue;
         }
-        auto mappedBuffer = GstMappedBuffer::create(buffer, GST_MAP_READ);
+        GstMappedBuffer mappedBuffer(buffer, GST_MAP_READ);
         ASSERT(mappedBuffer);
         if (!mappedBuffer) {
             GST_WARNING("Track %d unable to map buffer.", m_index);
             continue;
         }
 
-        GST_INFO("Track %d parsing sample: %.*s", m_index, static_cast<int>(mappedBuffer->size()),
-            reinterpret_cast<char*>(mappedBuffer->data()));
-        client()->parseWebVTTCueData(reinterpret_cast<char*>(mappedBuffer->data()), mappedBuffer->size());
+        GST_INFO("Track %d parsing sample: %.*s", m_index, static_cast<int>(mappedBuffer.size()),
+            reinterpret_cast<char*>(mappedBuffer.data()));
+        client()->parseWebVTTCueData(reinterpret_cast<char*>(mappedBuffer.data()), mappedBuffer.size());
     }
 }
 
@@ -140,4 +138,4 @@ void InbandTextTrackPrivateGStreamer::notifyTrackOfStreamChanged()
 
 } // namespace WebCore
 
-#endif // ENABLE(VIDEO) && USE(GSTREAMER) && ENABLE(VIDEO_TRACK)
+#endif // ENABLE(VIDEO) && USE(GSTREAMER)

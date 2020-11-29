@@ -36,6 +36,7 @@
 #import "WebPageProxy.h"
 #import <UIKit/UIPickerView.h>
 #import <WebCore/LocalizedStrings.h>
+#import <pal/spi/cocoa/IOKitSPI.h>
 #import <wtf/RetainPtr.h>
 
 using namespace WebKit;
@@ -97,7 +98,8 @@ ALLOW_DEPRECATED_DECLARATIONS_END
     WKContentView *_contentView;
 }
 
-@property(nonatomic,assign) WKSelectPopover *popover;
+@property (nonatomic, readonly) BOOL shouldDismissWithAnimation;
+@property (nonatomic, assign) WKSelectPopover *popover;
 @end
 
 @implementation WKSelectTableViewController
@@ -269,7 +271,7 @@ ALLOW_DEPRECATED_DECLARATIONS_END
     }
     
     CGRect textRect = [cell textRectForContentRect:[cell contentRectForBounds:[cell bounds]]];
-    ASSERT(textRect.size.width > 0.0);
+    ASSERT_IMPLIES(CGRectGetWidth(tableView.bounds) > 0, textRect.size.width > 0);
     
     // Assume all cells have the same available text width.
     UIFont *font = cell.textLabel.font;
@@ -363,6 +365,11 @@ ALLOW_DEPRECATED_DECLARATIONS_END
     }
 }
 
+- (BOOL)shouldDismissWithAnimation
+{
+    return _contentView._shouldUseLegacySelectPopoverDismissalBehavior;
+}
+
 #if !USE(UIKIT_KEYBOARD_ADDITIONS)
 #pragma mark UIKeyInput delegate methods
 
@@ -391,10 +398,6 @@ ALLOW_DEPRECATED_DECLARATIONS_END
 {
     if (!(self = [super initWithView:view]))
         return nil;
-    
-    CGRect frame;
-    frame.origin = CGPointZero;
-    frame.size = [UIKeyboard defaultSizeForInterfaceOrientation:[UIApp interfaceOrientation]];
 
     _tableViewController = adoptNS([[WKSelectTableViewController alloc] initWithView:view hasGroups:hasGroups]);
     [_tableViewController setPopover:self];
@@ -446,6 +449,7 @@ ALLOW_DEPRECATED_DECLARATIONS_END
 
 - (void)controlEndEditing
 {
+    [self dismissPopoverAnimated:[_tableViewController shouldDismissWithAnimation]];
 }
 
 - (void)_userActionDismissedPopover:(id)sender

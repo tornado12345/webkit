@@ -23,8 +23,6 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#pragma once
-
 #import <AppKit/AppKit.h>
 
 #if USE(APPLE_INTERNAL_SDK)
@@ -42,13 +40,35 @@
 @protocol NSTextInputClient_Async
 @end
 
-@interface NSWindow (NSInspectorBarSupport)
+typedef NS_OPTIONS(NSUInteger, NSWindowShadowOptions) {
+    NSWindowShadowSecondaryWindow = 0x2,
+};
+
+@interface NSWindow ()
 - (NSInspectorBar *)inspectorBar;
 - (void)setInspectorBar:(NSInspectorBar *)bar;
+
+@property (readonly) NSWindowShadowOptions shadowOptions;
+
+#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 101400
+@property CGFloat titlebarAlphaValue;
+#endif
+
 @end
 
 #endif
 
 @interface NSInspectorBar (IPI)
 - (void)_update;
+@end
+
+#if __MAC_OS_X_VERSION_MAX_ALLOWED < 101400
+@interface NSWindow (IPI)
+@property CGFloat titlebarAlphaValue;
+@end
+#endif
+
+// FIXME: Move this above once <rdar://problem/70224980> is in an SDK.
+@interface NSCursor ()
++ (void)hideUntilChanged;
 @end

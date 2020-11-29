@@ -21,12 +21,14 @@
 #include "JSCValue.h"
 
 #include "APICast.h"
+#include "APIUtils.h"
 #include "JSCCallbackFunction.h"
 #include "JSCClassPrivate.h"
 #include "JSCContextPrivate.h"
 #include "JSCInlines.h"
 #include "JSCValuePrivate.h"
 #include "JSRetainPtr.h"
+#include "LiteralParser.h"
 #include "OpaqueJSString.h"
 #include <gobject/gvaluecollector.h>
 #include <wtf/glib/GRefPtr.h>
@@ -471,8 +473,11 @@ JSCValue* jsc_value_new_array(JSCContext* context, GType firstItemType, ...)
 {
     g_return_val_if_fail(JSC_IS_CONTEXT(context), nullptr);
 
-    JSValueRef exception = nullptr;
     auto* jsContext = jscContextGetJSContext(context);
+    JSC::JSGlobalObject* globalObject = toJS(jsContext);
+    JSC::JSLockHolder locker(globalObject);
+
+    JSValueRef exception = nullptr;
     auto* jsArray = JSObjectMakeArray(jsContext, 0, nullptr, &exception);
     if (jscContextHandleExceptionIfNeeded(context, exception))
         return nullptr;
@@ -490,7 +495,7 @@ JSCValue* jsc_value_new_array(JSCContext* context, GType firstItemType, ...)
         GUniqueOutPtr<char> error;
         G_VALUE_COLLECT_INIT(&item, itemType, args, G_VALUE_NOCOPY_CONTENTS, &error.outPtr());
         if (error) {
-            exception = toRef(JSC::createTypeError(toJS(jsContext), makeString("failed to collect array item: ", error.get())));
+            exception = toRef(JSC::createTypeError(globalObject, makeString("failed to collect array item: ", error.get())));
             jscContextHandleExceptionIfNeeded(context, exception);
             jsArray = nullptr;
             break;
@@ -587,11 +592,12 @@ gboolean jsc_value_is_array(JSCValue* value)
 /**
  * jsc_value_new_object:
  * @context: a #JSCContext
- * @instance: (nullable): an object instance or %NULL
+ * @instance: (nullable) (transfer full): an object instance or %NULL
  * @jsc_class: (nullable): the #JSCClass of @instance
  *
  * Create a new #JSCValue from @instance. If @instance is %NULL a new empty object is created.
- * When @instance is provided, @jsc_class must be provided too.
+ * When @instance is provided, @jsc_class must be provided too. @jsc_class takes ownership of
+ * @instance that will be freed by the #GDestroyNotify passed to jsc_context_register_class().
  *
  * Returns: (transfer full): a #JSCValue.
  */
@@ -600,7 +606,7 @@ JSCValue* jsc_value_new_object(JSCContext* context, gpointer instance, JSCClass*
     g_return_val_if_fail(JSC_IS_CONTEXT(context), nullptr);
     g_return_val_if_fail(!instance || JSC_IS_CLASS(jscClass), nullptr);
 
-    return jscContextGetOrCreateValue(context, instance ? toRef(jscClassGetOrCreateJSWrapper(jscClass, instance)) : JSObjectMake(jscContextGetJSContext(context), nullptr, nullptr)).leakRef();
+    return jscContextGetOrCreateValue(context, instance ? toRef(jscClassGetOrCreateJSWrapper(jscClass, context, instance)) : JSObjectMake(jscContextGetJSContext(context), nullptr, nullptr)).leakRef();
 }
 
 /**
@@ -876,6 +882,8 @@ static GRefPtr<JSCValue> jscValueCallFunction(JSCValue* value, JSObjectRef funct
 {
     JSCValuePrivate* priv = value->priv;
     auto* jsContext = jscContextGetJSContext(priv->context.get());
+    JSC::JSGlobalObject* globalObject = toJS(jsContext);
+    JSC::JSLockHolder locker(globalObject);
 
     JSValueRef exception = nullptr;
     Vector<JSValueRef> arguments;
@@ -885,7 +893,7 @@ static GRefPtr<JSCValue> jscValueCallFunction(JSCValue* value, JSObjectRef funct
         GUniqueOutPtr<char> error;
         G_VALUE_COLLECT_INIT(&parameter, parameterType, args, G_VALUE_NOCOPY_CONTENTS, &error.outPtr());
         if (error) {
-            exception = toRef(JSC::createTypeError(toJS(jsContext), makeString("failed to collect function paramater: ", error.get())));
+            exception = toRef(JSC::createTypeError(globalObject, makeString("failed to collect function paramater: ", error.get())));
             jscContextHandleExceptionIfNeeded(priv->context.get(), exception);
             return adoptGRef(jsc_value_new_undefined(priv->context.get()));
         }
@@ -1002,7 +1010,7 @@ JSCValue* jsc_value_object_invoke_methodv(JSCValue* value, const char* name, uns
 
     auto result = jsObjectCall(jsContext, function, JSC::JSCCallbackFunction::Type::Method, object, arguments, &exception);
     if (jscContextHandleExceptionIfNeeded(priv->context.get(), exception))
-        jsc_value_new_undefined(priv->context.get());
+        return jsc_value_new_undefined(priv->context.get());
 
     return jscContextGetOrCreateValue(priv->context.get(), result).leakRef();
 }
@@ -1036,19 +1044,34 @@ void jsc_value_object_define_property_data(JSCValue* value, const char* property
     g_return_if_fail(propertyName);
 
     JSCValuePrivate* priv = value->priv;
-    GRefPtr<JSCValue> descriptor = adoptGRef(jsc_value_new_object(priv->context.get(), nullptr, nullptr));
-    GRefPtr<JSCValue> trueValue = adoptGRef(jsc_value_new_boolean(priv->context.get(), TRUE));
-    if (flags & JSC_VALUE_PROPERTY_CONFIGURABLE)
-        jsc_value_object_set_property(descriptor.get(), "configurable", trueValue.get());
-    if (flags & JSC_VALUE_PROPERTY_ENUMERABLE)
-        jsc_value_object_set_property(descriptor.get(), "enumerable", trueValue.get());
-    if (propertyValue)
-        jsc_value_object_set_property(descriptor.get(), "value", propertyValue);
-    if (flags & JSC_VALUE_PROPERTY_WRITABLE)
-        jsc_value_object_set_property(descriptor.get(), "writable", trueValue.get());
-    GRefPtr<JSCValue> object = adoptGRef(jsc_context_get_value(priv->context.get(), "Object"));
-    GRefPtr<JSCValue> result = adoptGRef(jsc_value_object_invoke_method(object.get(), "defineProperty",
-        JSC_TYPE_VALUE, value, G_TYPE_STRING, propertyName, JSC_TYPE_VALUE, descriptor.get(), G_TYPE_NONE));
+    auto* jsContext = jscContextGetJSContext(priv->context.get());
+    JSC::JSGlobalObject* globalObject = toJS(jsContext);
+    JSC::VM& vm = globalObject->vm();
+    JSC::JSLockHolder locker(vm);
+    auto scope = DECLARE_CATCH_SCOPE(vm);
+
+    JSC::JSValue jsValue = toJS(globalObject, priv->jsValue);
+    JSC::JSObject* object = jsValue.toObject(globalObject);
+    JSValueRef exception = nullptr;
+    if (handleExceptionIfNeeded(scope, jsContext, &exception) == ExceptionStatus::DidThrow) {
+        jscContextHandleExceptionIfNeeded(priv->context.get(), exception);
+        return;
+    }
+
+    auto name = OpaqueJSString::tryCreate(String::fromUTF8(propertyName));
+    if (!name)
+        return;
+
+    JSC::PropertyDescriptor descriptor;
+    descriptor.setValue(toJS(globalObject, propertyValue->priv->jsValue));
+    descriptor.setEnumerable(flags & JSC_VALUE_PROPERTY_ENUMERABLE);
+    descriptor.setConfigurable(flags & JSC_VALUE_PROPERTY_CONFIGURABLE);
+    descriptor.setWritable(flags & JSC_VALUE_PROPERTY_WRITABLE);
+    object->methodTable(vm)->defineOwnProperty(object, globalObject, name->identifier(&vm), descriptor, true);
+    if (handleExceptionIfNeeded(scope, jsContext, &exception) == ExceptionStatus::DidThrow) {
+        jscContextHandleExceptionIfNeeded(priv->context.get(), exception);
+        return;
+    }
 }
 
 /**
@@ -1067,6 +1090,11 @@ void jsc_value_object_define_property_data(JSCValue* value, const char* property
  * When the property is cleared in the #JSCClass context, @destroy_notify is called with
  * @user_data as parameter. This is equivalent to JavaScript <function>Object.defineProperty()</function>
  * when used with an accessor descriptor.
+ *
+ * Note that the value returned by @getter must be fully transferred. In case of boxed types, you could use
+ * %G_TYPE_POINTER instead of the actual boxed #GType to ensure that the instance owned by #JSCClass is used.
+ * If you really want to return a new copy of the boxed type, use #JSC_TYPE_VALUE and return a #JSCValue created
+ * with jsc_value_new_object() that receives the copy as instance parameter.
  */
 void jsc_value_object_define_property_accessor(JSCValue* value, const char* propertyName, JSCValuePropertyFlags flags, GType propertyType, GCallback getter, GCallback setter, gpointer userData, GDestroyNotify destroyNotify)
 {
@@ -1076,42 +1104,59 @@ void jsc_value_object_define_property_accessor(JSCValue* value, const char* prop
     g_return_if_fail(getter || setter);
 
     JSCValuePrivate* priv = value->priv;
-    GRefPtr<JSCValue> descriptor = adoptGRef(jsc_value_new_object(priv->context.get(), nullptr, nullptr));
-    GRefPtr<JSCValue> trueValue = adoptGRef(jsc_value_new_boolean(priv->context.get(), TRUE));
-    if (flags & JSC_VALUE_PROPERTY_CONFIGURABLE)
-        jsc_value_object_set_property(descriptor.get(), "configurable", trueValue.get());
-    if (flags & JSC_VALUE_PROPERTY_ENUMERABLE)
-        jsc_value_object_set_property(descriptor.get(), "enumerable", trueValue.get());
-
-    JSC::ExecState* exec = toJS(jscContextGetJSContext(priv->context.get()));
-    JSC::VM& vm = exec->vm();
+    auto* jsContext = jscContextGetJSContext(priv->context.get());
+    JSC::JSGlobalObject* globalObject = toJS(jsContext);
+    JSC::VM& vm = globalObject->vm();
     JSC::JSLockHolder locker(vm);
+    auto scope = DECLARE_CATCH_SCOPE(vm);
+
+    JSC::JSValue jsValue = toJS(globalObject, priv->jsValue);
+    JSC::JSObject* object = jsValue.toObject(globalObject);
+    JSValueRef exception = nullptr;
+    if (handleExceptionIfNeeded(scope, jsContext, &exception) == ExceptionStatus::DidThrow) {
+        jscContextHandleExceptionIfNeeded(priv->context.get(), exception);
+        return;
+    }
+
+    auto name = OpaqueJSString::tryCreate(String::fromUTF8(propertyName));
+    if (!name)
+        return;
+
+    JSC::PropertyDescriptor descriptor;
+    descriptor.setEnumerable(flags & JSC_VALUE_PROPERTY_ENUMERABLE);
+    descriptor.setConfigurable(flags & JSC_VALUE_PROPERTY_CONFIGURABLE);
     if (getter) {
         GRefPtr<GClosure> closure = adoptGRef(g_cclosure_new(getter, userData, reinterpret_cast<GClosureNotify>(reinterpret_cast<GCallback>(destroyNotify))));
-        auto* functionObject = toRef(JSC::JSCCallbackFunction::create(vm, exec->lexicalGlobalObject(), "get"_s,
-            JSC::JSCCallbackFunction::Type::Method, nullptr, WTFMove(closure), propertyType, Vector<GType> { }));
-        GRefPtr<JSCValue> function = jscContextGetOrCreateValue(priv->context.get(), functionObject);
-        jsc_value_object_set_property(descriptor.get(), "get", function.get());
+        auto function = JSC::JSCCallbackFunction::create(vm, globalObject, "get"_s,
+            JSC::JSCCallbackFunction::Type::Method, nullptr, WTFMove(closure), propertyType, Vector<GType> { });
+        descriptor.setGetter(function);
     }
     if (setter) {
         GRefPtr<GClosure> closure = adoptGRef(g_cclosure_new(setter, userData, getter ? nullptr : reinterpret_cast<GClosureNotify>(reinterpret_cast<GCallback>(destroyNotify))));
-        auto* functionObject = toRef(JSC::JSCCallbackFunction::create(vm, exec->lexicalGlobalObject(), "set"_s,
-            JSC::JSCCallbackFunction::Type::Method, nullptr, WTFMove(closure), G_TYPE_NONE, Vector<GType> { propertyType }));
-        GRefPtr<JSCValue> function = jscContextGetOrCreateValue(priv->context.get(), functionObject);
-        jsc_value_object_set_property(descriptor.get(), "set", function.get());
+        auto function = JSC::JSCCallbackFunction::create(vm, globalObject, "set"_s,
+            JSC::JSCCallbackFunction::Type::Method, nullptr, WTFMove(closure), G_TYPE_NONE, Vector<GType> { propertyType });
+        descriptor.setSetter(function);
     }
-    GRefPtr<JSCValue> object = adoptGRef(jsc_context_get_value(priv->context.get(), "Object"));
-    GRefPtr<JSCValue> result = adoptGRef(jsc_value_object_invoke_method(object.get(), "defineProperty",
-        JSC_TYPE_VALUE, value, G_TYPE_STRING, propertyName, JSC_TYPE_VALUE, descriptor.get(), G_TYPE_NONE));
+    object->methodTable(vm)->defineOwnProperty(object, globalObject, name->identifier(&vm), descriptor, true);
+    if (handleExceptionIfNeeded(scope, jsContext, &exception) == ExceptionStatus::DidThrow) {
+        jscContextHandleExceptionIfNeeded(priv->context.get(), exception);
+        return;
+    }
 }
 
 static GRefPtr<JSCValue> jscValueFunctionCreate(JSCContext* context, const char* name, GCallback callback, gpointer userData, GDestroyNotify destroyNotify, GType returnType, Optional<Vector<GType>>&& parameters)
 {
-    GRefPtr<GClosure> closure = adoptGRef(g_cclosure_new(callback, userData, reinterpret_cast<GClosureNotify>(reinterpret_cast<GCallback>(destroyNotify))));
-    JSC::ExecState* exec = toJS(jscContextGetJSContext(context));
-    JSC::VM& vm = exec->vm();
+    GRefPtr<GClosure> closure;
+    // If the function doesn't have arguments, we need to swap the fake instance and user data to ensure
+    // user data is the first parameter and fake instance ignored.
+    if (parameters && parameters->isEmpty() && userData)
+        closure = adoptGRef(g_cclosure_new_swap(callback, userData, reinterpret_cast<GClosureNotify>(reinterpret_cast<GCallback>(destroyNotify))));
+    else
+        closure = adoptGRef(g_cclosure_new(callback, userData, reinterpret_cast<GClosureNotify>(reinterpret_cast<GCallback>(destroyNotify))));
+    JSC::JSGlobalObject* globalObject = toJS(jscContextGetJSContext(context));
+    JSC::VM& vm = globalObject->vm();
     JSC::JSLockHolder locker(vm);
-    auto* functionObject = toRef(JSC::JSCCallbackFunction::create(vm, exec->lexicalGlobalObject(), name ? String::fromUTF8(name) : "anonymous"_s,
+    auto* functionObject = toRef(JSC::JSCCallbackFunction::create(vm, globalObject, name ? String::fromUTF8(name) : "anonymous"_s,
         JSC::JSCCallbackFunction::Type::Function, nullptr, WTFMove(closure), returnType, WTFMove(parameters)));
     return jscContextGetOrCreateValue(context, functionObject);
 }
@@ -1131,6 +1176,11 @@ static GRefPtr<JSCValue> jscValueFunctionCreate(JSCContext* context, const char*
  * When the function is called by JavaScript or jsc_value_function_call(), @callback is called
  * receiving the function parameters and then @user_data as last parameter. When the function is
  * cleared in @context, @destroy_notify is called with @user_data as parameter.
+ *
+ * Note that the value returned by @callback must be fully transferred. In case of boxed types, you could use
+ * %G_TYPE_POINTER instead of the actual boxed #GType to ensure that the instance owned by #JSCClass is used.
+ * If you really want to return a new copy of the boxed type, use #JSC_TYPE_VALUE and return a #JSCValue created
+ * with jsc_value_new_object() that receives the copy as instance parameter.
  *
  * Returns: (transfer full): a #JSCValue.
  */
@@ -1168,6 +1218,11 @@ JSCValue* jsc_value_new_function(JSCContext* context, const char* name, GCallbac
  * receiving the function parameters and then @user_data as last parameter. When the function is
  * cleared in @context, @destroy_notify is called with @user_data as parameter.
  *
+ * Note that the value returned by @callback must be fully transferred. In case of boxed types, you could use
+ * %G_TYPE_POINTER instead of the actual boxed #GType to ensure that the instance owned by #JSCClass is used.
+ * If you really want to return a new copy of the boxed type, use #JSC_TYPE_VALUE and return a #JSCValue created
+ * with jsc_value_new_object() that receives the copy as instance parameter.
+ *
  * Returns: (transfer full): a #JSCValue.
  */
 JSCValue* jsc_value_new_functionv(JSCContext* context, const char* name, GCallback callback, gpointer userData, GDestroyNotify destroyNotify, GType returnType, unsigned parametersCount, GType *parameterTypes)
@@ -1199,6 +1254,11 @@ JSCValue* jsc_value_new_functionv(JSCContext* context, const char* name, GCallba
  * When the function is called by JavaScript or jsc_value_function_call(), @callback is called
  * receiving an #GPtrArray of #JSCValue<!-- -->s with the arguments and then @user_data as last parameter.
  * When the function is cleared in @context, @destroy_notify is called with @user_data as parameter.
+ *
+ * Note that the value returned by @callback must be fully transferred. In case of boxed types, you could use
+ * %G_TYPE_POINTER instead of the actual boxed #GType to ensure that the instance owned by #JSCClass is used.
+ * If you really want to return a new copy of the boxed type, use #JSC_TYPE_VALUE and return a #JSCValue created
+ * with jsc_value_new_object() that receives the copy as instance parameter.
  *
  * Returns: (transfer full): a #JSCValue.
  */
@@ -1386,4 +1446,84 @@ JSCValue* jsc_value_constructor_callv(JSCValue* value, unsigned parametersCount,
         return jsc_value_new_undefined(priv->context.get());
 
     return jscContextGetOrCreateValue(priv->context.get(), result).leakRef();
+}
+
+/**
+ * jsc_value_new_from_json:
+ * @context: a #JSCContext
+ * @json: the JSON string to be parsed
+ *
+ * Create a new #JSCValue referencing a new value created by parsing @json.
+ *
+ * Returns: (transfer full): a #JSCValue.
+ *
+ * Since: 2.28
+ */
+JSCValue* jsc_value_new_from_json(JSCContext* context, const char* json)
+{
+    g_return_val_if_fail(JSC_IS_CONTEXT(context), nullptr);
+
+    if (!json)
+        return jsc_value_new_null(context);
+
+    auto* jsContext = jscContextGetJSContext(context);
+    JSC::JSGlobalObject* globalObject = toJS(jsContext);
+    JSC::JSLockHolder locker(globalObject);
+
+    JSValueRef exception = nullptr;
+    JSC::JSValue jsValue;
+    String jsonString = String::fromUTF8(json);
+    if (jsonString.is8Bit()) {
+        JSC::LiteralParser<LChar> jsonParser(globalObject, jsonString.characters8(), jsonString.length(), JSC::StrictJSON);
+        jsValue = jsonParser.tryLiteralParse();
+        if (!jsValue)
+            exception = toRef(JSC::createSyntaxError(globalObject, jsonParser.getErrorMessage()));
+    } else {
+        JSC::LiteralParser<UChar> jsonParser(globalObject, jsonString.characters16(), jsonString.length(), JSC::StrictJSON);
+        jsValue = jsonParser.tryLiteralParse();
+        if (!jsValue)
+            exception = toRef(JSC::createSyntaxError(globalObject, jsonParser.getErrorMessage()));
+    }
+
+    if (exception) {
+        jscContextHandleExceptionIfNeeded(context, exception);
+        return nullptr;
+    }
+
+    return jsValue ? jscContextGetOrCreateValue(context, toRef(globalObject, jsValue)).leakRef() : nullptr;
+}
+
+/**
+ * jsc_value_to_json:
+ * @value: a #JSCValue
+ * @indent: The number of spaces to indent when nesting.
+ *
+ * Create a JSON string of @value serialization. If @indent is 0, the resulting JSON will
+ * not contain newlines. The size of the indent is clamped to 10 spaces.
+ *
+ * Returns: (transfer full): a null-terminated JSON string with serialization of @value
+ *
+ * Since: 2.28
+ */
+char* jsc_value_to_json(JSCValue* value, unsigned indent)
+{
+    g_return_val_if_fail(JSC_IS_VALUE(value), nullptr);
+
+    JSCValuePrivate* priv = value->priv;
+    JSValueRef exception = nullptr;
+    JSRetainPtr<JSStringRef> jsJSON(Adopt, JSValueCreateJSONString(jscContextGetJSContext(priv->context.get()), priv->jsValue, indent, &exception));
+    if (jscContextHandleExceptionIfNeeded(priv->context.get(), exception))
+        return nullptr;
+
+    if (!jsJSON)
+        return nullptr;
+
+    size_t maxSize = JSStringGetMaximumUTF8CStringSize(jsJSON.get());
+    auto* json = static_cast<char*>(g_malloc(maxSize));
+    if (!JSStringGetUTF8CString(jsJSON.get(), json, maxSize)) {
+        g_free(json);
+        return nullptr;
+    }
+
+    return json;
 }

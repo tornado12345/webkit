@@ -22,17 +22,21 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
-// https://github.com/gpuweb/gpuweb/blob/master/design/sketch.webidl
+// https://gpuweb.github.io/gpuweb
 
 typedef unsigned long u32;
 
-enum GPUAddressMode {
+[
+    ImplementedAs=GPUAddressMode
+] enum GPUAddressMode {
     "clamp-to-edge",
     "repeat",
     "mirror-repeat"
 };
 
-enum GPUFilterMode {
+[
+    ImplementedAs=GPUFilterMode
+] enum GPUFilterMode {
     "nearest",
     "linear"
 };

@@ -1,12 +1,12 @@
 let state = "WaitingForHang";
 
-navigator.serviceWorker.addEventListener("message", function(event) {
+navigator.serviceWorker.addEventListener("message", async function(event) {
     log(event.data);
     if (state === "WaitingForHang") {
         log("PASS: ServiceWorker received message: " + event.data);
         log("Service Worker should now be hung");
         log("Terminating service worker...")
-        internals.terminateServiceWorker(worker);
+        await internals.terminateServiceWorker(worker);
         log("Terminated service worker.");
         state = "WaitingForMessageAfterTerminatingHungServiceWorker"
         handle = setInterval(function() {
@@ -23,7 +23,17 @@ navigator.serviceWorker.addEventListener("message", function(event) {
     }
 });
 
-navigator.serviceWorker.register("resources/postmessage-echo-worker-mayhang.js", { }).then(function(registration) {
+async function doTest()
+{
+    if (window.testRunner) {
+        testRunner.setUseSeparateServiceWorkerProcess(true);
+        await fetch("").then(() => { }, () => { });
+    }
+ 
+    const registration = await navigator.serviceWorker.register("resources/postmessage-echo-worker-mayhang.js", { });
     worker = registration.installing;
     worker.postMessage("HANG");
-});
+}
+
+doTest();
+

@@ -41,9 +41,9 @@ class WebFrame;
 class WebFramePolicyListener;
 class WebHistory;
 
-class WebFrameLoaderClient : public WebCore::FrameLoaderClient, public WebCore::ProgressTrackerClient {
+class WebFrameLoaderClient : public WebCore::FrameLoaderClient {
 public:
-    WebFrameLoaderClient(WebFrame* = 0);
+    WebFrameLoaderClient(WebFrame* = nullptr);
     ~WebFrameLoaderClient();
 
     void setWebFrame(WebFrame* webFrame) { m_webFrame = webFrame; }
@@ -51,15 +51,13 @@ public:
 
     void dispatchDidFailToStartPlugin(const WebCore::PluginView&) const;
 
-    Optional<uint64_t> pageID() const final;
-    Optional<uint64_t> frameID() const final;
-    PAL::SessionID sessionID() const final;
+    Optional<WebCore::PageIdentifier> pageID() const final;
+    Optional<WebCore::FrameIdentifier> frameID() const final;
 
     bool hasWebView() const override;
 
     Ref<WebCore::FrameNetworkingContext> createNetworkingContext() override;
 
-    void frameLoaderDestroyed() override;
     void makeRepresentation(WebCore::DocumentLoader*) override;
     void forceLayoutForNonHTML() override;
 
@@ -68,7 +66,7 @@ public:
     void detachedFromParent2() override;
     void detachedFromParent3() override;
 
-    void convertMainResourceLoadToDownload(WebCore::DocumentLoader*, PAL::SessionID, const WebCore::ResourceRequest&, const WebCore::ResourceResponse&) override;
+    void convertMainResourceLoadToDownload(WebCore::DocumentLoader*, const WebCore::ResourceRequest&, const WebCore::ResourceResponse&) override;
     void assignIdentifierToInitialRequest(unsigned long identifier, WebCore::DocumentLoader*, const WebCore::ResourceRequest&) override;
 
     void dispatchWillSendRequest(WebCore::DocumentLoader*, unsigned long identifier, WebCore::ResourceRequest&, const WebCore::ResourceResponse& redirectResponse) override;
@@ -93,14 +91,14 @@ public:
     void dispatchWillClose() override;
     void dispatchDidStartProvisionalLoad() override;
     void dispatchDidReceiveTitle(const WebCore::StringWithDirection&) override;
-    void dispatchDidCommitLoad(Optional<WebCore::HasInsecureContent>) override;
-    void dispatchDidFailProvisionalLoad(const WebCore::ResourceError&) override;
+    void dispatchDidCommitLoad(Optional<WebCore::HasInsecureContent>, Optional<WebCore::UsedLegacyTLS>) override;
+    void dispatchDidFailProvisionalLoad(const WebCore::ResourceError&, WebCore::WillContinueLoading) override;
     void dispatchDidFailLoad(const WebCore::ResourceError&) override;
     void dispatchDidFinishDocumentLoad() override;
     void dispatchDidFinishLoad() override;
     void dispatchDidReachLayoutMilestone(OptionSet<WebCore::LayoutMilestone>) override;
 
-    void dispatchDecidePolicyForResponse(const WebCore::ResourceResponse&, const WebCore::ResourceRequest&, WebCore::PolicyCheckIdentifier, WebCore::FramePolicyFunction&&) override;
+    void dispatchDecidePolicyForResponse(const WebCore::ResourceResponse&, const WebCore::ResourceRequest&, WebCore::PolicyCheckIdentifier, const String&, WebCore::FramePolicyFunction&&) override;
     void dispatchDecidePolicyForNewWindowAction(const WebCore::NavigationAction&, const WebCore::ResourceRequest&, WebCore::FormState*, const WTF::String& frameName, WebCore::PolicyCheckIdentifier, WebCore::FramePolicyFunction&&) override;
     void dispatchDecidePolicyForNavigationAction(const WebCore::NavigationAction&, const WebCore::ResourceRequest&, const WebCore::ResourceResponse& redirectResponse, WebCore::FormState*, WebCore::PolicyDecisionMode, WebCore::PolicyCheckIdentifier, WebCore::FramePolicyFunction&&) override;
     void cancelPolicyCheck() override;
@@ -121,10 +119,6 @@ public:
 
     void startDownload(const WebCore::ResourceRequest&, const String& suggestedName = String()) override;
 
-    void progressStarted(WebCore::Frame&) override;
-    void progressEstimateChanged(WebCore::Frame&) override;
-    void progressFinished(WebCore::Frame&) override;
-
     void committedLoad(WebCore::DocumentLoader*, const char*, int) override;
     void finishedLoading(WebCore::DocumentLoader*) override;
 
@@ -142,18 +136,18 @@ public:
     void didRunInsecureContent(WebCore::SecurityOrigin&, const URL&) override;
     void didDetectXSS(const URL&, bool didBlockEntirePage) override;
 
-    WebCore::ResourceError cancelledError(const WebCore::ResourceRequest&) override;
-    WebCore::ResourceError blockedError(const WebCore::ResourceRequest&) override;
-    WebCore::ResourceError blockedByContentBlockerError(const WebCore::ResourceRequest&) override;
-    WebCore::ResourceError cannotShowURLError(const WebCore::ResourceRequest&) override;
-    WebCore::ResourceError interruptedForPolicyChangeError(const WebCore::ResourceRequest&) override;
-    WebCore::ResourceError cannotShowMIMETypeError(const WebCore::ResourceResponse&) override;
-    WebCore::ResourceError fileDoesNotExistError(const WebCore::ResourceResponse&) override;
-    WebCore::ResourceError pluginWillHandleLoadError(const WebCore::ResourceResponse&) override;
+    WebCore::ResourceError cancelledError(const WebCore::ResourceRequest&) const override;
+    WebCore::ResourceError blockedError(const WebCore::ResourceRequest&) const override;
+    WebCore::ResourceError blockedByContentBlockerError(const WebCore::ResourceRequest&) const override;
+    WebCore::ResourceError cannotShowURLError(const WebCore::ResourceRequest&) const override;
+    WebCore::ResourceError interruptedForPolicyChangeError(const WebCore::ResourceRequest&) const override;
+    WebCore::ResourceError cannotShowMIMETypeError(const WebCore::ResourceResponse&) const override;
+    WebCore::ResourceError fileDoesNotExistError(const WebCore::ResourceResponse&) const override;
+    WebCore::ResourceError pluginWillHandleLoadError(const WebCore::ResourceResponse&) const override;
 
-    bool shouldFallBack(const WebCore::ResourceError&) override;
+    bool shouldFallBack(const WebCore::ResourceError&) const override;
 
-    WTF::String userAgent(const URL&) override;
+    WTF::String userAgent(const URL&) const override;
 
     Ref<WebCore::DocumentLoader> createDocumentLoader(const WebCore::ResourceRequest&, const WebCore::SubstituteData&) override;
     void updateCachedDocumentLoader(WebCore::DocumentLoader&) override { }
@@ -177,17 +171,12 @@ public:
     void didFinishLoad() override;
     void prepareForDataSourceReplacement() override;
 
-    void didSaveToPageCache() override;
-    void didRestoreFromPageCache() override;
-
-    void dispatchDidBecomeFrameset(bool) override;
+    void didRestoreFromBackForwardCache() override;
 
     bool canCachePage() const override;
 
-    RefPtr<WebCore::Frame> createFrame(const URL&, const WTF::String& name, WebCore::HTMLFrameOwnerElement&,
-        const WTF::String& referrer) override;
+    RefPtr<WebCore::Frame> createFrame(const WTF::String& name, WebCore::HTMLFrameOwnerElement&) override;
     RefPtr<WebCore::Widget> createPlugin(const WebCore::IntSize&, WebCore::HTMLPlugInElement&, const URL&, const Vector<WTF::String>&, const Vector<WTF::String>&, const WTF::String&, bool loadManually) override;
-    void recreatePlugin(WebCore::Widget*) override { }
     void redirectDataToPlugin(WebCore::Widget&) override;
 
     RefPtr<WebCore::Widget> createJavaAppletWidget(const WebCore::IntSize&, WebCore::HTMLAppletElement&, const URL& baseURL, const Vector<WTF::String>& paramNames, const Vector<WTF::String>& paramValues) override;
@@ -203,6 +192,7 @@ public:
     bool shouldAlwaysUsePluginDocument(const WTF::String& mimeType) const override;
 
     void prefetchDNS(const String&) override;
+    void sendH2Ping(const URL&, CompletionHandler<void(Expected<Seconds, WebCore::ResourceError>&&)>&&) final;
 
 private:
     WebHistory* webHistory() const;

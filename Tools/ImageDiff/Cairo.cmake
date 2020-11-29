@@ -1,13 +1,9 @@
-list(APPEND IMAGE_DIFF_SOURCES
-    ${IMAGE_DIFF_DIR}/cairo/PlatformImageCairo.cpp
+list(APPEND ImageDiff_SOURCES
+    cairo/PlatformImageCairo.cpp
 )
 
-list(APPEND IMAGE_DIFF_SYSTEM_INCLUDE_DIRECTORIES
-    ${CAIRO_INCLUDE_DIRS}
+list(APPEND ImageDiff_LIBRARIES
+    Cairo::Cairo
 )
 
-list(APPEND IMAGE_DIFF_LIBRARIES
-    ${CAIRO_LIBRARIES}
-)
-
-add_definitions(-DUSE_CAIRO=1)
+list(APPEND ImageDiff_PRIVATE_DEFINITIONS USE_CAIRO=1)

@@ -1,4 +1,5 @@
 //@ skip if $memoryLimited
+//@ runDefault
 var exception;
 try {
     bar = '2.3023e-320'
@@ -8,5 +9,7 @@ try {
     exception = e;
 }
 
-if (exception != "Error: Out of memory")
+// Creating the error message for the TypeError overflows
+// the string and therefore an out-of-memory error is thrown.
+if (exception != "RangeError: Out of memory")
     throw "FAILED";

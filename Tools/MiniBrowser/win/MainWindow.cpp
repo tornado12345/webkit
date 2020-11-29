@@ -28,18 +28,29 @@
 
 #include "Common.h"
 #include "MiniBrowserLibResource.h"
-#include "WebKitLegacyBrowserWindow.h"
+#include <sstream>
+
+#if USE(CF)
+#include <CoreFoundation/CoreFoundation.h>
+#endif
 
 #if ENABLE(WEBKIT)
 #include "WebKitBrowserWindow.h"
+#endif
+
+#if ENABLE(WEBKIT_LEGACY)
+#include "WebKitLegacyBrowserWindow.h"
 #endif
 
 namespace WebCore {
 float deviceScaleFactorForWindow(HWND);
 }
 
-static constexpr int controlButtonWidth = 24;
-static constexpr int urlBarHeight = 24;
+static const wchar_t* kMiniBrowserRegistryKey = L"Software\\WebKit\\MiniBrowser";
+
+static constexpr int kToolbarImageSize = 32;
+static constexpr int kToolbarURLBarIndex = 4;
+static constexpr int kToolbarProgressIndicatorIndex = 5;
 
 static WNDPROC DefEditProc = nullptr;
 
@@ -83,8 +94,15 @@ void MainWindow::registerClass(HINSTANCE hInstance)
     RegisterClassEx(&wcex);
 }
 
-MainWindow::MainWindow(BrowserWindowType type)
-    : m_browserWindowType(type)
+bool MainWindow::isInstance(HWND hwnd)
+{
+    wchar_t buff[64];
+    if (!GetClassName(hwnd, buff, _countof(buff)))
+        return false;
+    return s_windowClass == buff;
+}
+
+MainWindow::MainWindow()
 {
     s_numInstances++;
 }
@@ -94,12 +112,91 @@ MainWindow::~MainWindow()
     s_numInstances--;
 }
 
-Ref<MainWindow> MainWindow::create(BrowserWindowType type)
+Ref<MainWindow> MainWindow::create()
 {
-    return adoptRef(*new MainWindow(type));
+    return adoptRef(*new MainWindow());
 }
 
-bool MainWindow::init(HINSTANCE hInstance, bool usesLayeredWebView, bool pageLoadTesting)
+void MainWindow::createToolbar(HINSTANCE hInstance)
+{
+    m_hToolbarWnd = CreateWindowEx(0, TOOLBARCLASSNAME, nullptr, 
+        WS_CHILD | WS_BORDER | TBSTYLE_FLAT | TBSTYLE_LIST | TBSTYLE_TOOLTIPS, 0, 0, 0, 0, 
+        m_hMainWnd, nullptr, hInstance, nullptr);
+        
+    if (!m_hToolbarWnd)
+        return;
+
+    const int ImageListID = 0;
+    const int numButtons = 4;
+
+    HIMAGELIST hImageList;
+    hImageList = ImageList_LoadImage(hInstance, MAKEINTRESOURCE(IDB_TOOLBAR), kToolbarImageSize, 0, CLR_DEFAULT, IMAGE_BITMAP, 0);
+
+    SendMessage(m_hToolbarWnd, TB_SETIMAGELIST, ImageListID, reinterpret_cast<LPARAM>(hImageList));
+    SendMessage(m_hToolbarWnd, TB_SETEXTENDEDSTYLE, 0, TBSTYLE_EX_DRAWDDARROWS | TBSTYLE_EX_MIXEDBUTTONS);
+
+    const DWORD buttonStyles = BTNS_AUTOSIZE;
+
+    TBBUTTON tbButtons[] = {
+        { MAKELONG(0, ImageListID), IDM_HISTORY_BACKWARD, TBSTATE_ENABLED, buttonStyles | BTNS_DROPDOWN, { }, 0, (INT_PTR)L"Back" },
+        { MAKELONG(1, ImageListID), IDM_HISTORY_FORWARD, TBSTATE_ENABLED, buttonStyles | BTNS_DROPDOWN, { }, 0, (INT_PTR)L"Forward"},
+        { MAKELONG(2, ImageListID), IDM_RELOAD, TBSTATE_ENABLED, buttonStyles, { }, 0, (INT_PTR)L"Reload"},
+        { MAKELONG(3, ImageListID), IDM_GO_HOME, TBSTATE_ENABLED, buttonStyles, { }, 0, (INT_PTR)L"Home"},
+        { 0, 0, TBSTATE_ENABLED, BTNS_SEP, { }, 0, 0}, // URL bar
+        { 0, 0, TBSTATE_ENABLED, BTNS_SEP, { }, 0, 0}, // Progress indicator
+    };
+    ASSERT(tbButtons[kToolbarURLBarIndex].fsStyle == BTNS_SEP);
+    ASSERT(tbButtons[kToolbarProgressIndicatorIndex].fsStyle == BTNS_SEP);
+
+    SendMessage(m_hToolbarWnd, TB_BUTTONSTRUCTSIZE, sizeof(TBBUTTON), 0);
+    SendMessage(m_hToolbarWnd, TB_ADDBUTTONS, _countof(tbButtons), reinterpret_cast<LPARAM>(&tbButtons));
+    ShowWindow(m_hToolbarWnd, true);
+
+    m_hURLBarWnd = CreateWindow(L"EDIT", 0, WS_CHILD | WS_VISIBLE | WS_BORDER | ES_LEFT | ES_AUTOHSCROLL, 0, 0, 0, 0, m_hToolbarWnd, 0, hInstance, 0);
+    m_hProgressIndicator = CreateWindow(L"STATIC", 0, WS_CHILD | WS_VISIBLE | SS_CENTER | SS_CENTERIMAGE, 0, 0, 0, 0, m_hToolbarWnd, 0, hInstance, 0);
+
+    DefEditProc = reinterpret_cast<WNDPROC>(GetWindowLongPtr(m_hURLBarWnd, GWLP_WNDPROC));
+    SetWindowLongPtr(m_hURLBarWnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(EditProc));
+}
+
+void MainWindow::resizeToolbar(int parentWidth)
+{
+    TBBUTTONINFO info { sizeof(TBBUTTONINFO), TBIF_BYINDEX | TBIF_SIZE };
+    info.cx = parentWidth - m_toolbarItemsWidth;
+    SendMessage(m_hToolbarWnd, TB_SETBUTTONINFO, kToolbarURLBarIndex, reinterpret_cast<LPARAM>(&info));
+
+    SendMessage(m_hToolbarWnd, TB_AUTOSIZE, 0, 0);
+
+    RECT rect;
+    SendMessage(m_hToolbarWnd, TB_GETITEMRECT, kToolbarURLBarIndex, reinterpret_cast<LPARAM>(&rect));
+    MoveWindow(m_hURLBarWnd, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, true);
+
+    SendMessage(m_hToolbarWnd, TB_GETITEMRECT, kToolbarProgressIndicatorIndex, reinterpret_cast<LPARAM>(&rect));
+    MoveWindow(m_hProgressIndicator, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, true);
+}
+
+void MainWindow::rescaleToolbar()
+{
+    const float scaleFactor = WebCore::deviceScaleFactorForWindow(m_hMainWnd);
+    const int scaledImageSize = kToolbarImageSize * scaleFactor;
+
+    TBBUTTONINFO info { sizeof(TBBUTTONINFO), TBIF_BYINDEX | TBIF_SIZE };
+
+    info.cx = 0;
+    SendMessage(m_hToolbarWnd, TB_SETBUTTONINFO, kToolbarURLBarIndex, reinterpret_cast<LPARAM>(&info));
+    info.cx = scaledImageSize * 2;
+    SendMessage(m_hToolbarWnd, TB_SETBUTTONINFO, kToolbarProgressIndicatorIndex, reinterpret_cast<LPARAM>(&info));
+
+    SendMessage(m_hToolbarWnd, TB_AUTOSIZE, 0, 0);
+
+    int numItems = SendMessage(m_hToolbarWnd, TB_BUTTONCOUNT, 0, 0);
+
+    RECT rect;
+    SendMessage(m_hToolbarWnd, TB_GETITEMRECT, numItems-1, reinterpret_cast<LPARAM>(&rect));
+    m_toolbarItemsWidth = rect.right;
+}
+
+bool MainWindow::init(BrowserWindowFactory factory, HINSTANCE hInstance, bool usesLayeredWebView)
 {
     registerClass(hInstance);
 
@@ -114,21 +211,15 @@ bool MainWindow::init(HINSTANCE hInstance, bool usesLayeredWebView, bool pageLoa
 #if !ENABLE(WEBKIT)
     EnableMenuItem(GetMenu(m_hMainWnd), IDM_NEW_WEBKIT_WINDOW, MF_GRAYED);
 #endif
-
-    float scaleFactor = WebCore::deviceScaleFactorForWindow(nullptr);
-    m_hBackButtonWnd = CreateWindow(L"BUTTON", L"<", WS_CHILD | WS_VISIBLE  | BS_TEXT, 0, 0, 0, 0, m_hMainWnd, reinterpret_cast<HMENU>(IDM_HISTORY_BACKWARD), hInstance, 0);
-    m_hForwardButtonWnd = CreateWindow(L"BUTTON", L">", WS_CHILD | WS_VISIBLE | BS_TEXT, scaleFactor * controlButtonWidth, 0, 0, 0, m_hMainWnd, reinterpret_cast<HMENU>(IDM_HISTORY_FORWARD), hInstance, 0);
-    m_hURLBarWnd = CreateWindow(L"EDIT", 0, WS_CHILD | WS_VISIBLE | WS_BORDER | ES_LEFT | ES_AUTOVSCROLL, scaleFactor * controlButtonWidth * 2, 0, 0, 0, m_hMainWnd, 0, hInstance, 0);
-
-    DefEditProc = reinterpret_cast<WNDPROC>(GetWindowLongPtr(m_hURLBarWnd, GWLP_WNDPROC));
-    SetWindowLongPtr(m_hURLBarWnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(EditProc));
-
-    auto factory = WebKitLegacyBrowserWindow::create;
-#if ENABLE(WEBKIT)
-    if (m_browserWindowType == BrowserWindowType::WebKit)
-        factory = WebKitBrowserWindow::create;
+#if !ENABLE(WEBKIT_LEGACY)
+    EnableMenuItem(GetMenu(m_hMainWnd), IDM_NEW_WEBKITLEGACY_WINDOW, MF_GRAYED);
 #endif
-    m_browserWindow = factory(m_hMainWnd, m_hURLBarWnd, usesLayeredWebView, pageLoadTesting);
+
+    createToolbar(hInstance);
+    if (!m_hToolbarWnd)
+        return false;
+
+    m_browserWindow = factory(*this, m_hMainWnd, usesLayeredWebView);
     if (!m_browserWindow)
         return false;
     HRESULT hr = m_browserWindow->init();
@@ -143,30 +234,60 @@ bool MainWindow::init(HINSTANCE hInstance, bool usesLayeredWebView, bool pageLoa
 
 void MainWindow::resizeSubViews()
 {
-    float scaleFactor = WebCore::deviceScaleFactorForWindow(m_hMainWnd);
-
     RECT rcClient;
     GetClientRect(m_hMainWnd, &rcClient);
 
-    int height = scaleFactor * urlBarHeight;
-    int width = scaleFactor * controlButtonWidth;
-
-    MoveWindow(m_hBackButtonWnd, 0, 0, width, height, TRUE);
-    MoveWindow(m_hForwardButtonWnd, width, 0, width, height, TRUE);
-    MoveWindow(m_hURLBarWnd, width * 2, 0, rcClient.right, height, TRUE);
+    resizeToolbar(rcClient.right);
 
     if (m_browserWindow->usesLayeredWebView() || !m_browserWindow->hwnd())
         return;
-    MoveWindow(m_browserWindow->hwnd(), 0, height, rcClient.right, rcClient.bottom - height, TRUE);
+
+    RECT rect;
+    GetWindowRect(m_hToolbarWnd, &rect);
+    POINT toolbarBottom = { 0, rect.bottom };
+    ScreenToClient(m_hMainWnd, &toolbarBottom);
+    auto height = toolbarBottom.y;
+    MoveWindow(m_browserWindow->hwnd(), 0, height, rcClient.right, rcClient.bottom - height, true);
 }
 
 LRESULT CALLBACK MainWindow::WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
+    LRESULT result = 0;
     RefPtr<MainWindow> thisWindow = reinterpret_cast<MainWindow*>(GetWindowLongPtr(hWnd, GWLP_USERDATA));
     switch (message) {
+    case WM_ACTIVATE:
+        switch (LOWORD(wParam)) {
+        case WA_ACTIVE:
+        case WA_CLICKACTIVE:
+            SetFocus(thisWindow->browserWindow()->hwnd());
+        }
+        break;
     case WM_CREATE:
         SetWindowLongPtr(hWnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(reinterpret_cast<LPCREATESTRUCT>(lParam)->lpCreateParams));
         break;
+    case WM_APPCOMMAND: {
+        auto cmd = GET_APPCOMMAND_LPARAM(lParam);
+        switch (cmd) {
+        case APPCOMMAND_BROWSER_BACKWARD:
+            thisWindow->browserWindow()->navigateForwardOrBackward(false);
+            result = 1;
+            break;
+        case APPCOMMAND_BROWSER_FORWARD:
+            thisWindow->browserWindow()->navigateForwardOrBackward(true);
+            result = 1;
+            break;
+        case APPCOMMAND_BROWSER_HOME:
+            thisWindow->goHome();
+            break;
+        case APPCOMMAND_BROWSER_REFRESH:
+            thisWindow->browserWindow()->reload();
+            result = 1;
+            break;
+        case APPCOMMAND_BROWSER_STOP:
+            break;
+        }
+        break;
+    }
     case WM_COMMAND: {
         int wmId = LOWORD(wParam);
         int wmEvent = HIWORD(wParam);
@@ -186,20 +307,30 @@ LRESULT CALLBACK MainWindow::WndProc(HWND hWnd, UINT message, WPARAM wParam, LPA
         case IDC_URL_BAR:
             thisWindow->onURLBarEnter();
             break;
+#if ENABLE(WEBKIT)
         case IDM_NEW_WEBKIT_WINDOW: {
-            auto& newWindow = MainWindow::create(BrowserWindowType::WebKit).leakRef();
-            newWindow.init(hInst);
+            auto& newWindow = MainWindow::create().leakRef();
+            newWindow.init(WebKitBrowserWindow::create, hInst);
             ShowWindow(newWindow.hwnd(), SW_SHOW);
             break;
         }
+#endif
+#if ENABLE(WEBKIT_LEGACY)
         case IDM_NEW_WEBKITLEGACY_WINDOW: {
-            auto& newWindow = MainWindow::create(BrowserWindowType::WebKitLegacy).leakRef();
-            newWindow.init(hInst);
+            auto& newWindow = MainWindow::create().leakRef();
+            newWindow.init(WebKitLegacyBrowserWindow::create, hInst);
             ShowWindow(newWindow.hwnd(), SW_SHOW);
             break;
         }
+#endif
+        case IDM_CLOSE_WINDOW:
+            PostMessage(hWnd, WM_CLOSE, 0, 0);
+            break;
         case IDM_ABOUT:
             DialogBox(hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), hWnd, About);
+            break;
+        case IDM_GO_HOME:
+            thisWindow->goHome();
             break;
         case IDM_EXIT:
             DestroyWindow(hWnd);
@@ -213,6 +344,9 @@ LRESULT CALLBACK MainWindow::WndProc(HWND hWnd, UINT message, WPARAM wParam, LPA
         case IDM_PROXY_SETTINGS:
             thisWindow->browserWindow()->openProxySettings();
             break;
+        case IDM_SET_DEFAULT_URL:
+            thisWindow->setDefaultURLToCurrentURL();
+            break;
         case IDM_CACHES:
             if (!::IsWindow(thisWindow->m_hCacheWnd)) {
                 thisWindow->m_hCacheWnd = CreateDialogParam(hInst, MAKEINTRESOURCE(IDD_CACHES), hWnd, cachesDialogProc, reinterpret_cast<LPARAM>(thisWindow.get()));
@@ -221,13 +355,16 @@ LRESULT CALLBACK MainWindow::WndProc(HWND hWnd, UINT message, WPARAM wParam, LPA
             break;
         case IDM_HISTORY_BACKWARD:
         case IDM_HISTORY_FORWARD:
-            thisWindow->browserWindow()->navigateForwardOrBackward(wmId);
+            thisWindow->browserWindow()->navigateForwardOrBackward(wmId == IDM_HISTORY_FORWARD);
             break;
         case IDM_UA_OTHER:
             DialogBoxParam(hInst, MAKEINTRESOURCE(IDD_USER_AGENT), hWnd, customUserAgentDialogProc, reinterpret_cast<LPARAM>(thisWindow.get()));
             break;
         case IDM_ACTUAL_SIZE:
             thisWindow->browserWindow()->resetZoom();
+            break;
+        case IDM_RELOAD:
+            thisWindow->browserWindow()->reload();
             break;
         case IDM_ZOOM_IN:
             thisWindow->browserWindow()->zoomIn();
@@ -257,14 +394,17 @@ LRESULT CALLBACK MainWindow::WndProc(HWND hWnd, UINT message, WPARAM wParam, LPA
     case WM_SIZE:
         thisWindow->resizeSubViews();
         break;
-    case WM_DPICHANGED:
+    case WM_DPICHANGED: {
         thisWindow->updateDeviceScaleFactor();
-        return DefWindowProc(hWnd, message, wParam, lParam);
+        auto& rect = *reinterpret_cast<RECT*>(lParam);
+        SetWindowPos(hWnd, nullptr, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, SWP_NOZORDER | SWP_NOACTIVATE);
+        break;
+    }
     default:
         return DefWindowProc(hWnd, message, wParam, lParam);
     }
 
-    return 0;
+    return result;
 }
 
 static bool menuItemIsChecked(const MENUITEMINFO& info)
@@ -289,6 +429,16 @@ static void turnOffOtherUserAgents(HMENU menu)
         info.fState = MFS_UNCHECKED;
         ::SetMenuItemInfo(menu, menuToClear, FALSE, &info);
     }
+}
+
+void MainWindow::setDefaultURLToCurrentURL()
+{
+    wchar_t url[INTERNET_MAX_URL_LENGTH];
+    GetWindowText(m_hURLBarWnd, url, INTERNET_MAX_URL_LENGTH);
+    auto length = wcslen(url);
+    if (!length)
+        return;
+    RegSetKeyValue(HKEY_CURRENT_USER, kMiniBrowserRegistryKey, L"DefaultURL", REG_SZ, url, (length + 1) * sizeof(wchar_t));
 }
 
 bool MainWindow::toggleMenuItem(UINT menuID)
@@ -331,18 +481,21 @@ bool MainWindow::toggleMenuItem(UINT menuID)
     return true;
 }
 
-LRESULT CALLBACK EditProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
+LRESULT CALLBACK EditProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     switch (message) {
+    case WM_SETFOCUS:
+        PostMessage(hWnd, EM_SETSEL, 0, -1);
+        break;
     case WM_CHAR:
         if (wParam == 13) {
             // Enter Key
-            ::PostMessage(GetParent(hDlg), static_cast<UINT>(WM_COMMAND), MAKELPARAM(IDC_URL_BAR, 0), 0);
+            ::PostMessage(GetParent(hWnd), static_cast<UINT>(WM_COMMAND), MAKELPARAM(IDC_URL_BAR, 0), 0);
             return 0;
         }
-    default:
-        return CallWindowProc(DefEditProc, hDlg, message, wParam, lParam);
+        break;
     }
+    return CallWindowProc(DefEditProc, hWnd, message, wParam, lParam);
 }
 
 // Message handler for about box.
@@ -432,30 +585,70 @@ INT_PTR CALLBACK MainWindow::customUserAgentDialogProc(HWND hDlg, UINT message, 
     return (INT_PTR)FALSE;
 }
 
-void MainWindow::loadURL(BSTR url)
+void MainWindow::loadURL(std::wstring url)
 {
-    if (FAILED(m_browserWindow->loadURL(url)))
+    if (::PathFileExists(url.c_str()) || ::PathIsUNC(url.c_str())) {
+        wchar_t fileURL[INTERNET_MAX_URL_LENGTH];
+        DWORD fileURLLength = _countof(fileURL);
+
+        if (SUCCEEDED(::UrlCreateFromPath(url.c_str(), fileURL, &fileURLLength, 0)))
+            url = fileURL;
+    }
+    if (url.find(L"://") == url.npos)
+        url = L"http://" + url;
+
+    if (FAILED(m_browserWindow->loadURL(_bstr_t(url.c_str()))))
         return;
 
     SetFocus(m_browserWindow->hwnd());
 }
 
+void MainWindow::goHome()
+{
+    std::wstring defaultURL = L"https://www.webkit.org/";
+    wchar_t url[INTERNET_MAX_URL_LENGTH];
+    DWORD urlLength = sizeof(url);
+    if (!RegGetValue(HKEY_CURRENT_USER, kMiniBrowserRegistryKey, L"DefaultURL", RRF_RT_REG_SZ, nullptr, &url, &urlLength))
+        defaultURL = url;
+    loadURL(defaultURL);
+}
+
 void MainWindow::onURLBarEnter()
 {
-    wchar_t strPtr[INTERNET_MAX_URL_LENGTH];
-    GetWindowText(m_hURLBarWnd, strPtr, INTERNET_MAX_URL_LENGTH);
-    strPtr[INTERNET_MAX_URL_LENGTH - 1] = 0;
-    _bstr_t bstr(strPtr);
-    loadURL(bstr.GetBSTR());
+    wchar_t url[INTERNET_MAX_URL_LENGTH];
+    GetWindowText(m_hURLBarWnd, url, INTERNET_MAX_URL_LENGTH);
+    loadURL(url);
 }
 
 void MainWindow::updateDeviceScaleFactor()
 {
     if (m_hURLBarFont)
         ::DeleteObject(m_hURLBarFont);
-    auto scaleFactor = WebCore::deviceScaleFactorForWindow(m_hMainWnd);
-    int fontHeight = scaleFactor * urlBarHeight * 3 / 4;
+
+    rescaleToolbar();
+
+    RECT rect;
+    GetClientRect(m_hToolbarWnd, &rect);
+    int fontHeight = rect.bottom * 3. / 4;
+
     m_hURLBarFont = ::CreateFont(fontHeight, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
-        OUT_TT_ONLY_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, FF_DONTCARE, L"Times New Roman");
+        OUT_TT_ONLY_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, FF_DONTCARE, L"Tahoma");
     ::SendMessage(m_hURLBarWnd, static_cast<UINT>(WM_SETFONT), reinterpret_cast<WPARAM>(m_hURLBarFont), TRUE);
+}
+
+void MainWindow::progressChanged(double progress)
+{
+    std::wostringstream text;
+    text << static_cast<int>(progress * 100) << L'%';
+    SetWindowText(m_hProgressIndicator, text.str().c_str());
+}
+
+void MainWindow::progressFinished()
+{
+    SetWindowText(m_hProgressIndicator, L"");
+}
+
+void MainWindow::activeURLChanged(std::wstring url)
+{
+    SetWindowText(m_hURLBarWnd, url.c_str());
 }

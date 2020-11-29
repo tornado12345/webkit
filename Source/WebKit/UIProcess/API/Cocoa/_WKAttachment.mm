@@ -102,6 +102,13 @@ static const NSInteger InvalidAttachmentErrorCode = 2;
 
 @implementation _WKAttachment
 
+- (void)dealloc
+{
+    _attachment->~Attachment();
+
+    [super dealloc];
+}
+
 - (API::Object&)_apiObject
 {
     return *_attachment;
@@ -123,7 +130,8 @@ static const NSInteger InvalidAttachmentErrorCode = 2;
 - (void)setFileWrapper:(NSFileWrapper *)fileWrapper contentType:(NSString *)contentType completion:(void (^)(NSError *))completionHandler
 {
     if (!_attachment->isValid()) {
-        completionHandler([NSError errorWithDomain:WKErrorDomain code:InvalidAttachmentErrorCode userInfo:nil]);
+        if (completionHandler)
+            completionHandler([NSError errorWithDomain:WKErrorDomain code:InvalidAttachmentErrorCode userInfo:nil]);
         return;
     }
 

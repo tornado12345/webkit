@@ -2,15 +2,16 @@
 <html>
 <head>
 <script src="../../http/tests/inspector/resources/inspector-test.js"></script>
-<script src="resources/utilities.js"></script>
+<script src="resources/formatting-utilities.js"></script>
 <script>
 function test()
 {
-    let suite = InspectorTest.createAsyncSuite("EsprimaFormatter.JavaScript");
+    let suite = InspectorTest.createAsyncSuite("JSFormatter");
 
     addFormattingTests(suite, "text/javascript", [
         "resources/javascript-tests/arrow-functions.js",
         "resources/javascript-tests/classes.js",
+        "resources/javascript-tests/comma-expressions.js",
         "resources/javascript-tests/comments-and-preserve-newlines.js",
         "resources/javascript-tests/comments-only.js",
         "resources/javascript-tests/do-while-statement.js",
@@ -22,6 +23,7 @@ function test()
         "resources/javascript-tests/label-break-continue-block.js",
         "resources/javascript-tests/logic-expressions.js",
         "resources/javascript-tests/new-expression.js",
+        "resources/javascript-tests/numbers.js",
         "resources/javascript-tests/object-array-literal.js",
         "resources/javascript-tests/other-statements.js",
         "resources/javascript-tests/return-statement.js",

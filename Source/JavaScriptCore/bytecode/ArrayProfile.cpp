@@ -27,15 +27,11 @@
 #include "ArrayProfile.h"
 
 #include "CodeBlock.h"
-#include "JSCInlines.h"
+#include "JSCellInlines.h"
 #include <wtf/CommaPrinter.h>
 #include <wtf/StringPrintStream.h>
 
 namespace JSC {
-
-#if !ASSERT_DISABLED
-const char* const ArrayProfile::s_typeName = "ArrayProfile";
-#endif
 
 // Keep in sync with the order of TypedArrayType.
 const ArrayModes typedArrayModes[NumberOfTypedArrayTypesExcludingDataView] = {

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -37,6 +37,9 @@
 #import <wtf/Deque.h>
 #import <wtf/RetainPtr.h>
 
+// FIXME: Re-enable this test once rdar://57029120 is resolved.
+#if (PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED < 110000) || (PLATFORM(IOS) && __IPHONE_OS_VERSION_MIN_REQUIRED < 140000)
+
 static bool receivedScriptMessage;
 static Deque<RetainPtr<WKScriptMessage>> scriptMessages;
 
@@ -49,6 +52,18 @@ static Deque<RetainPtr<WKScriptMessage>> scriptMessages;
 {
     receivedScriptMessage = true;
     scriptMessages.append(message);
+}
+
+@end
+
+@interface StructuredCloneBackwardCompatibilityNavigationDelegate : NSObject <WKNavigationDelegate>
+@end
+
+@implementation StructuredCloneBackwardCompatibilityNavigationDelegate
+
+- (NSData *)_webCryptoMasterKeyForWebView:(WKWebView *)webView
+{
+    return [NSData dataWithBytes:(const uint8_t*)"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f" length:16];
 }
 
 @end
@@ -75,7 +90,7 @@ TEST(IndexedDB, StructuredCloneBackwardCompatibility)
     NSURL *url2 = [[NSBundle mainBundle] URLForResource:@"IndexedDBStructuredCloneBackwardCompatibility" withExtension:@"sqlite3-shm" subdirectory:@"TestWebKitAPI.resources"];
     NSURL *url3 = [[NSBundle mainBundle] URLForResource:@"IndexedDBStructuredCloneBackwardCompatibility" withExtension:@"sqlite3-wal" subdirectory:@"TestWebKitAPI.resources"];
 
-    NSURL *idbPath = [NSURL fileURLWithPath:[@"~/Library/WebKit/TestWebKitAPI/CustomWebsiteData/IndexedDB/" stringByExpandingTildeInPath]];
+    NSURL *idbPath = [NSURL fileURLWithPath:[@"~/Library/WebKit/com.apple.WebKit.TestWebKitAPI/CustomWebsiteData/IndexedDB/" stringByExpandingTildeInPath]];
     [[NSFileManager defaultManager] removeItemAtURL:idbPath error:nil];
     EXPECT_FALSE([[NSFileManager defaultManager] fileExistsAtPath:idbPath.path]);
 
@@ -92,8 +107,11 @@ TEST(IndexedDB, StructuredCloneBackwardCompatibility)
 
     // Run the test
     RetainPtr<WKWebView> webView = adoptNS([[WKWebView alloc] initWithFrame:NSMakeRect(0, 0, 800, 600) configuration:configuration.get()]);
+    auto delegate = adoptNS([[StructuredCloneBackwardCompatibilityNavigationDelegate alloc] init]);
+    [webView setNavigationDelegate:delegate.get()];
     NSURLRequest *request = [NSURLRequest requestWithURL:[[NSBundle mainBundle] URLForResource:@"IndexedDBStructuredCloneBackwardCompatibilityRead" withExtension:@"html" subdirectory:@"TestWebKitAPI.resources"]];
     [webView loadRequest:request];
 
     EXPECT_STREQ([getNextMessage().body UTF8String], "Pass");
 }
+#endif

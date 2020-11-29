@@ -214,7 +214,9 @@ static void delayBetweenMove(int eventIndex, double elapsed)
     if (eventRef) {
         RetainPtr<IOHIDEventRef> strongEvent = eventRef;
         dispatch_async(dispatch_get_main_queue(), ^{
+ALLOW_DEPRECATED_DECLARATIONS_BEGIN
             uint32_t contextID = [UIApplication sharedApplication].keyWindow._contextId;
+ALLOW_DEPRECATED_DECLARATIONS_END
             ASSERT(contextID);
             BKSHIDEventSetDigitizerInfo(strongEvent.get(), contextID, false, false, NULL, 0, 0);
             [[UIApplication sharedApplication] _enqueueHIDEvent:strongEvent.get()];
@@ -239,7 +241,9 @@ static void delayBetweenMove(int eventIndex, double elapsed)
     
     if (markerEvent) {
         dispatch_async(dispatch_get_main_queue(), [markerEvent = WTFMove(markerEvent)] {
+ALLOW_DEPRECATED_DECLARATIONS_BEGIN
             auto contextID = [UIApplication sharedApplication].keyWindow._contextId;
+ALLOW_DEPRECATED_DECLARATIONS_END
             ASSERT(contextID);
             BKSHIDEventSetDigitizerInfo(markerEvent.get(), contextID, false, false, NULL, 0, 0);
             [[UIApplication sharedApplication] _enqueueHIDEvent:markerEvent.get()];
@@ -290,12 +294,12 @@ static void delayBetweenMove(int eventIndex, double elapsed)
 {
     touchCount = std::min(touchCount, HIDMaxTouchCount);
 
-    CGPoint locations[touchCount];
+    Vector<CGPoint> locations(touchCount);
 
     for (NSUInteger index = 0; index < touchCount; ++index)
         locations[index] = location;
     
-    [self touchDownAtPoints:locations touchCount:touchCount];
+    [self touchDownAtPoints:locations.data() touchCount:touchCount];
 }
 
 - (void)touchDown:(CGPoint)location
@@ -323,12 +327,12 @@ static void delayBetweenMove(int eventIndex, double elapsed)
 {
     touchCount = std::min(touchCount, HIDMaxTouchCount);
 
-    CGPoint locations[touchCount];
+    Vector<CGPoint> locations(touchCount);
 
     for (NSUInteger index = 0; index < touchCount; ++index)
         locations[index] = location;
     
-    [self liftUpAtPoints:locations touchCount:touchCount];
+    [self liftUpAtPoints:locations.data() touchCount:touchCount];
 }
 
 - (void)liftUp:(CGPoint)location
@@ -340,8 +344,8 @@ static void delayBetweenMove(int eventIndex, double elapsed)
 {
     touchCount = std::min(touchCount, HIDMaxTouchCount);
 
-    CGPoint startLocations[touchCount];
-    CGPoint nextLocations[touchCount];
+    Vector<CGPoint> startLocations(touchCount);
+    Vector<CGPoint> nextLocations(touchCount);
 
     CFAbsoluteTime startTime = CFAbsoluteTimeGetCurrent();
     CFTimeInterval elapsed = 0;
@@ -357,7 +361,7 @@ static void delayBetweenMove(int eventIndex, double elapsed)
 
             nextLocations[i] = calculateNextCurveLocation(startLocations[i], newLocations[i], interval);
         }
-        [self _updateTouchPoints:nextLocations count:touchCount];
+        [self _updateTouchPoints:nextLocations.data() count:touchCount];
 
         delayBetweenMove(eventIndex++, elapsed);
     }

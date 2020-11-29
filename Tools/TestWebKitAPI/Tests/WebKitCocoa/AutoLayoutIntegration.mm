@@ -23,11 +23,12 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
+#import "config.h"
 
 #import "PlatformUtilities.h"
 #import "TestNavigationDelegate.h"
 #import <WebKit/WKWebViewPrivate.h>
+#import <wtf/BlockPtr.h>
 #import <wtf/RetainPtr.h>
 
 #if PLATFORM(MAC)
@@ -38,9 +39,12 @@ static bool didEvaluateJavaScript;
 @interface AutoLayoutWKWebView : WKWebView
 @property (nonatomic) BOOL expectingIntrinsicContentSizeChange;
 @property (nonatomic) NSSize expectedIntrinsicContentSize;
+@property (nonatomic) dispatch_block_t invalidatedIntrinsicContentSizeBlock;
 @end
 
-@implementation AutoLayoutWKWebView
+@implementation AutoLayoutWKWebView {
+    BlockPtr<void()> _invalidatedIntrinsicContentSizeBlock;
+}
 
 - (instancetype)initWithFrame:(NSRect)frame configuration:(WKWebViewConfiguration *)configuration
 {
@@ -110,11 +114,24 @@ static bool didEvaluateJavaScript;
 
 - (void)invalidateIntrinsicContentSize
 {
+    if (_invalidatedIntrinsicContentSizeBlock)
+        _invalidatedIntrinsicContentSizeBlock();
+
     if (!_expectingIntrinsicContentSizeChange)
         return;
 
     _expectingIntrinsicContentSizeChange = NO;
     didInvalidateIntrinsicContentSize = true;
+}
+
+- (void)setInvalidatedIntrinsicContentSizeBlock:(dispatch_block_t)block
+{
+    _invalidatedIntrinsicContentSizeBlock = makeBlockPtr(block);
+}
+
+- (dispatch_block_t)invalidatedIntrinsicContentSizeBlock
+{
+    return _invalidatedIntrinsicContentSizeBlock.get();
 }
 
 @end
@@ -145,8 +162,11 @@ TEST(WebKit, AutoLayoutIntegration)
     // Changing the width to 100 should result in one rows of ten; with the constraint (width >= 100) -> 100x10
     [webView layoutAtMinimumWidth:100 andExpectContentSizeChange:NSMakeSize(100, 10) resettingWidth:YES];
 
-    // One 100x100 rect and ten 10x10 rects, inline; with the constraint (width >= 20) -> 100x110
-    [webView load:@"<div class='large'></div><div class='small inline'></div><div class='small inline'></div><div class='small inline'></div><div class='small inline'></div><div class='small inline'></div><div class='small inline'></div><div class='small inline'></div><div class='small inline'></div><div class='small inline'></div><div class='small inline'></div>" withWidth:20 expectingContentSize:NSMakeSize(100, 110)];
+    // One 100x100 rect and ten 10x10 rects, inline; with the constraint (width >= 20) -> 100x150
+    [webView load:@"<div class='large'></div><div class='small inline'></div><div class='small inline'></div><div class='small inline'></div><div class='small inline'></div><div class='small inline'></div><div class='small inline'></div><div class='small inline'></div><div class='small inline'></div><div class='small inline'></div><div class='small inline'></div>" withWidth:20 expectingContentSize:NSMakeSize(100, 150)];
+
+    // Test content with a subframe
+    [webView load:@"<object type=\"text/html\" data=\"about:blank\">" withWidth:300 expectingContentSize:NSMakeSize(300, 150)];
 
     // With _shouldExpandContentToViewHeightForAutoLayout off (the default), the page should lay out to the intrinsic height
     // of the content.
@@ -163,6 +183,8 @@ TEST(WebKit, AutoLayoutIntegration)
     // of the intrinsic height of the content. We have to load differently-sized content so that we can wait for
     // the intrinsic size change callback.
     [webView _setShouldExpandContentToViewHeightForAutoLayout:YES];
+    // 100px _is_the_expected_ height because we intentionally report stale value to avoid unstable layout.
+    // See FrameView::autoSizeIfEnabled().
     [webView load:@"<div class='large'></div>" withWidth:50 expectingContentSize:NSMakeSize(100, 100) resettingWidth:NO];
     [webView evaluateJavaScript:@"window.innerHeight" completionHandler:^(id value, NSError *error) {
         EXPECT_TRUE([value isKindOfClass:[NSNumber class]]);
@@ -199,10 +221,53 @@ TEST(WebKit, AutoLayoutRenderingProgressRelativeOrdering)
     [webView setExpectedIntrinsicContentSize:NSMakeSize(100, 400)];
     [webView loadHTMLString:@"<body style='margin: 0; height: 400px;'></body>" baseURL:nil];
     TestWebKitAPI::Util::run(&didInvalidateIntrinsicContentSize);
-    EXPECT_FALSE(didFirstLayout);
     TestWebKitAPI::Util::run(&didFirstLayout);
     TestWebKitAPI::Util::run(&didFinishNavigation);
     [webView setNavigationDelegate:nil];
+}
+
+TEST(WebKit, AutoLayoutBatchesUpdatesWhenInvalidatingIntrinsicContentSize)
+{
+    auto webView = adoptNS([[AutoLayoutWKWebView alloc] initWithFrame:NSMakeRect(0, 0, 1000, 1000)]);
+    [webView _setMinimumLayoutWidth:100];
+
+    auto navigationDelegate = adoptNS([[TestNavigationDelegate alloc] init]);
+    [webView setNavigationDelegate:navigationDelegate.get()];
+
+    __block bool didFinishNavigation = false;
+    didInvalidateIntrinsicContentSize = false;
+    [navigationDelegate setDidFinishNavigation:^(WKWebView *, WKNavigation *) {
+        didFinishNavigation = true;
+    }];
+
+    [webView setExpectingIntrinsicContentSizeChange:YES];
+    [webView loadHTMLString:@"<body style='margin: 0; height: 400px;'></body>" baseURL:nil];
+    TestWebKitAPI::Util::run(&didInvalidateIntrinsicContentSize);
+    TestWebKitAPI::Util::run(&didFinishNavigation);
+
+    NSString *script = @"document.body.style.height = '800px';"
+        "document.scrollingElement.scrollTop;"
+        "document.body.style.height = '400px';"
+        "document.scrollingElement.scrollTop;";
+
+    __block int intrinsicSizeInvalidationCount = 0;
+    [webView setInvalidatedIntrinsicContentSizeBlock:^{
+        ++intrinsicSizeInvalidationCount;
+    }];
+
+    __block bool doneEvaluatingScript = false;
+    [webView evaluateJavaScript:script completionHandler:^(id, NSError *) {
+        doneEvaluatingScript = true;
+    }];
+    TestWebKitAPI::Util::run(&doneEvaluatingScript);
+
+    __block bool doneWaitingForNextPresentationUpdate = false;
+    [webView _doAfterNextPresentationUpdate:^{
+        doneWaitingForNextPresentationUpdate = true;
+    }];
+    TestWebKitAPI::Util::run(&doneWaitingForNextPresentationUpdate);
+
+    EXPECT_EQ(0, intrinsicSizeInvalidationCount);
 }
 
 #endif

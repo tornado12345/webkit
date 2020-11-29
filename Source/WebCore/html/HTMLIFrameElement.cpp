@@ -3,7 +3,7 @@
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Simon Hausmann (hausmann@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2006, 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2004-2019 Apple Inc. All rights reserved.
  * Copyright (C) 2009 Ericsson AB. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
@@ -29,9 +29,10 @@
 #include "DOMTokenList.h"
 #include "Frame.h"
 #include "HTMLNames.h"
+#include "LazyLoadFrameObserver.h"
 #include "RenderIFrame.h"
-#include "RuntimeEnabledFeatures.h"
 #include "ScriptableDocumentParser.h"
+#include "Settings.h"
 #include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
@@ -51,12 +52,18 @@ Ref<HTMLIFrameElement> HTMLIFrameElement::create(const QualifiedName& tagName, D
     return adoptRef(*new HTMLIFrameElement(tagName, document));
 }
 
+int HTMLIFrameElement::defaultTabIndex() const
+{
+    return 0;
+}
+
 DOMTokenList& HTMLIFrameElement::sandbox()
 {
-    if (!m_sandbox)
-        m_sandbox = std::make_unique<DOMTokenList>(*this, sandboxAttr, [](Document&, StringView token) {
+    if (!m_sandbox) {
+        m_sandbox = makeUnique<DOMTokenList>(*this, sandboxAttr, [](Document&, StringView token) {
             return SecurityContext::isSupportedSandboxPolicy(token);
         });
+    }
     return *m_sandbox;
 }
 
@@ -67,7 +74,7 @@ bool HTMLIFrameElement::isPresentationAttribute(const QualifiedName& name) const
     return HTMLFrameElementBase::isPresentationAttribute(name);
 }
 
-void HTMLIFrameElement::collectStyleForPresentationAttribute(const QualifiedName& name, const AtomicString& value, MutableStyleProperties& style)
+void HTMLIFrameElement::collectStyleForPresentationAttribute(const QualifiedName& name, const AtomString& value, MutableStyleProperties& style)
 {
     if (name == widthAttr)
         addHTMLLengthToStyle(style, CSSPropertyWidth, value);
@@ -80,13 +87,13 @@ void HTMLIFrameElement::collectStyleForPresentationAttribute(const QualifiedName
         // a presentational hint that the border should be off if set to zero.
         if (!value.toInt()) {
             // Add a rule that nulls out our border width.
-            addPropertyToPresentationAttributeStyle(style, CSSPropertyBorderWidth, 0, CSSPrimitiveValue::CSS_PX);
+            addPropertyToPresentationAttributeStyle(style, CSSPropertyBorderWidth, 0, CSSUnitType::CSS_PX);
         }
     } else
         HTMLFrameElementBase::collectStyleForPresentationAttribute(name, value, style);
 }
 
-void HTMLIFrameElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
+void HTMLIFrameElement::parseAttribute(const QualifiedName& name, const AtomString& value)
 {
     if (name == sandboxAttr) {
         if (m_sandbox)
@@ -96,15 +103,22 @@ void HTMLIFrameElement::parseAttribute(const QualifiedName& name, const AtomicSt
         setSandboxFlags(value.isNull() ? SandboxNone : SecurityContext::parseSandboxPolicy(value, invalidTokens));
         if (!invalidTokens.isNull())
             document().addConsoleMessage(MessageSource::Other, MessageLevel::Error, "Error while parsing the 'sandbox' attribute: " + invalidTokens);
-    } else if (name == allowAttr)
-        m_allow = value;
-    else
+    } else if (name == allowAttr || name == allowfullscreenAttr || name == webkitallowfullscreenAttr) {
+        m_featurePolicy = WTF::nullopt;
+    } else if (name == loadingAttr) {
+        // Allow loading=eager to load the frame immediately if the lazy load was started, but
+        // do not allow the reverse situation since the eager load is already started.
+        if (m_lazyLoadFrameObserver && !equalLettersIgnoringASCIICase(value, "lazy")) {
+            m_lazyLoadFrameObserver->unobserve();
+            loadDeferredFrame();
+        }
+    } else
         HTMLFrameElementBase::parseAttribute(name, value);
 }
 
 bool HTMLIFrameElement::rendererIsNeeded(const RenderStyle& style)
 {
-    return isURLAllowed() && style.display() != DisplayType::None;
+    return style.display() != DisplayType::None && canLoad();
 }
 
 RenderPtr<RenderElement> HTMLIFrameElement::createElementRenderer(RenderStyle&& style, const RenderTreePosition&)
@@ -112,42 +126,84 @@ RenderPtr<RenderElement> HTMLIFrameElement::createElementRenderer(RenderStyle&& 
     return createRenderer<RenderIFrame>(*this, WTFMove(style));
 }
 
-void HTMLIFrameElement::setReferrerPolicyForBindings(const AtomicString& value)
+void HTMLIFrameElement::setReferrerPolicyForBindings(const AtomString& value)
 {
     setAttributeWithoutSynchronization(referrerpolicyAttr, value);
 }
 
 String HTMLIFrameElement::referrerPolicyForBindings() const
 {
-    switch (referrerPolicy()) {
-    case ReferrerPolicy::NoReferrer:
-        return "no-referrer"_s;
-    case ReferrerPolicy::UnsafeUrl:
-        return "unsafe-url"_s;
-    case ReferrerPolicy::Origin:
-        return "origin"_s;
-    case ReferrerPolicy::OriginWhenCrossOrigin:
-        return "origin-when-cross-origin"_s;
-    case ReferrerPolicy::SameOrigin:
-        return "same-origin"_s;
-    case ReferrerPolicy::StrictOrigin:
-        return "strict-origin"_s;
-    case ReferrerPolicy::StrictOriginWhenCrossOrigin:
-        return "strict-origin-when-cross-origin"_s;
-    case ReferrerPolicy::NoReferrerWhenDowngrade:
-        return "no-referrer-when-downgrade"_s;
-    case ReferrerPolicy::EmptyString:
-        return { };
-    }
-    ASSERT_NOT_REACHED();
-    return { };
+    return referrerPolicyToString(referrerPolicy());
 }
 
 ReferrerPolicy HTMLIFrameElement::referrerPolicy() const
 {
-    if (RuntimeEnabledFeatures::sharedFeatures().referrerPolicyAttributeEnabled())
+    if (m_lazyLoadFrameObserver)
+        return m_lazyLoadFrameObserver->referrerPolicy();
+    if (document().settings().referrerPolicyAttributeEnabled())
         return parseReferrerPolicy(attributeWithoutSynchronization(referrerpolicyAttr), ReferrerPolicySource::ReferrerPolicyAttribute).valueOr(ReferrerPolicy::EmptyString);
     return ReferrerPolicy::EmptyString;
+}
+
+const FeaturePolicy& HTMLIFrameElement::featurePolicy() const
+{
+    if (!m_featurePolicy)
+        m_featurePolicy = FeaturePolicy::parse(document(), *this, attributeWithoutSynchronization(allowAttr));
+    return *m_featurePolicy;
+}
+
+const AtomString& HTMLIFrameElement::loadingForBindings() const
+{
+    static MainThreadNeverDestroyed<const AtomString> eager("eager", AtomString::ConstructFromLiteral);
+    static MainThreadNeverDestroyed<const AtomString> lazy("lazy", AtomString::ConstructFromLiteral);
+    return equalLettersIgnoringASCIICase(attributeWithoutSynchronization(HTMLNames::loadingAttr), "lazy") ? lazy : eager;
+}
+
+void HTMLIFrameElement::setLoadingForBindings(const AtomString& value)
+{
+    setAttributeWithoutSynchronization(loadingAttr, value);
+}
+
+static bool isFrameLazyLoadable(const URL& completeURL, const AtomString& loadingAttributeValue)
+{
+    if (!completeURL.protocolIsInHTTPFamily())
+        return false;
+
+    return equalLettersIgnoringASCIICase(loadingAttributeValue, "lazy");
+}
+
+bool HTMLIFrameElement::shouldLoadFrameLazily()
+{
+    if (!m_lazyLoadFrameObserver && document().settings().lazyIframeLoadingEnabled()) {
+        URL completeURL = document().completeURL(frameURL());
+        if (isFrameLazyLoadable(completeURL, attributeWithoutSynchronization(HTMLNames::loadingAttr))) {
+            auto currentReferrerPolicy = referrerPolicy();
+            lazyLoadFrameObserver().observe(completeURL.string(), currentReferrerPolicy);
+            return true;
+        }
+    }
+    return false;
+}
+
+bool HTMLIFrameElement::isLazyLoadObserverActive() const
+{
+    return !!m_lazyLoadFrameObserver;
+}
+
+void HTMLIFrameElement::loadDeferredFrame()
+{
+    AtomString currentURL = frameURL();
+    setFrameURL(m_lazyLoadFrameObserver->frameURL());
+    openURL();
+    setFrameURL(currentURL);
+    m_lazyLoadFrameObserver = nullptr;
+}
+
+LazyLoadFrameObserver& HTMLIFrameElement::lazyLoadFrameObserver()
+{
+    if (!m_lazyLoadFrameObserver)
+        m_lazyLoadFrameObserver = makeUnique<LazyLoadFrameObserver>(*this);
+    return *m_lazyLoadFrameObserver;
 }
 
 }

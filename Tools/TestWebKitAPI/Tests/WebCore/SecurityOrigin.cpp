@@ -152,10 +152,6 @@ TEST_F(SecurityOriginTest, IsPotentiallyTrustworthy)
     EXPECT_TRUE(SecurityOrigin::createFromString("blob:http://localhost/3D45F36F-C126-493A-A8AA-457FA495247B")->isPotentiallyTrustworthy());
     EXPECT_TRUE(SecurityOrigin::createFromString("blob:http://[::1]/3D45F36F-C126-493A-A8AA-457FA495247B")->isPotentiallyTrustworthy());
     EXPECT_TRUE(SecurityOrigin::createFromString("blob:https://example.com/3D45F36F-C126-493A-A8AA-457FA495247B")->isPotentiallyTrustworthy());
-    EXPECT_TRUE(SecurityOrigin::createFromString("data:,a")->isPotentiallyTrustworthy());
-    EXPECT_TRUE(SecurityOrigin::createFromString("about:")->isPotentiallyTrustworthy());
-    EXPECT_TRUE(SecurityOrigin::createFromString("about:blank")->isPotentiallyTrustworthy());
-    EXPECT_TRUE(SecurityOrigin::createFromString("about:srcdoc")->isPotentiallyTrustworthy());
     EXPECT_TRUE(SecurityOrigin::createFromString("wss://example.com")->isPotentiallyTrustworthy());
     EXPECT_TRUE(SecurityOrigin::createFromString("https://example.com")->isPotentiallyTrustworthy());
     EXPECT_TRUE(SecurityOrigin::createFromString("http://127.0.0.0")->isPotentiallyTrustworthy());
@@ -181,6 +177,52 @@ TEST_F(SecurityOriginTest, IsPotentiallyTrustworthy)
     EXPECT_FALSE(SecurityOrigin::createFromString("ws://example.com")->isPotentiallyTrustworthy());
     EXPECT_FALSE(SecurityOrigin::createFromString("blob:http://example.com/3D45F36F-C126-493A-A8AA-457FA495247B")->isPotentiallyTrustworthy());
     EXPECT_FALSE(SecurityOrigin::createFromString("dummy:a")->isPotentiallyTrustworthy());
+    EXPECT_FALSE(SecurityOrigin::createFromString("blob:null/3D45F36F-C126-493A-A8AA-457FA495247B")->isPotentiallyTrustworthy());
+    EXPECT_FALSE(SecurityOrigin::createFromString("data:,a")->isPotentiallyTrustworthy());
+    EXPECT_FALSE(SecurityOrigin::createFromString("about:")->isPotentiallyTrustworthy());
+    EXPECT_FALSE(SecurityOrigin::createFromString("about:blank")->isPotentiallyTrustworthy());
+    EXPECT_FALSE(SecurityOrigin::createFromString("about:srcdoc")->isPotentiallyTrustworthy());
+    EXPECT_FALSE(SecurityOrigin::createFromString("javascript:srcdoc")->isPotentiallyTrustworthy());
+}
+
+TEST_F(SecurityOriginTest, IsRegistrableDomainSuffix)
+{
+    auto exampleOrigin = SecurityOrigin::create(URL(URL(), "http://www.example.com"));
+    EXPECT_TRUE(exampleOrigin->isMatchingRegistrableDomainSuffix("example.com"));
+    EXPECT_TRUE(exampleOrigin->isMatchingRegistrableDomainSuffix("www.example.com"));
+#if !ENABLE(PUBLIC_SUFFIX_LIST)
+    EXPECT_TRUE(exampleOrigin->isMatchingRegistrableDomainSuffix("com"));
+#endif
+    EXPECT_FALSE(exampleOrigin->isMatchingRegistrableDomainSuffix(""));
+    EXPECT_FALSE(exampleOrigin->isMatchingRegistrableDomainSuffix("."));
+    EXPECT_FALSE(exampleOrigin->isMatchingRegistrableDomainSuffix(".example.com"));
+    EXPECT_FALSE(exampleOrigin->isMatchingRegistrableDomainSuffix(".www.example.com"));
+    EXPECT_FALSE(exampleOrigin->isMatchingRegistrableDomainSuffix("example.com."));
+#if ENABLE(PUBLIC_SUFFIX_LIST)
+    EXPECT_FALSE(exampleOrigin->isMatchingRegistrableDomainSuffix("com"));
+#endif
+
+    auto exampleDotOrigin = SecurityOrigin::create(URL(URL(), "http://www.example.com."));
+    EXPECT_TRUE(exampleDotOrigin->isMatchingRegistrableDomainSuffix("example.com."));
+    EXPECT_TRUE(exampleDotOrigin->isMatchingRegistrableDomainSuffix("www.example.com."));
+#if !ENABLE(PUBLIC_SUFFIX_LIST)
+    EXPECT_TRUE(exampleOrigin->isMatchingRegistrableDomainSuffix("com."));
+#endif
+    EXPECT_FALSE(exampleDotOrigin->isMatchingRegistrableDomainSuffix(""));
+    EXPECT_FALSE(exampleDotOrigin->isMatchingRegistrableDomainSuffix("."));
+    EXPECT_FALSE(exampleDotOrigin->isMatchingRegistrableDomainSuffix(".example.com."));
+    EXPECT_FALSE(exampleDotOrigin->isMatchingRegistrableDomainSuffix(".www.example.com."));
+    EXPECT_FALSE(exampleDotOrigin->isMatchingRegistrableDomainSuffix("example.com"));
+#if ENABLE(PUBLIC_SUFFIX_LIST)
+    EXPECT_FALSE(exampleDotOrigin->isMatchingRegistrableDomainSuffix("com"));
+#endif
+
+    auto ipOrigin = SecurityOrigin::create(URL(URL(), "http://127.0.0.1"));
+    EXPECT_TRUE(ipOrigin->isMatchingRegistrableDomainSuffix("127.0.0.1", true));
+    EXPECT_FALSE(ipOrigin->isMatchingRegistrableDomainSuffix("127.0.0.2", true));
+
+    auto comOrigin = SecurityOrigin::create(URL(URL(), "http://com"));
+    EXPECT_TRUE(comOrigin->isMatchingRegistrableDomainSuffix("com"));
 }
 
 } // namespace TestWebKitAPI

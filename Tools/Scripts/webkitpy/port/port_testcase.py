@@ -41,34 +41,31 @@ from contextlib import contextmanager
 
 from webkitpy.common.system.executive_mock import MockExecutive
 from webkitpy.common.system.filesystem_mock import MockFileSystem
-from webkitpy.common.system.outputcapture import OutputCapture
 from webkitpy.common.system.systemhost_mock import MockSystemHost
 from webkitpy.common.version_name_map import INTERNAL_TABLE
 from webkitpy.port.base import Port
-from webkitpy.port.config import apple_additions
+from webkitpy.port.config import apple_additions, clear_cached_configuration
 from webkitpy.port.image_diff import ImageDiffer
 from webkitpy.port.server_process_mock import MockServerProcess
 from webkitpy.layout_tests.servers import http_server_base
 from webkitpy.tool.mocktool import MockOptions
+
+from webkitcorepy import OutputCapture
 
 
 # FIXME: get rid of this fixture
 class TestWebKitPort(Port):
     port_name = "testwebkitport"
 
-    def __init__(self, port_name=None, symbols_string=None,
+    def __init__(self, port_name=None,
                  expectations_file=None, skips_file=None, host=None, config=None,
                  **kwargs):
         port_name = port_name or TestWebKitPort.port_name
-        self.symbols_string = symbols_string  # Passing "" disables all staticly-detectable features.
         host = host or MockSystemHost()
         super(TestWebKitPort, self).__init__(host, port_name=port_name, **kwargs)
 
     def all_test_configurations(self):
         return [self.test_configuration()]
-
-    def _symbols_string(self):
-        return self.symbols_string
 
     def _tests_for_other_platforms(self, **kwargs):
         return ["media", ]
@@ -93,7 +90,7 @@ def bind_mock_apple_additions():
             result.mapping[INTERNAL_TABLE] = {}
             for platform in result.mapping[PUBLIC_TABLE]:
                 result.mapping[INTERNAL_TABLE][platform] = {}
-                for name, version in result.mapping[PUBLIC_TABLE][platform].iteritems():
+                for name, version in result.mapping[PUBLIC_TABLE][platform].items():
                     result.mapping[INTERNAL_TABLE][platform]['add-' + name] = version
             return result
 
@@ -124,7 +121,7 @@ class PortTestCase(unittest.TestCase):
         port_name = port_name or self.port_name
         port_name = self.port_maker.determine_full_port_name(host, options, port_name)
         port = self.port_maker(host, port_name, options=options, **kwargs)
-        port._config.build_directory = lambda configuration: '/mock-build'
+        port._config.build_directory = lambda configuration, for_host=False: '/mock-build'
         return port
 
     def test_default_timeout_ms(self):
@@ -263,26 +260,26 @@ class PortTestCase(unittest.TestCase):
     def test_diff_image__missing_both(self):
         port = self.make_port()
         self.assertFalse(port.diff_image(None, None)[0])
-        self.assertFalse(port.diff_image(None, '')[0])
-        self.assertFalse(port.diff_image('', None)[0])
+        self.assertFalse(port.diff_image(None, b'')[0])
+        self.assertFalse(port.diff_image(b'', None)[0])
 
-        self.assertFalse(port.diff_image('', '')[0])
+        self.assertFalse(port.diff_image(b'', b'')[0])
 
     def test_diff_image__missing_actual(self):
         port = self.make_port()
-        self.assertTrue(port.diff_image(None, 'foo')[0])
-        self.assertTrue(port.diff_image('', 'foo')[0])
+        self.assertTrue(port.diff_image(None, b'foo')[0])
+        self.assertTrue(port.diff_image(b'', b'foo')[0])
 
     def test_diff_image__missing_expected(self):
         port = self.make_port()
-        self.assertTrue(port.diff_image('foo', None)[0])
-        self.assertTrue(port.diff_image('foo', '')[0])
+        self.assertTrue(port.diff_image(b'foo', None)[0])
+        self.assertTrue(port.diff_image(b'foo', b'')[0])
 
     def test_diff_image(self):
         port = self.make_port()
         self.proc = None
 
-        def make_proc(port, nm, cmd, env):
+        def make_proc(port, nm, cmd, env, crash_message=None):
             self.proc = MockServerProcess(port, nm, cmd, env, lines=['diff: 100% failed\n', 'diff: 100% failed\n'])
             return self.proc
 
@@ -296,22 +293,22 @@ class PortTestCase(unittest.TestCase):
         # First test the case of not using the JHBuild wrapper.
         self.assertFalse(port._should_use_jhbuild())
 
-        self.assertEqual(port.diff_image('foo', 'bar'), ('', 100.0, None))
+        self.assertEqual(port.diff_image(b'foo', b'bar'), (b'', 100.0, None))
         self.assertEqual(self.proc.cmd, [port._path_to_image_diff(), "--tolerance", "0.1"])
-        self.assertEqual(port.diff_image('foo', 'bar', None), ('', 100.0, None))
+        self.assertEqual(port.diff_image(b'foo', b'bar', None), (b'', 100.0, None))
         self.assertEqual(self.proc.cmd, [port._path_to_image_diff(), "--tolerance", "0.1"])
-        self.assertEqual(port.diff_image('foo', 'bar', 0), ('', 100.0, None))
+        self.assertEqual(port.diff_image(b'foo', b'bar', 0), (b'', 100.0, None))
         self.assertEqual(self.proc.cmd, [port._path_to_image_diff(), "--tolerance", "0"])
 
         # Now test the case of using JHBuild wrapper.
         port._filesystem.maybe_make_directory(port.path_from_webkit_base('WebKitBuild', 'Dependencies%s' % port.port_name.upper()))
         self.assertTrue(port._should_use_jhbuild())
 
-        self.assertEqual(port.diff_image('foo', 'bar'), ('', 100.0, None))
+        self.assertEqual(port.diff_image(b'foo', b'bar'), (b'', 100.0, None))
         self.assertEqual(self.proc.cmd, port._jhbuild_wrapper + [port._path_to_image_diff(), "--tolerance", "0.1"])
-        self.assertEqual(port.diff_image('foo', 'bar', None), ('', 100.0, None))
+        self.assertEqual(port.diff_image(b'foo', b'bar', None), (b'', 100.0, None))
         self.assertEqual(self.proc.cmd, port._jhbuild_wrapper + [port._path_to_image_diff(), "--tolerance", "0.1"])
-        self.assertEqual(port.diff_image('foo', 'bar', 0), ('', 100.0, None))
+        self.assertEqual(port.diff_image(b'foo', b'bar', 0), (b'', 100.0, None))
         self.assertEqual(self.proc.cmd, port._jhbuild_wrapper + [port._path_to_image_diff(), "--tolerance", "0"])
 
         port.clean_up_test_run()
@@ -320,21 +317,21 @@ class PortTestCase(unittest.TestCase):
 
     def test_diff_image_passed(self):
         port = self.make_port()
-        port._server_process_constructor = lambda port, nm, cmd, env: MockServerProcess(lines=['diff: 0% passed\n'])
+        port._server_process_constructor = lambda port, nm, cmd, env, crash_message=None: MockServerProcess(lines=['diff: 0% passed\n'])
         image_differ = ImageDiffer(port)
-        self.assertEqual(image_differ.diff_image('foo', 'bar', 0.1), (None, 0, None))
+        self.assertEqual(image_differ.diff_image(b'foo', b'bar', 0.1), (None, 0, None))
 
     def test_diff_image_failed(self):
         port = self.make_port()
-        port._server_process_constructor = lambda port, nm, cmd, env: MockServerProcess(lines=['diff: 100% failed\n'])
+        port._server_process_constructor = lambda port, nm, cmd, env, crash_message=None: MockServerProcess(lines=['diff: 100% failed\n'])
         image_differ = ImageDiffer(port)
-        self.assertEqual(image_differ.diff_image('foo', 'bar', 0.1), ('', 100.0, None))
+        self.assertEqual(image_differ.diff_image(b'foo', b'bar', 0.1), (b'', 100.0, None))
 
     def test_diff_image_crashed(self):
         port = self.make_port()
         self.proc = None
 
-        def make_proc(port, nm, cmd, env):
+        def make_proc(port, nm, cmd, env, crash_message=None):
             self.proc = MockServerProcess(port, nm, cmd, env, crashed=True)
             return self.proc
 
@@ -344,7 +341,7 @@ class PortTestCase(unittest.TestCase):
 
         port._server_process_constructor = make_proc
         port.setup_test_run()
-        self.assertEqual(port.diff_image('foo', 'bar'), ('', 0, 'ImageDiff crashed\n'))
+        self.assertEqual(port.diff_image(b'foo', b'bar'), (b'', 0, 'ImageDiff crashed\n'))
         port.clean_up_test_run()
 
     def integration_test_websocket_server__normal(self):
@@ -473,8 +470,8 @@ class PortTestCase(unittest.TestCase):
         for path in port.expectations_files():
             port._filesystem.write_text_file(path, '')
         ordered_dict = port.expectations_dict()
-        self.assertEqual(port.path_to_generic_test_expectations_file(), ordered_dict.keys()[0])
-        self.assertEqual(port.path_to_test_expectations_file(), ordered_dict.keys()[port.test_expectations_file_position()])
+        self.assertEqual(port.path_to_generic_test_expectations_file(), list(ordered_dict.keys())[0])
+        self.assertEqual(port.path_to_test_expectations_file(), list(ordered_dict.keys())[port.test_expectations_file_position()])
 
         options = MockOptions(additional_expectations=['/tmp/foo', '/tmp/bar'])
         port = self.make_port(options=options)
@@ -483,8 +480,8 @@ class PortTestCase(unittest.TestCase):
         port._filesystem.write_text_file('/tmp/foo', 'foo')
         port._filesystem.write_text_file('/tmp/bar', 'bar')
         ordered_dict = port.expectations_dict()
-        self.assertEqual(ordered_dict.keys()[-2:], options.additional_expectations)  # pylint: disable=E1101
-        self.assertEqual(ordered_dict.values()[-2:], ['foo', 'bar'])
+        self.assertEqual(list(ordered_dict.keys())[-2:], options.additional_expectations)  # pylint: disable=E1101
+        self.assertEqual(list(ordered_dict.values())[-2:], ['foo', 'bar'])
 
     def test_path_to_test_expectations_file(self):
         port = TestWebKitPort()
@@ -499,26 +496,6 @@ class PortTestCase(unittest.TestCase):
         port.host.filesystem.files['/mock-checkout/LayoutTests/platform/testwebkitport/TestExpectations'] = 'some content'
         port._options = MockOptions(webkit_test_runner=False)
         self.assertEqual(port.path_to_test_expectations_file(), '/mock-checkout/LayoutTests/platform/testwebkitport/TestExpectations')
-
-    def test_skipped_directories_for_features(self):
-        supported_features = ["Accelerated Compositing", "Foo Feature"]
-        expected_directories = set(["animations/3d", "transforms/3d"])
-        port = TestWebKitPort(supported_features=supported_features)
-        port._runtime_feature_list = lambda: supported_features
-        result_directories = set(port._skipped_tests_for_unsupported_features(test_list=["animations/3d/foo.html"]))
-        self.assertEqual(result_directories, expected_directories)
-
-    def test_skipped_directories_for_features_no_matching_tests_in_test_list(self):
-        supported_features = ["Accelerated Compositing", "Foo Feature"]
-        expected_directories = set([])
-        result_directories = set(TestWebKitPort(supported_features=supported_features)._skipped_tests_for_unsupported_features(test_list=['foo.html']))
-        self.assertEqual(result_directories, expected_directories)
-
-    def test_skipped_tests_for_unsupported_features_empty_test_list(self):
-        supported_features = ["Accelerated Compositing", "Foo Feature"]
-        expected_directories = set([])
-        result_directories = set(TestWebKitPort(supported_features=supported_features)._skipped_tests_for_unsupported_features(test_list=None))
-        self.assertEqual(result_directories, expected_directories)
 
     def test_skipped_layout_tests(self):
         self.assertEqual(TestWebKitPort().skipped_layout_tests(test_list=[]), set(['media']))
@@ -555,41 +532,56 @@ class PortTestCase(unittest.TestCase):
         host.filesystem.write_text_file('/mock-checkout/LayoutTests/platform/testwebkitport/TestExpectations',
             'BUG_TESTEXPECTATIONS SKIP : fast/html/article-element.html = FAIL\n')
         port = TestWebKitPort(host=host)
-        self.assertEqual(''.join(port.expectations_dict().values()), 'BUG_TESTEXPECTATIONS SKIP : fast/html/article-element.html = FAIL\n')
+        self.assertEqual(''.join(list(port.expectations_dict().values())), 'BUG_TESTEXPECTATIONS SKIP : fast/html/article-element.html = FAIL\n')
 
     def test_build_driver(self):
-        output = OutputCapture()
         port = TestWebKitPort()
         # Delay setting _executive to avoid logging during construction
         port._executive = MockExecutive(should_log=True)
         port._options = MockOptions(configuration="Release")  # This should not be necessary, but I think TestWebKitPort is actually reading from disk (and thus detects the current configuration).
-        expected_logs = "MOCK run_command: ['Tools/Scripts/build-dumprendertree', '--release'], cwd=/mock-checkout, env={'MOCK_ENVIRON_COPY': '1'}\n"
-        self.assertTrue(output.assert_outputs(self, port._build_driver, expected_logs=expected_logs))
+        with OutputCapture(level=logging.INFO) as captured:
+            self.assertTrue(port._build_driver())
+        self.assertEqual(
+            captured.root.log.getvalue(),
+            "MOCK run_command: ['Tools/Scripts/build-dumprendertree', '--release'], cwd=/mock-checkout, env={'MOCK_ENVIRON_COPY': '1'}\n",
+        )
 
         # Make sure WebKitTestRunner is used.
         port._options = MockOptions(webkit_test_runner=True, configuration="Release")
-        expected_logs = "MOCK run_command: ['Tools/Scripts/build-dumprendertree', '--release'], cwd=/mock-checkout, env={'MOCK_ENVIRON_COPY': '1'}\nMOCK run_command: ['Tools/Scripts/build-webkittestrunner', '--release'], cwd=/mock-checkout, env={'MOCK_ENVIRON_COPY': '1'}\n"
-        self.assertTrue(output.assert_outputs(self, port._build_driver, expected_logs=expected_logs))
+        with OutputCapture(level=logging.INFO) as captured:
+            self.assertTrue(port._build_driver())
+        self.assertEqual(
+            captured.root.log.getvalue(),
+            '''MOCK run_command: ['Tools/Scripts/build-dumprendertree', '--release'], cwd=/mock-checkout, env={'MOCK_ENVIRON_COPY': '1'}
+MOCK run_command: ['Tools/Scripts/build-webkittestrunner', '--release'], cwd=/mock-checkout, env={'MOCK_ENVIRON_COPY': '1'}
+''',
+        )
 
         # Make sure we show the build log when --verbose is passed, which we simulate by setting the logging level to DEBUG.
-        output.set_log_level(logging.DEBUG)
         port._options = MockOptions(configuration="Release")
-        expected_logs = """MOCK run_command: ['Tools/Scripts/build-dumprendertree', '--release'], cwd=/mock-checkout, env={'MOCK_ENVIRON_COPY': '1'}
+        with OutputCapture(level=logging.DEBUG) as captured:
+            self.assertTrue(port._build_driver())
+        self.assertEqual(
+            captured.root.log.getvalue(),
+            '''MOCK run_command: ['Tools/Scripts/build-dumprendertree', '--release'], cwd=/mock-checkout, env={'MOCK_ENVIRON_COPY': '1'}
 Output of ['Tools/Scripts/build-dumprendertree', '--release']:
 MOCK output of child process
-"""
-        self.assertTrue(output.assert_outputs(self, port._build_driver, expected_logs=expected_logs))
-        output.set_log_level(logging.INFO)
+''',
+        )
 
         # Make sure that failure to build returns False.
         port._executive = MockExecutive(should_log=True, should_throw=True)
+        with OutputCapture(level=logging.DEBUG) as captured:
+            self.assertFalse(port._build_driver())
         # Because WK2 currently has to build both webkittestrunner and DRT, if DRT fails, that's the only one it tries.
-        expected_logs = """MOCK run_command: ['Tools/Scripts/build-dumprendertree', '--release'], cwd=/mock-checkout, env={'MOCK_ENVIRON_COPY': '1'}
+        self.assertEqual(
+            captured.root.log.getvalue(),
+            '''MOCK run_command: ['Tools/Scripts/build-dumprendertree', '--release'], cwd=/mock-checkout, env={'MOCK_ENVIRON_COPY': '1'}
 MOCK ScriptError
 
 MOCK output of child process
-"""
-        self.assertFalse(output.assert_outputs(self, port._build_driver, expected_logs=expected_logs))
+''',
+        )
 
     def _assert_config_file_for_platform(self, port, platform, config_file):
         self.assertEqual(port._apache_config_file_name_for_platform(platform), config_file)
@@ -614,10 +606,12 @@ MOCK output of child process
     def test_apache_config_file_name_for_platform(self):
         port = TestWebKitPort()
         port._apache_version = lambda: '2.2'
-        self._assert_config_file_for_platform(port, 'cygwin', 'apache2.2-httpd-win.conf')
-
         self._assert_config_file_for_platform(port, 'linux2', 'apache2.2-httpd.conf')
         self._assert_config_file_for_platform(port, 'linux3', 'apache2.2-httpd.conf')
+
+        port._win_php_version = lambda: '-php7'
+        self._assert_config_file_for_platform(port, 'cygwin', 'win-httpd-2.2-php7.conf')
+        self._assert_config_file_for_platform(port, 'win32', 'win-httpd-2.2-php7.conf')
 
         port._is_redhat_based = lambda: True
         port._apache_version = lambda: '2.2'
@@ -629,7 +623,6 @@ MOCK output of child process
         self._assert_config_file_for_platform(port, 'linux2', 'debian-httpd-2.2.conf')
 
         self._assert_config_file_for_platform(port, 'mac', 'apache2.2-httpd.conf')
-        self._assert_config_file_for_platform(port, 'win32', 'win-httpd-2.2-php7.conf')  # WinCairo uses win32. Only AppleWin port uses cygwin.
         self._assert_config_file_for_platform(port, 'barf', 'apache2.2-httpd.conf')
 
     def test_path_to_apache_config_file(self):
@@ -686,6 +679,33 @@ MOCK output of child process
         self.assertEqual(port.baseline_search_path()[0], '/tmp/foo')
 
     def test_max_child_processes(self):
+
         port = self.make_port()
         self.assertEqual(port.max_child_processes(True), 0)
         self.assertEqual(port.max_child_processes(), float('inf'))
+
+    def test_default_upload_configuration(self):
+        clear_cached_configuration()
+        port = self.make_port()
+        configuration = port.configuration_for_upload()
+        self.assertEqual(configuration['architecture'], port.architecture())
+        self.assertEqual(configuration['is_simulator'], False)
+        self.assertEqual(configuration['platform'], port.host.platform.os_name)
+        self.assertEqual(configuration['style'], 'release')
+        self.assertEqual(configuration['version_name'], port.host.platform.os_version_name())
+
+    def test_debug_upload_configuration(self):
+        clear_cached_configuration()
+        port = self.make_port(options=MockOptions(configuration='Debug'))
+        self.assertEqual(port.configuration_for_upload()['style'], 'debug')
+
+    def test_asan_upload_configuration(self):
+        clear_cached_configuration()
+        port = self.make_port()
+        port.host.filesystem.write_text_file('/mock-build/ASan', 'YES')
+        self.assertEqual(port.configuration_for_upload()['style'], 'asan')
+
+    def test_guard_malloc_configuration(self):
+        clear_cached_configuration()
+        port = self.make_port(options=MockOptions(guard_malloc=True))
+        self.assertEqual(port.configuration_for_upload()['style'], 'guard-malloc')

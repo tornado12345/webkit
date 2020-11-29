@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,16 +23,15 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#import <WebKit/WKFoundation.h>
-
 #import <CoreGraphics/CoreGraphics.h>
 #import <Foundation/Foundation.h>
+#import <WebKit/WKFoundation.h>
 
 /*! A WKPreferences object encapsulates the preference settings for a web
  view. The preferences object associated with a web view is specified by
  its web view configuration.
  */
-WK_CLASS_AVAILABLE(macosx(10.10), ios(8.0))
+WK_CLASS_AVAILABLE(macos(10.10), ios(8.0))
 @interface WKPreferences : NSObject <NSSecureCoding>
 
 /*! @abstract The minimum font size in points.
@@ -40,34 +39,36 @@ WK_CLASS_AVAILABLE(macosx(10.10), ios(8.0))
  */
 @property (nonatomic) CGFloat minimumFontSize;
 
-/*! @abstract A Boolean value indicating whether JavaScript is enabled.
- @discussion The default value is YES.
- */
-@property (nonatomic) BOOL javaScriptEnabled;
-
 /*! @abstract A Boolean value indicating whether JavaScript can open
  windows without user interaction.
  @discussion The default value is NO in iOS and YES in OS X.
  */
 @property (nonatomic) BOOL javaScriptCanOpenWindowsAutomatically;
 
+/*! @abstract A Boolean value indicating whether warnings should be
+ shown for suspected fraudulent content such as phishing or malware.
+ @discussion The default value is YES.
+ */
+@property (nonatomic, getter=isFraudulentWebsiteWarningEnabled) BOOL fraudulentWebsiteWarningEnabled WK_API_AVAILABLE(macos(10.15), ios(13.0));
+
 #if !TARGET_OS_IPHONE
-/*! @abstract A Boolean value indicating whether Java is enabled.
- @discussion The default value is NO.
- */
-@property (nonatomic) BOOL javaEnabled;
-
-/*! @abstract A Boolean value indicating whether plug-ins are enabled.
- @discussion The default value is NO.
- */
-@property (nonatomic) BOOL plugInsEnabled;
-
 /*!
  @property tabFocusesLinks
  @abstract If tabFocusesLinks is YES, the tab key will focus links and form controls.
  The Option key temporarily reverses this preference.
  */
-@property (nonatomic) BOOL tabFocusesLinks WK_API_AVAILABLE(macosx(10.12.3));
+@property (nonatomic) BOOL tabFocusesLinks WK_API_AVAILABLE(macos(10.12.3));
 #endif
+
+@end
+
+@interface WKPreferences (WKDeprecated)
+
+#if !TARGET_OS_IPHONE
+@property (nonatomic) BOOL javaEnabled WK_API_DEPRECATED("Java is no longer supported", macos(10.10, 10.15));
+@property (nonatomic) BOOL plugInsEnabled WK_API_DEPRECATED("Plug-ins are no longer supported", macos(10.10, 10.15));
+#endif
+
+@property (nonatomic) BOOL javaScriptEnabled WK_API_DEPRECATED("Use WKWebPagePreferences.allowsContentJavaScript to disable content JavaScript on a per-navigation basis", macos(10.10, WK_MAC_TBA), ios(8.0, WK_IOS_TBA));
 
 @end

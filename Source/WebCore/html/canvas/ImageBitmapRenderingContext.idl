@@ -24,12 +24,12 @@
  */
 
 [
-    EnabledAtRuntime=ImageBitmapOffscreenCanvas,
+    EnabledAtRuntime=ImageBitmap,
     Exposed=Window,
     CallTracingCallback=recordCanvasAction,
 ] interface ImageBitmapRenderingContext {
     readonly attribute HTMLCanvasElement canvas;
 
-    [MayThrowException] void transferFromImageBitmap(ImageBitmap? bitmap);
+    [MayThrowException] undefined transferFromImageBitmap(ImageBitmap? bitmap);
 };
 

@@ -30,6 +30,7 @@
 #include "PluginModuleInfo.h"
 
 #include <WebCore/PluginData.h>
+#include <wtf/HashSet.h>
 
 namespace WebKit {
 
@@ -63,8 +64,6 @@ public:
     Optional<Vector<WebCore::SupportedPluginIdentifier>> supportedPluginIdentifiers();
     void addSupportedPlugin(String&& matchingDomain, String&& identifier, HashSet<String>&& mimeTypes, HashSet<String> extensions);
     void clearSupportedPlugins() { m_supportedPlugins = WTF::nullopt; }
-
-    static bool shouldAllowPluginToRunUnsandboxed(const String& pluginBundleIdentifier);
 
 private:
     PluginModuleInfo findPluginForMIMEType(const String& mimeType, WebCore::PluginData::AllowedPluginTypes) const;

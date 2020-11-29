@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- webkit-test-runner [ experimental:WebGPUEnabled=true ] -->
+<!DOCTYPE html>
 <meta charset=utf-8>
 <title>Basic GPUTexture Tests.</title>
 <body>
@@ -8,7 +8,7 @@
 <script src="../resources/testharnessreport.js"></script>
 <script>
 const canvas = document.querySelector("canvas");    
-let device, context;
+let context;
 
 let texSize = {
     width: canvas.width,
@@ -18,49 +18,69 @@ let texSize = {
 
 let texDescriptor = {
     size: texSize,
-    arrayLayerCount: 1,
-    mipLevelCount: 1,
-    sampleCount: 1,
-    dimension: "2d",
-    format: "d32-float-s8-uint",
+    format: "depth32float-stencil8",
     usage: GPUTextureUsage.OUTPUT_ATTACHMENT
 };
 
-promise_test(async () => {
-    device = await getBasicDevice();
-    context = createBasicContext(canvas, device);
+promise_test(() => {
+    return getBasicDevice().then(function(device) {
+        swapChain = createBasicSwapChain(canvas, device);
 
-    const texture = context.getNextTexture();
-    assert_true(texture instanceof WebGPUTexture, "Successfully acquired next texture.");
+        const texture = swapChain.getCurrentTexture();
+        assert_true(texture instanceof GPUTexture, "Successfully acquired next texture.");
 
-    const textureView = texture.createDefaultTextureView();
-    assert_true(textureView instanceof WebGPUTextureView, "Successfully created texture view from next texture.");
+        const textureView = texture.createDefaultView();
+        assert_true(textureView instanceof GPUTextureView, "Successfully created texture view from next texture.");
+    }, function() {
+    });
 }, "Create texture view from swap chain.");
 
-promise_test(async () => {
-    const depthTexture = device.createTexture(texDescriptor);
-    assert_true(depthTexture instanceof WebGPUTexture, "Successfully created depth texture.");
+promise_test(() => {
+    return getBasicDevice().then(function(device) {
+        const depthTexture = device.createTexture(texDescriptor);
+        assert_true(depthTexture instanceof GPUTexture, "Successfully created depth texture.");
+    }, function() {
+    });
 }, "Create basic depth texture from device.");
 
-promise_test(async () => {
-    texDescriptor.sampleCount = 4;
-    texDescriptor.format = "r8g8b8a8-unorm";
-    texDescriptor.usage = GPUTextureUsage.SAMPLED | GPUTextureUsage.TRANSFER_SRC
+promise_test(() => {
+    return getBasicDevice().then(function(device) {
+        texDescriptor.sampleCount = 4;
+        texDescriptor.format = "rgba8unorm";
+        texDescriptor.usage = GPUTextureUsage.SAMPLED | GPUTextureUsage.COPY_SRC
 
-    const multisampledTexture = device.createTexture(texDescriptor);
-    assert_true(multisampledTexture instanceof WebGPUTexture, "Successfully created multisampled texture.");
+        const multisampledTexture = device.createTexture(texDescriptor);
+        assert_true(multisampledTexture instanceof GPUTexture, "Successfully created multisampled texture.");
+    }, function() {
+    });
 }, "Create basic 4x multisampled texture.");
 
-promise_test(async () => {
-    texDescriptor.size.depth = 3;
-    texDescriptor.sampleCount = 1;
-    texDescriptor.dimension = "3d";
+promise_test(() => {
+    return getBasicDevice().then(function(device) {
+        texDescriptor.size.depth = 3;
+        texDescriptor.sampleCount = 1;
+        texDescriptor.dimension = "3d";
 
-    const texture3d = device.createTexture(texDescriptor);
-    assert_true(texture3d instanceof WebGPUTexture, "Successfully created basic 3D texture.");
+        const texture3d = device.createTexture(texDescriptor);
+        assert_true(texture3d instanceof GPUTexture, "Successfully created basic 3D texture.");
+    }, function() {
+    });
 }, "Create basic 3D texture from device.");
 
-// FIXME: Add tests for 1D textures, textureArrays, and WebGPUTextureViews.
+promise_test(() => {
+    return getBasicDevice().then(function(device) {
+        texDescriptor.format = "rgba8unorm";
+        texDescriptor.usage = GPUTextureUsage.OUTPUT_ATTACHMENT | GPUTextureUsage.SAMPLED;
+
+        const renderTarget = device.createTexture(texDescriptor);
+        assert_true(renderTarget instanceof GPUTexture, "Successfully created off-screen render target.");
+        const textureView = renderTarget.createDefaultView();
+        assert_true(textureView instanceof GPUTextureView, "Successfully created texture view from off-screen render target.");
+    }, function() {
+    });
+}, "Create a render target texture (which can be sampled) from device.");
+
+// FIXME: Add tests for 1D textures, textureArrays, and GPUTextureViews.
 </script>
 </body>
 </html>

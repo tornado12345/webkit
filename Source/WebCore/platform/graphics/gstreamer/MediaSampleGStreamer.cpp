@@ -23,13 +23,15 @@
 
 #include "GStreamerCommon.h"
 
+#include <JavaScriptCore/JSCInlines.h>
+#include <JavaScriptCore/TypedArrayInlines.h>
 #include <algorithm>
 
 #if ENABLE(VIDEO) && USE(GSTREAMER)
 
 namespace WebCore {
 
-MediaSampleGStreamer::MediaSampleGStreamer(GRefPtr<GstSample>&& sample, const FloatSize& presentationSize, const AtomicString& trackId)
+MediaSampleGStreamer::MediaSampleGStreamer(GRefPtr<GstSample>&& sample, const FloatSize& presentationSize, const AtomString& trackId)
     : m_pts(MediaTime::zeroTime())
     , m_dts(MediaTime::zeroTime())
     , m_duration(MediaTime::zeroTime())
@@ -76,7 +78,7 @@ MediaSampleGStreamer::MediaSampleGStreamer(GRefPtr<GstSample>&& sample, const Fl
         m_flags = static_cast<MediaSample::SampleFlags>(m_flags | MediaSample::IsNonDisplaying);
 }
 
-MediaSampleGStreamer::MediaSampleGStreamer(const FloatSize& presentationSize, const AtomicString& trackId)
+MediaSampleGStreamer::MediaSampleGStreamer(const FloatSize& presentationSize, const AtomString& trackId)
     : m_pts(MediaTime::zeroTime())
     , m_dts(MediaTime::zeroTime())
     , m_duration(MediaTime::zeroTime())
@@ -85,7 +87,7 @@ MediaSampleGStreamer::MediaSampleGStreamer(const FloatSize& presentationSize, co
 {
 }
 
-Ref<MediaSampleGStreamer> MediaSampleGStreamer::createFakeSample(GstCaps*, MediaTime pts, MediaTime dts, MediaTime duration, const FloatSize& presentationSize, const AtomicString& trackId)
+Ref<MediaSampleGStreamer> MediaSampleGStreamer::createFakeSample(GstCaps*, MediaTime pts, MediaTime dts, MediaTime duration, const FloatSize& presentationSize, const AtomString& trackId)
 {
     MediaSampleGStreamer* gstreamerMediaSample = new MediaSampleGStreamer(presentationSize, trackId);
     gstreamerMediaSample->m_pts = pts;
@@ -95,12 +97,65 @@ Ref<MediaSampleGStreamer> MediaSampleGStreamer::createFakeSample(GstCaps*, Media
     return adoptRef(*gstreamerMediaSample);
 }
 
-void MediaSampleGStreamer::applyPtsOffset(MediaTime timestampOffset)
+Ref<MediaSampleGStreamer> MediaSampleGStreamer::createImageSample(Vector<uint8_t>&& bgraData, unsigned width, unsigned height, double frameRate)
 {
-    if (m_pts > timestampOffset) {
-        m_duration = m_duration + (m_pts - timestampOffset);
-        m_pts = timestampOffset;
-    }
+    size_t size = bgraData.sizeInBytes();
+    auto* data = bgraData.releaseBuffer().leakPtr();
+    auto buffer = adoptGRef(gst_buffer_new_wrapped_full(GST_MEMORY_FLAG_READONLY, data, size, 0, size, data, [](gpointer data) {
+        WTF::VectorMalloc::free(data);
+    }));
+    gst_buffer_add_video_meta(buffer.get(), GST_VIDEO_FRAME_FLAG_NONE, GST_VIDEO_FORMAT_BGRA, width, height);
+
+    int frameRateNumerator, frameRateDenominator;
+    gst_util_double_to_fraction(frameRate, &frameRateNumerator, &frameRateDenominator);
+
+    auto caps = adoptGRef(gst_caps_new_simple("video/x-raw", "format", G_TYPE_STRING, "BGRA", "width", G_TYPE_INT, width,
+        "height", G_TYPE_INT, height, "framerate", GST_TYPE_FRACTION, frameRateNumerator, frameRateDenominator, nullptr));
+    auto sample = adoptGRef(gst_sample_new(buffer.get(), caps.get(), nullptr, nullptr));
+    return create(WTFMove(sample), FloatSize(width, height), { });
+}
+
+RefPtr<JSC::Uint8ClampedArray> MediaSampleGStreamer::getRGBAImageData() const
+{
+    auto* caps = gst_sample_get_caps(m_sample.get());
+    GstVideoInfo inputInfo;
+    if (!gst_video_info_from_caps(&inputInfo, caps))
+        return nullptr;
+
+    // We could check the input format is RGBA before attempting a conversion, but it is very
+    // unlikely to pay off. The input format is likely to be BGRA (when the samples are created as a
+    // result of mediastream captureStream) or some YUV format if the sample is from a video capture
+    // device. This method is called only by internals during layout tests, it is thus not critical
+    // to optimize this code path.
+
+    auto outputCaps = adoptGRef(gst_caps_copy(caps));
+    gst_caps_set_simple(outputCaps.get(), "format", G_TYPE_STRING, "RGBA", nullptr);
+
+    GstVideoInfo outputInfo;
+    if (!gst_video_info_from_caps(&outputInfo, outputCaps.get()))
+        return nullptr;
+
+    int width = GST_VIDEO_INFO_WIDTH(&inputInfo);
+    int height = GST_VIDEO_INFO_HEIGHT(&inputInfo);
+    unsigned byteLength = GST_VIDEO_INFO_SIZE(&inputInfo);
+    auto bufferStorage = JSC::ArrayBuffer::create(width * height, 4);
+    auto outputBuffer = adoptGRef(gst_buffer_new_wrapped_full(GST_MEMORY_FLAG_NO_SHARE, bufferStorage->data(), byteLength, 0, byteLength, nullptr, [](gpointer) { }));
+    gst_buffer_add_video_meta(outputBuffer.get(), GST_VIDEO_FRAME_FLAG_NONE, GST_VIDEO_FORMAT_RGBA, width, height);
+    GstMappedFrame outputFrame(outputBuffer.get(), outputInfo, GST_MAP_WRITE);
+
+    GUniquePtr<GstVideoConverter> converter(gst_video_converter_new(&inputInfo, &outputInfo, nullptr));
+    GstMappedFrame inputFrame(gst_sample_get_buffer(m_sample.get()), inputInfo, GST_MAP_READ);
+    gst_video_converter_frame(converter.get(), inputFrame.get(), outputFrame.get());
+    return JSC::Uint8ClampedArray::tryCreate(WTFMove(bufferStorage), 0, byteLength);
+}
+
+void MediaSampleGStreamer::extendToTheBeginning()
+{
+    // Only to be used with the first sample, as a hack for lack of support for edit lists.
+    // See AppendPipeline::appsinkNewSample()
+    ASSERT(m_dts == MediaTime::zeroTime());
+    m_duration += m_pts;
+    m_pts = MediaTime::zeroTime();
 }
 
 void MediaSampleGStreamer::offsetTimestampsBy(const MediaTime& timestampOffset)

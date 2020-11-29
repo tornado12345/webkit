@@ -1,9 +1,13 @@
+// FIXME: Consider making jump islands work with Options::jitMemoryReservationSize
+// https://bugs.webkit.org/show_bug.cgi?id=209037
+//@ skip if $architecture == "arm64"
+
 import * as assert from '../assert.js'
 import Builder from '../Builder.js'
 
 const verbose = false;
 const numFunctions = 2;
-const maxParams = 32;
+const maxParams = 8;
 
 // This test starts running with a few bytes of executable memory available. Try
 // to create and instantiate modules which have way more imports than anything

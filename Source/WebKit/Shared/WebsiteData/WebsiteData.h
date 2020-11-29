@@ -25,9 +25,11 @@
 
 #pragma once
 
+#include <WebCore/RegistrableDomain.h>
 #include <WebCore/SecurityOriginData.h>
 #include <wtf/HashMap.h>
 #include <wtf/HashSet.h>
+#include <wtf/OptionSet.h>
 #include <wtf/Vector.h>
 
 namespace IPC {
@@ -37,7 +39,9 @@ class Encoder;
 
 namespace WebKit {
 
-enum class WebsiteDataType;
+enum class WebsiteDataType : uint32_t;
+
+enum class WebsiteDataProcessType { Network, UI, Web };
 
 struct WebsiteData {
     struct Entry {
@@ -55,13 +59,15 @@ struct WebsiteData {
 #if ENABLE(NETSCAPE_PLUGIN_API)
     HashSet<String> hostNamesWithPluginData;
 #endif
-
-    HashSet<String> originsWithCredentials;
-
     HashSet<String> hostNamesWithHSTSCache;
+#if ENABLE(RESOURCE_LOAD_STATISTICS)
+    HashSet<WebCore::RegistrableDomain> registrableDomainsWithResourceLoadStatistics;
+#endif
 
     void encode(IPC::Encoder&) const;
-    static bool decode(IPC::Decoder&, WebsiteData&);
+    static WARN_UNUSED_RETURN bool decode(IPC::Decoder&, WebsiteData&);
+    static WebsiteDataProcessType ownerProcess(WebsiteDataType);
+    static OptionSet<WebsiteDataType> filter(OptionSet<WebsiteDataType>, WebsiteDataProcessType);
 };
 
 }

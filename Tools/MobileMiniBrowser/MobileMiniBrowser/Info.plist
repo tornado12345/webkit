@@ -49,5 +49,14 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoadsInWebContent</key>
+		<true/>
+	</dict>
+    <key>NSCameraUsageDescription</key>
+    <string>Recording video on behalf of websites</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Recording audio on behalf of websites</string>
 </dict>
 </plist>

@@ -174,6 +174,10 @@ WI.CanvasSidebarPanel = class CanvasSidebarPanel extends WI.NavigationSidebarPan
         let canvas = objects.find((object) => object instanceof WI.Canvas);
         if (canvas) {
             this.canvas = canvas;
+            let treeElement = this._canvasTreeOutline.findTreeElement(canvas);
+            const omitFocus = false;
+            const selectedByUser = false;
+            treeElement.revealAndSelect(omitFocus, selectedByUser);
             return;
         }
 
@@ -210,6 +214,18 @@ WI.CanvasSidebarPanel = class CanvasSidebarPanel extends WI.NavigationSidebarPan
 
         this.contentBrowser.addEventListener(WI.ContentBrowser.Event.CurrentRepresentedObjectsDidChange, this.updateRepresentedObjects, this);
         this.updateRepresentedObjects();
+
+        if (this._recording) {
+            this._recordingTreeOutline.updateVirtualizedElementsDebouncer.force();
+
+            let action = this._recording[WI.CanvasSidebarPanel.SelectedActionSymbol];
+            let treeElement = this._recordingTreeOutline.findTreeElement(action);
+            if (treeElement) {
+                const omitFocus = false;
+                const selectedByUser = false;
+                treeElement.revealAndSelect(omitFocus, selectedByUser);
+            }
+        }
     }
 
     hidden()
@@ -221,10 +237,9 @@ WI.CanvasSidebarPanel = class CanvasSidebarPanel extends WI.NavigationSidebarPan
 
     canShowRepresentedObject(representedObject)
     {
-        if (representedObject instanceof WI.CanvasCollection)
-            return false;
-
-        return super.canShowRepresentedObject(representedObject);
+        return representedObject instanceof WI.Canvas
+            || representedObject instanceof WI.ShaderProgram
+            || representedObject instanceof WI.Recording;
     }
 
     // Protected
@@ -306,7 +321,7 @@ WI.CanvasSidebarPanel = class CanvasSidebarPanel extends WI.NavigationSidebarPan
 
     _handleImportButtonNavigationItemClicked(event)
     {
-        WI.FileUtilities.importJSON((result) => WI.canvasManager.processJSON(result));
+        WI.FileUtilities.importJSON((result) => WI.canvasManager.processJSON(result), {multiple: true});
     }
 
     _treeSelectionDidChange(event)
@@ -361,7 +376,7 @@ WI.CanvasSidebarPanel = class CanvasSidebarPanel extends WI.NavigationSidebarPan
         const selectedByUser = false;
         canvasTreeElement.revealAndSelect(omitFocus, selectedByUser);
 
-        if (WI.Canvas.ContextType.Canvas2D || this._canvas.contextType === WI.Canvas.ContextType.WebGL)
+        if (WI.Canvas.ContextType.Canvas2D || this._canvas.contextType === WI.Canvas.ContextType.WebGL || this._canvas.contextType === WI.Canvas.ContextType.WebGL2)
             this._recordButtonNavigationItem.enabled = true;
 
         this.recording = null;
@@ -460,7 +475,7 @@ WI.CanvasSidebarPanel = class CanvasSidebarPanel extends WI.NavigationSidebarPan
 
     _updateRecordNavigationItem()
     {
-        if (!this._canvas || !(this._canvas.contextType === WI.Canvas.ContextType.Canvas2D || this._canvas.contextType === WI.Canvas.ContextType.WebGL)) {
+        if (!this._canvas || !(this._canvas.contextType === WI.Canvas.ContextType.Canvas2D || this._canvas.contextType === WI.Canvas.ContextType.WebGL || this._canvas.contextType === WI.Canvas.ContextType.WebGL2)) {
             this._recordButtonNavigationItem.enabled = false;
             return;
         }
@@ -482,6 +497,7 @@ WI.CanvasSidebarPanel = class CanvasSidebarPanel extends WI.NavigationSidebarPan
 
         let hasRecordings = this._recording || (this._canvas && this._canvas.recordingCollection.size);
         this.element.classList.toggle("has-recordings", hasRecordings);
+        this.element.classList.toggle("showing-recording", !!this._recording);
         if (!hasRecordings)
             return;
 
@@ -577,11 +593,13 @@ WI.CanvasSidebarPanel = class CanvasSidebarPanel extends WI.NavigationSidebarPan
         console.assert(isInitialStateAction || this._recordingTreeOutline.children.lastValue instanceof WI.FolderTreeElement, "There should be a WI.FolderTreeElement for the frame for this action.");
         this._createRecordingActionTreeElement(action, index, isInitialStateAction ? this._recordingTreeOutline : this._recordingTreeOutline.children.lastValue);
 
+        if (!this._recording[WI.CanvasSidebarPanel.SelectedActionSymbol]) {
+            console.assert(action === this._recording.actions[0]);
+            this.action = this._recording.actions[0];
+        }
+
         if (this._recording.ready) {
             this._recording.removeEventListener(null, null, this);
-
-            if (!this._recording[WI.CanvasSidebarPanel.SelectedActionSymbol])
-                this.action = this._recording.actions[0];
 
             if (this._recordingProcessingOptionsContainer) {
                 this._recordingProcessingOptionsContainer.remove();

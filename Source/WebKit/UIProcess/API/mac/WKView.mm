@@ -32,18 +32,22 @@
 #import "APIIconLoadingClient.h"
 #import "APIPageConfiguration.h"
 #import "WKBrowsingContextGroupPrivate.h"
-#import "WKDragDestinationAction.h"
 #import "WKNSData.h"
 #import "WKProcessGroupPrivate.h"
+#import "WKWebViewMac.h"
 #import "WebBackForwardListItem.h"
 #import "WebKit2Initialize.h"
 #import "WebPageGroup.h"
-#import "WebPreferencesKeys.h"
+#import "WebPageProxy.h"
+#import "WebPreferences.h"
 #import "WebProcessPool.h"
 #import "WebViewImpl.h"
 #import "_WKLinkIconParametersInternal.h"
+#import <WebCore/WebViewVisualIdentificationOverlay.h>
+#import <WebKit/WKDragDestinationAction.h>
 #import <pal/spi/cocoa/AVKitSPI.h>
 #import <wtf/BlockPtr.h>
+#import <wtf/NakedRef.h>
 
 @interface WKViewData : NSObject {
 @public
@@ -70,9 +74,9 @@
 
 #endif
 
-IGNORE_WARNINGS_BEGIN("deprecated-implementations")
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 @implementation WKView
-IGNORE_WARNINGS_END
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 
 - (id)initWithFrame:(NSRect)frame processGroup:(WKProcessGroup *)processGroup browsingContextGroup:(WKBrowsingContextGroup *)browsingContextGroup
 {
@@ -176,9 +180,9 @@ IGNORE_WARNINGS_END
     _data->_impl->setFrameSize(NSSizeToCGSize(size));
 }
 
-IGNORE_WARNINGS_BEGIN("deprecated-implementations")
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 - (void)renewGState
-IGNORE_WARNINGS_END
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 {
     _data->_impl->renewGState();
     [super renewGState];
@@ -309,7 +313,9 @@ WEBCORE_COMMAND(yankAndSelect)
     return _data->_impl->readSelectionFromPasteboard(pasteboard);
 }
 
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 - (void)changeFont:(id)sender
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 {
     _data->_impl->changeFontFromFontManager();
 }
@@ -691,9 +697,9 @@ Some other editing-related methods still unimplemented:
 }
 
 #if ENABLE(DRAG_SUPPORT)
-IGNORE_WARNINGS_BEGIN("deprecated-implementations")
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 - (void)draggedImage:(NSImage *)image endedAt:(NSPoint)endPoint operation:(NSDragOperation)operation
-IGNORE_WARNINGS_END
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 {
     _data->_impl->draggedImage(image, NSPointToCGPoint(endPoint), operation);
 }
@@ -784,9 +790,9 @@ IGNORE_WARNINGS_END
     return _data->_impl->accessibilityFocusedUIElement();
 }
 
-IGNORE_WARNINGS_BEGIN("deprecated-implementations")
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 - (BOOL)accessibilityIsIgnored
-IGNORE_WARNINGS_END
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 {
     return _data->_impl->accessibilityIsIgnored();
 }
@@ -796,23 +802,23 @@ IGNORE_WARNINGS_END
     return _data->_impl->accessibilityHitTest(NSPointToCGPoint(point));
 }
 
-IGNORE_WARNINGS_BEGIN("deprecated-implementations")
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 - (id)accessibilityAttributeValue:(NSString *)attribute
-IGNORE_WARNINGS_END
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 {
     return _data->_impl->accessibilityAttributeValue(attribute);
 }
 
-IGNORE_WARNINGS_BEGIN("deprecated-implementations")
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 - (id)accessibilityAttributeValue:(NSString *)attribute forParameter:(id)parameter
-IGNORE_WARNINGS_END
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 {
     return _data->_impl->accessibilityAttributeValue(attribute, parameter);
 }
 
-IGNORE_WARNINGS_BEGIN("deprecated-implementations")
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 - (NSArray<NSString *> *)accessibilityParameterizedAttributeNames
-IGNORE_WARNINGS_END
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 {
     NSArray<NSString *> *names = [super accessibilityParameterizedAttributeNames];
     return [names arrayByAddingObject:@"AXConvertRelativeFrame"];
@@ -868,32 +874,44 @@ IGNORE_WARNINGS_END
     _data->_impl->removeTrackingRects(tags, count);
 }
 
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 - (NSString *)view:(NSView *)view stringForToolTip:(NSToolTipTag)tag point:(NSPoint)point userData:(void *)data
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 {
     return _data->_impl->stringForToolTip(tag);
 }
 
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 - (void)pasteboardChangedOwner:(NSPasteboard *)pasteboard
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 {
     _data->_impl->pasteboardChangedOwner(pasteboard);
 }
 
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 - (void)pasteboard:(NSPasteboard *)pasteboard provideDataForType:(NSString *)type
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 {
     _data->_impl->provideDataForPasteboard(pasteboard, type);
 }
 
-IGNORE_WARNINGS_BEGIN("deprecated-implementations")
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 - (NSArray *)namesOfPromisedFilesDroppedAtDestination:(NSURL *)dropDestination
-IGNORE_WARNINGS_END
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 {
     return _data->_impl->namesOfPromisedFilesDroppedAtDestination(dropDestination);
+}
+
+- (void)_web_grantDOMPasteAccess
+{
+    _data->_impl->handleDOMPasteRequestWithResult(WebCore::DOMPasteAccessResponse::GrantedForGesture);
 }
 
 - (void)maybeInstallIconLoadingClient
 {
     ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     class IconLoadingClient : public API::IconLoadingClient {
+        WTF_MAKE_FAST_ALLOCATED;
     public:
         explicit IconLoadingClient(WKView *wkView)
             : m_wkView(wkView)
@@ -931,10 +949,10 @@ IGNORE_WARNINGS_END
     ALLOW_DEPRECATED_DECLARATIONS_END
 
     if ([self respondsToSelector:IconLoadingClient::delegateSelector()])
-        _data->_impl->page().setIconLoadingClient(std::make_unique<IconLoadingClient>(self));
+        _data->_impl->page().setIconLoadingClient(makeUnique<IconLoadingClient>(self));
 }
 
-- (instancetype)initWithFrame:(NSRect)frame processPool:(WebKit::WebProcessPool&)processPool configuration:(Ref<API::PageConfiguration>&&)configuration
+- (instancetype)initWithFrame:(NSRect)frame processPool:(NakedRef<WebKit::WebProcessPool>)processPool configuration:(Ref<API::PageConfiguration>&&)configuration
 {
     self = [super initWithFrame:frame];
     if (!self)
@@ -943,9 +961,10 @@ IGNORE_WARNINGS_END
     WebKit::InitializeWebKit2();
 
     _data = [[WKViewData alloc] init];
-    _data->_impl = std::make_unique<WebKit::WebViewImpl>(self, nullptr, processPool, WTFMove(configuration));
+    _data->_impl = makeUnique<WebKit::WebViewImpl>(self, nullptr, processPool.get(), WTFMove(configuration));
 
     [self maybeInstallIconLoadingClient];
+    [WebViewVisualIdentificationOverlay installForWebViewIfNeeded:self kind:@"WKView" deprecated:YES];
 
     return self;
 }
@@ -1138,9 +1157,9 @@ IGNORE_WARNINGS_END
 @end
 
 ALLOW_DEPRECATED_DECLARATIONS_BEGIN
-IGNORE_WARNINGS_BEGIN("deprecated-implementations")
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 @implementation WKView (Private)
-IGNORE_WARNINGS_END
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 
 - (void)saveBackForwardSnapshotForCurrentItem
 {
@@ -1177,7 +1196,8 @@ static WebCore::UserInterfaceLayoutDirection toUserInterfaceLayoutDirection(NSUs
     configuration->setPageGroup(WebKit::toImpl(pageGroupRef));
     configuration->setRelatedPage(WebKit::toImpl(relatedPage));
 #if PLATFORM(MAC)
-    configuration->preferenceValues().set(WebKit::WebPreferencesKey::systemLayoutDirectionKey(), WebKit::WebPreferencesStore::Value(static_cast<uint32_t>(toUserInterfaceLayoutDirection(self.userInterfaceLayoutDirection))));
+    configuration->setPreferences(&configuration->pageGroup()->preferences());
+    configuration->preferences()->setSystemLayoutDirection(static_cast<uint32_t>(toUserInterfaceLayoutDirection(self.userInterfaceLayoutDirection)));
 #endif
 
     return [self initWithFrame:frame processPool:*WebKit::toImpl(contextRef) configuration:WTFMove(configuration)];
@@ -1249,6 +1269,16 @@ static WebCore::UserInterfaceLayoutDirection toUserInterfaceLayoutDirection(NSUs
 - (void)setMinimumSizeForAutoLayout:(NSSize)minimumSizeForAutoLayout
 {
     _data->_impl->setMinimumSizeForAutoLayout(NSSizeToCGSize(minimumSizeForAutoLayout));
+}
+
+- (NSSize)sizeToContentAutoSizeMaximumSize
+{
+    return NSSizeFromCGSize(_data->_impl->sizeToContentAutoSizeMaximumSize());
+}
+
+- (void)setSizeToContentAutoSizeMaximumSize:(NSSize)sizeToContentAutoSizeMaximumSize
+{
+    _data->_impl->setSizeToContentAutoSizeMaximumSize(NSSizeToCGSize(sizeToContentAutoSizeMaximumSize));
 }
 
 - (BOOL)shouldExpandToViewHeightForAutoLayout
@@ -1457,40 +1487,6 @@ static WebCore::UserInterfaceLayoutDirection toUserInterfaceLayoutDirection(NSUs
 - (CGFloat)_totalHeightOfBanners
 {
     return _data->_impl->totalHeightOfBanners();
-}
-
-static Optional<WebCore::ScrollbarOverlayStyle> toCoreScrollbarStyle(_WKOverlayScrollbarStyle scrollbarStyle)
-{
-    switch (scrollbarStyle) {
-    case _WKOverlayScrollbarStyleDark:
-        return WebCore::ScrollbarOverlayStyleDark;
-    case _WKOverlayScrollbarStyleLight:
-        return WebCore::ScrollbarOverlayStyleLight;
-    case _WKOverlayScrollbarStyleDefault:
-        return WebCore::ScrollbarOverlayStyleDefault;
-    case _WKOverlayScrollbarStyleAutomatic:
-    default:
-        break;
-    }
-
-    return WTF::nullopt;
-}
-
-static _WKOverlayScrollbarStyle toAPIScrollbarStyle(Optional<WebCore::ScrollbarOverlayStyle> coreScrollbarStyle)
-{
-    if (!coreScrollbarStyle)
-        return _WKOverlayScrollbarStyleAutomatic;
-
-    switch (coreScrollbarStyle.value()) {
-    case WebCore::ScrollbarOverlayStyleDark:
-        return _WKOverlayScrollbarStyleDark;
-    case WebCore::ScrollbarOverlayStyleLight:
-        return _WKOverlayScrollbarStyleLight;
-    case WebCore::ScrollbarOverlayStyleDefault:
-        return _WKOverlayScrollbarStyleDefault;
-    default:
-        return _WKOverlayScrollbarStyleAutomatic;
-    }
 }
 
 - (void)_setOverlayScrollbarStyle:(_WKOverlayScrollbarStyle)scrollbarStyle

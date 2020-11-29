@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2017 The ANGLE Project Authors. All rights reserved.
+// Copyright 2017 The ANGLE Project Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -13,37 +13,87 @@
 #include <ostream>
 
 #include "ANGLEPerfTest.h"
+#include "test_utils/angle_test_configs.h"
 
 struct DrawCallPerfParams : public RenderTestParams
 {
     // Common default options
-    DrawCallPerfParams()
-    {
-        majorVersion = 2;
-        minorVersion = 0;
-        windowWidth  = 256;
-        windowHeight = 256;
-    }
-    virtual ~DrawCallPerfParams() {}
+    DrawCallPerfParams();
+    ~DrawCallPerfParams() override;
 
-    std::string suffix() const override;
+    std::string story() const override;
 
-    unsigned int iterations = 50;
-    double runTimeSeconds   = 10.0;
-    int numTris             = 1;
-    bool useFBO             = false;
+    double runTimeSeconds;
+    int numTris;
 };
 
-std::ostream &operator<<(std::ostream &os, const DrawCallPerfParams &params);
+namespace params
+{
+template <typename ParamsT>
+ParamsT D3D9(const ParamsT &in)
+{
+    ParamsT out       = in;
+    out.eglParameters = angle::egl_platform::D3D9();
+    return out;
+}
 
-DrawCallPerfParams DrawCallPerfD3D11Params(bool useNullDevice, bool renderToTexture);
+template <typename ParamsT>
+ParamsT D3D11(const ParamsT &in)
+{
+    ParamsT out       = in;
+    out.eglParameters = angle::egl_platform::D3D11();
+    return out;
+}
 
-DrawCallPerfParams DrawCallPerfD3D9Params(bool useNullDevice, bool renderToTexture);
+template <typename ParamsT>
+ParamsT GL(const ParamsT &in)
+{
+    ParamsT out       = in;
+    out.eglParameters = angle::egl_platform::OPENGL_OR_GLES();
+    return out;
+}
 
-DrawCallPerfParams DrawCallPerfOpenGLOrGLESParams(bool useNullDevice, bool renderToTexture);
+template <typename ParamsT>
+ParamsT GL3(const ParamsT &in)
+{
+    ParamsT out       = in;
+    out.eglParameters = angle::egl_platform::OPENGL_OR_GLES(3, 0);
+    return out;
+}
 
-DrawCallPerfParams DrawCallPerfValidationOnly();
+template <typename ParamsT>
+ParamsT Vulkan(const ParamsT &in)
+{
+    ParamsT out       = in;
+    out.eglParameters = angle::egl_platform::VULKAN();
+    return out;
+}
 
-DrawCallPerfParams DrawCallPerfVulkanParams(bool renderToTexture);
+template <typename ParamsT>
+ParamsT WGL(const ParamsT &in)
+{
+    ParamsT out = in;
+    out.driver  = angle::GLESDriverType::SystemWGL;
+    return out;
+}
+
+template <typename ParamsT>
+ParamsT EGL(const ParamsT &in)
+{
+    ParamsT out = in;
+    out.driver  = angle::GLESDriverType::SystemEGL;
+    return out;
+}
+
+template <typename ParamsT>
+ParamsT Native(const ParamsT &in)
+{
+#if defined(ANGLE_PLATFORM_WINDOWS)
+    return WGL(in);
+#else
+    return EGL(in);
+#endif
+}
+}  // namespace params
 
 #endif  // TESTS_PERF_TESTS_DRAW_CALL_PERF_PARAMS_H_

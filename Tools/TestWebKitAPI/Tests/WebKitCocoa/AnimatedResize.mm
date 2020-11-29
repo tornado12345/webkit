@@ -23,16 +23,18 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
+#import "config.h"
 
 #import "PlatformUtilities.h"
 #import "Test.h"
 #import "TestNavigationDelegate.h"
+#import "TestWKWebView.h"
 #import <WebKit/WKPreferences.h>
+#import <WebKit/WKPreferencesPrivate.h>
 #import <WebKit/WKProcessPoolPrivate.h>
 #import <WebKit/WKWebView.h>
 #import <WebKit/WKWebViewConfiguration.h>
-#import <WebKit/WKWebViewPrivate.h>
+#import <WebKit/WKWebViewPrivateForTesting.h>
 #import <WebKit/_WKProcessPoolConfiguration.h>
 #import <wtf/RetainPtr.h>
 
@@ -289,6 +291,44 @@ TEST(WebKit, OverrideLayoutSizeIsRestoredAfterChangingDuringProcessRelaunch)
     TestWebKitAPI::Util::run(&didReadLayoutSize);
 }
 
+TEST(WebKit, ChangeFrameAndMinimumEffectiveDeviceWidthDuringAnimatedResize)
+{
+    auto webView = createAnimatedResizeWebView();
+    [[webView configuration] preferences]._shouldIgnoreMetaViewport = YES;
+    [webView setUIDelegate:webView.get()];
+    [webView loadHTMLString:@"<body>Hello world</body>" baseURL:nil];
+
+    auto navigationDelegate = adoptNS([[TestNavigationDelegate alloc] init]);
+    [webView setNavigationDelegate:navigationDelegate.get()];
+    [navigationDelegate waitForDidFinishNavigation];
+
+    auto window = adoptNS([[UIWindow alloc] initWithFrame:CGRectMake(0, 0, 800, 600)]);
+    [window addSubview:webView.get()];
+    [window setHidden:NO];
+
+    [webView _beginAnimatedResizeWithUpdates:^{
+        [webView _setMinimumEffectiveDeviceWidth:1000];
+        [webView setFrame:CGRectMake(0, 0, 500, 375)];
+    }];
+
+    [webView _endAnimatedResize];
+
+    __block bool didReadLayoutSize = false;
+    [webView _doAfterNextPresentationUpdate:^{
+        [webView evaluateJavaScript:@"[window.innerWidth, window.innerHeight, visualViewport.scale]" completionHandler:^(NSArray<NSNumber *> *value, NSError *error) {
+            CGFloat innerWidth = value[0].floatValue;
+            CGFloat innerHeight = value[1].floatValue;
+            CGFloat scale = value[2].floatValue;
+            EXPECT_EQ(innerWidth, 1000);
+            EXPECT_EQ(innerHeight, 750);
+            EXPECT_EQ(scale, 0.5);
+            didReadLayoutSize = true;
+        }];
+    }];
+
+    TestWebKitAPI::Util::run(&didReadLayoutSize);
+}
+
 static UIView *immediateSubviewOfClass(UIView *view, Class cls)
 {
     UIView *foundSubview = nil;
@@ -426,6 +466,34 @@ TEST(WebKit, AnimatedResizeBlocksDoAfterNextPresentationUpdate)
 
     TestWebKitAPI::Util::run(&didEndAnimatedResize);
     TestWebKitAPI::Util::run(&didGetCommitAfterEndAnimatedResize);
+}
+
+TEST(WebKit, CreateWebPageAfterAnimatedResize)
+{
+    auto webView = adoptNS([[TestWKWebView alloc] initWithFrame:CGRectMake(0, 0, 1024, 768)]);
+    [webView synchronouslyLoadTestPageNamed:@"large-red-square-image"];
+
+    [webView _beginAnimatedResizeWithUpdates:^{
+        [webView setFrame:CGRectMake(0, 0, 768, 1024)];
+    }];
+
+    __block bool doneWaitingForPresentationUpdate = false;
+    [webView _doAfterNextPresentationUpdate:^{
+        doneWaitingForPresentationUpdate = true;
+    }];
+
+    [webView _doAfterNextPresentationUpdateWithoutWaitingForAnimatedResizeForTesting:^{
+        [webView _endAnimatedResize];
+    }];
+
+    TestWebKitAPI::Util::run(&doneWaitingForPresentationUpdate);
+
+    [webView _killWebContentProcessAndResetState];
+    [webView synchronouslyLoadTestPageNamed:@"large-red-square-image"];
+
+    NSArray<NSNumber *> *dimensions = [webView objectByEvaluatingJavaScript:@"[innerWidth, innerHeight]"];
+    EXPECT_EQ(768, dimensions.firstObject.intValue);
+    EXPECT_EQ(1024, dimensions.lastObject.intValue);
 }
 
 #endif

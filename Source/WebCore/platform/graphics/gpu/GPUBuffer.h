@@ -29,17 +29,12 @@
 
 #include "DeferrableTask.h"
 #include "GPUBufferUsage.h"
+#include "GPUPlatformTypes.h"
 #include <wtf/Function.h>
 #include <wtf/OptionSet.h>
 #include <wtf/Ref.h>
 #include <wtf/RefCounted.h>
-#include <wtf/RetainPtr.h>
 #include <wtf/Vector.h>
-
-#if USE(METAL)
-OBJC_PROTOCOL(MTLBuffer);
-OBJC_PROTOCOL(MTLCommandBuffer);
-#endif
 
 namespace JSC {
 class ArrayBuffer;
@@ -48,15 +43,11 @@ class ArrayBuffer;
 namespace WebCore {
 
 class GPUDevice;
+class GPUErrorScopes;
 
 struct GPUBufferDescriptor;
 
-#if USE(METAL)
-using PlatformBuffer = MTLBuffer;
-#else
-using PlatformBuffer = void;
-#endif
-using PlatformBufferSmartPtr = RetainPtr<PlatformBuffer>;
+enum class GPUBufferMappedOption;
 
 class GPUBuffer : public RefCounted<GPUBuffer> {
 public:
@@ -68,31 +59,32 @@ public:
 
     ~GPUBuffer();
 
-    static RefPtr<GPUBuffer> tryCreate(Ref<GPUDevice>&&, GPUBufferDescriptor&&);
+    static RefPtr<GPUBuffer> tryCreate(GPUDevice&, const GPUBufferDescriptor&, GPUBufferMappedOption, GPUErrorScopes&);
 
-    PlatformBuffer *platformBuffer() const { return m_platformBuffer.get(); }
-    unsigned long byteLength() const { return m_byteLength; }
-    bool isTransferSource() const { return m_usage.contains(GPUBufferUsage::Flags::TransferSource); }
-    bool isTransferDestination() const { return m_usage.contains(GPUBufferUsage::Flags::TransferDestination); }
+    PlatformBuffer* platformBuffer() const { return m_platformBuffer.get(); }
+    size_t byteLength() const { return m_byteLength; }
+    bool isCopySource() const { return m_usage.contains(GPUBufferUsage::Flags::CopySource); }
+    bool isCopyDestination() const { return m_usage.contains(GPUBufferUsage::Flags::CopyDestination); }
+    bool isIndex() const { return m_usage.contains(GPUBufferUsage::Flags::Index); }
     bool isVertex() const { return m_usage.contains(GPUBufferUsage::Flags::Vertex); }
     bool isUniform() const { return m_usage.contains(GPUBufferUsage::Flags::Uniform); }
     bool isStorage() const { return m_usage.contains(GPUBufferUsage::Flags::Storage); }
     bool isReadOnly() const;
     bool isMappable() const { return m_usage.containsAny({ GPUBufferUsage::Flags::MapWrite, GPUBufferUsage::Flags::MapRead }); }
+    unsigned platformUsage() const { return m_platformUsage; }
     State state() const;
+
+    JSC::ArrayBuffer* mapOnCreation();
 
 #if USE(METAL)
     void commandBufferCommitted(MTLCommandBuffer *);
     void commandBufferCompleted();
-
-    void reuseSubDataBuffer(RetainPtr<MTLBuffer>&&);
 #endif
 
-    void setSubData(unsigned long, const JSC::ArrayBuffer&);
     using MappingCallback = WTF::Function<void(JSC::ArrayBuffer*)>;
-    void registerMappingCallback(MappingCallback&&, bool);
-    void unmap();
-    void destroy();
+    void registerMappingCallback(MappingCallback&&, bool, GPUErrorScopes&);
+    void unmap(GPUErrorScopes*);
+    void destroy(GPUErrorScopes*);
 
 private:
     struct PendingMappingCallback : public RefCounted<PendingMappingCallback> {
@@ -107,13 +99,13 @@ private:
         PendingMappingCallback(MappingCallback&&);
     };
 
-    static bool validateBufferUsage(const GPUDevice&, OptionSet<GPUBufferUsage::Flags>);
-
-    GPUBuffer(PlatformBufferSmartPtr&&, const GPUBufferDescriptor&, OptionSet<GPUBufferUsage::Flags>, Ref<GPUDevice>&&);
+    GPUBuffer(PlatformBufferSmartPtr&&, GPUDevice&, size_t, OptionSet<GPUBufferUsage::Flags>, GPUBufferMappedOption);
+    static bool validateBufferUsage(const GPUDevice&, OptionSet<GPUBufferUsage::Flags>, GPUErrorScopes&);
 
     JSC::ArrayBuffer* stagingBufferForRead();
     JSC::ArrayBuffer* stagingBufferForWrite();
     void runMappingCallback();
+    void copyStagingBufferToGPU(GPUErrorScopes*);
 
     bool isMapWrite() const { return m_usage.contains(GPUBufferUsage::Flags::MapWrite); }
     bool isMapRead() const { return m_usage.contains(GPUBufferUsage::Flags::MapRead); }
@@ -123,17 +115,15 @@ private:
     PlatformBufferSmartPtr m_platformBuffer;
     Ref<GPUDevice> m_device;
 
-#if USE(METAL)
-    Vector<RetainPtr<MTLBuffer>> m_subDataBuffers;
-#endif
-
     RefPtr<JSC::ArrayBuffer> m_stagingBuffer;
     RefPtr<PendingMappingCallback> m_mappingCallback;
     DeferrableTask<Timer> m_mappingCallbackTask;
 
-    unsigned long m_byteLength;
+    size_t m_byteLength;
     OptionSet<GPUBufferUsage::Flags> m_usage;
+    unsigned m_platformUsage;
     unsigned m_numScheduledCommandBuffers { 0 };
+    bool m_isMappedFromCreation { false };
 };
 
 } // namespace WebCore

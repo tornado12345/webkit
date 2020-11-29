@@ -24,9 +24,9 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#include "BackForwardList.h"
+#import "BackForwardList.h"
 
-#include <WebCore/PageCache.h>
+#import <WebCore/BackForwardCache.h>
 
 using namespace WebCore;
 
@@ -58,7 +58,7 @@ void BackForwardList::addItem(Ref<HistoryItem>&& newItem)
         while (m_entries.size() > targetSize) {
             Ref<HistoryItem> item = m_entries.takeLast();
             m_entryHash.remove(item.ptr());
-            PageCache::singleton().remove(item);
+            BackForwardCache::singleton().remove(item);
         }
     }
 
@@ -68,7 +68,7 @@ void BackForwardList::addItem(Ref<HistoryItem>&& newItem)
         Ref<HistoryItem> item = WTFMove(m_entries[0]);
         m_entries.remove(0);
         m_entryHash.remove(item.ptr());
-        PageCache::singleton().remove(item);
+        BackForwardCache::singleton().remove(item);
         --m_current;
     }
 
@@ -143,7 +143,7 @@ void BackForwardList::forwardListWithLimit(int limit, Vector<Ref<HistoryItem>>& 
     list.clear();
     if (!m_entries.size())
         return;
-        
+
     unsigned lastEntry = m_entries.size() - 1;
     if (m_current < lastEntry) {
         int last = std::min(m_current + limit, lastEntry);
@@ -163,7 +163,7 @@ void BackForwardList::setCapacity(int size)
     while (size < static_cast<int>(m_entries.size())) {
         Ref<HistoryItem> item = m_entries.takeLast();
         m_entryHash.remove(item.ptr());
-        PageCache::singleton().remove(item);
+        BackForwardCache::singleton().remove(item);
     }
 
     if (!size)

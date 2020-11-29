@@ -26,6 +26,7 @@
 #pragma once
 
 #include "APIObject.h"
+#include "InputMethodFilter.h"
 #include "PageClientImpl.h"
 #include "WebPageProxy.h"
 #include <WebCore/ActivityState.h>
@@ -33,17 +34,31 @@
 #include <wtf/OptionSet.h>
 #include <wtf/RefPtr.h>
 
+#if ENABLE(ACCESSIBILITY)
+#include "WebKitWebViewAccessible.h"
+#include <wtf/glib/GRefPtr.h>
+#endif
+
 typedef struct OpaqueJSContext* JSGlobalContextRef;
+typedef struct _WebKitInputMethodContext WebKitInputMethodContext;
+struct wpe_input_keyboard_event;
 struct wpe_view_backend;
 
 namespace API {
 class ViewClient;
 }
 
+namespace WebCore {
+struct CompositionUnderline;
+}
+
 namespace WebKit {
 class DownloadProxy;
+class ScrollGestureController;
 class WebPageGroup;
 class WebProcessPool;
+struct EditingRange;
+struct UserMessage;
 }
 
 namespace WKWPE {
@@ -55,13 +70,26 @@ public:
         return new View(backend, configuration);
     }
 
+    ~View();
+
     // Client methods
     void setClient(std::unique_ptr<API::ViewClient>&&);
     void frameDisplayed();
     void handleDownloadRequest(WebKit::DownloadProxy&);
+    void willStartLoad();
+    void didChangePageID();
+    void didReceiveUserMessage(WebKit::UserMessage&&, CompletionHandler<void(WebKit::UserMessage&&)>&&);
+
+    void setInputMethodContext(WebKitInputMethodContext*);
+    WebKitInputMethodContext* inputMethodContext() const;
+    void setInputMethodState(Optional<WebKit::InputMethodState>&&);
+    void synthesizeCompositionKeyPress(const String&, Optional<Vector<WebCore::CompositionUnderline>>&&, Optional<WebKit::EditingRange>&&);
+
+    void selectionDidChange();
 
     WebKit::WebPageProxy& page() { return *m_pageProxy; }
 
+    API::ViewClient& client() const { return *m_client; }
     struct wpe_view_backend* backend() { return m_backend; }
 
     const WebCore::IntSize& size() const { return m_size; }
@@ -75,14 +103,22 @@ public:
     void setFullScreen(bool fullScreenState) { m_fullScreenModeActive = fullScreenState; };
 #endif
 
+#if ENABLE(ACCESSIBILITY)
+    WebKitWebViewAccessible* accessible() const;
+#endif
+
+    WebKit::ScrollGestureController& scrollGestureController() const { return *m_scrollGestureController; }
+
 private:
     View(struct wpe_view_backend*, const API::PageConfiguration&);
 
     void setSize(const WebCore::IntSize&);
     void setViewState(OptionSet<WebCore::ActivityState::Flag>);
+    void handleKeyboardEvent(struct wpe_input_keyboard_event*);
 
     std::unique_ptr<API::ViewClient> m_client;
 
+    std::unique_ptr<WebKit::ScrollGestureController> m_scrollGestureController;
     std::unique_ptr<WebKit::PageClientImpl> m_pageClient;
     RefPtr<WebKit::WebPageProxy> m_pageProxy;
     WebCore::IntSize m_size;
@@ -93,6 +129,12 @@ private:
 #if ENABLE(FULLSCREEN_API)
     bool m_fullScreenModeActive { false };
 #endif
+
+#if ENABLE(ACCESSIBILITY)
+    mutable GRefPtr<WebKitWebViewAccessible> m_accessible;
+#endif
+
+    WebKit::InputMethodFilter m_inputMethodFilter;
 };
 
 } // namespace WKWPE

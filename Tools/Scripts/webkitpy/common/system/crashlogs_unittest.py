@@ -23,11 +23,12 @@
 
 import unittest
 
+from webkitcorepy import string_utils
+
 from webkitpy.common.system.crashlogs import CrashLogs
 from webkitpy.common.system.filesystem_mock import MockFileSystem
 from webkitpy.common.system.systemhost import SystemHost
 from webkitpy.common.system.systemhost_mock import MockSystemHost
-from webkitpy.thirdparty.mock import Mock
 
 # Needed to support Windows port tests
 from webkitpy.port.win import WinPort
@@ -36,7 +37,7 @@ from webkitpy.port.win import WinPort
 def make_mock_crash_report_darwin(process_name, pid):
     return """Crash log may not start with Process line
 Process:         {process_name} [{pid}]
-Path:            /Volumes/Data/slave/snowleopard-intel-release-tests/build/WebKitBuild/Release/{process_name}
+Path:            /Volumes/Data/worker/snowleopard-intel-release-tests/build/WebKitBuild/Release/{process_name}
 Identifier:      {process_name}
 Version:         ??? (???)
 Code Type:       X86-64 (Native)
@@ -57,7 +58,7 @@ Crashed Thread:  0
 
 Dyld Error Message:
   Library not loaded: /Volumes/Data/WebKit-BuildSlave/snowleopard-intel-release/build/WebKitBuild/Release/WebCore.framework/Versions/A/WebCore
-  Referenced from: /Volumes/Data/slave/snowleopard-intel-release/build/WebKitBuild/Release/WebKit.framework/Versions/A/WebKit
+  Referenced from: /Volumes/Data/worker/snowleopard-intel-release/build/WebKitBuild/Release/WebKit.framework/Versions/A/WebKit
   Reason: image not found
 
 Binary Images:
@@ -298,6 +299,9 @@ class CrashLogsTest(unittest.TestCase):
         self.files['/Users/mock/Library/Logs/DiagnosticReports/DumpRenderTree_2011-06-13-150721_quadzen.crash'] = None
         self.files['/Users/mock/Library/Logs/DiagnosticReports/DumpRenderTree_2011-06-13-150722_quadzen.crash'] = self.other_process_mock_crash_report
         self.files['/Users/mock/Library/Logs/DiagnosticReports/DumpRenderTree_2011-06-13-150723_quadzen.crash'] = self.misformatted_mock_crash_report
+
+        self.files = {key: string_utils.encode(value) for key, value in self.files.items()}
+
         self.filesystem = MockFileSystem(self.files)
         crash_logs = CrashLogs(MockSystemHost(filesystem=self.filesystem), CrashLogsTest.DARWIN_MOCK_CRASH_DIRECTORY)
         logs = self.filesystem.files_under('/Users/mock/Library/Logs/DiagnosticReports/')
@@ -313,8 +317,8 @@ class CrashLogsTest(unittest.TestCase):
         all_logs = crash_logs.find_all_logs()
         self.assertEqual(len(all_logs), 8)
 
-        for test, crash_log in all_logs.iteritems():
-            self.assertTrue(crash_log in self.files.values())
+        for test, crash_log in all_logs.items():
+            self.assertTrue(crash_log in [string_utils.decode(value) for value in self.files.values()])
             if test.split('-')[0] != 'Sandbox':
                 self.assertTrue(test == "Unknown" or int(test.split("-")[1]) in range(28527, 28531))
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2004-2019 Apple Inc. All rights reserved.
  * Copyright (C) 2006 Alexey Proskuryakov <ap@nypop.com>
  * Copyright (C) 2007-2009 Torch Mobile, Inc.
  *
@@ -31,10 +31,8 @@
 #include "DecodeEscapeSequences.h"
 #include "TextCodec.h"
 #include "TextEncodingRegistry.h"
-#include <unicode/unorm.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/StdLibExtras.h>
-#include <wtf/text/CString.h>
 #include <wtf/text/StringView.h>
 
 namespace WebCore {
@@ -46,21 +44,15 @@ static const TextEncoding& UTF7Encoding()
 }
 
 TextEncoding::TextEncoding(const char* name)
-    : m_name(atomicCanonicalTextEncodingName(name))
+    : m_name(atomCanonicalTextEncodingName(name))
     , m_backslashAsCurrencySymbol(backslashAsCurrencySymbol())
 {
-    // Aliases are valid, but not "replacement" itself.
-    if (equalLettersIgnoringASCIICase(name, "replacement"))
-        m_name = nullptr;
 }
 
 TextEncoding::TextEncoding(const String& name)
-    : m_name(atomicCanonicalTextEncodingName(name))
+    : m_name(atomCanonicalTextEncodingName(name))
     , m_backslashAsCurrencySymbol(backslashAsCurrencySymbol())
 {
-    // Aliases are valid, but not "replacement" itself.
-    if (equalLettersIgnoringASCIICase(name, "replacement"))
-        m_name = nullptr;
 }
 
 String TextEncoding::decode(const char* data, size_t length, bool stopOnError, bool& sawError) const
@@ -71,47 +63,18 @@ String TextEncoding::decode(const char* data, size_t length, bool stopOnError, b
     return newTextCodec(*this)->decode(data, length, true, stopOnError, sawError);
 }
 
-ALLOW_DEPRECATED_DECLARATIONS_BEGIN
-// NOTE: ICU's unorm_quickCheck and unorm_normalize functions are deprecated.
-
-Vector<uint8_t> TextEncoding::encode(StringView text, UnencodableHandling handling) const
+Vector<uint8_t> TextEncoding::encode(StringView string, UnencodableHandling handling, NFCNormalize normalize) const
 {
-    if (!m_name || text.isEmpty())
+    if (!m_name || string.isEmpty())
         return { };
-
-    // FIXME: Consider adding a fast case for ASCII.
 
     // FIXME: What's the right place to do normalization?
     // It's a little strange to do it inside the encode function.
     // Perhaps normalization should be an explicit step done before calling encode.
-
-    auto upconvertedCharacters = text.upconvertedCharacters();
-
-    const UChar* source = upconvertedCharacters;
-    unsigned sourceLength = text.length();
-
-    Vector<UChar> normalizedCharacters;
-
-    UErrorCode err = U_ZERO_ERROR;
-    if (unorm_quickCheck(source, sourceLength, UNORM_NFC, &err) != UNORM_YES) {
-        // First try using the length of the original string, since normalization to NFC rarely increases length.
-        normalizedCharacters.grow(sourceLength);
-        int32_t normalizedLength = unorm_normalize(source, sourceLength, UNORM_NFC, 0, normalizedCharacters.data(), sourceLength, &err);
-        if (err == U_BUFFER_OVERFLOW_ERROR) {
-            err = U_ZERO_ERROR;
-            normalizedCharacters.resize(normalizedLength);
-            normalizedLength = unorm_normalize(source, sourceLength, UNORM_NFC, 0, normalizedCharacters.data(), normalizedLength, &err);
-        }
-        ASSERT(U_SUCCESS(err));
-
-        source = normalizedCharacters.data();
-        sourceLength = normalizedLength;
-    }
-
-    return newTextCodec(*this)->encode(StringView { source, sourceLength }, handling);
+    if (normalize == NFCNormalize::Yes)
+        return newTextCodec(*this)->encode(normalizedNFC(string).view, handling);
+    return newTextCodec(*this)->encode(string, handling);
 }
-
-ALLOW_DEPRECATED_DECLARATIONS_END
 
 const char* TextEncoding::domName() const
 {
@@ -125,7 +88,7 @@ const char* TextEncoding::domName() const
     // FIXME: This is not thread-safe. At the moment, this function is
     // only accessed in a single thread, but eventually has to be made
     // thread-safe along with usesVisualOrdering().
-    static const char* const a = atomicCanonicalTextEncodingName("windows-949");
+    static const char* const a = atomCanonicalTextEncodingName("windows-949");
     if (m_name == a)
         return "EUC-KR";
     return m_name;
@@ -136,7 +99,7 @@ bool TextEncoding::usesVisualOrdering() const
     if (noExtendedTextEncodingNameUsed())
         return false;
 
-    static const char* const a = atomicCanonicalTextEncodingName("ISO-8859-8");
+    static const char* const a = atomCanonicalTextEncodingName("ISO-8859-8");
     return m_name == a;
 }
 
@@ -219,10 +182,10 @@ const TextEncoding& WindowsLatin1Encoding()
     return globalWindowsLatin1Encoding;
 }
 
-String decodeURLEscapeSequences(const String& string, const TextEncoding& encoding)
+String decodeURLEscapeSequences(StringView string, const TextEncoding& encoding)
 {
     if (string.isEmpty())
-        return string;
+        return string.toString();
     return decodeEscapeSequences<URLEscapeSequence>(string, encoding);
 }
 

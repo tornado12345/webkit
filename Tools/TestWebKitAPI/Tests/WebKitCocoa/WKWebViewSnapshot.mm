@@ -120,7 +120,7 @@ TEST(WKWebView, SnapshotImageBaseCase)
         NSInteger viewWidthInPixels = viewWidth * backingScaleFactor;
         NSInteger viewHeightInPixels = viewHeight * backingScaleFactor;
 
-        unsigned char rgba[viewWidthInPixels * viewHeightInPixels * 4];
+        uint8_t *rgba = (unsigned char *)calloc(viewWidthInPixels * viewHeightInPixels * 4, sizeof(unsigned char));
         RetainPtr<CGContextRef> context = CGBitmapContextCreate(rgba, viewWidthInPixels, viewHeightInPixels, 8, 4 * viewWidthInPixels, colorSpace.get(), kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
         CGContextDrawImage(context.get(), CGRectMake(0, 0, viewWidthInPixels, viewHeightInPixels), cgImage.get());
 
@@ -139,6 +139,8 @@ TEST(WKWebView, SnapshotImageBaseCase)
         EXPECT_EQ(255, rgba[pixelIndex]);
         EXPECT_EQ(0, rgba[pixelIndex + 1]);
         EXPECT_EQ(0, rgba[pixelIndex + 2]);
+
+        free(rgba);
 
         isDone = true;
     }];
@@ -264,7 +266,7 @@ TEST(WKWebView, SnapshotImageLargeAsyncDecoding)
         RetainPtr<CGImageRef> cgImage = convertToCGImage(snapshotImage);
         RetainPtr<CGColorSpaceRef> colorSpace = adoptCF(CGColorSpaceCreateDeviceRGB());
 
-        unsigned char rgba[viewWidth * viewHeight * 4];
+        uint8_t *rgba = (unsigned char *)calloc(viewWidth * viewHeight * 4, sizeof(unsigned char));
         RetainPtr<CGContextRef> context = CGBitmapContextCreate(rgba, viewWidth, viewHeight, 8, 4 * viewWidth, colorSpace.get(), kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
         CGContextDrawImage(context.get(), CGRectMake(0, 0, viewWidth, viewHeight), cgImage.get());
 
@@ -285,6 +287,8 @@ TEST(WKWebView, SnapshotImageLargeAsyncDecoding)
         EXPECT_EQ(255, rgba[pixelIndex]);
         EXPECT_EQ(255, rgba[pixelIndex + 1]);
         EXPECT_EQ(255, rgba[pixelIndex + 2]);
+
+        free(rgba);
 
         isDone = true;
     }];
@@ -337,7 +341,7 @@ TEST(WKWebView, SnapshotAfterScreenUpdates)
         NSInteger viewWidthInPixels = viewWidth * backingScaleFactor;
         NSInteger viewHeightInPixels = viewHeight * backingScaleFactor;
         
-        unsigned char rgba[viewWidthInPixels * viewHeightInPixels * 4];
+        uint8_t *rgba = (unsigned char *)calloc(viewWidthInPixels * viewHeightInPixels * 4, sizeof(unsigned char));
         RetainPtr<CGContextRef> context = CGBitmapContextCreate(rgba, viewWidthInPixels, viewHeightInPixels, 8, 4 * viewWidthInPixels, colorSpace.get(), kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
         CGContextDrawImage(context.get(), CGRectMake(0, 0, viewWidthInPixels, viewHeightInPixels), cgImage.get());
         
@@ -345,6 +349,8 @@ TEST(WKWebView, SnapshotAfterScreenUpdates)
         EXPECT_EQ(0, rgba[pixelIndex]);
         EXPECT_EQ(0, rgba[pixelIndex + 1]);
         EXPECT_EQ(255, rgba[pixelIndex + 2]);
+
+        free(rgba);
         
         isDone = true;
     }];
@@ -398,17 +404,79 @@ TEST(WKWebView, SnapshotWithoutAfterScreenUpdates)
         NSInteger viewWidthInPixels = viewWidth * backingScaleFactor;
         NSInteger viewHeightInPixels = viewHeight * backingScaleFactor;
         
-        unsigned char rgba[viewWidthInPixels * viewHeightInPixels * 4];
+        uint8_t *rgba = (unsigned char *)calloc(viewWidthInPixels * viewHeightInPixels * 4, sizeof(unsigned char));
         RetainPtr<CGContextRef> context = CGBitmapContextCreate(rgba, viewWidthInPixels, viewHeightInPixels, 8, 4 * viewWidthInPixels, colorSpace.get(), kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
         CGContextDrawImage(context.get(), CGRectMake(0, 0, viewWidthInPixels, viewHeightInPixels), cgImage.get());
-        
+
         NSInteger pixelIndex = getPixelIndex(0, 0, viewWidthInPixels);
         EXPECT_EQ(0, rgba[pixelIndex]);
         EXPECT_EQ(0, rgba[pixelIndex + 1]);
         EXPECT_EQ(255, rgba[pixelIndex + 2]);
+
+        free(rgba);
         
         isDone = true;
     }];
     
     TestWebKitAPI::Util::run(&isDone);
 }
+
+// FIXME: Confirm that this works on iOS too.
+#if PLATFORM(MAC)
+TEST(WKWebView, SnapshotWebGL)
+{
+    NSInteger viewWidth = 800;
+    NSInteger viewHeight = 600;
+    RetainPtr<WKWebView> webView = adoptNS([[WKWebView alloc] initWithFrame:NSMakeRect(0, 0, viewWidth, viewHeight)]);
+
+    RetainPtr<PlatformWindow> window;
+    CGFloat backingScaleFactor;
+
+#if PLATFORM(MAC)
+    window = adoptNS([[NSWindow alloc] initWithContentRect:[webView frame] styleMask:NSBorderlessWindowMask backing:NSBackingStoreBuffered defer:NO]);
+    [[window contentView] addSubview:webView.get()];
+    backingScaleFactor = [window backingScaleFactor];
+#elif PLATFORM(IOS_FAMILY)
+    window = adoptNS([[UIWindow alloc] initWithFrame:[webView frame]]);
+    [window addSubview:webView.get()];
+    backingScaleFactor = [[window screen] scale];
+#endif
+
+    [webView loadHTMLString:@"<style>body{margin:0;padding:0}</style><canvas></canvas><script>window.addEventListener('load', () => { let ctx = document.querySelector('canvas').getContext('webgl'); ctx.clearColor(0, 1, 0, 1); ctx.clear(ctx.COLOR_BUFFER_BIT); }, false);</script>" baseURL:nil];
+    [webView _test_waitForDidFinishNavigation];
+
+    RetainPtr<WKSnapshotConfiguration> snapshotConfiguration = adoptNS([[WKSnapshotConfiguration alloc] init]);
+    [snapshotConfiguration setRect:NSMakeRect(0, 0, viewWidth, viewHeight)];
+    [snapshotConfiguration setSnapshotWidth:@(viewWidth)];
+    [snapshotConfiguration setAfterScreenUpdates:YES];
+
+    isDone = false;
+    [webView takeSnapshotWithConfiguration:snapshotConfiguration.get() completionHandler:^(PlatformImage snapshotImage, NSError *error) {
+        EXPECT_NULL(error);
+
+        EXPECT_EQ(viewWidth, snapshotImage.size.width);
+
+        RetainPtr<CGImageRef> cgImage = convertToCGImage(snapshotImage);
+        RetainPtr<CGColorSpaceRef> colorSpace = adoptCF(CGColorSpaceCreateDeviceRGB());
+
+        NSInteger viewWidthInPixels = viewWidth * backingScaleFactor;
+        NSInteger viewHeightInPixels = viewHeight * backingScaleFactor;
+
+        uint8_t *rgba = (unsigned char *)calloc(viewWidthInPixels * viewHeightInPixels * 4, sizeof(unsigned char));
+        RetainPtr<CGContextRef> context = CGBitmapContextCreate(rgba, viewWidthInPixels, viewHeightInPixels, 8, 4 * viewWidthInPixels, colorSpace.get(), kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+        CGContextDrawImage(context.get(), CGRectMake(0, 0, viewWidthInPixels, viewHeightInPixels), cgImage.get());
+
+        NSInteger pixelIndex = getPixelIndex(0, 0, viewWidthInPixels);
+        EXPECT_EQ(0, rgba[pixelIndex]);
+        EXPECT_EQ(255, rgba[pixelIndex + 1]);
+        EXPECT_EQ(0, rgba[pixelIndex + 2]);
+        EXPECT_EQ(255, rgba[pixelIndex + 3]);
+
+        free(rgba);
+
+        isDone = true;
+    }];
+
+    TestWebKitAPI::Util::run(&isDone);
+}
+#endif

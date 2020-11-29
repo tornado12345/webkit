@@ -149,7 +149,6 @@ static NSString *normalizedStringWithAppKitCompatibilityMapping(NSString *charac
         return @"\x1B";
     case kHIDUsage_KeypadNumLock: // Num Lock / Clear
         return makeNSStringWithCharacter(NSClearLineFunctionKey);
-#if USE(UIKIT_KEYBOARD_ADDITIONS)
     case kHIDUsage_KeyboardDeleteForward:
         return makeNSStringWithCharacter(NSDeleteFunctionKey);
     case kHIDUsage_KeyboardEnd:
@@ -158,14 +157,11 @@ static NSString *normalizedStringWithAppKitCompatibilityMapping(NSString *charac
         return makeNSStringWithCharacter(NSInsertFunctionKey);
     case kHIDUsage_KeyboardHome:
         return makeNSStringWithCharacter(NSHomeFunctionKey);
-#endif
     }
-#if USE(UIKIT_KEYBOARD_ADDITIONS)
     if (keyCode >= kHIDUsage_KeyboardF1 && keyCode <= kHIDUsage_KeyboardF12)
         return makeNSStringWithCharacter(NSF1FunctionKey + (keyCode - kHIDUsage_KeyboardF1));
     if (keyCode >= kHIDUsage_KeyboardF13 && keyCode <= kHIDUsage_KeyboardF24)
         return makeNSStringWithCharacter(NSF13FunctionKey + (keyCode - kHIDUsage_KeyboardF13));
-#endif
     return characters;
 }
 
@@ -189,6 +185,17 @@ static NSString *normalizedStringWithAppKitCompatibilityMapping(NSString *charac
     _modifierFlags = modifiers;
     _keyboardFlags = flags;
     _inputManagerHint = [hint retain];
+
+    BOOL flagsChanged = _keyboardFlags & WebEventKeyboardInputModifierFlagsChanged;
+    if (!flagsChanged) {
+        // Map Command + . to Escape since Apple Smart Keyboards lack an Escape key.
+        // FIXME: This doesn't work for some keyboard layouts, like French. See <rdar://problem/51047011>.
+        if ([charactersIgnoringModifiers isEqualToString:@"."] && (modifiers & WebEventFlagMaskCommandKey)) {
+            keyCode = kHIDUsage_KeyboardEscape;
+            _modifierFlags &= ~WebEventFlagMaskCommandKey;
+        }
+    }
+
     if (keyCode)
         _keyCode = windowsKeyCodeForKeyCode(keyCode);
     else if ([charactersIgnoringModifiers length] == 1) {
@@ -196,7 +203,7 @@ static NSString *normalizedStringWithAppKitCompatibilityMapping(NSString *charac
         _keyCode = windowsKeyCodeForCharCodeIOS([charactersIgnoringModifiers characterAtIndex:0]);
     }
 
-    if (!(_keyboardFlags & WebEventKeyboardInputModifierFlagsChanged)) {
+    if (!flagsChanged) {
         _characters = [normalizedStringWithAppKitCompatibilityMapping(characters, keyCode) retain];
         _charactersIgnoringModifiers = [normalizedStringWithAppKitCompatibilityMapping(charactersIgnoringModifiers, keyCode) retain];
         _tabKey = tabKey;

@@ -26,6 +26,7 @@
 #include "config.h"
 #include "PageClientImpl.h"
 
+#include "APIViewClient.h"
 #include "DrawingAreaProxyCoordinatedGraphics.h"
 #include "NativeWebMouseEvent.h"
 #include "NativeWebWheelEvent.h"
@@ -33,15 +34,19 @@
 #include "WPEView.h"
 #include "WebContextMenuProxy.h"
 #include "WebContextMenuProxyWPE.h"
+#include "WebKitPopupMenu.h"
 #include <WebCore/ActivityState.h>
 #include <WebCore/DOMPasteAccess.h>
 #include <WebCore/NotImplemented.h>
+
+#if ENABLE(ACCESSIBILITY)
+#include <atk/atk.h>
+#endif
 
 namespace WebKit {
 
 PageClientImpl::PageClientImpl(WKWPE::View& view)
     : m_view(view)
-    , m_scrollGestureController(std::make_unique<ScrollGestureController>())
 {
 }
 
@@ -59,14 +64,14 @@ IPC::Attachment PageClientImpl::hostFileDescriptor()
 
 std::unique_ptr<DrawingAreaProxy> PageClientImpl::createDrawingAreaProxy(WebProcessProxy& process)
 {
-    return std::make_unique<DrawingAreaProxyCoordinatedGraphics>(m_view.page(), process);
+    return makeUnique<DrawingAreaProxyCoordinatedGraphics>(m_view.page(), process);
 }
 
 void PageClientImpl::setViewNeedsDisplay(const WebCore::Region&)
 {
 }
 
-void PageClientImpl::requestScroll(const WebCore::FloatPoint&, const WebCore::IntPoint&, bool)
+void PageClientImpl::requestScroll(const WebCore::FloatPoint&, const WebCore::IntPoint&)
 {
 }
 
@@ -124,10 +129,9 @@ void PageClientImpl::didCommitLoadForMainFrame(const String&, bool)
 {
 }
 
-void PageClientImpl::handleDownloadRequest(DownloadProxy* download)
+void PageClientImpl::handleDownloadRequest(DownloadProxy& download)
 {
-    ASSERT(download);
-    m_view.handleDownloadRequest(*download);
+    m_view.handleDownloadRequest(download);
 }
 
 void PageClientImpl::didChangeContentSize(const WebCore::IntSize&)
@@ -208,11 +212,12 @@ void PageClientImpl::doneWithTouchEvent(const NativeWebTouchEvent& touchEvent, b
         return;
 
     auto& page = m_view.page();
+    auto& scrollGestureController = m_view.scrollGestureController();
 
-    if (m_scrollGestureController->handleEvent(touchPoint)) {
-        struct wpe_input_axis_event* axisEvent = m_scrollGestureController->axisEvent();
+    if (scrollGestureController.handleEvent(touchPoint)) {
+        struct wpe_input_axis_event* axisEvent = scrollGestureController.axisEvent();
         if (axisEvent->type != wpe_input_axis_event_type_null)
-            page.handleWheelEvent(WebKit::NativeWebWheelEvent(axisEvent, m_view.page().deviceScaleFactor()));
+            page.handleWheelEvent(WebKit::NativeWebWheelEvent(axisEvent, m_view.page().deviceScaleFactor(), WebWheelEvent::Phase::PhaseNone, WebWheelEvent::Phase::PhaseNone));
         return;
     }
 
@@ -237,7 +242,7 @@ void PageClientImpl::doneWithTouchEvent(const NativeWebTouchEvent& touchEvent, b
         pointerEvent.state = 0;
         pointerEvent.modifiers &= ~wpe_input_pointer_modifier_button1;
         break;
-    case wpe_input_pointer_event_type_null:
+    case wpe_input_touch_event_type_null:
         ASSERT_NOT_REACHED();
         return;
     }
@@ -250,15 +255,17 @@ void PageClientImpl::wheelEventWasNotHandledByWebCore(const NativeWebWheelEvent&
 {
 }
 
-RefPtr<WebPopupMenuProxy> PageClientImpl::createPopupMenuProxy(WebPageProxy&)
+RefPtr<WebPopupMenuProxy> PageClientImpl::createPopupMenuProxy(WebPageProxy& page)
 {
-    return nullptr;
+    if (!m_view.client().isGLibBasedAPI())
+        return nullptr;
+    return WebKitPopupMenu::create(m_view, page);
 }
 
 #if ENABLE(CONTEXT_MENUS)
-Ref<WebContextMenuProxy> PageClientImpl::createContextMenuProxy(WebPageProxy&, ContextMenuContextData&& context, const UserData& userData)
+Ref<WebContextMenuProxy> PageClientImpl::createContextMenuProxy(WebPageProxy& page, ContextMenuContextData&& context, const UserData& userData)
 {
-    return WebContextMenuProxyWPE::create(WTFMove(context), userData);
+    return WebContextMenuProxyWPE::create(page, WTFMove(context), userData);
 }
 #endif
 
@@ -302,15 +309,20 @@ void PageClientImpl::didRemoveNavigationGestureSnapshot()
 {
 }
 
+void PageClientImpl::didStartProvisionalLoadForMainFrame()
+{
+    m_view.willStartLoad();
+}
+
 void PageClientImpl::didFirstVisuallyNonEmptyLayoutForMainFrame()
 {
 }
 
-void PageClientImpl::didFinishLoadForMainFrame()
+void PageClientImpl::didFinishNavigation(API::Navigation*)
 {
 }
 
-void PageClientImpl::didFailLoadForMainFrame()
+void PageClientImpl::didFailNavigation(API::Navigation*)
 {
 }
 
@@ -330,7 +342,7 @@ void PageClientImpl::derefView()
 {
 }
 
-#if ENABLE(VIDEO)
+#if ENABLE(VIDEO) && USE(GSTREAMER)
 bool PageClientImpl::decidePolicyForInstallMissingMediaPluginsPermissionRequest(InstallMissingMediaPluginsPermissionRequest&)
 {
     return false;
@@ -403,6 +415,33 @@ void PageClientImpl::beganExitFullScreen(const WebCore::IntRect& /* initialFrame
 void PageClientImpl::requestDOMPasteAccess(const WebCore::IntRect&, const String&, CompletionHandler<void(WebCore::DOMPasteAccessResponse)>&& completionHandler)
 {
     completionHandler(WebCore::DOMPasteAccessResponse::DeniedForGesture);
+}
+
+#if ENABLE(ACCESSIBILITY)
+AtkObject* PageClientImpl::accessible()
+{
+    return ATK_OBJECT(m_view.accessible());
+}
+#endif
+
+void PageClientImpl::didChangeWebPageID() const
+{
+    m_view.didChangePageID();
+}
+
+void PageClientImpl::sendMessageToWebView(UserMessage&& message, CompletionHandler<void(UserMessage&&)>&& completionHandler)
+{
+    m_view.didReceiveUserMessage(WTFMove(message), WTFMove(completionHandler));
+}
+
+void PageClientImpl::setInputMethodState(Optional<InputMethodState>&& state)
+{
+    m_view.setInputMethodState(WTFMove(state));
+}
+
+void PageClientImpl::selectionDidChange()
+{
+    m_view.selectionDidChange();
 }
 
 } // namespace WebKit

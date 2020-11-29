@@ -3,7 +3,7 @@
 import json
 import logging
 
-from benchmark_runner import BenchmarkRunner
+from webkitpy.benchmark_runner.benchmark_runner import BenchmarkRunner
 
 
 _log = logging.getLogger(__name__)
@@ -17,7 +17,6 @@ class WebDriverBenchmarkRunner(BenchmarkRunner):
         return result
 
     def _run_one_test(self, web_root, test_file):
-        import webkitpy.thirdparty.autoinstalled.selenium
         from selenium.webdriver.support.ui import WebDriverWait
         result = None
         try:
@@ -26,6 +25,9 @@ class WebDriverBenchmarkRunner(BenchmarkRunner):
             _log.info('Waiting on results from web browser')
             result = WebDriverWait(driver, self._plan['timeout'], poll_frequency=1.0).until(self._get_result)
             driver.quit()
+        except Exception as error:
+            self._browser_driver.diagnose_test_failure(self._diagnose_dir, error)
+            raise error
         finally:
             self._browser_driver.close_browsers()
 

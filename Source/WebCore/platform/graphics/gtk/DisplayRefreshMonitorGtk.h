@@ -25,7 +25,7 @@
 
 #pragma once
 
-#if USE(REQUEST_ANIMATION_FRAME_DISPLAY_MONITOR)
+#if !USE(GTK4)
 
 #include "DisplayRefreshMonitor.h"
 
@@ -37,12 +37,7 @@ class DisplayRefreshMonitorGtk : public DisplayRefreshMonitor {
 public:
     static RefPtr<DisplayRefreshMonitorGtk> create(PlatformDisplayID displayID)
     {
-#ifndef GTK_API_VERSION_2
         return adoptRef(*new DisplayRefreshMonitorGtk(displayID));
-#else
-        UNUSED_PARAM(displayID);
-        return nullptr;
-#endif
     }
 
     virtual ~DisplayRefreshMonitorGtk();
@@ -58,4 +53,4 @@ private:
 
 } // namespace WebCore
 
-#endif // USE(REQUEST_ANIMATION_FRAME_DISPLAY_MONITOR)
+#endif // !USE(GTK4)

@@ -23,11 +23,8 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#pragma once
-
-#import <WebKit/WKFoundation.h>
-
 #import <Foundation/Foundation.h>
+#import <WebKit/WKFoundation.h>
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -36,9 +33,9 @@ typedef NS_ENUM(NSInteger, _WKApplicationManifestDisplayMode) {
     _WKApplicationManifestDisplayModeMinimalUI,
     _WKApplicationManifestDisplayModeStandalone,
     _WKApplicationManifestDisplayModeFullScreen,
-} WK_API_AVAILABLE(macosx(10.13.4), ios(11.3));
+} WK_API_AVAILABLE(macos(10.13.4), ios(11.3));
 
-WK_CLASS_AVAILABLE(macosx(10.13.4), ios(11.3))
+WK_CLASS_AVAILABLE(macos(10.13.4), ios(11.3))
 @interface _WKApplicationManifest : NSObject <NSSecureCoding>
 
 @property (nonatomic, readonly, nullable, copy) NSString *name;

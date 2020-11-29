@@ -33,7 +33,6 @@
 #include <WebCore/ActivityState.h>
 #include <WebCore/FloatRect.h>
 #include <WebCore/IntRect.h>
-#include <WebCore/LayerFlushThrottleState.h>
 #include <WebCore/LayoutMilestone.h>
 #include <WebCore/PlatformScreen.h>
 #include <wtf/Forward.h>
@@ -80,15 +79,16 @@ public:
     virtual void setNeedsDisplayInRect(const WebCore::IntRect&) = 0;
     virtual void scroll(const WebCore::IntRect& scrollRect, const WebCore::IntSize& scrollDelta) = 0;
 
+    virtual void sendEnterAcceleratedCompositingModeIfNeeded() { }
+
     // FIXME: These should be pure virtual.
     virtual void forceRepaint() { }
     virtual bool forceRepaintAsync(CallbackID) { return false; }
     virtual void setLayerTreeStateIsFrozen(bool) { }
     virtual bool layerTreeStateIsFrozen() const { return false; }
-    virtual bool layerFlushThrottlingIsActive() const { return false; }
 
-    virtual void setPaintingEnabled(bool) { }
     virtual void updatePreferences(const WebPreferencesStore&) { }
+    virtual void enablePainting() { }
     virtual void mainFrameContentSizeChanged(const WebCore::IntSize&) { }
 
 #if PLATFORM(COCOA)
@@ -98,26 +98,24 @@ public:
     virtual void acceleratedAnimationDidStart(uint64_t /*layerID*/, const String& /*key*/, MonotonicTime /*startTime*/) { }
     virtual void acceleratedAnimationDidEnd(uint64_t /*layerID*/, const String& /*key*/) { }
     virtual void addFence(const WTF::MachSendRight&) { }
-#endif
-#if PLATFORM(IOS_FAMILY)
+
     virtual WebCore::FloatRect exposedContentRect() const = 0;
     virtual void setExposedContentRect(const WebCore::FloatRect&) = 0;
 #endif
+
     virtual void mainFrameScrollabilityChanged(bool) { }
 
-    virtual bool supportsAsyncScrolling() { return false; }
+    virtual bool supportsAsyncScrolling() const { return false; }
+    virtual bool usesDelegatedScrolling() const { return false; }
+    virtual bool usesDelegatedPageScaling() const { return false; }
 
-    virtual bool shouldUseTiledBackingForFrameView(const WebCore::FrameView&) { return false; }
+    virtual bool shouldUseTiledBackingForFrameView(const WebCore::FrameView&) const { return false; }
 
     virtual WebCore::GraphicsLayerFactory* graphicsLayerFactory() { return nullptr; }
     virtual void setRootCompositingLayer(WebCore::GraphicsLayer*) = 0;
-    virtual void scheduleCompositingLayerFlush() = 0;
-    virtual void scheduleInitialDeferredPaint() = 0;
-    virtual void scheduleCompositingLayerFlushImmediately() = 0;
+    virtual void triggerRenderingUpdate() = 0;
 
-#if USE(REQUEST_ANIMATION_FRAME_DISPLAY_MONITOR)
     virtual RefPtr<WebCore::DisplayRefreshMonitor> createDisplayRefreshMonitor(WebCore::PlatformDisplayID);
-#endif
 
     virtual void dispatchAfterEnsuringUpdatedScrollPosition(WTF::Function<void ()>&&);
 
@@ -126,20 +124,20 @@ public:
 
     virtual bool markLayersVolatileImmediatelyIfPossible() { return true; }
 
-    virtual bool adjustLayerFlushThrottling(WebCore::LayerFlushThrottleState::Flags) { return false; }
-
     virtual void attachViewOverlayGraphicsLayer(WebCore::GraphicsLayer*) { }
 
     virtual void setShouldScaleViewToFitDocument(bool) { }
 
-    virtual bool dispatchDidReachLayoutMilestone(OptionSet<WebCore::LayoutMilestone>) { return false; }
+    virtual bool addMilestonesToDispatch(OptionSet<WebCore::LayoutMilestone>) { return false; }
 
 #if PLATFORM(COCOA)
     // Used by TiledCoreAnimationDrawingArea.
     virtual void updateGeometry(const WebCore::IntSize& viewSize, bool flushSynchronously, const WTF::MachSendRight& fencePort) { }
 #endif
 
+#if USE(COORDINATED_GRAPHICS)
     virtual void layerHostDidFlushLayers() { }
+#endif
 
 #if USE(COORDINATED_GRAPHICS) || USE(TEXTURE_MAPPER)
     virtual void didChangeViewportAttributes(WebCore::ViewportAttributes&&) = 0;
@@ -147,6 +145,7 @@ public:
 #endif
 
     virtual void adoptLayersFromDrawingArea(DrawingArea&) { }
+    virtual void adoptDisplayRefreshMonitorsFromDrawingArea(DrawingArea&) { }
 
     void removeMessageReceiverIfNeeded();
 
@@ -162,19 +161,16 @@ protected:
     DrawingAreaIdentifier m_identifier;
     WebPage& m_webPage;
 
-#if USE(TEXTURE_MAPPER_GL) && PLATFORM(GTK) && PLATFORM(X11) && !USE(REDIRECTED_XCOMPOSITE_WINDOW)
-    uint64_t m_nativeSurfaceHandleForCompositing { 0 };
-#endif
-
 private:
     // IPC::MessageReceiver.
     void didReceiveMessage(IPC::Connection&, IPC::Decoder&) override;
-    void didReceiveSyncMessage(IPC::Connection&, IPC::Decoder&, std::unique_ptr<IPC::Encoder>&) override;
 
     // Message handlers.
     // FIXME: These should be pure virtual.
-    virtual void updateBackingStoreState(uint64_t /*backingStoreStateID*/, bool /*respondImmediately*/, float /*deviceScaleFactor*/, const WebCore::IntSize& /*size*/, 
+#if USE(COORDINATED_GRAPHICS) || USE(TEXTURE_MAPPER)
+    virtual void updateBackingStoreState(uint64_t /*backingStoreStateID*/, bool /*respondImmediately*/, float /*deviceScaleFactor*/, const WebCore::IntSize& /*size*/,
                                          const WebCore::IntSize& /*scrollOffset*/) { }
+#endif
     virtual void didUpdate() { }
 
 #if PLATFORM(COCOA)
@@ -186,11 +182,6 @@ private:
     virtual void commitTransientZoom(double scale, WebCore::FloatPoint origin) { }
 
     virtual void addTransactionCallbackID(WebKit::CallbackID) { ASSERT_NOT_REACHED(); }
-#endif
-
-#if USE(TEXTURE_MAPPER_GL) && PLATFORM(GTK) && PLATFORM(X11) && !USE(REDIRECTED_XCOMPOSITE_WINDOW)
-    virtual void setNativeSurfaceHandleForCompositing(uint64_t) = 0;
-    virtual void destroyNativeSurfaceHandleForCompositing(bool&) = 0;
 #endif
 
     bool m_hasRemovedMessageReceiver { false };

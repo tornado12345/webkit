@@ -28,9 +28,6 @@
 #include "ViewBackend.h"
 #include <cairo.h>
 #include <glib.h>
-#include <unordered_map>
-
-typedef void* EGLImageKHR;
 
 namespace WPEToolingBackends {
 
@@ -39,18 +36,22 @@ public:
     HeadlessViewBackend(uint32_t width, uint32_t height);
     virtual ~HeadlessViewBackend();
 
-    cairo_surface_t* createSnapshot();
+    struct wpe_view_backend* backend() const override;
+
+    cairo_surface_t* snapshot();
 
 private:
-    void displayBuffer(EGLImageKHR) override;
+    void updateSnapshot(struct wpe_fdo_shm_exported_buffer*);
+    void vsync();
 
-    void performUpdate();
+    struct wpe_view_backend_exportable_fdo* m_exportable { nullptr };
 
-    EGLImageKHR m_pendingImage;
-    EGLImageKHR m_lockedImage;
+    cairo_surface_t* m_snapshot { nullptr };
 
-    GSource* m_updateSource { nullptr };
-    gint64 m_frameRate { G_USEC_PER_SEC / 60 };
+    struct {
+        GSource* source { nullptr };
+        bool pending { false };
+    } m_update;
 };
 
 } // namespace WPEToolingBackends

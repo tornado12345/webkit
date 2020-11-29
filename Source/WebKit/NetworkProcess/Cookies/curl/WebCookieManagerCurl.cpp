@@ -27,51 +27,35 @@
 #include "WebCookieManager.h"
 
 #include "NetworkProcess.h"
+#include <WebCore/HTTPCookieAcceptPolicy.h>
 #include <WebCore/NetworkStorageSession.h>
 
 namespace WebKit {
 
 using namespace WebCore;
 
-void WebCookieManager::platformSetHTTPCookieAcceptPolicy(HTTPCookieAcceptPolicy policy)
+void WebCookieManager::platformSetHTTPCookieAcceptPolicy(HTTPCookieAcceptPolicy policy, CompletionHandler<void()>&& completionHandler)
 {
     CookieAcceptPolicy curlPolicy = CookieAcceptPolicy::OnlyFromMainDocumentDomain;
     switch (policy) {
-    case HTTPCookieAcceptPolicyAlways:
+    case HTTPCookieAcceptPolicy::AlwaysAccept:
         curlPolicy = CookieAcceptPolicy::Always;
         break;
-    case HTTPCookieAcceptPolicyNever:
+    case HTTPCookieAcceptPolicy::Never:
         curlPolicy = CookieAcceptPolicy::Never;
         break;
-    case HTTPCookieAcceptPolicyOnlyFromMainDocumentDomain:
+    case HTTPCookieAcceptPolicy::OnlyFromMainDocumentDomain:
         curlPolicy = CookieAcceptPolicy::OnlyFromMainDocumentDomain;
         break;
-    case HTTPCookieAcceptPolicyExclusivelyFromMainDocumentDomain:
+    case HTTPCookieAcceptPolicy::ExclusivelyFromMainDocumentDomain:
         curlPolicy = CookieAcceptPolicy::ExclusivelyFromMainDocumentDomain;
         break;
     }
 
     m_process.forEachNetworkStorageSession([curlPolicy] (const auto& networkStorageSession) {
-        networkStorageSession.cookieStorage().setCookieAcceptPolicy(networkStorageSession, curlPolicy);
+        networkStorageSession.setCookieAcceptPolicy(curlPolicy);
     });
-}
-
-HTTPCookieAcceptPolicy WebCookieManager::platformGetHTTPCookieAcceptPolicy()
-{
-    const auto& networkStorageSession = m_process.defaultStorageSession();
-    switch (networkStorageSession.cookieStorage().cookieAcceptPolicy(networkStorageSession)) {
-    case CookieAcceptPolicy::Always:
-        return HTTPCookieAcceptPolicyAlways;
-    case CookieAcceptPolicy::Never:
-        return HTTPCookieAcceptPolicyNever;
-    case CookieAcceptPolicy::OnlyFromMainDocumentDomain:
-        return HTTPCookieAcceptPolicyOnlyFromMainDocumentDomain;
-    case CookieAcceptPolicy::ExclusivelyFromMainDocumentDomain:
-        return HTTPCookieAcceptPolicyExclusivelyFromMainDocumentDomain;
-    }
-
-    ASSERT_NOT_REACHED();
-    return HTTPCookieAcceptPolicyOnlyFromMainDocumentDomain;
+    completionHandler();
 }
 
 } // namespace WebKit

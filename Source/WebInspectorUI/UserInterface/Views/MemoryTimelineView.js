@@ -96,6 +96,9 @@ WI.MemoryTimelineView = class MemoryTimelineView extends WI.TimelineView
         timeline.addEventListener(WI.Timeline.Event.RecordAdded, this._memoryTimelineRecordAdded, this);
 
         this.element.addEventListener("mousemove", this._handleGraphMouseMove.bind(this));
+
+        for (let record of timeline.records)
+            this._processRecord(record);
     }
 
     // Static
@@ -113,6 +116,8 @@ WI.MemoryTimelineView = class MemoryTimelineView extends WI.TimelineView
             return WI.UIString("Page");
         }
     }
+
+    static get memoryCategoryViewHeight() { return 75; }
 
     // Public
 
@@ -165,6 +170,13 @@ WI.MemoryTimelineView = class MemoryTimelineView extends WI.TimelineView
 
     get showsFilterBar() { return false; }
 
+    initialLayout()
+    {
+        super.initialLayout();
+
+        this.element.style.setProperty("--memory-category-view-height", MemoryTimelineView.memoryCategoryViewHeight + "px");
+    }
+
     layout()
     {
         if (this.layoutReason === WI.View.LayoutReason.Resize)
@@ -178,8 +190,6 @@ WI.MemoryTimelineView = class MemoryTimelineView extends WI.TimelineView
         if (!this._didInitializeCategories)
             return;
 
-        const memoryCategoryViewHeight = 75; // Keep this in sync with .memory-category-view
-
         let graphStartTime = this.startTime;
         let graphEndTime = this.endTime;
         let secondsPerPixel = this._timelineRuler.secondsPerPixel;
@@ -187,11 +197,10 @@ WI.MemoryTimelineView = class MemoryTimelineView extends WI.TimelineView
 
         let discontinuities = this._recording.discontinuitiesInTimeRange(graphStartTime, visibleEndTime);
 
-        // Don't include the record before the graph start if the graph start is within a gap.
-        let includeRecordBeforeStart = !discontinuities.length || discontinuities[0].startTime > graphStartTime;
-
-        // FIXME: <https://webkit.org/b/153759> Web Inspector: Memory Timelines should better extend to future data
-        let visibleRecords = this.representedObject.recordsInTimeRange(graphStartTime, visibleEndTime, includeRecordBeforeStart);
+        let visibleRecords = this.representedObject.recordsInTimeRange(graphStartTime, visibleEndTime, {
+            includeRecordBeforeStart: !discontinuities.length || discontinuities[0].startTime > graphStartTime,
+            includeRecordAfterEnd: true,
+        });
         if (!visibleRecords.length || (visibleRecords.length === 1 && visibleRecords[0].endTime < graphStartTime)) {
             this.clear();
             return;
@@ -219,10 +228,10 @@ WI.MemoryTimelineView = class MemoryTimelineView extends WI.TimelineView
             let time = record.startTime;
             let startDiscontinuity = null;
             let endDiscontinuity = null;
-            if (discontinuities.length && discontinuities[0].endTime < time) {
+            if (discontinuities.length && discontinuities[0].endTime <= time) {
                 startDiscontinuity = discontinuities.shift();
                 endDiscontinuity = startDiscontinuity;
-                while (discontinuities.length && discontinuities[0].endTime < time)
+                while (discontinuities.length && discontinuities[0].endTime <= time)
                     endDiscontinuity = discontinuities.shift();
             }
 
@@ -265,7 +274,7 @@ WI.MemoryTimelineView = class MemoryTimelineView extends WI.TimelineView
                 return (time - graphStartTime) / secondsPerPixel;
             }
 
-            let size = new WI.Size(xScale(graphEndTime), memoryCategoryViewHeight);
+            let size = new WI.Size(xScale(graphEndTime), MemoryTimelineView.memoryCategoryViewHeight);
 
             function yScale(value) {
                 return size.height - (((value - graphMin) / graphMax) * size.height);
@@ -445,12 +454,17 @@ WI.MemoryTimelineView = class MemoryTimelineView extends WI.TimelineView
         let memoryTimelineRecord = event.data.record;
         console.assert(memoryTimelineRecord instanceof WI.MemoryTimelineRecord);
 
+        this._processRecord(memoryTimelineRecord);
+
+        if (memoryTimelineRecord.startTime >= this.startTime && memoryTimelineRecord.endTime <= this.endTime)
+            this.needsLayout();
+    }
+
+    _processRecord(memoryTimelineRecord)
+    {
         if (!this._didInitializeCategories)
             this._initializeCategoryViews(memoryTimelineRecord);
 
         this._maxSize = Math.max(this._maxSize, memoryTimelineRecord.totalSize);
-
-        if (memoryTimelineRecord.startTime >= this.startTime && memoryTimelineRecord.endTime <= this.endTime)
-            this.needsLayout();
     }
 };

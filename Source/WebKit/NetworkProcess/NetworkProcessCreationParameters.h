@@ -27,15 +27,13 @@
 
 #include "CacheModel.h"
 #include "SandboxExtension.h"
-#include "WebsiteDataStoreParameters.h"
 #include <WebCore/Cookie.h>
 #include <wtf/ProcessID.h>
 #include <wtf/Vector.h>
 #include <wtf/text/WTFString.h>
 
 #if USE(SOUP)
-#include "HTTPCookieAcceptPolicy.h"
-#include <WebCore/SoupNetworkProxySettings.h>
+#include <WebCore/HTTPCookieAcceptPolicy.h>
 #endif
 
 namespace IPC {
@@ -49,18 +47,11 @@ struct NetworkProcessCreationParameters {
     NetworkProcessCreationParameters();
 
     void encode(IPC::Encoder&) const;
-    static bool decode(IPC::Decoder&, NetworkProcessCreationParameters&);
+    static WARN_UNUSED_RETURN bool decode(IPC::Decoder&, NetworkProcessCreationParameters&);
 
     CacheModel cacheModel { CacheModel::DocumentViewer };
-    bool canHandleHTTPSServerTrustEvaluation { true };
 
-    String diskCacheDirectory;
-    SandboxExtension::Handle diskCacheDirectoryExtensionHandle;
-    bool shouldEnableNetworkCacheEfficacyLogging { false };
-#if ENABLE(NETWORK_CACHE_SPECULATIVE_REVALIDATION)
-    bool shouldEnableNetworkCacheSpeculativeRevalidation { false };
-#endif
-#if PLATFORM(MAC)
+#if PLATFORM(MAC) || PLATFORM(MACCATALYST)
     Vector<uint8_t> uiProcessCookieStorageIdentifier;
 #endif
 #if PLATFORM(IOS_FAMILY)
@@ -69,49 +60,26 @@ struct NetworkProcessCreationParameters {
     SandboxExtension::Handle parentBundleDirectoryExtensionHandle;
 #endif
     bool shouldSuppressMemoryPressureHandler { false };
-    bool shouldUseTestingNetworkSession { false };
 
     Vector<String> urlSchemesRegisteredForCustomProtocols;
 
 #if PLATFORM(COCOA)
     String uiProcessBundleIdentifier;
     uint32_t uiProcessSDKVersion { 0 };
-#if PLATFORM(IOS_FAMILY)
-    String ctDataConnectionServiceType;
-#endif
     RetainPtr<CFDataRef> networkATSContext;
-    bool storageAccessAPIEnabled;
-    bool suppressesConnectionTerminationOnSystemChange;
 #endif
 
-    WebsiteDataStoreParameters defaultDataStoreParameters;
-    
 #if USE(SOUP)
-    HTTPCookieAcceptPolicy cookieAcceptPolicy { HTTPCookieAcceptPolicyAlways };
-    bool ignoreTLSErrors { false };
+    WebCore::HTTPCookieAcceptPolicy cookieAcceptPolicy { WebCore::HTTPCookieAcceptPolicy::AlwaysAccept };
     Vector<String> languages;
-    WebCore::SoupNetworkProxySettings proxySettings;
 #endif
 
     Vector<String> urlSchemesRegisteredAsSecure;
     Vector<String> urlSchemesRegisteredAsBypassingContentSecurityPolicy;
     Vector<String> urlSchemesRegisteredAsLocal;
     Vector<String> urlSchemesRegisteredAsNoAccess;
-    Vector<String> urlSchemesRegisteredAsDisplayIsolated;
-    Vector<String> urlSchemesRegisteredAsCanDisplayOnlyIfCanRequest;
-    Vector<String> urlSchemesRegisteredAsCORSEnabled;
 
-#if ENABLE(PROXIMITY_NETWORKING)
-    unsigned wirelessContextIdentifier { 0 };
-#endif
-
-#if ENABLE(SERVICE_WORKER)
-    String serviceWorkerRegistrationDirectory;
-    SandboxExtension::Handle serviceWorkerRegistrationDirectoryExtensionHandle;
-    Vector<String> urlSchemesServiceWorkersCanHandle;
-    bool shouldDisableServiceWorkerProcessTerminationDelay { false };
-#endif
-    bool shouldEnableITPDatabase { false };
+    bool enableAdClickAttributionDebugMode { false };
 };
 
 } // namespace WebKit

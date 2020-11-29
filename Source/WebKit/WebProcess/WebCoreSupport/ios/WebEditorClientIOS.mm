@@ -36,15 +36,21 @@
 namespace WebKit {
 using namespace WebCore;
     
-void WebEditorClient::handleKeyboardEvent(KeyboardEvent* event)
+void WebEditorClient::handleKeyboardEvent(KeyboardEvent& event)
 {
     if (m_page->handleEditingKeyboardEvent(event))
-        event->setDefaultHandled();
+        event.setDefaultHandled();
 }
 
-void WebEditorClient::handleInputMethodKeydown(KeyboardEvent* event)
+void WebEditorClient::handleInputMethodKeydown(KeyboardEvent& event)
 {
+#if USE(UIKIT_KEYBOARD_ADDITIONS)
+    if (event.handledByInputMethod())
+        event.setDefaultHandled();
+#else
     notImplemented();
+    UNUSED_PARAM(event);
+#endif
 }
 
 void WebEditorClient::setInsertionPasteboard(const String&)
@@ -93,7 +99,29 @@ void WebEditorClient::updateStringForFind(const String& findString)
 
 void WebEditorClient::overflowScrollPositionChanged()
 {
-    m_page->didChangeSelection();
+    m_page->didChangeOverflowScrollPosition();
+}
+
+void WebEditorClient::subFrameScrollPositionChanged()
+{
+    m_page->didChangeOverflowScrollPosition();
+}
+
+bool WebEditorClient::shouldAllowSingleClickToChangeSelection(WebCore::Node& targetNode, const WebCore::VisibleSelection& newSelection) const
+{
+    // The text selection assistant will handle selection in the case where we are already editing the node
+    auto* editableRoot = newSelection.rootEditableElement();
+    return !editableRoot || editableRoot != targetNode.rootEditableElement() || !m_page->isShowingInputViewForFocusedElement();
+}
+
+bool WebEditorClient::shouldRevealCurrentSelectionAfterInsertion() const
+{
+    return m_page->shouldRevealCurrentSelectionAfterInsertion();
+}
+
+bool WebEditorClient::shouldSuppressPasswordEcho() const
+{
+    return m_page->screenIsBeingCaptured() || m_page->hardwareKeyboardIsAttached();
 }
 
 } // namespace WebKit

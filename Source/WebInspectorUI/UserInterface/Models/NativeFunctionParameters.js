@@ -161,7 +161,8 @@ WI.NativeConstructorFunctionParameters = {
 
     Console: {
         assert: "condition, [message], [...values]",
-        count: "[label]",
+        count: "label = \"default\"",
+        countReset: "label = \"default\"",
         debug: "message, [...values]",
         dir: "object",
         dirxml: "object",
@@ -175,10 +176,12 @@ WI.NativeConstructorFunctionParameters = {
         profileEnd: "name",
         record: "object, [options]",
         recordEnd: "object",
+        screenshot: "[node]",
         table: "data, [columns]",
         takeHeapSnapshot: "[label]",
-        time: "name = \"default\"",
-        timeEnd: "name = \"default\"",
+        time: "label = \"default\"",
+        timeLog: "label = \"default\"",
+        timeEnd: "label = \"default\"",
         timeStamp: "[label]",
         trace: "message, [...values]",
         warn: "message, [...values]",
@@ -695,7 +698,7 @@ WI.NativePrototypeFunctionParameters = {
     CommandLineAPIHost: {
         copyText: "text",
         databaseId: "database",
-        getEventListeners: "node",
+        getEventListeners: "target",
         inspect: "objectId, hints",
         storageId: "storage",
         __proto__: null,
@@ -1089,11 +1092,6 @@ WI.NativePrototypeFunctionParameters = {
     MediaQueryList: {
         addListener: "[listener]",
         removeListener: "[listener]",
-        __proto__: null,
-    },
-
-    MediaQueryListListener: {
-        queryChanged: "[list]",
         __proto__: null,
     },
 
@@ -2180,20 +2178,6 @@ WI.NativePrototypeFunctionParameters = {
 };
 
 (function() {
-    // COMPATIBILITY (iOS 9): EventTarget properties were on instances, now there
-    // is an actual EventTarget prototype in the chain.
-    var EventTarget = WI.NativePrototypeFunctionParameters.EventTarget;
-    var eventTargetTypes = [
-        "Node", "Window",
-        "AudioNode", "AudioTrackList", "DOMApplicationCache", "FileReader",
-        "MediaController", "MediaStreamTrack", "MessagePort", "Notification", "RTCDTMFSender",
-        "SpeechSynthesisUtterance", "TextTrack", "TextTrackCue", "TextTrackList",
-        "VideoTrackList", "WebKitMediaKeySession", "WebKitNamedFlow", "WebSocket",
-        "WorkerGlobalScope", "XMLHttpRequest", "webkitMediaStream", "webkitRTCPeerConnection"
-    ];
-    for (var type of eventTargetTypes)
-        Object.assign(WI.NativePrototypeFunctionParameters[type], EventTarget);
-
     var ElementQueries = {
         getElementsByClassName: "classNames",
         getElementsByTagName: "tagName",
@@ -2219,9 +2203,5 @@ WI.NativePrototypeFunctionParameters = {
     Object.assign(WI.NativePrototypeFunctionParameters.Element, ParentNode);
     Object.assign(WI.NativePrototypeFunctionParameters.Document, ParentNode);
     Object.assign(WI.NativePrototypeFunctionParameters.DocumentFragment, ParentNode);
-
-    // COMPATIBILITY (iOS 9): window.console used to be a Console object instance,
-    // now it is just a namespace object on the global object.
-    WI.NativePrototypeFunctionParameters.Console = WI.NativeConstructorFunctionParameters.Console;
 
 })();

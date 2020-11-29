@@ -27,8 +27,10 @@
 #include "DisplayListRecorder.h"
 
 #include "DisplayList.h"
+#include "DisplayListDrawingContext.h"
 #include "DisplayListItems.h"
 #include "GraphicsContext.h"
+#include "ImageBuffer.h"
 #include "Logging.h"
 #include <wtf/MathExtras.h>
 #include <wtf/text/TextStream.h>
@@ -36,12 +38,13 @@
 namespace WebCore {
 namespace DisplayList {
 
-Recorder::Recorder(GraphicsContext& context, DisplayList& displayList, const GraphicsContextState& state, const FloatRect& initialClip, const AffineTransform& baseCTM)
-    : GraphicsContextImpl(context, initialClip, baseCTM)
+Recorder::Recorder(GraphicsContext& context, DisplayList& displayList, const GraphicsContextState& state, const FloatRect& initialClip, const AffineTransform& initialCTM, Delegate* delegate)
+    : GraphicsContextImpl(context, initialClip, AffineTransform())
     , m_displayList(displayList)
+    , m_delegate(delegate)
 {
     LOG_WITH_STREAM(DisplayLists, stream << "\nRecording with clip " << initialClip);
-    m_stateStack.append(ContextState(state, baseCTM, initialClip));
+    m_stateStack.append({ state, initialCTM, initialClip });
 }
 
 Recorder::~Recorder()
@@ -50,8 +53,61 @@ Recorder::~Recorder()
     LOG(DisplayLists, "Recorded display list:\n%s", m_displayList.description().data());
 }
 
+void Recorder::putImageData(WebCore::AlphaPremultiplication inputFormat, const WebCore::ImageData& imageData, const WebCore::IntRect& srcRect, const WebCore::IntPoint& destPoint, WebCore::AlphaPremultiplication destFormat)
+{
+    appendItem(WebCore::DisplayList::PutImageData::create(inputFormat, imageData, srcRect, destPoint, destFormat));
+}
+
+static bool containsOnlyInlineStateChanges(const GraphicsContextStateChange& changes, GraphicsContextState::StateChangeFlags changeFlags)
+{
+    static constexpr GraphicsContextState::StateChangeFlags inlineStateChangeFlags {
+        GraphicsContextState::StrokeThicknessChange,
+        GraphicsContextState::StrokeColorChange,
+        GraphicsContextState::FillColorChange,
+        GraphicsContextState::FillGradientChange,
+    };
+
+    if (changeFlags != (changeFlags & inlineStateChangeFlags))
+        return false;
+
+    if (changeFlags.contains(GraphicsContextState::StrokeColorChange) && !changes.m_state.strokeColor.isInline())
+        return false;
+
+    if (changeFlags.contains(GraphicsContextState::FillColorChange) && !changes.m_state.fillColor.isInline())
+        return false;
+
+    if (changeFlags.contains(GraphicsContextState::FillGradientChange)
+        && (!changes.m_state.fillGradient || !SetInlineFillGradient::isInline(*changes.m_state.fillGradient)))
+        return false;
+
+    return true;
+}
+
+void Recorder::appendStateChangeItem(const GraphicsContextStateChange& changes, GraphicsContextState::StateChangeFlags changeFlags)
+{
+    if (!containsOnlyInlineStateChanges(changes, changeFlags)) {
+        m_displayList.appendItem(SetState::create(changes.m_state, changeFlags));
+        return;
+    }
+
+    if (changeFlags.contains(GraphicsContextState::StrokeColorChange))
+        m_displayList.appendItem(SetInlineStrokeColor::create(changes.m_state.strokeColor.asInline()));
+
+    if (changeFlags.contains(GraphicsContextState::StrokeThicknessChange))
+        m_displayList.appendItem(SetStrokeThickness::create(changes.m_state.strokeThickness));
+
+    if (changeFlags.contains(GraphicsContextState::FillColorChange))
+        m_displayList.appendItem(SetInlineFillColor::create(changes.m_state.fillColor.asInline()));
+
+    if (changeFlags.contains(GraphicsContextState::FillGradientChange))
+        m_displayList.appendItem(SetInlineFillGradient::create(*changes.m_state.fillGradient));
+}
+
 void Recorder::willAppendItem(const Item& item)
 {
+    if (m_delegate)
+        m_delegate->willAppendItem(item);
+
     if (item.isDrawingItem()
 #if USE(CG)
         || item.type() == ItemType::ApplyStrokePattern || item.type() == ItemType::ApplyStrokePattern
@@ -61,8 +117,8 @@ void Recorder::willAppendItem(const Item& item)
         GraphicsContextState::StateChangeFlags changesFromLastState = stateChanges.changesFromState(currentState().lastDrawingState);
         if (changesFromLastState) {
             LOG_WITH_STREAM(DisplayLists, stream << "pre-drawing, saving state " << GraphicsContextStateChange(stateChanges.m_state, changesFromLastState));
-            m_displayList.append(SetState::create(stateChanges.m_state, changesFromLastState));
-            stateChanges.m_changeFlags = 0;
+            appendStateChangeItem(stateChanges, changesFromLastState);
+            stateChanges.m_changeFlags = { };
             currentState().lastDrawingState = stateChanges.m_state;
         }
         currentState().wasUsedForDrawing = true;
@@ -101,49 +157,50 @@ void Recorder::setMiterLimit(float miterLimit)
 
 void Recorder::drawGlyphs(const Font& font, const GlyphBuffer& glyphBuffer, unsigned from, unsigned numGlyphs, const FloatPoint& startPoint, FontSmoothingMode smoothingMode)
 {
-    DrawingItem& newItem = downcast<DrawingItem>(appendItem(DrawGlyphs::create(font, glyphBuffer.glyphs(from), glyphBuffer.advances(from), numGlyphs, FloatPoint(), toFloatSize(startPoint), smoothingMode)));
-    updateItemExtent(newItem);
+    appendItemAndUpdateExtent(DrawGlyphs::create(font, glyphBuffer.glyphs(from), glyphBuffer.advances(from), numGlyphs, startPoint, smoothingMode));
 }
 
 ImageDrawResult Recorder::drawImage(Image& image, const FloatRect& destination, const FloatRect& source, const ImagePaintingOptions& imagePaintingOptions)
 {
-    DrawingItem& newItem = downcast<DrawingItem>(appendItem(DrawImage::create(image, destination, source, imagePaintingOptions)));
-    updateItemExtent(newItem);
+    appendItemAndUpdateExtent(DrawImage::create(image, destination, source, imagePaintingOptions));
     return ImageDrawResult::DidRecord;
 }
 
 ImageDrawResult Recorder::drawTiledImage(Image& image, const FloatRect& destination, const FloatPoint& source, const FloatSize& tileSize, const FloatSize& spacing, const ImagePaintingOptions& imagePaintingOptions)
 {
-    DrawingItem& newItem = downcast<DrawingItem>(appendItem(DrawTiledImage::create(image, destination, source, tileSize, spacing, imagePaintingOptions)));
-    updateItemExtent(newItem);
+    appendItemAndUpdateExtent(DrawTiledImage::create(image, destination, source, tileSize, spacing, imagePaintingOptions));
     return ImageDrawResult::DidRecord;
 }
 
 ImageDrawResult Recorder::drawTiledImage(Image& image, const FloatRect& destination, const FloatRect& source, const FloatSize& tileScaleFactor, Image::TileRule hRule, Image::TileRule vRule, const ImagePaintingOptions& imagePaintingOptions)
 {
-    DrawingItem& newItem = downcast<DrawingItem>(appendItem(DrawTiledScaledImage::create(image, destination, source, tileScaleFactor, hRule, vRule, imagePaintingOptions)));
-    updateItemExtent(newItem);
+    appendItemAndUpdateExtent(DrawTiledScaledImage::create(image, destination, source, tileScaleFactor, hRule, vRule, imagePaintingOptions));
     return ImageDrawResult::DidRecord;
 }
 
-#if USE(CG) || USE(CAIRO)
-void Recorder::drawNativeImage(const NativeImagePtr& image, const FloatSize& imageSize, const FloatRect& destRect, const FloatRect& srcRect, CompositeOperator op, BlendMode blendMode, ImageOrientation orientation)
+bool Recorder::drawImageBuffer(WebCore::ImageBuffer& imageBuffer, const FloatRect& destRect, const FloatRect& srcRect, const ImagePaintingOptions& options)
 {
-    DrawingItem& newItem = downcast<DrawingItem>(appendItem(DrawNativeImage::create(image, imageSize, destRect, srcRect, op, blendMode, orientation)));
-    updateItemExtent(newItem);
-}
-#endif
+    if (!m_delegate || !m_delegate->lockRemoteImageBuffer(imageBuffer))
+        return false;
 
-void Recorder::drawPattern(Image& image, const FloatRect& destRect, const FloatRect& tileRect, const AffineTransform& patternTransform, const FloatPoint& phase, const FloatSize& spacing, CompositeOperator op, BlendMode blendMode)
+    appendItemAndUpdateExtent(DrawImageBuffer::create(imageBuffer.renderingResourceIdentifier(), destRect, srcRect, options));
+    return true;
+}
+
+void Recorder::drawNativeImage(const NativeImagePtr& image, const FloatSize& imageSize, const FloatRect& destRect, const FloatRect& srcRect, const ImagePaintingOptions& options)
 {
-    DrawingItem& newItem = downcast<DrawingItem>(appendItem(DrawPattern::create(image, destRect, tileRect, patternTransform, phase, spacing, op, blendMode)));
-    updateItemExtent(newItem);
+    appendItemAndUpdateExtent(DrawNativeImage::create(image, imageSize, destRect, srcRect, options));
+}
+
+void Recorder::drawPattern(Image& image, const FloatRect& destRect, const FloatRect& tileRect, const AffineTransform& patternTransform, const FloatPoint& phase, const FloatSize& spacing, const ImagePaintingOptions& options)
+{
+    appendItemAndUpdateExtent(DrawPattern::create(image, destRect, tileRect, patternTransform, phase, spacing, options));
 }
 
 void Recorder::save()
 {
     appendItem(Save::create());
-    m_stateStack.append(m_stateStack.last().cloneForSave(m_displayList.itemCount() - 1));
+    m_stateStack.append(m_stateStack.last().cloneForSave());
 }
 
 void Recorder::restore()
@@ -152,24 +209,12 @@ void Recorder::restore()
         return;
 
     bool stateUsedForDrawing = currentState().wasUsedForDrawing;
-    size_t saveIndex = currentState().saveItemIndex;
 
     m_stateStack.removeLast();
     // Have to avoid eliding nested Save/Restore when a descendant state contains drawing items.
     currentState().wasUsedForDrawing |= stateUsedForDrawing;
 
-    if (!stateUsedForDrawing && saveIndex) {
-        // This Save/Restore didn't contain any drawing items. Roll back to just before the last save.
-        m_displayList.removeItemsFromIndex(saveIndex);
-        return;
-    }
-
     appendItem(Restore::create());
-
-    if (saveIndex) {
-        Save& saveItem = downcast<Save>(m_displayList.itemAt(saveIndex));
-        saveItem.setRestoreIndex(m_displayList.itemCount() - 1);
-    }
 }
 
 void Recorder::translate(float x, float y)
@@ -196,21 +241,21 @@ void Recorder::concatCTM(const AffineTransform& transform)
     appendItem(ConcatenateCTM::create(transform));
 }
 
-void Recorder::setCTM(const AffineTransform&)
+void Recorder::setCTM(const AffineTransform& transform)
 {
-    WTFLogAlways("GraphicsContext::setCTM() is not compatible with DisplayList::Recorder.");
+    currentState().setCTM(transform);
+    appendItem(SetCTM::create(transform));
 }
 
 AffineTransform Recorder::getCTM(GraphicsContext::IncludeDeviceScale)
 {
-    WTFLogAlways("GraphicsContext::getCTM() is not yet compatible with DisplayList::Recorder.");
-    return { };
+    // FIXME: Respect the given value of IncludeDeviceScale.
+    return currentState().ctm;
 }
 
 void Recorder::beginTransparencyLayer(float opacity)
 {
-    DrawingItem& newItem = downcast<DrawingItem>(appendItem(BeginTransparencyLayer::create(opacity)));
-    updateItemExtent(newItem);
+    appendItemAndUpdateExtent(BeginTransparencyLayer::create(opacity));
 }
 
 void Recorder::endTransparencyLayer()
@@ -220,122 +265,114 @@ void Recorder::endTransparencyLayer()
 
 void Recorder::drawRect(const FloatRect& rect, float borderThickness)
 {
-    DrawingItem& newItem = downcast<DrawingItem>(appendItem(DrawRect::create(rect, borderThickness)));
-    updateItemExtent(newItem);
+    appendItemAndUpdateExtent(DrawRect::create(rect, borderThickness));
 }
 
 void Recorder::drawLine(const FloatPoint& point1, const FloatPoint& point2)
 {
-    DrawingItem& newItem = downcast<DrawingItem>(appendItem(DrawLine::create(point1, point2)));
-    updateItemExtent(newItem);
+    appendItemAndUpdateExtent(DrawLine::create(point1, point2));
 }
 
 void Recorder::drawLinesForText(const FloatPoint& point, float thickness, const DashArray& widths, bool printing, bool doubleLines)
 {
-    DrawingItem& newItem = downcast<DrawingItem>(appendItem(DrawLinesForText::create(FloatPoint(), toFloatSize(point), thickness, widths, printing, doubleLines)));
-    updateItemExtent(newItem);
+    appendItemAndUpdateExtent(DrawLinesForText::create(FloatPoint(), toFloatSize(point), thickness, widths, printing, doubleLines));
 }
 
 void Recorder::drawDotsForDocumentMarker(const FloatRect& rect, DocumentMarkerLineStyle style)
 {
-    DrawingItem& newItem = downcast<DrawingItem>(appendItem(DrawDotsForDocumentMarker::create(rect, style)));
-    updateItemExtent(newItem);
+    appendItemAndUpdateExtent(DrawDotsForDocumentMarker::create(rect, style));
 }
 
 void Recorder::drawEllipse(const FloatRect& rect)
 {
-    DrawingItem& newItem = downcast<DrawingItem>(appendItem(DrawEllipse::create(rect)));
-    updateItemExtent(newItem);
+    appendItemAndUpdateExtent(DrawEllipse::create(rect));
 }
 
 void Recorder::drawPath(const Path& path)
 {
-    DrawingItem& newItem = downcast<DrawingItem>(appendItem(DrawPath::create(path)));
-    updateItemExtent(newItem);
+    appendItemAndUpdateExtent(DrawPath::create(path));
 }
 
 void Recorder::drawFocusRing(const Path& path, float width, float offset, const Color& color)
 {
-    DrawingItem& newItem = downcast<DrawingItem>(appendItem(DrawFocusRingPath::create(path, width, offset, color)));
-    updateItemExtent(newItem);
+    appendItemAndUpdateExtent(DrawFocusRingPath::create(path, width, offset, color));
 }
 
 void Recorder::drawFocusRing(const Vector<FloatRect>& rects, float width, float offset, const Color& color)
 {
-    DrawingItem& newItem = downcast<DrawingItem>(appendItem(DrawFocusRingRects::create(rects, width, offset, color)));
-    updateItemExtent(newItem);
+    appendItemAndUpdateExtent(DrawFocusRingRects::create(rects, width, offset, color));
 }
 
 void Recorder::fillRect(const FloatRect& rect)
 {
-    DrawingItem& newItem = downcast<DrawingItem>(appendItem(FillRect::create(rect)));
-    updateItemExtent(newItem);
+    appendItemAndUpdateExtent(FillRect::create(rect));
 }
 
 void Recorder::fillRect(const FloatRect& rect, const Color& color)
 {
-    DrawingItem& newItem = downcast<DrawingItem>(appendItem(FillRectWithColor::create(rect, color)));
-    updateItemExtent(newItem);
+    appendItemAndUpdateExtent(FillRectWithColor::create(rect, color));
 }
 
 void Recorder::fillRect(const FloatRect& rect, Gradient& gradient)
 {
-    DrawingItem& newItem = downcast<DrawingItem>(appendItem(FillRectWithGradient::create(rect, gradient)));
-    updateItemExtent(newItem);
+    appendItemAndUpdateExtent(FillRectWithGradient::create(rect, gradient));
 }
 
 void Recorder::fillRect(const FloatRect& rect, const Color& color, CompositeOperator op, BlendMode blendMode)
 {
-    DrawingItem& newItem = downcast<DrawingItem>(appendItem(FillCompositedRect::create(rect, color, op, blendMode)));
-    updateItemExtent(newItem);
+    appendItemAndUpdateExtent(FillCompositedRect::create(rect, color, op, blendMode));
 }
 
 void Recorder::fillRoundedRect(const FloatRoundedRect& rect, const Color& color, BlendMode blendMode)
 {
-    DrawingItem& newItem = downcast<DrawingItem>(appendItem(FillRoundedRect::create(rect, color, blendMode)));
-    updateItemExtent(newItem);
+    appendItemAndUpdateExtent(FillRoundedRect::create(rect, color, blendMode));
 }
 
 void Recorder::fillRectWithRoundedHole(const FloatRect& rect, const FloatRoundedRect& roundedHoleRect, const Color& color)
 {
-    DrawingItem& newItem = downcast<DrawingItem>(appendItem(FillRectWithRoundedHole::create(rect, roundedHoleRect, color)));
-    updateItemExtent(newItem);
+    appendItemAndUpdateExtent(FillRectWithRoundedHole::create(rect, roundedHoleRect, color));
 }
 
 void Recorder::fillPath(const Path& path)
 {
-    DrawingItem& newItem = downcast<DrawingItem>(appendItem(FillPath::create(path)));
-    updateItemExtent(newItem);
+#if ENABLE(INLINE_PATH_DATA)
+    if (path.hasInlineData()) {
+        appendItemAndUpdateExtent(FillInlinePath::create(path.inlineData()));
+        return;
+    }
+#endif
+    appendItemAndUpdateExtent(FillPath::create(path));
 }
 
 void Recorder::fillEllipse(const FloatRect& rect)
 {
-    DrawingItem& newItem = downcast<DrawingItem>(appendItem(FillEllipse::create(rect)));
-    updateItemExtent(newItem);
+    appendItemAndUpdateExtent(FillEllipse::create(rect));
 }
 
 void Recorder::strokeRect(const FloatRect& rect, float lineWidth)
 {
-    DrawingItem& newItem = downcast<DrawingItem>(appendItem(StrokeRect::create(rect, lineWidth)));
-    updateItemExtent(newItem);
+    appendItemAndUpdateExtent(StrokeRect::create(rect, lineWidth));
 }
 
 void Recorder::strokePath(const Path& path)
 {
-    DrawingItem& newItem = downcast<DrawingItem>(appendItem(StrokePath::create(path)));
-    updateItemExtent(newItem);
+#if ENABLE(INLINE_PATH_DATA)
+    if (path.hasInlineData()) {
+        appendItemAndUpdateExtent(StrokeInlinePath::create(path.inlineData()));
+        return;
+    }
+#endif
+    appendItemAndUpdateExtent(StrokePath::create(path));
 }
 
 void Recorder::strokeEllipse(const FloatRect& rect)
 {
-    DrawingItem& newItem = downcast<DrawingItem>(appendItem(StrokeEllipse::create(rect)));
-    updateItemExtent(newItem);
+    appendItemAndUpdateExtent(StrokeEllipse::create(rect));
 }
 
 void Recorder::clearRect(const FloatRect& rect)
 {
-    DrawingItem& newItem = downcast<DrawingItem>(appendItem(ClearRect::create(rect)));
-    updateItemExtent(newItem);
+    appendItemAndUpdateExtent(ClearRect::create(rect));
 }
 
 #if USE(CG)
@@ -383,6 +420,18 @@ void Recorder::clipToImageBuffer(ImageBuffer&, const FloatRect&)
     WTFLogAlways("GraphicsContext::clipToImageBuffer is not compatible with DisplayList::Recorder.");
 }
 
+void Recorder::clipToDrawingCommands(const FloatRect& destination, ColorSpace colorSpace, Function<void(GraphicsContext&)>&& drawingFunction)
+{
+    auto recordingContext = makeUnique<DrawingContext>(destination.size());
+    drawingFunction(recordingContext->context());
+    appendItem(ClipToDrawingCommands::create(destination, colorSpace, recordingContext->takeDisplayList()));
+}
+
+void Recorder::paintFrameForMedia(MediaPlayer& player, const FloatRect& destination)
+{
+    appendItem(PaintFrameForMedia::create(player, destination));
+}
+
 void Recorder::applyDeviceScaleFactor(float deviceScaleFactor)
 {
     // FIXME: this changes the baseCTM, which will invalidate all of our cached extents.
@@ -396,16 +445,25 @@ FloatRect Recorder::roundToDevicePixels(const FloatRect& rect, GraphicsContext::
     return rect;
 }
 
-Item& Recorder::appendItem(Ref<Item>&& item)
+void Recorder::appendItemAndUpdateExtent(Ref<DrawingItem>&& item)
+{
+    auto& newItem = appendItem(WTFMove(item));
+    updateItemExtent(newItem);
+}
+
+template<typename ItemType>
+ItemType& Recorder::appendItem(Ref<ItemType>&& item)
 {
     willAppendItem(item.get());
-    return m_displayList.append(WTFMove(item));
+    return downcast<ItemType>(m_displayList.append(WTFMove(item)));
 }
 
 void Recorder::updateItemExtent(DrawingItem& item) const
 {
     if (Optional<FloatRect> rect = item.localBounds(graphicsContext()))
         item.setExtent(extentFromLocalBounds(rect.value()));
+    else if (Optional<FloatRect> rect = item.globalBounds())
+        item.setExtent(rect.value());
 }
 
 // FIXME: share with ShadowData
@@ -481,6 +539,18 @@ void Recorder::ContextState::scale(const FloatSize& size)
 {
     ctm.scale(size);
     clipBounds.scale(1 / size.width(), 1 / size.height());
+}
+
+void Recorder::ContextState::setCTM(const AffineTransform& matrix)
+{
+    Optional<AffineTransform> inverseTransformForClipBounds;
+    if (auto originalCTMInverse = ctm.inverse())
+        inverseTransformForClipBounds = originalCTMInverse->multiply(matrix).inverse();
+
+    ctm = matrix;
+
+    if (inverseTransformForClipBounds)
+        clipBounds = inverseTransformForClipBounds->mapRect(clipBounds);
 }
 
 void Recorder::ContextState::concatCTM(const AffineTransform& matrix)

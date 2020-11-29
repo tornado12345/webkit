@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004, 2005, 2006, 2016 Apple Inc.  All rights reserved.
+ * Copyright (C) 2004-2020 Apple Inc.  All rights reserved.
  * Copyright (C) 2007-2008 Torch Mobile, Inc.
  * Copyright (C) 2012 Company 100 Inc.
  *
@@ -27,45 +27,16 @@
 
 #pragma once
 
-#include "GraphicsTypes.h"
-#include "ImageOrientation.h"
-
-#if USE(CG)
-#include <wtf/RetainPtr.h>
-typedef struct CGImage* CGImageRef;
-#elif USE(CAIRO)
-#include "RefPtrCairo.h"
-#elif USE(WINGDI)
-#include "SharedBitmap.h"
-#endif
-
-#if USE(DIRECT2D)
-#include "COMPtr.h"
-#include <d2d1.h>
-#endif
+#include "NativeImagePtr.h"
 
 namespace WebCore {
 
 class Color;
-class FloatRect;
 class IntSize;
-class GraphicsContext;
 
-#if USE(CG)
-typedef RetainPtr<CGImageRef> NativeImagePtr;
-#elif USE(DIRECT2D)
-typedef COMPtr<ID2D1Bitmap> NativeImagePtr;
-#elif USE(CAIRO)
-typedef RefPtr<cairo_surface_t> NativeImagePtr;
-#elif USE(WINGDI)
-typedef RefPtr<SharedBitmap> NativeImagePtr;
-#endif
-
-IntSize nativeImageSize(const NativeImagePtr&);
+WEBCORE_EXPORT IntSize nativeImageSize(const NativeImagePtr&);
 bool nativeImageHasAlpha(const NativeImagePtr&);
 Color nativeImageSinglePixelSolidColor(const NativeImagePtr&);
-
-void drawNativeImage(const NativeImagePtr&, GraphicsContext&, const FloatRect&, const FloatRect&, const IntSize&, CompositeOperator, BlendMode, const ImageOrientation&);
 void clearNativeImageSubimages(const NativeImagePtr&);
-    
+
 }

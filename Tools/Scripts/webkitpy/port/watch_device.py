@@ -1,4 +1,4 @@
-# Copyright (C) 2018 Apple Inc. All rights reserved.
+# Copyright (C) 2018-2019 Apple Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -22,9 +22,10 @@
 
 import logging
 
+from webkitcorepy import Version
+
 from webkitpy.common.memoized import memoized
 from webkitpy.common.system.crashlogs import CrashLogs
-from webkitpy.common.version import Version
 from webkitpy.port.config import apple_additions
 from webkitpy.port.watch import WatchPort
 
@@ -79,6 +80,9 @@ class WatchDevicePort(WatchPort):
                 return (stderr, crashlog)
         return (stderr, None)
 
+    def supports_layout_tests(self):
+        return self.DEVICE_MANAGER is not None
+
     @memoized
     def device_version(self):
         if self.get_option('version'):
@@ -101,7 +105,7 @@ class WatchDevicePort(WatchPort):
         return version
 
     # FIXME: These need device implementations <rdar://problem/30497991>.
-    def check_for_leaks(self, process_name, process_pid):
+    def check_for_leaks(self, process_name, process_id):
         pass
 
     def operating_system(self):

@@ -2,6 +2,9 @@ find_library(QUARTZ_LIBRARY Quartz)
 find_library(CARBON_LIBRARY Carbon)
 find_library(CORESERVICES_LIBRARY CoreServices)
 
+add_definitions(-DJSC_API_AVAILABLE\\\(...\\\)=)
+add_definitions(-DJSC_CLASS_AVAILABLE\\\(...\\\)=)
+
 # FIXME: We shouldn't need to define NS_RETURNS_RETAINED.
 add_definitions(-iframework ${QUARTZ_LIBRARY}/Frameworks -iframework ${CORESERVICES_LIBRARY}/Frameworks -DNS_RETURNS_RETAINED=)
 
@@ -20,16 +23,21 @@ list(APPEND DumpRenderTree_LIBRARIES
 )
 
 list(APPEND DumpRenderTree_INCLUDE_DIRECTORIES
-    cg
-    cf
-    mac
-    mac/InternalHeaders/WebKit
-    TestNetscapePlugIn
+    ${DumpRenderTree_DIR}/cg
+    ${DumpRenderTree_DIR}/cf
+    ${DumpRenderTree_DIR}/cocoa
+    ${DumpRenderTree_DIR}/mac
+    ${DumpRenderTree_DIR}/mac/InternalHeaders/WebKit
+    ${DumpRenderTree_DIR}/TestNetscapePlugIn
     ${FORWARDING_HEADERS_DIR}
     ${FORWARDING_HEADERS_DIR}/WebCore
     ${FORWARDING_HEADERS_DIR}/WebKit
     ${FORWARDING_HEADERS_DIR}/WebKitLegacy
     ${WEBCORE_DIR}/testing/cocoa
+    ${WEBKITLEGACY_DIR}
+    ${WebKitTestRunner_SHARED_DIR}/cocoa
+    ${WebKitTestRunner_SHARED_DIR}/mac
+    ${WebKitTestRunner_SHARED_DIR}/spi
 )
 
 # Common ${TestNetscapePlugIn_SOURCES} from CMakeLists.txt are C++ source files.
@@ -52,12 +60,10 @@ list(APPEND DumpRenderTree_Cpp_SOURCES
 )
 
 list(APPEND DumpRenderTree_ObjC_SOURCES
-    DefaultPolicyDelegate.m
     DumpRenderTreeFileDraggingSource.m
 
     mac/AppleScriptController.m
     mac/NavigationController.m
-    mac/ObjCController.m
     mac/ObjCPlugin.m
     mac/ObjCPluginFunction.m
     mac/TextInputControllerMac.m
@@ -68,6 +74,8 @@ list(APPEND DumpRenderTree_Cpp_SOURCES
 )
 
 list(APPEND DumpRenderTree_ObjCpp_SOURCES
+    DefaultPolicyDelegate.mm
+    cocoa/UIScriptControllerCocoa.mm
     mac/AccessibilityCommonMac.mm
     mac/AccessibilityControllerMac.mm
     mac/AccessibilityNotificationHandler.mm
@@ -85,6 +93,7 @@ list(APPEND DumpRenderTree_ObjCpp_SOURCES
     mac/HistoryDelegate.mm
     mac/MockGeolocationProvider.mm
     mac/MockWebNotificationProvider.mm
+    mac/ObjCController.m
     mac/PixelDumpSupportMac.mm
     mac/PolicyDelegate.mm
     mac/ResourceLoadDelegate.mm
@@ -92,6 +101,8 @@ list(APPEND DumpRenderTree_ObjCpp_SOURCES
     mac/UIDelegate.mm
     mac/UIScriptControllerMac.mm
     mac/WorkQueueItemMac.mm
+    ${WebKitTestRunner_SHARED_DIR}/cocoa/ClassMethodSwizzler.mm
+    ${WebKitTestRunner_SHARED_DIR}/cocoa/LayoutTestSpellChecker.mm
 )
 
 set(DumpRenderTree_SOURCES
@@ -129,5 +140,7 @@ set(DumpRenderTree_RESOURCES
 
 file(MAKE_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/DumpRenderTree.resources)
 foreach (_file ${DumpRenderTree_RESOURCES})
-    file(COPY ${TOOLS_DIR}/DumpRenderTree/fonts/${_file} DESTINATION ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/DumpRenderTree.resources)
+    if (NOT EXISTS ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/DumpRenderTree.resources/${_file})
+        file(COPY ${TOOLS_DIR}/DumpRenderTree/fonts/${_file} DESTINATION ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/DumpRenderTree.resources)
+    endif ()
 endforeach ()

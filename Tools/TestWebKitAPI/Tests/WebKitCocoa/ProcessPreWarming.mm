@@ -49,7 +49,8 @@ TEST(WKProcessPool, WarmInitialProcess)
     EXPECT_TRUE([pool _hasPrewarmedWebProcess]);
 }
 
-TEST(WKProcessPool, InitialWarmedProcessUsed)
+enum class ShouldUseEphemeralStore { No, Yes };
+static void runInitialWarmedProcessUsedTest(ShouldUseEphemeralStore shouldUseEphemeralStore)
 {
     auto processPoolConfiguration = adoptNS([[_WKProcessPoolConfiguration alloc] init]);
     processPoolConfiguration.get().prewarmsProcessesAutomatically = NO;
@@ -62,17 +63,30 @@ TEST(WKProcessPool, InitialWarmedProcessUsed)
 
     auto configuration = adoptNS([[WKWebViewConfiguration alloc] init]);
     configuration.get().processPool = pool.get();
+    if (shouldUseEphemeralStore == ShouldUseEphemeralStore::Yes)
+        configuration.get().websiteDataStore = [WKWebsiteDataStore nonPersistentDataStore];
 
     auto webView = adoptNS([[WKWebView alloc] initWithFrame:CGRectMake(0, 0, 800, 600) configuration:configuration.get()]);
+
+    [webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:loadableURL]]];
 
     EXPECT_FALSE([pool _hasPrewarmedWebProcess]);
     EXPECT_EQ(1U, [pool _webPageContentProcessCount]);
 
-    [webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:loadableURL]]];
     [webView _test_waitForDidFinishNavigation];
 
     EXPECT_FALSE([pool _hasPrewarmedWebProcess]);
     EXPECT_EQ(1U, [pool _webPageContentProcessCount]);
+}
+
+TEST(WKProcessPool, InitialWarmedProcessUsed)
+{
+    runInitialWarmedProcessUsedTest(ShouldUseEphemeralStore::No);
+}
+
+TEST(WKProcessPool, InitialWarmedProcessUsedForEphemeralSession)
+{
+    runInitialWarmedProcessUsedTest(ShouldUseEphemeralStore::Yes);
 }
 
 TEST(WKProcessPool, AutomaticProcessWarming)
@@ -101,6 +115,53 @@ TEST(WKProcessPool, AutomaticProcessWarming)
     EXPECT_EQ(2U, [pool _webPageContentProcessCount]);
 
     auto webView2 = adoptNS([[WKWebView alloc] initWithFrame:CGRectMake(0, 0, 800, 600) configuration:configuration.get()]);
+    [webView2 loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:loadableURL]]];
+
     EXPECT_FALSE([pool _hasPrewarmedWebProcess]);
     EXPECT_EQ(2U, [pool _webPageContentProcessCount]);
+}
+
+TEST(WKProcessPool, PrewarmedProcessCrash)
+{
+    auto processPoolConfiguration = adoptNS([[_WKProcessPoolConfiguration alloc] init]);
+    processPoolConfiguration.get().prewarmsProcessesAutomatically = NO;
+
+    auto pool = adoptNS([[WKProcessPool alloc] _initWithConfiguration:processPoolConfiguration.get()]);
+    [pool _warmInitialProcess];
+
+    EXPECT_TRUE([pool _hasPrewarmedWebProcess]);
+    EXPECT_EQ(1U, [pool _webPageContentProcessCount]);
+
+    // Wait for prewarmed process to finish launching.
+    while (![pool _prewarmedProcessIdentifier])
+        TestWebKitAPI::Util::sleep(0.01);
+
+    kill([pool _prewarmedProcessIdentifier], 9);
+
+    while ([pool _hasPrewarmedWebProcess])
+        TestWebKitAPI::Util::sleep(0.01);
+}
+
+TEST(WebKit, TryUsingPrewarmedProcessThatJustCrashed)
+{
+    auto pool = adoptNS([[WKProcessPool alloc] init]);
+
+    EXPECT_FALSE([pool _hasPrewarmedWebProcess]);
+
+    [pool _warmInitialProcess];
+    EXPECT_TRUE([pool _hasPrewarmedWebProcess]);
+
+    // Wait for prewarmed process to finish launching.
+    while (![pool _prewarmedProcessIdentifier])
+        TestWebKitAPI::Util::sleep(0.01);
+
+    // Kill the prewarmed process.
+    kill([pool _prewarmedProcessIdentifier], 9);
+
+    // Try using the prewarmed process right away.
+    auto configuration = adoptNS([[WKWebViewConfiguration alloc] init]);
+    configuration.get().processPool = pool.get();
+    auto webView = adoptNS([[WKWebView alloc] initWithFrame:NSMakeRect(0, 0, 800, 600) configuration:configuration.get()]);
+    [webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:loadableURL]]];
+    [webView _test_waitForDidFinishNavigation];
 }

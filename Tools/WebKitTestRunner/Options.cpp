@@ -28,6 +28,7 @@
 #include "config.h"
 #include "Options.h"
 
+#include "StringFunctions.h"
 #include <string.h>
 
 namespace WTR {
@@ -54,12 +55,6 @@ static bool handleOptionGcBetweenTests(Options& options, const char*, const char
 static bool handleOptionPixelTests(Options& options, const char*, const char*)
 {
     options.shouldDumpPixelsForAllTests = true;
-    return true;
-}
-
-static bool handleOptionPrintSupportedFeatures(Options& options, const char*, const char*)
-{
-    options.printSupportedFeatures = true;
     return true;
 }
 
@@ -105,10 +100,41 @@ static bool handleOptionAllowAnyHTTPSCertificateForAllowedHosts(Options& options
     return true;
 }
 
+#if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
+static bool handleOptionAccessibilityIsolatedTreeMode(Options& options, const char*, const char*)
+{
+    options.accessibilityIsolatedTreeMode = true;
+    return true;
+}
+#endif
+
 static bool handleOptionAllowedHost(Options& options, const char*, const char* host)
 {
     options.allowedHosts.insert(host);
     return true;
+}
+
+static bool parseFeature(std::string_view featureString, std::unordered_map<std::string, bool>& features)
+{
+    auto strings = split(featureString, '=');
+    if (strings.empty() || strings.size() > 2)
+        return false;
+
+    auto featureName = strings[0];
+    bool enabled = strings.size() == 1 || strings[1] == "true";
+
+    features.insert({ std::string { featureName }, enabled });
+    return true;
+}
+
+static bool handleOptionExperimentalFeature(Options& options, const char*, const char* feature)
+{
+    return parseFeature(feature, options.experimentalFeatures);
+}
+
+static bool handleOptionInternalFeature(Options& options, const char*, const char* feature)
+{
+    return parseFeature(feature, options.internalFeatures);
 }
 
 static bool handleOptionUnmatched(Options& options, const char* option, const char*)
@@ -127,7 +153,6 @@ OptionsHandler::OptionsHandler(Options& o)
     optionList.append(Option("--gc-between-tests", "Garbage collection between tests.", handleOptionGcBetweenTests));
     optionList.append(Option("--pixel-tests", "Check pixels.", handleOptionPixelTests));
     optionList.append(Option("-p", "Check pixels.", handleOptionPixelTests));
-    optionList.append(Option("--print-supported-features", "For DumpRenderTree compatibility.", handleOptionPrintSupportedFeatures));
     optionList.append(Option("--complex-text", "Force complex tests.", handleOptionComplexText));
     optionList.append(Option("--accelerated-drawing", "Use accelerated drawing.", handleOptionAcceleratedDrawing));
     optionList.append(Option("--remote-layer-tree", "Use remote layer tree.", handleOptionRemoteLayerTree));
@@ -136,7 +161,12 @@ OptionsHandler::OptionsHandler(Options& o)
     optionList.append(Option("--show-webview", "Show the WebView during test runs (for debugging)", handleOptionShowWebView));
     optionList.append(Option("--show-touches", "Show the touches during test runs (for debugging)", handleOptionShowTouches));
     optionList.append(Option("--world-leaks", "Check for leaks of world objects (currently, documents)", handleOptionCheckForWorldLeaks));
-
+    optionList.append(Option("--experimental-feature", "Enable experimental feature", handleOptionExperimentalFeature, true));
+    optionList.append(Option("--internal-feature", "Enable internal feature", handleOptionInternalFeature, true));
+#if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
+    optionList.append(Option("--accessibility-isolated-tree", "Enable accessibility isolated tree mode for tests", handleOptionAccessibilityIsolatedTreeMode));
+#endif
+    
     optionList.append(Option(0, 0, handleOptionUnmatched));
 }
 
@@ -144,7 +174,12 @@ const char * OptionsHandler::usage = "Usage: WebKitTestRunner [options] filename
 const char * OptionsHandler::help = "Displays this help.";
 
 Option::Option(const char* name, const char* description, std::function<bool(Options&, const char*, const char*)> parameterHandler, bool hasArgument)
-    : name(name), description(description), parameterHandler(parameterHandler), hasArgument(hasArgument) { };
+    : name(name)
+    , description(description)
+    , parameterHandler(parameterHandler)
+    , hasArgument(hasArgument)
+{
+}
 
 bool Option::matches(const char* option)
 {

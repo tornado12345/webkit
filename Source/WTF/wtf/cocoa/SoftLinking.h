@@ -24,9 +24,10 @@
 
 #pragma once
 
-#import <wtf/Assertions.h>
 #import <dlfcn.h>
 #import <objc/runtime.h>
+#import <wtf/Assertions.h>
+#import <wtf/FileSystem.h>
 
 #pragma mark - Soft-link macros for use within a single source file
 
@@ -40,6 +41,16 @@
         }(); \
         return dylib; \
     }
+
+#define SOFT_LINK_LIBRARY_OPTIONAL(lib) \
+static void* lib##Library() \
+{ \
+    static void* dylib = ^{ \
+        void *result = dlopen("/usr/lib/" #lib ".dylib", RTLD_NOW); \
+        return result; \
+    }(); \
+    return dylib; \
+}
 
 #define SOFT_LINK_FRAMEWORK(framework) \
     static void* framework##Library() \
@@ -63,10 +74,16 @@
         return frameworkLibrary; \
     }
 
+#if USE(REALPATH_FOR_DLOPEN_PREFLIGHT)
+#define DLOPEN_PREFLIGHT(path) dlopen_preflight(FileSystem::realPath(path##_s).utf8().data())
+#else
+#define DLOPEN_PREFLIGHT(path) dlopen_preflight(path)
+#endif
+
 #define SOFT_LINK_FRAMEWORK_OPTIONAL_PREFLIGHT(framework) \
     static bool framework##LibraryIsAvailable() \
     { \
-        static bool frameworkLibraryIsAvailable = dlopen_preflight("/System/Library/Frameworks/" #framework ".framework/" #framework); \
+        static bool frameworkLibraryIsAvailable = DLOPEN_PREFLIGHT("/System/Library/Frameworks/" #framework ".framework/" #framework); \
         return frameworkLibraryIsAvailable; \
     }
 
@@ -524,12 +541,12 @@
     resultType softLink_##framework##_##functionName parameterDeclarations; \
     }
 
-#define SOFT_LINK_FUNCTION_MAY_FAIL_FOR_SOURCE(functionNamespace, framework, functionName, resultType, parameterDeclarations, parameterNames) \
+#define SOFT_LINK_FUNCTION_MAY_FAIL_FOR_SOURCE_WITH_EXPORT(functionNamespace, framework, functionName, resultType, parameterDeclarations, parameterNames, export) \
     WTF_EXTERN_C_BEGIN \
     resultType functionName parameterDeclarations; \
     WTF_EXTERN_C_END \
     namespace functionNamespace { \
-    resultType (*softLink##framework##functionName) parameterDeclarations = 0; \
+    export resultType (*softLink##framework##functionName) parameterDeclarations = 0; \
     bool init_##framework##_##functionName(); \
     bool init_##framework##_##functionName() \
     { \
@@ -539,7 +556,7 @@
     } \
     \
     bool canLoad_##framework##_##functionName(); \
-    bool canLoad_##framework##_##functionName() \
+    export bool canLoad_##framework##_##functionName() \
     { \
         static bool loaded = init_##framework##_##functionName(); \
         return loaded; \
@@ -552,6 +569,9 @@
         return softLink##framework##functionName parameterNames; \
     } \
     }
+
+#define SOFT_LINK_FUNCTION_MAY_FAIL_FOR_SOURCE(functionNamespace, framework, functionName, resultType, parameterDeclarations, parameterNames) \
+    SOFT_LINK_FUNCTION_MAY_FAIL_FOR_SOURCE_WITH_EXPORT(functionNamespace, framework, functionName, resultType, parameterDeclarations, parameterNames, )
 
 #define SOFT_LINK_POINTER_FOR_HEADER(functionNamespace, framework, variableName, variableType) \
     namespace functionNamespace { \

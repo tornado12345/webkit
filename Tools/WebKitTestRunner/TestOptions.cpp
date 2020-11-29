@@ -26,51 +26,182 @@
 #include "config.h"
 #include "TestOptions.h"
 
-#include <string>
-#include <wtf/text/WTFString.h>
+#include "TestOptionsGeneratedKeys.h"
+#include <wtf/Assertions.h>
 
 namespace WTR {
 
-static bool pathContains(const std::string& pathOrURL, const char* substring)
+const TestFeatures& TestOptions::defaults()
 {
-    String path(pathOrURL.c_str());
-    return path.contains(substring); // Case-insensitive.
+    static TestFeatures features;
+    if (features.boolWebPreferenceFeatures.empty()) {
+        features.boolWebPreferenceFeatures = {
+            // These are WebPreference values that must always be set as they may
+            // differ from the default set in the WebPreferences*.yaml configuration.
+            { "AllowTopNavigationToDataURLs", true },
+            { "CaptureAudioInGPUProcessEnabled", false },
+            { "CaptureAudioInUIProcessEnabled", false },
+            { "CaptureVideoInGPUProcessEnabled", false },
+            { "CaptureVideoInUIProcessEnabled", false },
+            { "DOMPasteAllowed", true },
+            { "MockScrollbarsEnabled", true },
+            { "ModernMediaControlsEnabled", true },
+            { "NeedsSiteSpecificQuirks", false },
+            { "PageVisibilityBasedProcessSuppressionEnabled", false },
+            { "UsesBackForwardCache", false },
+            { "WebAuthenticationEnabled", true },
+        };
+        features.boolTestRunnerFeatures = {
+            { "allowsLinkPreview", true },
+            { "dumpJSConsoleLogInStdErr", false },
+            { "editable", false },
+            { "enableInAppBrowserPrivacy", false },
+            { "enableProcessSwapOnNavigation", true },
+            { "enableProcessSwapOnWindowOpen", false },
+            { "ignoreSynchronousMessagingTimeouts", false },
+            { "ignoresViewportScaleLimits", false },
+            { "isAppBoundWebView", false },
+            { "runSingly", false },
+            { "shouldHandleRunOpenPanel", true },
+            { "shouldPresentPopovers", true },
+            { "shouldShowTouches", false },
+            { "shouldShowWebView", false },
+            { "spellCheckingDots", false },
+            { "useCharacterSelectionGranularity", false },
+            { "useDataDetection", false },
+            { "useEphemeralSession", false },
+            { "useFlexibleViewport", false },
+            { "useRemoteLayerTree", false },
+            { "useThreadedScrolling", false },
+        };
+        features.doubleTestRunnerFeatures = {
+            { "contentInset.top", 0 },
+            { "deviceScaleFactor", 1 },
+            { "viewHeight", 600 },
+            { "viewWidth", 800 },
+        };
+        features.stringTestRunnerFeatures = {
+            { "additionalSupportedImageTypes", { } },
+            { "applicationBundleIdentifier", { } },
+            { "applicationManifest", { } },
+            { "contentMode", { } },
+            { "jscOptions", { } },
+            { "standaloneWebApplicationURL", { } },
+        };
+        features.stringVectorTestRunnerFeatures = {
+            { "language", { } },
+        };
+    }
+    
+    return features;
 }
 
-static bool shouldMakeViewportFlexible(const std::string& pathOrURL)
+const std::unordered_map<std::string, TestHeaderKeyType>& TestOptions::keyTypeMapping()
 {
-    return pathContains(pathOrURL, "viewport/") && !pathContains(pathOrURL, "visual-viewport/");
+    static const std::unordered_map<std::string, TestHeaderKeyType> map {
+        GENERATED_WEB_PREFERENCE_KEY_TYPE_MAPPINGS
+
+        { "allowsLinkPreview", TestHeaderKeyType::BoolTestRunner },
+        { "dumpJSConsoleLogInStdErr", TestHeaderKeyType::BoolTestRunner },
+        { "editable", TestHeaderKeyType::BoolTestRunner },
+        { "enableInAppBrowserPrivacy", TestHeaderKeyType::BoolTestRunner },
+        { "enableProcessSwapOnNavigation", TestHeaderKeyType::BoolTestRunner },
+        { "enableProcessSwapOnWindowOpen", TestHeaderKeyType::BoolTestRunner },
+        { "ignoreSynchronousMessagingTimeouts", TestHeaderKeyType::BoolTestRunner },
+        { "ignoresViewportScaleLimits", TestHeaderKeyType::BoolTestRunner },
+        { "isAppBoundWebView", TestHeaderKeyType::BoolTestRunner },
+        { "runSingly", TestHeaderKeyType::BoolTestRunner },
+        { "shouldHandleRunOpenPanel", TestHeaderKeyType::BoolTestRunner },
+        { "shouldPresentPopovers", TestHeaderKeyType::BoolTestRunner },
+        { "shouldShowTouches", TestHeaderKeyType::BoolTestRunner },
+        { "shouldShowWebView", TestHeaderKeyType::BoolTestRunner },
+        { "spellCheckingDots", TestHeaderKeyType::BoolTestRunner },
+        { "useCharacterSelectionGranularity", TestHeaderKeyType::BoolTestRunner },
+        { "useDataDetection", TestHeaderKeyType::BoolTestRunner },
+        { "useEphemeralSession", TestHeaderKeyType::BoolTestRunner },
+        { "useFlexibleViewport", TestHeaderKeyType::BoolTestRunner },
+        { "useRemoteLayerTree", TestHeaderKeyType::BoolTestRunner },
+        { "useThreadedScrolling", TestHeaderKeyType::BoolTestRunner },
+    
+        { "contentInset.top", TestHeaderKeyType::DoubleTestRunner },
+        { "deviceScaleFactor", TestHeaderKeyType::DoubleTestRunner },
+        { "viewHeight", TestHeaderKeyType::DoubleTestRunner },
+        { "viewWidth", TestHeaderKeyType::DoubleTestRunner },
+
+        { "additionalSupportedImageTypes", TestHeaderKeyType::StringTestRunner },
+        { "applicationBundleIdentifier", TestHeaderKeyType::StringTestRunner },
+        { "applicationManifest", TestHeaderKeyType::StringRelativePathTestRunner },
+        { "contentMode", TestHeaderKeyType::StringTestRunner },
+        { "jscOptions", TestHeaderKeyType::StringTestRunner },
+        { "standaloneWebApplicationURL", TestHeaderKeyType::StringURLTestRunner },
+
+        { "language", TestHeaderKeyType::StringVectorTestRunner },
+    };
+
+    return map;
 }
 
-static bool shouldUseFixedLayout(const std::string& pathOrURL)
+bool TestOptions::hasSameInitializationOptions(const TestOptions& options) const
 {
-#if ENABLE(CSS_DEVICE_ADAPTATION)
-    if (pathContains(pathOrURL, "device-adapt/") || pathContains(pathOrURL, "device-adapt\\"))
-        return true;
-#endif
-    return false;
+    if (m_features.experimentalFeatures != options.m_features.experimentalFeatures)
+        return false;
+    if (m_features.internalDebugFeatures != options.m_features.internalDebugFeatures)
+        return false;
+    if (m_features.boolWebPreferenceFeatures != options.m_features.boolWebPreferenceFeatures)
+        return false;
+    if (m_features.doubleWebPreferenceFeatures != options.m_features.doubleWebPreferenceFeatures)
+        return false;
+    if (m_features.uint32WebPreferenceFeatures != options.m_features.uint32WebPreferenceFeatures)
+        return false;
+    if (m_features.stringWebPreferenceFeatures != options.m_features.stringWebPreferenceFeatures)
+        return false;
+    if (m_features.boolTestRunnerFeatures != options.m_features.boolTestRunnerFeatures)
+        return false;
+    if (m_features.doubleTestRunnerFeatures != options.m_features.doubleTestRunnerFeatures)
+        return false;
+    if (m_features.stringTestRunnerFeatures != options.m_features.stringTestRunnerFeatures)
+        return false;
+    if (m_features.stringVectorTestRunnerFeatures != options.m_features.stringVectorTestRunnerFeatures)
+        return false;
+    return true;
 }
 
-static bool isSVGTestPath(const std::string& pathOrURL)
+bool TestOptions::boolWebPreferenceFeatureValue(std::string key, bool defaultValue) const
 {
-    return pathContains(pathOrURL, "svg/W3C-SVG-1.1") || pathContains(pathOrURL, "svg\\W3C-SVG-1.1");
+    auto it = m_features.boolWebPreferenceFeatures.find(key);
+    if (it != m_features.boolWebPreferenceFeatures.end())
+        return it->second;
+    return defaultValue;
 }
 
-static float deviceScaleFactorForTest(const std::string& pathOrURL)
+template<typename T> T testRunnerFeatureValue(std::string key, const std::unordered_map<std::string, T>& map)
 {
-    if (pathContains(pathOrURL, "/hidpi-3x-"))
-        return 3;
-    if (pathContains(pathOrURL, "/hidpi-"))
-        return 2;
-    return 1;
+    // All test runner features should always exist in their corresponding map since the base/global defaults
+    // contains default values for all of them.
+
+    auto it = map.find(key);
+    ASSERT(it != map.end());
+    return it->second;
 }
 
-TestOptions::TestOptions(const std::string& pathOrURL)
-    : useFlexibleViewport(shouldMakeViewportFlexible(pathOrURL))
-    , useFixedLayout(shouldUseFixedLayout(pathOrURL))
-    , isSVGTest(isSVGTestPath(pathOrURL))
-    , deviceScaleFactor(deviceScaleFactorForTest(pathOrURL))
+bool TestOptions::boolTestRunnerFeatureValue(std::string key) const
 {
+    return testRunnerFeatureValue(key, m_features.boolTestRunnerFeatures);
+}
+
+double TestOptions::doubleTestRunnerFeatureValue(std::string key) const
+{
+    return testRunnerFeatureValue(key, m_features.doubleTestRunnerFeatures);
+}
+
+std::string TestOptions::stringTestRunnerFeatureValue(std::string key) const
+{
+    return testRunnerFeatureValue(key, m_features.stringTestRunnerFeatures);
+}
+
+std::vector<std::string> TestOptions::stringVectorTestRunnerFeatureValue(std::string key) const
+{
+    return testRunnerFeatureValue(key, m_features.stringVectorTestRunnerFeatures);
 }
 
 }

@@ -123,7 +123,6 @@ void Connection::readEventHandler()
 
                 m_readBuffer.grow(m_readBuffer.size() + bytesToRead);
                 if (!::ReadFile(m_connectionPipe, m_readBuffer.data() + numberOfBytesRead, bytesToRead, 0, &m_readListener.state())) {
-                    DWORD error = ::GetLastError();
                     ASSERT_NOT_REACHED();
                     return;
                 }
@@ -141,7 +140,7 @@ void Connection::readEventHandler()
         if (!m_readBuffer.isEmpty()) {
             // We have a message, let's dispatch it.
             Vector<Attachment> attachments(0);
-            auto decoder = std::make_unique<Decoder>(m_readBuffer.data(), m_readBuffer.size(), nullptr, WTFMove(attachments));
+            auto decoder = makeUnique<Decoder>(m_readBuffer.data(), m_readBuffer.size(), nullptr, WTFMove(attachments));
             processIncomingMessage(WTFMove(decoder));
         }
 

@@ -1,4 +1,4 @@
-# Copyright (C) 2017 Apple Inc. All rights reserved.
+# Copyright (C) 2017, 2019 Apple Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -35,9 +35,4 @@ class SubmitToEWS(AbstractStep):
 
     def run(self, state):
         for attachment_id in state.get('attachment_ids', []):
-            attachment = self._tool.bugs.fetch_attachment(attachment_id)
-            if not attachment:
-                continue  # Either Bugzilla is down or we do not have permission to view the attachment.
-            if attachment.bug().is_security_sensitive():
-                self._tool.status_server.upload_attachment(attachment)
-            self._tool.status_server.submit_to_ews(attachment_id)
+            self._tool.ews_server.submit_to_ews(attachment_id)

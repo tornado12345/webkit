@@ -26,10 +26,12 @@
 #pragma once
 
 #include "MacroAssemblerCodeRef.h"
+#include "OpcodeSize.h"
+#include "VM.h"
+#include <wtf/Scope.h>
 
 namespace JSC {
 
-class VM;
 struct ProtoCallFrame;
 typedef int64_t EncodedJSValue;
 
@@ -40,18 +42,30 @@ extern "C" {
 
 inline EncodedJSValue vmEntryToWasm(void* code, VM* vm, ProtoCallFrame* frame)
 {
+    auto clobberizeValidator = makeScopeExit([&] {
+        vm->didEnterVM = true;
+    });
     code = retagCodePtr<WasmEntryPtrTag, JSEntryPtrTag>(code);
     return vmEntryToJavaScript(code, vm, frame);
 }
 
 namespace LLInt {
 
-MacroAssemblerCodeRef<JITThunkPtrTag> functionForCallEntryThunkGenerator(VM*);
-MacroAssemblerCodeRef<JITThunkPtrTag> functionForConstructEntryThunkGenerator(VM*);
-MacroAssemblerCodeRef<JITThunkPtrTag> functionForCallArityCheckThunkGenerator(VM*);
-MacroAssemblerCodeRef<JITThunkPtrTag> functionForConstructArityCheckThunkGenerator(VM*);
-MacroAssemblerCodeRef<JITThunkPtrTag> evalEntryThunkGenerator(VM*);
-MacroAssemblerCodeRef<JITThunkPtrTag> programEntryThunkGenerator(VM*);
-MacroAssemblerCodeRef<JITThunkPtrTag> moduleProgramEntryThunkGenerator(VM*);
+MacroAssemblerCodeRef<JSEntryPtrTag> functionForCallEntryThunk();
+MacroAssemblerCodeRef<JSEntryPtrTag> functionForConstructEntryThunk();
+MacroAssemblerCodeRef<JSEntryPtrTag> functionForCallArityCheckThunk();
+MacroAssemblerCodeRef<JSEntryPtrTag> functionForConstructArityCheckThunk();
+MacroAssemblerCodeRef<JSEntryPtrTag> evalEntryThunk();
+MacroAssemblerCodeRef<JSEntryPtrTag> programEntryThunk();
+MacroAssemblerCodeRef<JSEntryPtrTag> moduleProgramEntryThunk();
+MacroAssemblerCodeRef<JSEntryPtrTag> getHostCallReturnValueThunk();
+
+MacroAssemblerCodeRef<ExceptionHandlerPtrTag> callToThrowThunk();
+MacroAssemblerCodeRef<ExceptionHandlerPtrTag> handleUncaughtExceptionThunk();
+MacroAssemblerCodeRef<ExceptionHandlerPtrTag> handleCatchThunk(OpcodeSize);
+
+#if ENABLE(WEBASSEMBLY)
+MacroAssemblerCodeRef<JITThunkPtrTag> wasmFunctionEntryThunk();
+#endif // ENABLE(WEBASSEMBLY)
 
 } } // namespace JSC::LLInt

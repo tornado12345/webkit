@@ -52,14 +52,10 @@
 #include <utility>
 
 #include "absl/strings/string_view.h"
-#include "rtc_base/constructormagic.h"
+#include "rtc_base/constructor_magic.h"
 #include "rtc_base/deprecation.h"
 #include "rtc_base/strings/string_builder.h"
 #include "rtc_base/system/inline.h"
-
-#if defined(WEBRTC_MAC) && !defined(WEBRTC_IOS)
-#include "rtc_base/logging_mac.h"
-#endif  // WEBRTC_MAC
 
 #if !defined(NDEBUG) || defined(DLOG_ALWAYS_ON)
 #define RTC_DLOG_IS_ON 1
@@ -430,6 +426,9 @@ class LogMessage {
   // These are the available logging channels
   //  Debug: Debug console on Windows, otherwise stderr
   static void LogToDebug(LoggingSeverity min_sev);
+
+  typedef void (*LogOutputCallback)(LoggingSeverity severity, const char*);
+  static void SetLogOutput(LoggingSeverity min_sev, LogOutputCallback);
   static LoggingSeverity GetLogToDebug();
 
   // Sets whether logs will be directed to stderr in debug mode.

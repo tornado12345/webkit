@@ -63,6 +63,7 @@
 #import <WebCore/WebCoreThreadMessage.h>
 #import <wtf/HashMap.h>
 #import <wtf/RefPtr.h>
+#import <wtf/cocoa/VectorCocoa.h>
 
 NSString * const WebOpenPanelConfigurationAllowMultipleFilesKey = @"WebOpenPanelConfigurationAllowMultipleFilesKey";
 NSString * const WebOpenPanelConfigurationMediaCaptureTypeKey = @"WebOpenPanelConfigurationMediaCaptureTypeKey";
@@ -134,17 +135,13 @@ void WebChromeClientIOS::runOpenPanel(Frame&, FileChooser& chooser)
     BOOL allowMultipleFiles = settings.allowsMultipleFiles;
     WebOpenPanelResultListener *listener = [[WebOpenPanelResultListener alloc] initWithChooser:chooser];
 
-    NSMutableArray *mimeTypes = [NSMutableArray arrayWithCapacity:settings.acceptMIMETypes.size()];
-    for (auto& type : settings.acceptMIMETypes)
-        [mimeTypes addObject:type];
-
     WebMediaCaptureType captureType = WebMediaCaptureTypeNone;
 #if ENABLE(MEDIA_CAPTURE)
     captureType = webMediaCaptureType(settings.mediaCaptureType);
 #endif
     NSDictionary *configuration = @{
         WebOpenPanelConfigurationAllowMultipleFilesKey: @(allowMultipleFiles),
-        WebOpenPanelConfigurationMimeTypesKey: mimeTypes,
+        WebOpenPanelConfigurationMimeTypesKey: createNSArray(settings.acceptMIMETypes).get(),
         WebOpenPanelConfigurationMediaCaptureTypeKey: @(captureType)
     };
 
@@ -182,11 +179,11 @@ void WebChromeClientIOS::setNeedsScrollNotifications(WebCore::Frame& frame, bool
     [[webView() _UIKitDelegateForwarder] webView:webView() needsScrollNotifications:[NSNumber numberWithBool:flag] forFrame:kit(&frame)];
 }
 
-void WebChromeClientIOS::observedContentChange(WebCore::Frame& frame)
+void WebChromeClientIOS::didFinishContentChangeObserving(WebCore::Frame& frame, WKContentChange observedContentChange)
 {
     if (!frame.document())
         return;
-    [[webView() _UIKitDelegateForwarder] webView:webView() didObserveDeferredContentChange:frame.document()->contentChangeObserver().observedContentChange() forFrame:kit(&frame)];
+    [[webView() _UIKitDelegateForwarder] webView:webView() didObserveDeferredContentChange:observedContentChange forFrame:kit(&frame)];
 }
 
 static inline NSString *nameForViewportFitValue(ViewportFit value)

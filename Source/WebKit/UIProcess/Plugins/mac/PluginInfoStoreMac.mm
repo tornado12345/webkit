@@ -31,8 +31,7 @@
 #import "Logging.h"
 #import "NetscapePluginModule.h"
 #import "SandboxUtilities.h"
-#import <WebCore/PluginBlacklist.h>
-#import <WebCore/RuntimeEnabledFeatures.h>
+#import <WebCore/PluginBlocklist.h>
 #import <pwd.h>
 #import <wtf/HashSet.h>
 #import <wtf/RetainPtr.h>
@@ -83,29 +82,6 @@ static bool shouldBlockPlugin(const PluginModuleInfo& plugin)
     return loadPolicy == PluginModuleBlockedForSecurity || loadPolicy == PluginModuleBlockedForCompatibility;
 }
 
-bool PluginInfoStore::shouldAllowPluginToRunUnsandboxed(const String& pluginBundleIdentifier)
-{
-    if (RuntimeEnabledFeatures::sharedFeatures().experimentalPlugInSandboxProfilesEnabled())
-        return false;
-
-    return pluginBundleIdentifier == "com.cisco.webex.plugin.gpc64"_s
-        || pluginBundleIdentifier == "com.google.googletalkbrowserplugin"_s
-        || pluginBundleIdentifier == "com.google.o1dbrowserplugin"_s
-        || pluginBundleIdentifier == "com.apple.NPSafeInput"_s
-        || pluginBundleIdentifier == "com.apple.BocomSubmitCtrl"_s
-        || pluginBundleIdentifier == "com.ftsafe.NPAPI-Core-Safe-SoftKeybaord.plugin.rfc1034identifier"_s
-        || pluginBundleIdentifier == "com.cfca.npSecEditCtl.MAC.BOC.plugin"_s
-        || pluginBundleIdentifier == "com.cfca.npSecEditCtl.MAC.BOCO"_s
-        || pluginBundleIdentifier == "cfca.com.npCryptoKit.MAC.BOC"_s
-        || pluginBundleIdentifier == "cfca.com.npP11CertEnroll.MAC.BOC"_s
-        || pluginBundleIdentifier == "cfca.com.npCryptoKit.UnionPay.MAC"_s
-        || pluginBundleIdentifier == "cfca.com.npP11CertEnroll.MAC.UnionPay"_s
-        || pluginBundleIdentifier == "Bocom.netsignplugin"_s
-        || pluginBundleIdentifier == "cfca.com.npP11CertEnroll.MAC.CGB"_s
-        || pluginBundleIdentifier == "cfca.com.npCryptoKit.CGB.MAC"_s
-        || pluginBundleIdentifier == "mw.icbc-safari-MW"_s;
-}
-
 bool PluginInfoStore::shouldUsePlugin(Vector<PluginModuleInfo>& alreadyLoadedPlugins, const PluginModuleInfo& plugin)
 {
     for (size_t i = 0; i < alreadyLoadedPlugins.size(); ++i) {
@@ -127,7 +103,7 @@ bool PluginInfoStore::shouldUsePlugin(Vector<PluginModuleInfo>& alreadyLoadedPlu
         return false;
     }
 
-    if (currentProcessIsSandboxed() && !plugin.hasSandboxProfile && !shouldAllowPluginToRunUnsandboxed(plugin.bundleIdentifier)) {
+    if (currentProcessIsSandboxed() && !plugin.hasSandboxProfile) {
         LOG(Plugins, "Ignoring unsandboxed plug-in %s", plugin.bundleIdentifier.utf8().data());
         return false;
     }
@@ -137,12 +113,12 @@ bool PluginInfoStore::shouldUsePlugin(Vector<PluginModuleInfo>& alreadyLoadedPlu
 
 PluginModuleLoadPolicy PluginInfoStore::defaultLoadPolicyForPlugin(const PluginModuleInfo& plugin)
 {
-    switch (PluginBlacklist::loadPolicyForPluginVersion(plugin.bundleIdentifier, plugin.versionString)) {
-    case PluginBlacklist::LoadPolicy::LoadNormally:
+    switch (PluginBlocklist::loadPolicyForPluginVersion(plugin.bundleIdentifier, plugin.versionString)) {
+    case PluginBlocklist::LoadPolicy::LoadNormally:
         return PluginModuleLoadNormally;
-    case PluginBlacklist::LoadPolicy::BlockedForSecurity:
+    case PluginBlocklist::LoadPolicy::BlockedForSecurity:
         return PluginModuleBlockedForSecurity;
-    case PluginBlacklist::LoadPolicy::BlockedForCompatibility:
+    case PluginBlocklist::LoadPolicy::BlockedForCompatibility:
         return PluginModuleBlockedForCompatibility;
     }
 }

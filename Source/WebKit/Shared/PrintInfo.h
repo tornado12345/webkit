@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2011-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,6 +24,9 @@
  */
 
 #pragma once
+
+#include <WebCore/LengthBox.h>
+#include <wtf/EnumTraits.h>
 
 #if USE(APPKIT)
 OBJC_CLASS NSPrintInfo;
@@ -56,9 +59,11 @@ struct PrintInfo {
     explicit PrintInfo(NSPrintInfo *);
 #endif
 
+    // These values are in 'point' unit (and not CSS pixel).
     float pageSetupScaleFactor { 0 };
     float availablePaperWidth { 0 };
     float availablePaperHeight { 0 };
+    WebCore::FloatBoxExtent margin;
 #if PLATFORM(IOS_FAMILY)
     bool snapshotFirstPage { false };
 #endif
@@ -70,7 +75,21 @@ struct PrintInfo {
 #endif
 
     void encode(IPC::Encoder&) const;
-    static bool decode(IPC::Decoder&, PrintInfo&);
+    static WARN_UNUSED_RETURN bool decode(IPC::Decoder&, PrintInfo&);
 };
 
-}
+} // namespace WebKit
+
+#if PLATFORM(GTK)
+namespace WTF {
+
+template<> struct EnumTraits<WebKit::PrintInfo::PrintMode> {
+    using values = EnumValues<
+        WebKit::PrintInfo::PrintMode,
+        WebKit::PrintInfo::PrintMode::PrintModeAsync,
+        WebKit::PrintInfo::PrintMode::PrintModeSync
+    >;
+};
+
+} // namespace WTF
+#endif // PLATFORM(GTK)

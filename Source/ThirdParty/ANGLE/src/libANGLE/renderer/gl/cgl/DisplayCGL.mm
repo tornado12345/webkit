@@ -1,21 +1,34 @@
 //
-// Copyright (c) 2015 The ANGLE Project Authors. All rights reserved.
+// Copyright 2015 The ANGLE Project Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
 
 // DisplayCGL.mm: CGL implementation of egl::Display
 
-#include "libANGLE/renderer/gl/cgl/DisplayCGL.h"
+#include "common/platform.h"
 
-#import <Cocoa/Cocoa.h>
-#include <dlfcn.h>
-#include <EGL/eglext.h>
+#if defined(ANGLE_PLATFORM_MACOS) || defined(ANGLE_PLATFORM_MACCATALYST)
 
-#include "common/debug.h"
-#include "libANGLE/Display.h"
-#include "libANGLE/renderer/gl/cgl/PbufferSurfaceCGL.h"
-#include "libANGLE/renderer/gl/cgl/WindowSurfaceCGL.h"
+#    include "libANGLE/renderer/gl/cgl/DisplayCGL.h"
+
+#    import <Cocoa/Cocoa.h>
+#    include <EGL/eglext.h>
+#    include <dlfcn.h>
+
+#    include "common/debug.h"
+#    include "gpu_info_util/SystemInfo.h"
+#    include "libANGLE/Display.h"
+#    include "libANGLE/Error.h"
+#    include "libANGLE/renderer/gl/cgl/ContextCGL.h"
+#    include "libANGLE/renderer/gl/cgl/DeviceCGL.h"
+#    include "libANGLE/renderer/gl/cgl/IOSurfaceSurfaceCGL.h"
+#    include "libANGLE/renderer/gl/cgl/PbufferSurfaceCGL.h"
+#    include "libANGLE/renderer/gl/cgl/RendererCGL.h"
+#    include "libANGLE/renderer/gl/cgl/WindowSurfaceCGL.h"
+#    include "platform/PlatformMethods.h"
+
+#    include "libANGLE/renderer/gl/cgl/CGLFunctions.h"
 
 namespace
 {
@@ -28,6 +41,76 @@ const char *kFallbackOpenGLDylibName = "GL";
 
 namespace rx
 {
+
+namespace
+{
+
+// Global IOKit I/O registryID that can match a GPU across process boundaries.
+using IORegistryGPUID = uint64_t;
+
+// Code from WebKit to set an OpenGL context to use a particular GPU by ID.
+// https://trac.webkit.org/browser/webkit/trunk/Source/WebCore/platform/graphics/cocoa/GraphicsContextGLOpenGLCocoa.mm
+// Used with permission.
+static void SetGPUByRegistryID(CGLContextObj contextObj,
+                               CGLPixelFormatObj pixelFormatObj,
+                               IORegistryGPUID preferredGPUID)
+{
+    if (@available(macOS 10.13, *))
+    {
+        // When a process does not have access to the WindowServer (as with Chromium's GPU process
+        // and WebKit's WebProcess), there is no way for OpenGL to tell which GPU is connected to a
+        // display. On 10.13+, find the virtual screen that corresponds to the preferred GPU by its
+        // registryID. CGLSetVirtualScreen can then be used to tell OpenGL which GPU it should be
+        // using.
+
+        if (!contextObj || !preferredGPUID)
+            return;
+
+        GLint virtualScreenCount = 0;
+        CGLError error = CGLDescribePixelFormat(pixelFormatObj, 0, kCGLPFAVirtualScreenCount,
+                                                &virtualScreenCount);
+        ASSERT(error == kCGLNoError);
+
+        GLint firstAcceleratedScreen = -1;
+
+        for (GLint virtualScreen = 0; virtualScreen < virtualScreenCount; ++virtualScreen)
+        {
+            GLint displayMask = 0;
+            error = CGLDescribePixelFormat(pixelFormatObj, virtualScreen, kCGLPFADisplayMask,
+                                           &displayMask);
+            ASSERT(error == kCGLNoError);
+
+            auto gpuID = angle::GetGpuIDFromOpenGLDisplayMask(displayMask);
+
+            if (gpuID == preferredGPUID)
+            {
+                error = CGLSetVirtualScreen(contextObj, virtualScreen);
+                ASSERT(error == kCGLNoError);
+                fprintf(stderr, "Context (%p) set to GPU with ID: (%lld).", contextObj, gpuID);
+                return;
+            }
+
+            if (firstAcceleratedScreen < 0)
+            {
+                GLint isAccelerated = 0;
+                error = CGLDescribePixelFormat(pixelFormatObj, virtualScreen, kCGLPFAAccelerated,
+                                               &isAccelerated);
+                ASSERT(error == kCGLNoError);
+                if (isAccelerated)
+                    firstAcceleratedScreen = virtualScreen;
+            }
+        }
+
+        // No registryID match found; set to first hardware-accelerated virtual screen.
+        if (firstAcceleratedScreen >= 0)
+        {
+            error = CGLSetVirtualScreen(contextObj, firstAcceleratedScreen);
+            ASSERT(error == kCGLNoError);
+        }
+    }
+}
+
+}  // anonymous namespace
 
 class FunctionsGLCGL : public FunctionsGL
 {
@@ -46,39 +129,66 @@ class FunctionsGLCGL : public FunctionsGL
 };
 
 DisplayCGL::DisplayCGL(const egl::DisplayState &state)
-    : DisplayGL(state), mEGLDisplay(nullptr), mFunctions(nullptr), mContext(nullptr)
-{
-}
+    : DisplayGL(state),
+      mEGLDisplay(nullptr),
+      mContext(nullptr),
+      mPixelFormat(nullptr),
+      mSupportsGPUSwitching(false),
+      mCurrentGPUID(0),
+      mDiscreteGPUPixelFormat(nullptr),
+      mDiscreteGPURefs(0),
+      mLastDiscreteGPUUnrefTime(0.0)
+{}
 
-DisplayCGL::~DisplayCGL()
-{
-}
+DisplayCGL::~DisplayCGL() {}
 
 egl::Error DisplayCGL::initialize(egl::Display *display)
 {
     mEGLDisplay = display;
 
-    CGLPixelFormatObj pixelFormat;
+    angle::SystemInfo info;
+    if (!angle::GetSystemInfo(&info))
+    {
+        return egl::EglNotInitialized() << "Unable to query ANGLE's SystemInfo.";
+    }
+
+    // This code implements the effect of the
+    // disableGPUSwitchingSupport workaround in FeaturesGL.
+    mSupportsGPUSwitching = info.isMacSwitchable && !info.hasNVIDIAGPU();
+
     {
         // TODO(cwallez) investigate which pixel format we want
-        CGLPixelFormatAttribute attribs[] = {
-            kCGLPFAOpenGLProfile, static_cast<CGLPixelFormatAttribute>(kCGLOGLPVersion_3_2_Core),
-            static_cast<CGLPixelFormatAttribute>(0)};
+        std::vector<CGLPixelFormatAttribute> attribs;
+        attribs.push_back(kCGLPFAOpenGLProfile);
+        attribs.push_back(static_cast<CGLPixelFormatAttribute>(kCGLOGLPVersion_3_2_Core));
+        attribs.push_back(kCGLPFAAllowOfflineRenderers);
+        attribs.push_back(static_cast<CGLPixelFormatAttribute>(0));
         GLint nVirtualScreens = 0;
-        CGLChoosePixelFormat(attribs, &pixelFormat, &nVirtualScreens);
+        CGLChoosePixelFormat(attribs.data(), &mPixelFormat, &nVirtualScreens);
 
-        if (pixelFormat == nullptr)
+        if (mPixelFormat == nullptr)
         {
             return egl::EglNotInitialized() << "Could not create the context's pixel format.";
         }
     }
 
-    CGLCreateContext(pixelFormat, nullptr, &mContext);
+    CGLCreateContext(mPixelFormat, nullptr, &mContext);
     if (mContext == nullptr)
     {
         return egl::EglNotInitialized() << "Could not create the CGL context.";
     }
-    CGLSetCurrentContext(mContext);
+
+    if (mSupportsGPUSwitching)
+    {
+        // Determine the currently active GPU on the system.
+        mCurrentGPUID = angle::GetGpuIDFromDisplayID(kCGDirectMainDisplay);
+    }
+
+    if (CGLSetCurrentContext(mContext) != kCGLNoError)
+    {
+        return egl::EglNotInitialized() << "Could not make the CGL context current.";
+    }
+    mThreadsWithCurrentContext.insert(std::this_thread::get_id());
 
     // There is no equivalent getProcAddress in CGL so we open the dylib directly
     void *handle = dlopen(kDefaultOpenGLDylibName, RTLD_NOW);
@@ -91,8 +201,19 @@ egl::Error DisplayCGL::initialize(egl::Display *display)
         return egl::EglNotInitialized() << "Could not open the OpenGL Framework.";
     }
 
-    mFunctions = new FunctionsGLCGL(handle);
-    mFunctions->initialize(display->getAttributeMap());
+    std::unique_ptr<FunctionsGL> functionsGL(new FunctionsGLCGL(handle));
+    functionsGL->initialize(display->getAttributeMap());
+
+    mRenderer.reset(new RendererCGL(std::move(functionsGL), display->getAttributeMap(), this));
+
+    const gl::Version &maxVersion = mRenderer->getMaxSupportedESVersion();
+    if (maxVersion < gl::Version(2, 0))
+    {
+        return egl::EglNotInitialized() << "OpenGL ES 2.0 is not supportable.";
+    }
+
+    auto &attributes = display->getAttributeMap();
+    mDeviceContextIsVolatile = attributes.get(EGL_PLATFORM_ANGLE_DEVICE_CONTEXT_VOLATILE_CGL_ANGLE, GL_FALSE);
 
     return DisplayGL::initialize(display);
 }
@@ -101,21 +222,70 @@ void DisplayCGL::terminate()
 {
     DisplayGL::terminate();
 
+    mRenderer.reset();
+    if (mPixelFormat != nullptr)
+    {
+        CGLDestroyPixelFormat(mPixelFormat);
+        mPixelFormat = nullptr;
+    }
     if (mContext != nullptr)
     {
         CGLSetCurrentContext(nullptr);
-        CGLReleaseContext(mContext);
+        CGLDestroyContext(mContext);
         mContext = nullptr;
+        mThreadsWithCurrentContext.clear();
     }
+    if (mDiscreteGPUPixelFormat != nullptr)
+    {
+        CGLDestroyPixelFormat(mDiscreteGPUPixelFormat);
+        mDiscreteGPUPixelFormat   = nullptr;
+        mLastDiscreteGPUUnrefTime = 0.0;
+    }
+}
 
-    SafeDelete(mFunctions);
+egl::Error DisplayCGL::prepareForCall()
+{
+    ASSERT(mContext);
+    auto threadId = std::this_thread::get_id();
+    if (mDeviceContextIsVolatile || mThreadsWithCurrentContext.find(threadId) == mThreadsWithCurrentContext.end())
+    {
+        if (CGLSetCurrentContext(mContext) != kCGLNoError)
+        {
+            return egl::EglBadAlloc() << "Could not make device CGL context current.";
+        }
+        mThreadsWithCurrentContext.insert(threadId);
+    }
+    return egl::NoError();
+}
+
+egl::Error DisplayCGL::releaseThread()
+{
+    ASSERT(mContext);
+    auto threadId = std::this_thread::get_id();
+    if (mThreadsWithCurrentContext.find(threadId) != mThreadsWithCurrentContext.end())
+    {
+        if (CGLSetCurrentContext(nullptr) != kCGLNoError)
+        {
+            return egl::EglBadAlloc() << "Could not release device CGL context.";
+        }
+        mThreadsWithCurrentContext.erase(threadId);
+    }
+    return egl::NoError();
+}
+
+egl::Error DisplayCGL::makeCurrent(egl::Surface *drawSurface,
+                                   egl::Surface *readSurface,
+                                   gl::Context *context)
+{
+    checkDiscreteGPUStatus();
+    return DisplayGL::makeCurrent(drawSurface, readSurface, context);
 }
 
 SurfaceImpl *DisplayCGL::createWindowSurface(const egl::SurfaceState &state,
                                              EGLNativeWindowType window,
                                              const egl::AttributeMap &attribs)
 {
-    return new WindowSurfaceCGL(state, this->getRenderer(), window, mFunctions, mContext);
+    return new WindowSurfaceCGL(state, mRenderer.get(), window, mContext);
 }
 
 SurfaceImpl *DisplayCGL::createPbufferSurface(const egl::SurfaceState &state,
@@ -123,7 +293,7 @@ SurfaceImpl *DisplayCGL::createPbufferSurface(const egl::SurfaceState &state,
 {
     EGLint width  = static_cast<EGLint>(attribs.get(EGL_WIDTH, 0));
     EGLint height = static_cast<EGLint>(attribs.get(EGL_HEIGHT, 0));
-    return new PbufferSurfaceCGL(state, this->getRenderer(), width, height, mFunctions);
+    return new PbufferSurfaceCGL(state, mRenderer.get(), width, height);
 }
 
 SurfaceImpl *DisplayCGL::createPbufferFromClientBuffer(const egl::SurfaceState &state,
@@ -131,8 +301,9 @@ SurfaceImpl *DisplayCGL::createPbufferFromClientBuffer(const egl::SurfaceState &
                                                        EGLClientBuffer clientBuffer,
                                                        const egl::AttributeMap &attribs)
 {
-    UNIMPLEMENTED();
-    return nullptr;
+    ASSERT(buftype == EGL_IOSURFACE_ANGLE);
+
+    return new IOSurfaceSurfaceCGL(state, mContext, clientBuffer, attribs);
 }
 
 SurfaceImpl *DisplayCGL::createPixmapSurface(const egl::SurfaceState &state,
@@ -143,10 +314,27 @@ SurfaceImpl *DisplayCGL::createPixmapSurface(const egl::SurfaceState &state,
     return nullptr;
 }
 
-egl::Error DisplayCGL::getDevice(DeviceImpl **device)
+ContextImpl *DisplayCGL::createContext(const gl::State &state,
+                                       gl::ErrorSet *errorSet,
+                                       const egl::Config *configuration,
+                                       const gl::Context *shareContext,
+                                       const egl::AttributeMap &attribs)
 {
-    UNIMPLEMENTED();
-    return egl::EglBadDisplay();
+    bool usesDiscreteGPU = false;
+
+    if (attribs.get(EGL_POWER_PREFERENCE_ANGLE, EGL_LOW_POWER_ANGLE) == EGL_HIGH_POWER_ANGLE)
+    {
+        // Should have been rejected by validation if not supported.
+        ASSERT(mSupportsGPUSwitching);
+        usesDiscreteGPU = true;
+    }
+
+    return new ContextCGL(this, state, errorSet, mRenderer, usesDiscreteGPU);
+}
+
+DeviceImpl *DisplayCGL::createDevice()
+{
+    return new DeviceCGL();
 }
 
 egl::ConfigSet DisplayCGL::generateConfigs()
@@ -196,6 +384,8 @@ egl::ConfigSet DisplayCGL::generateConfigs()
     config.bindToTextureRGB  = EGL_FALSE;
     config.bindToTextureRGBA = EGL_FALSE;
 
+    config.bindToTextureTarget = EGL_TEXTURE_RECTANGLE_ANGLE;
+
     config.surfaceType = EGL_WINDOW_BIT | EGL_PBUFFER_BIT;
 
     config.minSwapInterval = 1;
@@ -233,23 +423,50 @@ bool DisplayCGL::isValidNativeWindow(EGLNativeWindowType window) const
     return [layer isKindOfClass:[CALayer class]];
 }
 
+egl::Error DisplayCGL::validateClientBuffer(const egl::Config *configuration,
+                                            EGLenum buftype,
+                                            EGLClientBuffer clientBuffer,
+                                            const egl::AttributeMap &attribs) const
+{
+    ASSERT(buftype == EGL_IOSURFACE_ANGLE);
+
+    if (!IOSurfaceSurfaceCGL::validateAttributes(clientBuffer, attribs))
+    {
+        return egl::EglBadAttribute();
+    }
+
+    return egl::NoError();
+}
+
 std::string DisplayCGL::getVendorString() const
 {
     // TODO(cwallez) find a useful vendor string
     return "";
 }
 
-const FunctionsGL *DisplayCGL::getFunctionsGL() const
+CGLContextObj DisplayCGL::getCGLContext() const
 {
-    return mFunctions;
+    return mContext;
+}
+
+CGLPixelFormatObj DisplayCGL::getCGLPixelFormat() const
+{
+    return mPixelFormat;
 }
 
 void DisplayCGL::generateExtensions(egl::DisplayExtensions *outExtensions) const
 {
-    outExtensions->surfacelessContext = true;
+    outExtensions->iosurfaceClientBuffer = true;
+    outExtensions->surfacelessContext    = true;
+    outExtensions->deviceQuery           = true;
 
     // Contexts are virtualized so textures can be shared globally
     outExtensions->displayTextureShareGroup = true;
+
+    if (mSupportsGPUSwitching)
+    {
+        outExtensions->powerPreference = true;
+    }
 
     DisplayGL::generateExtensions(outExtensions);
 }
@@ -259,16 +476,21 @@ void DisplayCGL::generateCaps(egl::Caps *outCaps) const
     outCaps->textureNPOT = true;
 }
 
-egl::Error DisplayCGL::waitClient(const gl::Context *context) const
+egl::Error DisplayCGL::waitClient(const gl::Context *context)
 {
     // TODO(cwallez) UNIMPLEMENTED()
     return egl::NoError();
 }
 
-egl::Error DisplayCGL::waitNative(const gl::Context *context, EGLint engine) const
+egl::Error DisplayCGL::waitNative(const gl::Context *context, EGLint engine)
 {
     // TODO(cwallez) UNIMPLEMENTED()
     return egl::NoError();
+}
+
+gl::Version DisplayCGL::getMaxSupportedESVersion() const
+{
+    return mRenderer->getMaxSupportedESVersion();
 }
 
 egl::Error DisplayCGL::makeCurrentSurfaceless(gl::Context *context)
@@ -277,4 +499,150 @@ egl::Error DisplayCGL::makeCurrentSurfaceless(gl::Context *context)
     // default.
     return egl::NoError();
 }
+
+class WorkerContextCGL final : public WorkerContext
+{
+  public:
+    WorkerContextCGL(CGLContextObj context);
+    ~WorkerContextCGL() override;
+
+    bool makeCurrent() override;
+    void unmakeCurrent() override;
+
+  private:
+    CGLContextObj mContext;
+};
+
+WorkerContextCGL::WorkerContextCGL(CGLContextObj context) : mContext(context) {}
+
+WorkerContextCGL::~WorkerContextCGL()
+{
+    CGLSetCurrentContext(nullptr);
+    CGLReleaseContext(mContext);
+    mContext = nullptr;
 }
+
+bool WorkerContextCGL::makeCurrent()
+{
+    CGLError error = CGLSetCurrentContext(mContext);
+    if (error != kCGLNoError)
+    {
+        ERR() << "Unable to make gl context current.\n";
+        return false;
+    }
+    return true;
+}
+
+void WorkerContextCGL::unmakeCurrent()
+{
+    CGLSetCurrentContext(nullptr);
+}
+
+WorkerContext *DisplayCGL::createWorkerContext(std::string *infoLog)
+{
+    CGLContextObj context = nullptr;
+    CGLCreateContext(mPixelFormat, mContext, &context);
+    if (context == nullptr)
+    {
+        *infoLog += "Could not create the CGL context.";
+        return nullptr;
+    }
+
+    return new WorkerContextCGL(context);
+}
+
+void DisplayCGL::initializeFrontendFeatures(angle::FrontendFeatures *features) const
+{
+    mRenderer->initializeFrontendFeatures(features);
+}
+
+void DisplayCGL::populateFeatureList(angle::FeatureList *features)
+{
+    mRenderer->getFeatures().populateFeatureList(features);
+}
+
+egl::Error DisplayCGL::referenceDiscreteGPU()
+{
+    // Should have been rejected by validation if not supported.
+    ASSERT(mSupportsGPUSwitching);
+    // Create discrete pixel format if necessary.
+    if (mDiscreteGPUPixelFormat)
+    {
+        // Clear this out if necessary.
+        mLastDiscreteGPUUnrefTime = 0.0;
+    }
+    else
+    {
+        ASSERT(mLastDiscreteGPUUnrefTime == 0.0);
+        CGLPixelFormatAttribute discreteAttribs[] = {static_cast<CGLPixelFormatAttribute>(0)};
+        GLint numPixelFormats                     = 0;
+        if (CGLChoosePixelFormat(discreteAttribs, &mDiscreteGPUPixelFormat, &numPixelFormats) !=
+            kCGLNoError)
+        {
+            return egl::EglBadAlloc() << "Error choosing discrete pixel format.";
+        }
+    }
+    ++mDiscreteGPURefs;
+
+    return egl::NoError();
+}
+
+egl::Error DisplayCGL::unreferenceDiscreteGPU()
+{
+    // Should have been rejected by validation if not supported.
+    ASSERT(mSupportsGPUSwitching);
+    ASSERT(mDiscreteGPURefs > 0);
+    if (--mDiscreteGPURefs == 0)
+    {
+        auto *platform            = ANGLEPlatformCurrent();
+        mLastDiscreteGPUUnrefTime = platform->monotonicallyIncreasingTime(platform);
+    }
+
+    return egl::NoError();
+}
+
+void DisplayCGL::checkDiscreteGPUStatus()
+{
+    const double kDiscreteGPUTimeoutInSeconds = 10.0;
+
+    if (mLastDiscreteGPUUnrefTime != 0.0)
+    {
+        ASSERT(mSupportsGPUSwitching);
+        // A non-zero value implies that the timer is ticking on deleting the discrete GPU pixel
+        // format.
+        auto *platform = ANGLEPlatformCurrent();
+        ASSERT(platform);
+        double currentTime = platform->monotonicallyIncreasingTime(platform);
+        if (currentTime > mLastDiscreteGPUUnrefTime + kDiscreteGPUTimeoutInSeconds)
+        {
+            CGLDestroyPixelFormat(mDiscreteGPUPixelFormat);
+            mDiscreteGPUPixelFormat   = nullptr;
+            mLastDiscreteGPUUnrefTime = 0.0;
+        }
+    }
+}
+
+egl::Error DisplayCGL::handleGPUSwitch()
+{
+    if (mSupportsGPUSwitching)
+    {
+        uint64_t gpuID = angle::GetGpuIDFromDisplayID(kCGDirectMainDisplay);
+        if (gpuID != mCurrentGPUID)
+        {
+            SetGPUByRegistryID(mContext, mPixelFormat, gpuID);
+            // Performing the above operation seems to need a call to CGLSetCurrentContext to make
+            // the context work properly again. Failing to do this returns null strings for
+            // GL_VENDOR and GL_RENDERER.
+            CGLUpdateContext(mContext);
+            CGLSetCurrentContext(mContext);
+            onStateChange(angle::SubjectMessage::SubjectChanged);
+            mCurrentGPUID = gpuID;
+        }
+    }
+
+    return egl::NoError();
+}
+
+}  // namespace rx
+
+#endif  // defined(ANGLE_PLATFORM_MACOS) || defined(ANGLE_PLATFORM_MACCATALYST)

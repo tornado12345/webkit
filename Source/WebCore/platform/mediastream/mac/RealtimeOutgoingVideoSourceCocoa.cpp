@@ -28,6 +28,7 @@
 
 #if USE(LIBWEBRTC)
 
+#include "ImageRotationSessionVT.h"
 #include "Logging.h"
 #include "RealtimeIncomingVideoSourceCocoa.h"
 #include "RealtimeVideoUtilities.h"
@@ -61,11 +62,8 @@ RealtimeOutgoingVideoSourceCocoa::RealtimeOutgoingVideoSourceCocoa(Ref<MediaStre
 {
 }
 
-void RealtimeOutgoingVideoSourceCocoa::sampleBufferUpdated(MediaStreamTrackPrivate&, MediaSample& sample)
+void RealtimeOutgoingVideoSourceCocoa::videoSampleAvailable(MediaSample& sample)
 {
-    if (isSilenced())
-        return;
-
 #if !RELEASE_LOG_DISABLED
     if (!(++m_numberOfFrames % 60))
         ALWAYS_LOG(LOGIDENTIFIER, "frame ", m_numberOfFrames);

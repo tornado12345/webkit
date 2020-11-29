@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,41 +24,22 @@
  */
 
 #import <WebKit/WKFoundation.h>
-
-typedef NS_ENUM(NSInteger, _WKWebsiteAutoplayPolicy) {
-    _WKWebsiteAutoplayPolicyDefault,
-    _WKWebsiteAutoplayPolicyAllow,
-    _WKWebsiteAutoplayPolicyAllowWithoutSound,
-    _WKWebsiteAutoplayPolicyDeny
-} WK_API_AVAILABLE(macosx(10.13), ios(11.0));
-
-typedef NS_OPTIONS(NSUInteger, _WKWebsiteAutoplayQuirk) {
-    _WKWebsiteAutoplayQuirkSynthesizedPauseEvents = 1 << 0,
-    _WKWebsiteAutoplayQuirkInheritedUserGestures = 1 << 1,
-    _WKWebsiteAutoplayQuirkArbitraryUserGestures = 1 << 2,
-    _WKWebsiteAutoplayQuirkPerDocumentAutoplayBehavior = 1 << 3,
-} WK_API_AVAILABLE(macosx(10.13), ios(11.0));
-
-typedef NS_OPTIONS(NSUInteger, _WKWebsitePopUpPolicy) {
-    _WKWebsitePopUpPolicyDefault,
-    _WKWebsitePopUpPolicyAllow,
-    _WKWebsitePopUpPolicyBlock,
-} WK_API_AVAILABLE(macosx(10.14), ios(12.0));
+#import <WebKit/WKWebpagePreferencesPrivate.h>
 
 @class WKWebsiteDataStore;
 
-WK_CLASS_AVAILABLE(macosx(10.12.3), ios(10.3))
+WK_CLASS_DEPRECATED_WITH_REPLACEMENT("WKWebpagePreferences", macos(10.12.3, WK_MAC_TBA), ios(10.3, WK_IOS_TBA))
 @interface _WKWebsitePolicies : NSObject
 
 @property (nonatomic) BOOL contentBlockersEnabled;
-@property (nonatomic) _WKWebsiteAutoplayQuirk allowedAutoplayQuirks WK_API_AVAILABLE(macosx(10.13), ios(11.0));
-@property (nonatomic) _WKWebsiteAutoplayPolicy autoplayPolicy WK_API_AVAILABLE(macosx(10.13), ios(11.0));
-@property (nonatomic, copy) NSDictionary<NSString *, NSString *> *customHeaderFields WK_API_AVAILABLE(macosx(10.13.4), ios(11.3));
-@property (nonatomic) _WKWebsitePopUpPolicy popUpPolicy WK_API_AVAILABLE(macosx(10.14), ios(12.0));
-@property (nonatomic, strong) WKWebsiteDataStore *websiteDataStore WK_API_AVAILABLE(macosx(10.13.4), ios(11.3));
-@property (nonatomic, copy) NSString *customUserAgent WK_API_AVAILABLE(macosx(WK_MAC_TBA), ios(WK_IOS_TBA));
-@property (nonatomic, copy) NSString *customJavaScriptUserAgentAsSiteSpecificQuirks WK_API_AVAILABLE(macosx(WK_MAC_TBA), ios(WK_IOS_TBA));
-@property (nonatomic, copy) NSString *customNavigatorPlatform WK_API_AVAILABLE(macosx(WK_MAC_TBA), ios(WK_IOS_TBA));
-@property (nonatomic) BOOL deviceOrientationEventEnabled WK_API_AVAILABLE(macosx(WK_MAC_TBA), ios(WK_IOS_TBA));
+@property (nonatomic) _WKWebsiteAutoplayQuirk allowedAutoplayQuirks WK_API_AVAILABLE(macos(10.13), ios(11.0));
+@property (nonatomic) _WKWebsiteAutoplayPolicy autoplayPolicy WK_API_AVAILABLE(macos(10.13), ios(11.0));
+@property (nonatomic, copy) NSDictionary<NSString *, NSString *> *customHeaderFields WK_API_AVAILABLE(macos(10.13.4), ios(11.3));
+@property (nonatomic) _WKWebsitePopUpPolicy popUpPolicy WK_API_AVAILABLE(macos(10.14), ios(12.0));
+@property (nonatomic, strong) WKWebsiteDataStore *websiteDataStore WK_API_AVAILABLE(macos(10.13.4), ios(11.3));
+@property (nonatomic, copy) NSString *customUserAgent WK_API_AVAILABLE(macos(10.14.4), ios(12.2));
+@property (nonatomic, copy) NSString *customUserAgentAsSiteSpecificQuirks WK_API_AVAILABLE(macos(WK_MAC_TBA), ios(WK_IOS_TBA));
+@property (nonatomic, copy) NSString *customNavigatorPlatform WK_API_AVAILABLE(macos(10.14.4), ios(12.2));
+@property (nonatomic) _WKWebsiteDeviceOrientationAndMotionAccessPolicy deviceOrientationAndMotionAccessPolicy WK_API_AVAILABLE(macos(10.15), ios(13.0));
 
 @end

@@ -42,6 +42,7 @@
 #endif
 
 #include <assert.h>
+#include <comdef.h>
 #include <comip.h>
 #include <commctrl.h>
 #include <commdlg.h>
@@ -56,8 +57,10 @@
 #include <tchar.h>
 #include <windows.h>
 #include <wininet.h>
-#include <wtf/ExportMacros.h>
 #include <wtf/Platform.h>
+
+#include <JavaScriptCore/JSExportMacros.h>
+#include <WebCore/PlatformExportMacros.h>
 
 #if 0
 // Visual Studio Leak Detection

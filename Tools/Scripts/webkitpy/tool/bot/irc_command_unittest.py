@@ -1,4 +1,5 @@
 # Copyright (c) 2010 Google Inc. All rights reserved.
+# Copyright (C) 2020 Apple Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are
@@ -26,15 +27,17 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import logging
 import os
 import unittest
 
-from webkitpy.common.system.outputcapture import OutputCapture
 from webkitpy.tool.bot.irc_command import *
 from webkitpy.tool.mocktool import MockTool
 from webkitpy.common.net.web_mock import MockWeb
 from webkitpy.common.system.executive_mock import MockExecutive
 from webkitpy.common.system.filesystem_mock import MockFileSystem
+
+from webkitcorepy import OutputCapture
 
 
 class IRCCommandTest(unittest.TestCase):
@@ -46,19 +49,19 @@ class IRCCommandTest(unittest.TestCase):
                           whois.execute("tom", ["Adam", "Barth"], None, None))
         self.assertEqual("tom: Sorry, I don't know any contributors matching 'unknown@example.com'.",
                           whois.execute("tom", ["unknown@example.com"], None, None))
-        self.assertEqual('tom: tonyg@chromium.org is "Tony Gentilcore" <tonyg@chromium.org> (:tonyg-cr) (r). Why do you ask?',
+        self.assertEqual('tom: tonyg@chromium.org is "Tony Gentilcore" <tonyg@chromium.org> (:tonyg-cr). Why do you ask?',
                           whois.execute("tom", ["tonyg@chromium.org"], None, None))
-        self.assertEqual('tom: TonyG@Chromium.org is "Tony Gentilcore" <tonyg@chromium.org> (:tonyg-cr) (r). Why do you ask?',
+        self.assertEqual('tom: TonyG@Chromium.org is "Tony Gentilcore" <tonyg@chromium.org> (:tonyg-cr). Why do you ask?',
                           whois.execute("tom", ["TonyG@Chromium.org"], None, None))
         self.assertEqual('tom: rniwa is "Ryosuke Niwa" <rniwa@webkit.org> (:rniwa) (r). Why do you ask?',
                           whois.execute("tom", ["rniwa"], None, None))
         self.assertEqual('tom: Xan Lopez is "Xan Lopez" <xan.lopez@gmail.com> (:xan) (r). Why do you ask?',
                           whois.execute("tom", ["Xan", "Lopez"], None, None))
-        self.assertEqual(u'tom: Osztrogon\u00e1c is "Csaba Osztrogon\u00e1c" <ossy@webkit.org> (:ossy) (r). Why do you ask?',
+        self.assertEqual(u'tom: Osztrogon\u00e1c is "Csaba Osztrogon\u00e1c" <ossy@webkit.org> (:ossy). Why do you ask?',
                           whois.execute("tom", [u'Osztrogon\u00e1c'], None, None))
         self.assertEqual('tom: "Vicki Murley" <vicki@apple.com> hasn\'t told me their nick. Boo hoo :-(',
                           whois.execute("tom", ["vicki@apple.com"], None, None))
-        self.assertEqual('tom: I\'m not sure who you mean?  "Gavin Barraclough" <barraclough@apple.com> (:gbarra) (r) or "Gavin Peters" <gavinp@chromium.org> (:gavinp) (c) could be \'Gavin\'.',
+        self.assertEqual('tom: I\'m not sure who you mean?  "Gavin Barraclough" <barraclough@apple.com> (:gbarra) or "Gavin Peters" <gavinp@chromium.org> (:gavinp) could be \'Gavin\'.',
                           whois.execute("tom", ["Gavin"], None, None))
         self.assertEqual('tom: More than 5 contributors match \'david\', could you be more specific?',
                           whois.execute("tom", ["david"], None, None))
@@ -82,44 +85,48 @@ class IRCCommandTest(unittest.TestCase):
         self.assertEqual("tom: Failed to create bug:\nException from bugzilla!",
                           create_bug.execute("tom", example_args, tool, None))
 
-    def test_rollout_updates_working_copy(self):
-        rollout = Rollout()
+    def test_revert_updates_working_copy(self):
+        revert = Revert()
         tool = MockTool()
         tool.executive = MockExecutive(should_log=True)
-        expected_logs = "MOCK run_and_throw_if_fail: ['mock-update-webkit'], cwd=/mock-checkout\n"
-        OutputCapture().assert_outputs(self, rollout._update_working_copy, [tool], expected_logs=expected_logs)
+        with OutputCapture(level=logging.INFO) as captured:
+            revert._update_working_copy(tool)
+        self.assertEqual(
+            captured.root.log.getvalue(),
+            "MOCK run_and_throw_if_fail: ['mock-update-webkit'], cwd=/mock-checkout\n",
+        )
 
-    def test_rollout(self):
-        rollout = Rollout()
+    def test_revert(self):
+        revert = Revert()
         self.assertEqual(([1234], "testing foo"),
-                          rollout._parse_args(["1234", "testing", "foo"]))
+                         revert._parse_args(["1234", "testing", "foo"]))
 
         self.assertEqual(([554], "testing foo"),
-                          rollout._parse_args(["r554", "testing", "foo"]))
+                         revert._parse_args(["r554", "testing", "foo"]))
 
         self.assertEqual(([556, 792], "testing foo"),
-                          rollout._parse_args(["r556", "792", "testing", "foo"]))
+                         revert._parse_args(["r556", "792", "testing", "foo"]))
 
         self.assertEqual(([128, 256], "testing foo"),
-                          rollout._parse_args(["r128,r256", "testing", "foo"]))
+                         revert._parse_args(["r128,r256", "testing", "foo"]))
 
         self.assertEqual(([512, 1024, 2048], "testing foo"),
-                          rollout._parse_args(["512,", "1024,2048", "testing", "foo"]))
+                         revert._parse_args(["512,", "1024,2048", "testing", "foo"]))
 
         # Test invalid argument parsing:
-        self.assertEqual((None, None), rollout._parse_args([]))
-        self.assertEqual((None, None), rollout._parse_args(["--bar", "1234"]))
+        self.assertEqual((None, None), revert._parse_args([]))
+        self.assertEqual((None, None), revert._parse_args(["--bar", "1234"]))
 
         # Invalid arguments result in the USAGE message.
-        self.assertEqual("tom: Usage: rollout SVN_REVISION [SVN_REVISIONS] REASON",
-                          rollout.execute("tom", [], None, None))
+        self.assertEqual("tom: Usage: revert SVN_REVISION [SVN_REVISIONS] REASON",
+                         revert.execute("tom", [], None, None))
 
         tool = MockTool()
         tool.filesystem.files["/mock-checkout/test/file/one"] = ""
         tool.filesystem.files["/mock-checkout/test/file/two"] = ""
         self.assertEqual("Failed to apply reverse diff for files: test/file/one, test/file/two",
-                          rollout._check_diff_failure("""
-Preparing rollout for bug 123456.
+                         revert._check_diff_failure("""
+Preparing revert for bug 123456.
 Updating working directory
 Failed to apply reverse diff for revision 123456 because of the following conflicts:
 test/file/one
@@ -132,8 +139,8 @@ Current branch master is up to date.
         """, tool))
 
         self.assertEqual("Failed to apply reverse diff for file: test/file/one",
-                          rollout._check_diff_failure("""
-Preparing rollout for bug 123456.
+                         revert._check_diff_failure("""
+Preparing revert for bug 123456.
 Updating working directory
 Failed to apply reverse diff for revision 123456 because of the following conflicts:
 test/file/one
@@ -141,8 +148,8 @@ Updating OpenSource
 Current branch master is up to date.
         """, tool))
 
-        self.assertEqual(None, rollout._check_diff_failure("""
-Preparing rollout for bug 123456.
+        self.assertEqual(None, revert._check_diff_failure("""
+Preparing revert for bug 123456.
 Updating working directory
 Some other error report involving file paths:
 test/file/one

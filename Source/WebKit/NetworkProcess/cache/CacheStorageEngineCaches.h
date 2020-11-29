@@ -28,7 +28,6 @@
 #include "CacheStorageEngineCache.h"
 #include "NetworkCacheStorage.h"
 #include <WebCore/ClientOrigin.h>
-#include <WebCore/StorageQuotaUser.h>
 #include <wtf/CompletionHandler.h>
 #include <wtf/Deque.h>
 
@@ -42,9 +41,10 @@ namespace CacheStorage {
 
 class Engine;
 
-class Caches final : public RefCounted<Caches>, private WebCore::StorageQuotaUser {
+class Caches final : public RefCounted<Caches> {
 public:
-    static Ref<Caches> create(Engine& engine, WebCore::ClientOrigin&& origin, String&& rootPath, WebCore::StorageQuotaManager& quotaManager) { return adoptRef(*new Caches { engine, WTFMove(origin), WTFMove(rootPath), quotaManager }); }
+    static String cachesSizeFilename(const String& cachesRootsPath);
+    static Ref<Caches> create(Engine&, WebCore::ClientOrigin&&, String&& rootPath);
     ~Caches();
 
     static void retrieveOriginFromDirectory(const String& folderPath, WorkQueue&, WTF::CompletionHandler<void(Optional<WebCore::ClientOrigin>&&)>&&);
@@ -80,12 +80,10 @@ public:
     void clearMemoryRepresentation();
 
     uint64_t storageSize() const;
+    void updateSizeFile(CompletionHandler<void()>&&);
 
 private:
-    Caches(Engine&, WebCore::ClientOrigin&&, String&& rootPath, WebCore::StorageQuotaManager&);
-
-    // StorageQuotaUser API.
-    uint64_t spaceUsed() const final { return m_size; }
+    Caches(Engine&, WebCore::ClientOrigin&&, String&& rootPath);
 
     void initializeSize();
     void readCachesFromDisk(WTF::Function<void(Expected<Vector<Cache>, WebCore::DOMCacheEngine::Error>&&)>&&);
@@ -116,7 +114,6 @@ private:
     Vector<WebCore::DOMCacheEngine::CompletionCallback> m_pendingInitializationCallbacks;
     bool m_isWritingCachesToDisk { false };
     Deque<CompletionHandler<void(Optional<WebCore::DOMCacheEngine::Error>)>> m_pendingWritingCachesToDiskCallbacks;
-    WeakPtr<WebCore::StorageQuotaManager> m_quotaManager;
 };
 
 } // namespace CacheStorage

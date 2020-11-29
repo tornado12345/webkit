@@ -28,8 +28,8 @@
 
 #if ENABLE(SERVICE_WORKER)
 
-#include "DataReference.h"
 #include "FormDataReference.h"
+#include "Logging.h"
 #include "ServiceWorkerFetchTaskMessages.h"
 #include "SharedBufferDataReference.h"
 #include "WebCoreArgumentCoders.h"
@@ -55,7 +55,7 @@ void WebServiceWorkerFetchTaskClient::didReceiveRedirection(const WebCore::Resou
 {
     if (!m_connection)
         return;
-    m_connection->send(Messages::ServiceWorkerFetchTask::DidReceiveRedirectResponse { response }, m_fetchIdentifier.toUInt64());
+    m_connection->send(Messages::ServiceWorkerFetchTask::DidReceiveRedirectResponse { response }, m_fetchIdentifier);
 
     cleanup();
 }
@@ -68,7 +68,7 @@ void WebServiceWorkerFetchTaskClient::didReceiveResponse(const ResourceResponse&
     if (m_needsContinueDidReceiveResponseMessage)
         m_waitingForContinueDidReceiveResponseMessage = true;
 
-    m_connection->send(Messages::ServiceWorkerFetchTask::DidReceiveResponse { response, m_needsContinueDidReceiveResponseMessage }, m_fetchIdentifier.toUInt64());
+    m_connection->send(Messages::ServiceWorkerFetchTask::DidReceiveResponse { response, m_needsContinueDidReceiveResponseMessage }, m_fetchIdentifier);
 }
 
 void WebServiceWorkerFetchTaskClient::didReceiveData(Ref<SharedBuffer>&& buffer)
@@ -84,11 +84,17 @@ void WebServiceWorkerFetchTaskClient::didReceiveData(Ref<SharedBuffer>&& buffer)
         return;
     }
 
-    m_connection->send(Messages::ServiceWorkerFetchTask::DidReceiveData { { buffer }, static_cast<int64_t>(buffer->size()) }, m_fetchIdentifier.toUInt64());
+    m_connection->send(Messages::ServiceWorkerFetchTask::DidReceiveData { buffer.get(), static_cast<int64_t>(buffer->size()) }, m_fetchIdentifier);
 }
 
 void WebServiceWorkerFetchTaskClient::didReceiveFormDataAndFinish(Ref<FormData>&& formData)
 {
+    if (auto sharedBuffer = formData->asSharedBuffer()) {
+        didReceiveData(sharedBuffer.releaseNonNull());
+        didFinish();
+        return;
+    }
+
     if (!m_connection)
         return;
 
@@ -101,7 +107,7 @@ void WebServiceWorkerFetchTaskClient::didReceiveFormDataAndFinish(Ref<FormData>&
     // For now and for the case of blobs, we read it there and send the data through IPC.
     URL blobURL = formData->asBlobURL();
     if (blobURL.isNull()) {
-        m_connection->send(Messages::ServiceWorkerFetchTask::DidReceiveFormData { IPC::FormDataReference { WTFMove(formData) } }, m_fetchIdentifier.toUInt64());
+        m_connection->send(Messages::ServiceWorkerFetchTask::DidReceiveFormData { IPC::FormDataReference { WTFMove(formData) } }, m_fetchIdentifier);
         return;
     }
 
@@ -129,7 +135,7 @@ void WebServiceWorkerFetchTaskClient::didReceiveBlobChunk(const char* data, size
     if (!m_connection)
         return;
 
-    m_connection->send(Messages::ServiceWorkerFetchTask::DidReceiveData { { reinterpret_cast<const uint8_t*>(data), size }, static_cast<int64_t>(size) }, m_fetchIdentifier.toUInt64());
+    m_connection->send(Messages::ServiceWorkerFetchTask::DidReceiveData { { reinterpret_cast<const uint8_t*>(data), size }, static_cast<int64_t>(size) }, m_fetchIdentifier);
 }
 
 void WebServiceWorkerFetchTaskClient::didFinishBlobLoading()
@@ -145,11 +151,13 @@ void WebServiceWorkerFetchTaskClient::didFail(const ResourceError& error)
         return;
 
     if (m_waitingForContinueDidReceiveResponseMessage) {
+        RELEASE_LOG(ServiceWorker, "ServiceWorkerFrameLoaderClient::didFail while waiting, fetch identifier %llu", m_fetchIdentifier.toUInt64());
+
         m_responseData = makeUniqueRef<ResourceError>(error.isolatedCopy());
         return;
     }
 
-    m_connection->send(Messages::ServiceWorkerFetchTask::DidFail { error }, m_fetchIdentifier.toUInt64());
+    m_connection->send(Messages::ServiceWorkerFetchTask::DidFail { error }, m_fetchIdentifier);
 
     cleanup();
 }
@@ -160,11 +168,13 @@ void WebServiceWorkerFetchTaskClient::didFinish()
         return;
 
     if (m_waitingForContinueDidReceiveResponseMessage) {
+        RELEASE_LOG(ServiceWorker, "ServiceWorkerFrameLoaderClient::didFinish while waiting, fetch identifier %llu", m_fetchIdentifier.toUInt64());
+
         m_didFinish = true;
         return;
     }
 
-    m_connection->send(Messages::ServiceWorkerFetchTask::DidFinish { }, m_fetchIdentifier.toUInt64());
+    m_connection->send(Messages::ServiceWorkerFetchTask::DidFinish { }, m_fetchIdentifier);
 
     cleanup();
 }
@@ -174,7 +184,7 @@ void WebServiceWorkerFetchTaskClient::didNotHandle()
     if (!m_connection)
         return;
 
-    m_connection->send(Messages::ServiceWorkerFetchTask::DidNotHandle { }, m_fetchIdentifier.toUInt64());
+    m_connection->send(Messages::ServiceWorkerFetchTask::DidNotHandle { }, m_fetchIdentifier);
 
     cleanup();
 }
@@ -186,6 +196,8 @@ void WebServiceWorkerFetchTaskClient::cancel()
 
 void WebServiceWorkerFetchTaskClient::continueDidReceiveResponse()
 {
+    RELEASE_LOG(ServiceWorker, "ServiceWorkerFrameLoaderClient::continueDidReceiveResponse, has connection %d, didFinish %d, response type %ld", !!m_connection, m_didFinish, static_cast<long>(m_responseData.index()));
+
     if (!m_connection)
         return;
 

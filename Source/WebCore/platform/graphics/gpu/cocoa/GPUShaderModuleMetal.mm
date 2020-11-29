@@ -29,6 +29,7 @@
 #if ENABLE(WEBGPU)
 
 #import "GPUDevice.h"
+#import "GPUErrorScopes.h"
 #import "GPUShaderModuleDescriptor.h"
 #import "Logging.h"
 
@@ -37,29 +38,37 @@
 
 namespace WebCore {
 
-RefPtr<GPUShaderModule> GPUShaderModule::create(const GPUDevice& device, GPUShaderModuleDescriptor&& descriptor)
+RefPtr<GPUShaderModule> GPUShaderModule::tryCreate(const GPUDevice& device, const GPUShaderModuleDescriptor& descriptor)
 {
     if (!device.platformDevice()) {
         LOG(WebGPU, "GPUShaderModule::create(): Invalid GPUDevice!");
         return nullptr;
     }
+    
+    if (GPUDevice::useWHLSL)
+        return adoptRef(new GPUShaderModule(WHLSL::createShaderModule(descriptor.code)));
 
     PlatformShaderModuleSmartPtr module;
 
-    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    BEGIN_BLOCK_OBJC_EXCEPTIONS
 
     NSError *error = [NSError errorWithDomain:@"com.apple.WebKit.GPU" code:1 userInfo:nil];
     module = adoptNS([device.platformDevice() newLibraryWithSource:descriptor.code options:nil error:&error]);
     if (!module)
         LOG(WebGPU, "Shader compilation error: %s", [[error localizedDescription] UTF8String]);
 
-    END_BLOCK_OBJC_EXCEPTIONS;
+    END_BLOCK_OBJC_EXCEPTIONS
 
     return module ? adoptRef(new GPUShaderModule(WTFMove(module))) : nullptr;
 }
 
 GPUShaderModule::GPUShaderModule(PlatformShaderModuleSmartPtr&& module)
     : m_platformShaderModule(WTFMove(module))
+{
+}
+
+GPUShaderModule::GPUShaderModule(UniqueRef<WHLSL::ShaderModule>&& whlslModule)
+    : m_whlslModule(whlslModule.moveToUniquePtr())
 {
 }
 

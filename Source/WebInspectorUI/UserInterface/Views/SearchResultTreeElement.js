@@ -96,13 +96,15 @@ WI.SearchResultTreeElement = class SearchResultTreeElement extends WI.GeneralTre
             contextMenu.appendItem(WI.UIString("Reveal in Elements Tab"), () => {
                 WI.showMainFrameDOMTree(this.representedObject.domNode, {
                     ignoreSearchTab: true,
+                    initiatorHint: WI.TabBrowser.TabNavigationInitiator.ContextMenu,
                 });
             });
         } else if (this.representedObject instanceof WI.SourceCodeSearchMatchObject) {
-            contextMenu.appendItem(WI.UIString("Reveal in Resources Tab"), () => {
+            contextMenu.appendItem(WI.UIString("Reveal in Sources Tab"), () => {
                 WI.showOriginalOrFormattedSourceCodeTextRange(this.representedObject.sourceCodeTextRange, {
                     ignoreNetworkTab: true,
                     ignoreSearchTab: true,
+                    initiatorHint: WI.TabBrowser.TabNavigationInitiator.ContextMenu,
                 });
             });
         }

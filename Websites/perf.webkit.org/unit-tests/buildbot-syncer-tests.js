@@ -283,11 +283,11 @@ function samplePendingBuildRequests(buildRequestId, buildTime, workerName, build
     };
 }
 
-function sampleBuildData(workerName, isComplete, buildRequestId, buildNumber, builderId)
+function sampleBuildData(workerName, isComplete, buildRequestId, buildTag, builderId, state_string)
 {
     return {
         "builderid": builderId || 102,
-        "number": buildNumber || 614,
+        "number": buildTag || 614,
         "buildrequestid": 17,
         "complete": isComplete,
         "complete_at": null,
@@ -295,21 +295,21 @@ function sampleBuildData(workerName, isComplete, buildRequestId, buildNumber, bu
         "masterid": 1,
         "results": null,
         "started_at": 1513725109,
-        "state_string": "building",
+        state_string,
         "workerid": 41,
         "properties": {
             "build_request_id": [buildRequestId || 16733, "Force Build Form"],
             "platform": ["mac", "Unknown"],
             "scheduler": ["ABTest-iPad-RunBenchmark-Tests-ForceScheduler", "Scheduler"],
             "slavename": [workerName || "ABTest-iPad-0", "Worker (deprecated)"],
-            "workername": [workerName || "ABTest-iPad-0", "Worker"]
+            "workername": [workerName || "ABTest-iPad-0", "Worker"],
         }
     };
 }
 
 function sampleInProgressBuildData(workerName)
 {
-    return sampleBuildData(workerName, false);
+    return sampleBuildData(workerName, false, null, null, null, 'building');
 }
 
 function sampleInProgressBuild(workerName)
@@ -1045,6 +1045,53 @@ describe('BuildbotSyncer', () => {
             assert.deepEqual(JSON.parse(properties['owned-commits']), {'Owner Repository': [{revision: 'owned-002', repository: 'Owned Repository', ownerRevision: 'owner-001'}]});
         });
 
+        it('should allow to build with an owned component even if no repository accepts a patch in the triggerable repository group', () => {
+            const config = sampleiOSConfig();
+            config.repositoryGroups['owner-repository'] = {
+                'repositories': {'Owner Repository': {}},
+                'testProperties': {
+                    'owner-repo': {'revision': 'Owner Repository'},
+                    'roots': {'roots': {}},
+                },
+                'buildProperties': {
+                    'owned-commits': {'ownedRevisions': 'Owner Repository'}
+                },
+                'acceptsRoots': true,
+            };
+            const syncers = BuildbotSyncer._loadConfig(RemoteAPI, config, builderNameToIDMap());
+            const owner111289 = CommitLog.ensureSingleton('111289', {'id': '111289', 'time': 1456931874000, 'repository': MockModels.ownerRepository, 'revision': 'owner-001'});
+            const owned111222 = CommitLog.ensureSingleton('111222', {'id': '111222', 'time': 1456932774000, 'repository': MockModels.ownedRepository, 'revision': 'owned-002'});
+            const commitSet = CommitSet.ensureSingleton('53246486', {customRoots: [], revisionItems: [{commit: owner111289}, {commit: owned111222, commitOwner: owner111289, requiresBuild: true}]});
+            const request = BuildRequest.ensureSingleton(`123123`, {'triggerable': MockModels.triggerable,
+                repositoryGroup: MockModels.ownerRepositoryGroup,
+                'commitSet': commitSet, 'status': 'pending', 'platform': MockModels.iphone, 'test': null, 'order': -1});
+
+            const properties = syncers[2]._propertiesForBuildRequest(request, [request]);
+            assert.deepEqual(JSON.parse(properties['owned-commits']), {'Owner Repository': [{revision: 'owned-002', repository: 'Owned Repository', ownerRevision: 'owner-001'}]});
+        });
+
+        it('should fail if build type build request does not have any build repository group template', () => {
+            const config = sampleiOSConfig();
+            config.repositoryGroups['owner-repository'] = {
+                'repositories': {'Owner Repository': {}},
+                'testProperties': {
+                    'owner-repo': {'revision': 'Owner Repository'},
+                    'roots': {'roots': {}},
+                },
+                'acceptsRoots': true,
+            };
+            const syncers = BuildbotSyncer._loadConfig(RemoteAPI, config, builderNameToIDMap());
+            const owner1 = CommitLog.ensureSingleton('111289', {'id': '111289', 'time': 1456931874000, 'repository': MockModels.ownerRepository, 'revision': 'owner-001'});
+            const owned2 = CommitLog.ensureSingleton('111222', {'id': '111222', 'time': 1456932774000, 'repository': MockModels.ownedRepository, 'revision': 'owned-002'});
+            const commitSet = CommitSet.ensureSingleton('53246486', {customRoots: [], revisionItems: [{commit: owner1}, {commit: owned2, commitOwner: owner1, requiresBuild: true}]});
+            const request = BuildRequest.ensureSingleton(`123123`, {'triggerable': MockModels.triggerable,
+                repositoryGroup: MockModels.ownerRepositoryGroup,
+                'commitSet': commitSet, 'status': 'pending', 'platform': MockModels.iphone, 'test': null, 'order': -1});
+
+            assert.throws(() => syncers[2]._propertiesForBuildRequest(request, [request]),
+                (error) => error.code === 'ERR_ASSERTION');
+        });
+
         it('should set the property for the build request id', () => {
             const syncers = BuildbotSyncer._loadConfig(RemoteAPI, sampleiOSConfig(), builderNameToIDMap());
             const request = createSampleBuildRequest(MockModels.iphone, MockModels.speedometer);
@@ -1063,13 +1110,14 @@ describe('BuildbotSyncer', () => {
             assert.equal(pendingEntries.length, 1);
             const entry = pendingEntries[0];
             assert.ok(entry instanceof BuildbotBuildEntry);
-            assert.ok(!entry.buildNumber());
+            assert.ok(!entry.buildTag());
             assert.ok(!entry.workerName());
             assert.equal(entry.buildRequestId(), 16733);
             assert.ok(entry.isPending());
             assert.ok(!entry.isInProgress());
             assert.ok(!entry.hasFinished());
             assert.equal(entry.url(), 'http://build.webkit.org/#/buildrequests/17');
+            assert.equal(entry.statusDescription(), null);
         });
 
         it('should create BuildbotBuildEntry for in-progress build', () => {
@@ -1080,13 +1128,14 @@ describe('BuildbotSyncer', () => {
             assert.equal(entries.length, 1);
             const entry = entries[0];
             assert.ok(entry instanceof BuildbotBuildEntry);
-            assert.equal(entry.buildNumber(), 614);
+            assert.equal(entry.buildTag(), 614);
             assert.equal(entry.workerName(), 'ABTest-iPad-0');
             assert.equal(entry.buildRequestId(), 16733);
             assert.ok(!entry.isPending());
             assert.ok(entry.isInProgress());
             assert.ok(!entry.hasFinished());
             assert.equal(entry.url(), 'http://build.webkit.org/#/builders/102/builds/614');
+            assert.equal(entry.statusDescription(), 'building');
         });
 
         it('should create BuildbotBuildEntry for finished build', () => {
@@ -1097,13 +1146,14 @@ describe('BuildbotSyncer', () => {
             assert.deepEqual(entries.length, 1);
             const entry = entries[0];
             assert.ok(entry instanceof BuildbotBuildEntry);
-            assert.equal(entry.buildNumber(), 1755);
+            assert.equal(entry.buildTag(), 1755);
             assert.equal(entry.workerName(), 'ABTest-iPad-0');
             assert.equal(entry.buildRequestId(), 18935);
             assert.ok(!entry.isPending());
             assert.ok(!entry.isInProgress());
             assert.ok(entry.hasFinished());
             assert.equal(entry.url(), 'http://build.webkit.org/#/builders/102/builds/1755');
+            assert.equal(entry.statusDescription(), null);
         });
 
         it('should create BuildbotBuildEntry for mix of in-progress and finished builds', () => {
@@ -1115,23 +1165,25 @@ describe('BuildbotSyncer', () => {
 
             let entry = entries[0];
             assert.ok(entry instanceof BuildbotBuildEntry);
-            assert.equal(entry.buildNumber(), 614);
+            assert.equal(entry.buildTag(), 614);
             assert.equal(entry.workerName(), 'ABTest-iPad-0');
             assert.equal(entry.buildRequestId(), 16733);
             assert.ok(!entry.isPending());
             assert.ok(entry.isInProgress());
             assert.ok(!entry.hasFinished());
             assert.equal(entry.url(), 'http://build.webkit.org/#/builders/102/builds/614');
+            assert.equal(entry.statusDescription(), 'building');
 
             entry = entries[1];
             assert.ok(entry instanceof BuildbotBuildEntry);
-            assert.equal(entry.buildNumber(), 1755);
+            assert.equal(entry.buildTag(), 1755);
             assert.equal(entry.slaveName(), 'ABTest-iPad-0');
             assert.equal(entry.buildRequestId(), 18935);
             assert.ok(!entry.isPending());
             assert.ok(!entry.isInProgress());
             assert.ok(entry.hasFinished());
             assert.equal(entry.url(), 'http://build.webkit.org/#/builders/102/builds/1755');
+            assert.equal(entry.statusDescription(), null);
         });
     });
 
@@ -1173,7 +1225,7 @@ describe('BuildbotSyncer', () => {
 
             let entry = entries[0];
             assert.ok(entry instanceof BuildbotBuildEntry);
-            assert.equal(entry.buildNumber(), 1755);
+            assert.equal(entry.buildTag(), 1755);
             assert.equal(entry.workerName(), 'ABTest-iPad-0');
             assert.equal(entry.buildRequestId(), 18935);
             assert.ok(!entry.isPending());
@@ -1183,7 +1235,7 @@ describe('BuildbotSyncer', () => {
 
             entry = entries[1];
             assert.ok(entry instanceof BuildbotBuildEntry);
-            assert.equal(entry.buildNumber(), 614);
+            assert.equal(entry.buildTag(), 614);
             assert.equal(entry.slaveName(), 'ABTest-iPad-0');
             assert.equal(entry.buildRequestId(), 16733);
             assert.ok(!entry.isPending());
@@ -1239,7 +1291,7 @@ describe('BuildbotSyncer', () => {
                 assert.equal(entries.length, 1);
                 let entry = entries[0];
                 assert.ok(entry instanceof BuildbotBuildEntry);
-                assert.ok(!entry.buildNumber());
+                assert.ok(!entry.buildTag());
                 assert.ok(!entry.slaveName());
                 assert.equal(entry.buildRequestId(), 16733);
                 assert.ok(entry.isPending());
@@ -1263,7 +1315,7 @@ describe('BuildbotSyncer', () => {
                 assert.equal(entries.length, 1);
                 let entry = entries[0];
                 assert.ok(entry instanceof BuildbotBuildEntry);
-                assert.equal(entry.buildNumber(), 614);
+                assert.equal(entry.buildTag(), 614);
                 assert.equal(entry.slaveName(), 'ABTest-iPad-0');
                 assert.equal(entry.buildRequestId(), 16733);
                 assert.ok(!entry.isPending());
@@ -1287,7 +1339,7 @@ describe('BuildbotSyncer', () => {
                 assert.deepEqual(entries.length, 1);
                 let entry = entries[0];
                 assert.ok(entry instanceof BuildbotBuildEntry);
-                assert.equal(entry.buildNumber(), 1755);
+                assert.equal(entry.buildTag(), 1755);
                 assert.equal(entry.slaveName(), 'ABTest-iPad-0');
                 assert.equal(entry.buildRequestId(), 18935);
                 assert.ok(!entry.isPending());
@@ -1314,7 +1366,7 @@ describe('BuildbotSyncer', () => {
 
                 let entry = entries[0];
                 assert.ok(entry instanceof BuildbotBuildEntry);
-                assert.equal(entry.buildNumber(), null);
+                assert.equal(entry.buildTag(), null);
                 assert.equal(entry.slaveName(), null);
                 assert.equal(entry.buildRequestId(), 123);
                 assert.ok(entry.isPending());
@@ -1324,7 +1376,7 @@ describe('BuildbotSyncer', () => {
 
                 entry = entries[1];
                 assert.ok(entry instanceof BuildbotBuildEntry);
-                assert.equal(entry.buildNumber(), 614);
+                assert.equal(entry.buildTag(), 614);
                 assert.equal(entry.slaveName(), 'ABTest-iPad-0');
                 assert.equal(entry.buildRequestId(), 16733);
                 assert.ok(!entry.isPending());
@@ -1334,7 +1386,7 @@ describe('BuildbotSyncer', () => {
 
                 entry = entries[2];
                 assert.ok(entry instanceof BuildbotBuildEntry);
-                assert.equal(entry.buildNumber(), 1755);
+                assert.equal(entry.buildTag(), 1755);
                 assert.equal(entry.slaveName(), 'ABTest-iPad-0');
                 assert.equal(entry.buildRequestId(), 18935);
                 assert.ok(!entry.isPending());
@@ -1361,7 +1413,7 @@ describe('BuildbotSyncer', () => {
 
                 let entry = entries[0];
                 assert.ok(entry instanceof BuildbotBuildEntry);
-                assert.equal(entry.buildNumber(), null);
+                assert.equal(entry.buildTag(), null);
                 assert.equal(entry.slaveName(), null);
                 assert.equal(entry.buildRequestId(), 123);
                 assert.ok(entry.isPending());
@@ -1371,7 +1423,7 @@ describe('BuildbotSyncer', () => {
 
                 entry = entries[1];
                 assert.ok(entry instanceof BuildbotBuildEntry);
-                assert.equal(entry.buildNumber(), null);
+                assert.equal(entry.buildTag(), null);
                 assert.equal(entry.slaveName(), null);
                 assert.equal(entry.buildRequestId(), 456);
                 assert.ok(entry.isPending());
@@ -1381,7 +1433,7 @@ describe('BuildbotSyncer', () => {
 
                 entry = entries[2];
                 assert.ok(entry instanceof BuildbotBuildEntry);
-                assert.equal(entry.buildNumber(), 614);
+                assert.equal(entry.buildTag(), 614);
                 assert.equal(entry.slaveName(), 'ABTest-iPad-0');
                 assert.equal(entry.buildRequestId(), 16733);
                 assert.ok(!entry.isPending());
@@ -1391,7 +1443,7 @@ describe('BuildbotSyncer', () => {
 
                 entry = entries[3];
                 assert.ok(entry instanceof BuildbotBuildEntry);
-                assert.equal(entry.buildNumber(), 1755);
+                assert.equal(entry.buildTag(), 1755);
                 assert.equal(entry.slaveName(), 'ABTest-iPad-0');
                 assert.equal(entry.buildRequestId(), 18935);
                 assert.ok(!entry.isPending());
@@ -1418,7 +1470,7 @@ describe('BuildbotSyncer', () => {
 
                 let entry = entries[0];
                 assert.ok(entry instanceof BuildbotBuildEntry);
-                assert.equal(entry.buildNumber(), 614);
+                assert.equal(entry.buildTag(), 614);
                 assert.equal(entry.slaveName(), 'ABTest-iPad-0');
                 assert.equal(entry.buildRequestId(), 16733);
                 assert.ok(!entry.isPending());
@@ -1445,7 +1497,7 @@ describe('BuildbotSyncer', () => {
 
                 let entry = entries[0];
                 assert.ok(entry instanceof BuildbotBuildEntry);
-                assert.equal(entry.buildNumber(), 1755);
+                assert.equal(entry.buildTag(), 1755);
                 assert.equal(entry.slaveName(), 'ABTest-iPad-0');
                 assert.equal(entry.buildRequestId(), 16733);
                 assert.ok(!entry.isPending());

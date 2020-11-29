@@ -13,21 +13,28 @@ list(APPEND WTF_PUBLIC_HEADERS
     cf/CFURLExtras.h
     cf/TypeCastsCF.h
 
+    cocoa/CrashReporter.h
     cocoa/Entitlements.h
     cocoa/NSURLExtras.h
+    cocoa/RuntimeApplicationChecksCocoa.h
     cocoa/SoftLinking.h
+    cocoa/VectorCocoa.h
 
     darwin/WeakLinking.h
-
-    mac/AppKitCompatibilityDeclarations.h
 
     spi/cf/CFBundleSPI.h
     spi/cf/CFStringSPI.h
 
     spi/cocoa/CFXPCBridgeSPI.h
+    spi/cocoa/CrashReporterClientSPI.h
+    spi/cocoa/MachVMSPI.h
+    spi/cocoa/NSLocaleSPI.h
     spi/cocoa/SecuritySPI.h
     spi/cocoa/objcSPI.h
 
+    spi/darwin/DataVaultSPI.h
+    spi/darwin/OSVariantSPI.h
+    spi/darwin/ProcessMemoryFootprint.h
     spi/darwin/SandboxSPI.h
     spi/darwin/XPCSPI.h
     spi/darwin/dyldSPI.h
@@ -44,23 +51,26 @@ list(APPEND WTF_SOURCES
     cf/FileSystemCF.cpp
     cf/LanguageCF.cpp
     cf/RunLoopCF.cpp
-    cf/RunLoopTimerCF.cpp
     cf/SchedulePairCF.cpp
     cf/URLCF.cpp
 
     cocoa/AutodrainedPool.cpp
     cocoa/CPUTimeCocoa.cpp
+    cocoa/CrashReporter.cpp
     cocoa/Entitlements.mm
     cocoa/FileSystemCocoa.mm
+    cocoa/LanguageCocoa.mm
     cocoa/MachSendRight.cpp
     cocoa/MainThreadCocoa.mm
     cocoa/MemoryFootprintCocoa.cpp
     cocoa/MemoryPressureHandlerCocoa.mm
     cocoa/NSURLExtras.mm
+    cocoa/ResourceUsageCocoa.cpp
+    cocoa/RuntimeApplicationChecksCocoa.cpp
+    cocoa/SystemTracingCocoa.cpp
     cocoa/URLCocoa.mm
     cocoa/WorkQueueCocoa.cpp
 
-    mac/DeprecatedSymbolsUsedBySafari.mm
     mac/FileSystemMac.mm
     mac/SchedulePairMac.mm
 
@@ -68,7 +78,7 @@ list(APPEND WTF_SOURCES
     posix/OSAllocatorPOSIX.cpp
     posix/ThreadingPOSIX.cpp
 
-    text/cf/AtomicStringImplCF.cpp
+    text/cf/AtomStringImplCF.cpp
     text/cf/StringCF.cpp
     text/cf/StringImplCF.cpp
     text/cf/StringViewCF.cpp
@@ -79,26 +89,21 @@ list(APPEND WTF_SOURCES
     text/cocoa/TextBreakIteratorInternalICUCocoa.cpp
 )
 
-list(APPEND WTF_PRIVATE_INCLUDE_DIRECTORIES
-    ${DERIVED_SOURCES_WTF_DIR}
-)
-
-file(COPY mac/MachExceptions.defs DESTINATION ${DERIVED_SOURCES_WTF_DIR})
-file(COPY "${WTF_DIR}/icu/unicode" DESTINATION ${DERIVED_SOURCES_WTF_DIR})
+file(COPY mac/MachExceptions.defs DESTINATION ${WTF_DERIVED_SOURCES_DIR})
 
 add_custom_command(
     OUTPUT
-        ${DERIVED_SOURCES_WTF_DIR}/MachExceptionsServer.h
-        ${DERIVED_SOURCES_WTF_DIR}/mach_exc.h
-        ${DERIVED_SOURCES_WTF_DIR}/mach_excServer.c
-        ${DERIVED_SOURCES_WTF_DIR}/mach_excUser.c
+        ${WTF_DERIVED_SOURCES_DIR}/MachExceptionsServer.h
+        ${WTF_DERIVED_SOURCES_DIR}/mach_exc.h
+        ${WTF_DERIVED_SOURCES_DIR}/mach_excServer.c
+        ${WTF_DERIVED_SOURCES_DIR}/mach_excUser.c
     MAIN_DEPENDENCY mac/MachExceptions.defs
-    WORKING_DIRECTORY ${DERIVED_SOURCES_WTF_DIR}
+    WORKING_DIRECTORY ${WTF_DERIVED_SOURCES_DIR}
     COMMAND mig -sheader MachExceptionsServer.h MachExceptions.defs
     VERBATIM)
 list(APPEND WTF_SOURCES
-    ${DERIVED_SOURCES_WTF_DIR}/mach_excServer.c
-    ${DERIVED_SOURCES_WTF_DIR}/mach_excUser.c
+    ${WTF_DERIVED_SOURCES_DIR}/mach_excServer.c
+    ${WTF_DERIVED_SOURCES_DIR}/mach_excUser.c
 )
 
 WEBKIT_CREATE_FORWARDING_HEADERS(WebKitLegacy DIRECTORIES ${WebKitLegacy_FORWARDING_HEADERS_DIRECTORIES} FILES ${WebKitLegacy_FORWARDING_HEADERS_FILES})

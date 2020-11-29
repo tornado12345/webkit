@@ -34,7 +34,6 @@
 #import <WebKit/WKViewPrivate.h>
 #import <WebKit/WKPreferencesPrivate.h>
 #import <wtf/RetainPtr.h>
-#import <wtf/mac/AppKitCompatibilityDeclarations.h>
 
 @interface NSWindowController (WebKitFullScreenAdditions)
 - (NSRect)initialFrame;
@@ -120,8 +119,8 @@ void FullscreenZoomInitialFrame::initializeView(WKView *wkView)
 
     WKPageSetPageUIClient(wkView.pageRef, &uiClient.base);
 
-    WKRetainPtr<WKStringRef> identifier(AdoptWK, WKStringCreateWithUTF8CString("FullscreenZoomInitialFramePreferences"));
-    WKRetainPtr<WKPreferencesRef> customPreferences(AdoptWK, WKPreferencesCreateWithIdentifier(identifier.get()));
+    WKRetainPtr<WKStringRef> identifier = adoptWK(WKStringCreateWithUTF8CString("FullscreenZoomInitialFramePreferences"));
+    WKRetainPtr<WKPreferencesRef> customPreferences = adoptWK(WKPreferencesCreateWithIdentifier(identifier.get()));
     WKPreferencesSetFullScreenEnabled(customPreferences.get(), true);
     WKPageGroupSetPreferences(WKPageGetPageGroup(wkView.pageRef), customPreferences.get());
 }

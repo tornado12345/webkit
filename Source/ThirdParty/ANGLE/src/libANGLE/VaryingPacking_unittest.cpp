@@ -13,6 +13,7 @@
 // But 'None' is also define as a numberic constant 0L in <X11/X.h>.
 // So we need to include gtest first to avoid such conflict.
 
+#include "libANGLE/Program.h"
 #include "libANGLE/VaryingPacking.h"
 
 using namespace gl;
@@ -25,30 +26,32 @@ class VaryingPackingTest : public ::testing::TestWithParam<GLuint>
   protected:
     VaryingPackingTest() {}
 
-    bool testVaryingPacking(const std::vector<sh::Varying> &shVaryings,
+    bool testVaryingPacking(const std::vector<sh::ShaderVariable> &shVaryings,
                             VaryingPacking *varyingPacking)
     {
         std::vector<PackedVarying> packedVaryings;
-        for (const auto &shVarying : shVaryings)
+        for (const sh::ShaderVariable &shVarying : shVaryings)
         {
-            packedVaryings.push_back(PackedVarying(shVarying, shVarying.interpolation));
+            packedVaryings.push_back(PackedVarying(
+                VaryingInShaderRef(ShaderType::Vertex, &shVarying),
+                VaryingInShaderRef(ShaderType::Fragment, &shVarying), shVarying.interpolation));
         }
 
         InfoLog infoLog;
         std::vector<std::string> transformFeedbackVaryings;
 
-        return varyingPacking->packUserVaryings(infoLog, packedVaryings, transformFeedbackVaryings);
+        return varyingPacking->packUserVaryings(infoLog, packedVaryings);
     }
 
     // Uses the "relaxed" ANGLE packing mode.
-    bool packVaryings(GLuint maxVaryings, const std::vector<sh::Varying> &shVaryings)
+    bool packVaryings(GLuint maxVaryings, const std::vector<sh::ShaderVariable> &shVaryings)
     {
         VaryingPacking varyingPacking(maxVaryings, PackMode::ANGLE_RELAXED);
         return testVaryingPacking(shVaryings, &varyingPacking);
     }
 
     // Uses the stricter WebGL style packing rules.
-    bool packVaryingsStrict(GLuint maxVaryings, const std::vector<sh::Varying> &shVaryings)
+    bool packVaryingsStrict(GLuint maxVaryings, const std::vector<sh::ShaderVariable> &shVaryings)
     {
         VaryingPacking varyingPacking(maxVaryings, PackMode::WEBGL_STRICT);
         return testVaryingPacking(shVaryings, &varyingPacking);
@@ -57,20 +60,20 @@ class VaryingPackingTest : public ::testing::TestWithParam<GLuint>
     const int kMaxVaryings = GetParam();
 };
 
-std::vector<sh::Varying> MakeVaryings(GLenum type, size_t count, size_t arraySize)
+std::vector<sh::ShaderVariable> MakeVaryings(GLenum type, size_t count, size_t arraySize)
 {
-    std::vector<sh::Varying> varyings;
+    std::vector<sh::ShaderVariable> varyings;
 
     for (size_t index = 0; index < count; ++index)
     {
         std::stringstream strstr;
         strstr << type << index;
 
-        sh::Varying varying;
-        varying.type          = type;
-        varying.precision     = GL_MEDIUM_FLOAT;
-        varying.name          = strstr.str();
-        varying.mappedName    = strstr.str();
+        sh::ShaderVariable varying;
+        varying.type       = type;
+        varying.precision  = GL_MEDIUM_FLOAT;
+        varying.name       = strstr.str();
+        varying.mappedName = strstr.str();
         if (arraySize > 0)
         {
             varying.arraySizes.push_back(static_cast<unsigned int>(arraySize));
@@ -85,7 +88,10 @@ std::vector<sh::Varying> MakeVaryings(GLenum type, size_t count, size_t arraySiz
     return varyings;
 }
 
-void AddVaryings(std::vector<sh::Varying> *varyings, GLenum type, size_t count, size_t arraySize)
+void AddVaryings(std::vector<sh::ShaderVariable> *varyings,
+                 GLenum type,
+                 size_t count,
+                 size_t arraySize)
 {
     const auto &newVaryings = MakeVaryings(type, count, arraySize);
     varyings->insert(varyings->end(), newVaryings.begin(), newVaryings.end());
@@ -112,7 +118,7 @@ TEST_P(VaryingPackingTest, MaxPlusOneVaryingVec3Array)
 // This will overflow the available varying space.
 TEST_P(VaryingPackingTest, MaxVaryingVec3AndOneVec2)
 {
-    std::vector<sh::Varying> varyings = MakeVaryings(GL_FLOAT_VEC3, kMaxVaryings, 0);
+    std::vector<sh::ShaderVariable> varyings = MakeVaryings(GL_FLOAT_VEC3, kMaxVaryings, 0);
     AddVaryings(&varyings, GL_FLOAT_VEC2, 1, 0);
     ASSERT_FALSE(packVaryings(kMaxVaryings, varyings));
 }
@@ -139,7 +145,7 @@ TEST_P(VaryingPackingTest, TooManyVaryingVec2)
 // into the end of the vec3 varying arrays.
 TEST_P(VaryingPackingTest, MaxVaryingVec3ArrayAndFloatArrays)
 {
-    std::vector<sh::Varying> varyings = MakeVaryings(GL_FLOAT_VEC3, kMaxVaryings / 2, 2);
+    std::vector<sh::ShaderVariable> varyings = MakeVaryings(GL_FLOAT_VEC3, kMaxVaryings / 2, 2);
     AddVaryings(&varyings, GL_FLOAT, kMaxVaryings / 2, 2);
     ASSERT_TRUE(packVaryings(kMaxVaryings, varyings));
 }
@@ -147,7 +153,7 @@ TEST_P(VaryingPackingTest, MaxVaryingVec3ArrayAndFloatArrays)
 // This should not work - it has one too many float arrays.
 TEST_P(VaryingPackingTest, MaxVaryingVec3ArrayAndMaxPlusOneFloatArray)
 {
-    std::vector<sh::Varying> varyings = MakeVaryings(GL_FLOAT_VEC3, kMaxVaryings / 2, 2);
+    std::vector<sh::ShaderVariable> varyings = MakeVaryings(GL_FLOAT_VEC3, kMaxVaryings / 2, 2);
     AddVaryings(&varyings, GL_FLOAT, kMaxVaryings / 2 + 1, 2);
     ASSERT_FALSE(packVaryings(kMaxVaryings, varyings));
 }
@@ -160,6 +166,6 @@ TEST_P(VaryingPackingTest, MaxPlusOneMat2VaryingsFailsWebGL)
 }
 
 // Makes separate tests for different values of kMaxVaryings.
-INSTANTIATE_TEST_CASE_P(, VaryingPackingTest, ::testing::Values(1, 4, 8));
+INSTANTIATE_TEST_SUITE_P(, VaryingPackingTest, ::testing::Values(1, 4, 8));
 
 }  // anonymous namespace

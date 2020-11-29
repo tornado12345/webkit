@@ -26,12 +26,18 @@
 #import "config.h"
 #import "AccessibilityObject.h"
 
-#if HAVE(ACCESSIBILITY) && PLATFORM(COCOA)
+#if ENABLE(ACCESSIBILITY) && PLATFORM(COCOA)
 
 #import "WebAccessibilityObjectWrapperBase.h"
 
 namespace WebCore {
 
+PlainTextRange::PlainTextRange(NSRange r)
+    : start(r.location)
+    , length(r.length)
+{
+}
+    
 String AccessibilityObject::speechHintAttributeValue() const
 {
     auto speak = speakAsProperty();
@@ -197,4 +203,4 @@ String AccessibilityObject::helpTextAttributeValue() const
 
 }; // namespace WebCore
 
-#endif // HAVE(ACCESSIBILITY) && PLATFORM(COCOA)
+#endif // ENABLE(ACCESSIBILITY) && PLATFORM(COCOA)

@@ -64,7 +64,7 @@ def fake_platform(mac_version_string='10.6.3', release_string='bar', win_version
 def fake_executive(output=None):
     if output:
         return MockExecutive2(output=output)
-    return MockExecutive2(exception=SystemError)
+    return MockExecutive2(output='10.15.0\n')
 
 
 class TestPlatformInfo(unittest.TestCase):
@@ -76,10 +76,10 @@ class TestPlatformInfo(unittest.TestCase):
     def test_real_code(self):
         # This test makes sure the real (unmocked) code actually works.
         info = PlatformInfo(sys, platform, Executive())
-        self.assertNotEquals(info.os_name, '')
+        self.assertNotEqual(info.os_name, '')
         if info.is_mac() or info.is_win():
             self.assertIsNotNone(info.os_version)
-        self.assertNotEquals(info.display_name(), '')
+        self.assertNotEqual(info.display_name(), '')
         self.assertTrue(info.is_mac() or info.is_win() or info.is_linux() or info.is_freebsd())
         self.assertIsNotNone(info.terminal_width())
 
@@ -135,16 +135,16 @@ class TestPlatformInfo(unittest.TestCase):
 
     def test_display_name(self):
         info = self.make_info(fake_sys('darwin'))
-        self.assertNotEquals(info.display_name(), '')
+        self.assertNotEqual(info.display_name(), '')
 
         info = self.make_info(fake_sys('win32'), fake_platform(win_version_string='6.1.7600'))
-        self.assertNotEquals(info.display_name(), '')
+        self.assertNotEqual(info.display_name(), '')
 
         info = self.make_info(fake_sys('linux2'), fake_platform('', '10.4'))
-        self.assertNotEquals(info.display_name(), '')
+        self.assertNotEqual(info.display_name(), '')
 
         info = self.make_info(fake_sys('freebsd9'), fake_platform('', '9.0-RELEASE'))
-        self.assertNotEquals(info.display_name(), '')
+        self.assertNotEqual(info.display_name(), '')
 
     def test_total_bytes_memory(self):
         info = self.make_info(fake_sys('darwin'), fake_platform('10.6.3'), fake_executive('1234'))
@@ -160,6 +160,10 @@ class TestPlatformInfo(unittest.TestCase):
         self.assertIsNone(info.total_bytes_memory())
 
     def test_available_sdks(self):
+        sdk_version_output = '10.16\n'
+        info = self.make_info(fake_sys('darwin'), fake_platform('10.14.0'), fake_executive(sdk_version_output))
+        info.xcode_sdk_version('macosx')
+
         show_sdks_output = """iOS SDKs:
     iOS 12.0                          -sdk iphoneos12.0
 
@@ -177,7 +181,7 @@ watchOS Simulator SDKs:
     Simulator - watchOS 5.0           -sdk watchsimulator5.0
     Simulator - watchOS 5.0 Internal    -sdk watchsimulator5.0.type
 """
-        info = self.make_info(fake_sys('darwin'), fake_platform('10.14.0'), fake_executive(show_sdks_output))
+        info._executive = fake_executive(show_sdks_output)
         self.assertEqual(info.available_sdks(), [
             'iphoneos',
             'iphonesimulator', 'iphonesimulator.type',

@@ -114,6 +114,10 @@ void TestController::runModal(PlatformWebView*)
 {
 }
 
+void TestController::abortModal()
+{
+}
+
 WKContextRef TestController::platformContext()
 {
     return m_context.get();
@@ -132,8 +136,16 @@ void TestController::platformResetPreferencesToConsistentValues()
 {
 }
 
-void TestController::updatePlatformSpecificTestOptionsForTest(TestOptions&, const std::string&) const
+bool TestController::platformResetStateToConsistentValues(const TestOptions&)
 {
+    return true;
+}
+
+TestFeatures TestController::platformSpecificFeatureDefaultsForTest(const TestCommand&) const
+{
+    TestFeatures features;
+    features.boolWebPreferenceFeatures.insert({ "ModernMediaControlsEnabled", false });
+    return features;
 }
 
 } // namespace WTR

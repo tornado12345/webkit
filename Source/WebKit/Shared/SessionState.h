@@ -31,6 +31,7 @@
 #include <WebCore/FrameLoaderTypes.h>
 #include <WebCore/IntRect.h>
 #include <WebCore/SerializedScriptValue.h>
+#include <wtf/EnumTraits.h>
 #include <wtf/Optional.h>
 #include <wtf/URL.h>
 #include <wtf/Vector.h>
@@ -73,7 +74,7 @@ struct HTTPBody {
     };
 
     void encode(IPC::Encoder&) const;
-    static bool decode(IPC::Decoder&, HTTPBody&);
+    static WARN_UNUSED_RETURN bool decode(IPC::Decoder&, HTTPBody&);
 
     String contentType;
     Vector<Element> elements;
@@ -111,11 +112,15 @@ struct FrameState {
 #endif
 
     Vector<FrameState> children;
+
+    // This is only used to help debug <rdar://problem/48634553>.
+    bool isDestructed { false };
+    ~FrameState() { isDestructed = true; }
 };
 
 struct PageState {
     void encode(IPC::Encoder&) const;
-    static bool decode(IPC::Decoder&, PageState&);
+    static WARN_UNUSED_RETURN bool decode(IPC::Decoder&, PageState&);
 
     String title;
     FrameState mainFrameState;
@@ -133,6 +138,7 @@ struct BackForwardListItemState {
 #if PLATFORM(COCOA) || PLATFORM(GTK)
     RefPtr<ViewSnapshot> snapshot;
 #endif
+    bool hasCachedPage { false };
 };
 
 struct BackForwardListState {
@@ -150,3 +156,16 @@ struct SessionState {
 };
 
 } // namespace WebKit
+
+namespace WTF {
+
+template<> struct EnumTraits<WebKit::HTTPBody::Element::Type> {
+    using values = EnumValues<
+        WebKit::HTTPBody::Element::Type,
+        WebKit::HTTPBody::Element::Type::Data,
+        WebKit::HTTPBody::Element::Type::File,
+        WebKit::HTTPBody::Element::Type::Blob
+    >;
+};
+
+} // namespace WTF

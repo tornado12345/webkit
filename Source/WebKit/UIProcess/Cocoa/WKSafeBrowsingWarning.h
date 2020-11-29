@@ -23,6 +23,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#import "CocoaColor.h"
 #import "WKFoundation.h"
 #import <wtf/CompletionHandler.h>
 #import <wtf/RefPtr.h>
@@ -45,10 +46,23 @@ OBJC_CLASS WKSafeBrowsingTextView;
 #if PLATFORM(MAC)
 using ViewType = NSView;
 using RectType = NSRect;
-@interface WKSafeBrowsingWarning : NSView<NSTextViewDelegate>
 #else
 using ViewType = UIView;
 using RectType = CGRect;
+#endif
+
+@interface WKSafeBrowsingBox : ViewType {
+@package
+#if PLATFORM(MAC)
+    RetainPtr<CocoaColor> _backgroundColor;
+#endif
+}
+- (void)setSafeBrowsingBackgroundColor:(CocoaColor *)color;
+@end
+
+#if PLATFORM(MAC)
+@interface WKSafeBrowsingWarning : WKSafeBrowsingBox<NSTextViewDelegate, NSAccessibilityGroup>
+#else
 @interface WKSafeBrowsingWarning : UIScrollView<UITextViewDelegate>
 #endif
 {
@@ -56,7 +70,7 @@ using RectType = CGRect;
     CompletionHandler<void(Variant<WebKit::ContinueUnsafeLoad, URL>&&)> _completionHandler;
     RefPtr<const WebKit::SafeBrowsingWarning> _warning;
     WeakObjCPtr<WKSafeBrowsingTextView> _details;
-    WeakObjCPtr<ViewType> _box;
+    WeakObjCPtr<WKSafeBrowsingBox> _box;
 #if PLATFORM(WATCHOS)
     WeakObjCPtr<UIResponder> _previousFirstResponder;
 #endif

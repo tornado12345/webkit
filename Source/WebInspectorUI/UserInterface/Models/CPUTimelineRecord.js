@@ -27,7 +27,7 @@ WI.CPUTimelineRecord = class CPUTimelineRecord extends WI.TimelineRecord
 {
     constructor({timestamp, usage, threads})
     {
-        super(WI.TimelineRecord.Type.CPU, timestamp, timestamp);
+        super(WI.TimelineRecord.Type.CPU, timestamp - CPUTimelineRecord.samplingRatePerSecond, timestamp);
 
         console.assert(typeof timestamp === "number");
         console.assert(typeof usage === "number");
@@ -36,8 +36,7 @@ WI.CPUTimelineRecord = class CPUTimelineRecord extends WI.TimelineRecord
 
         this._timestamp = timestamp;
         this._usage = usage;
-
-        threads = threads || [];
+        this._threads = threads || [];
 
         this._mainThreadUsage = 0;
         this._webkitThreadUsage = 0;
@@ -45,14 +44,14 @@ WI.CPUTimelineRecord = class CPUTimelineRecord extends WI.TimelineRecord
         this._unknownThreadUsage = 0;
         this._workersData = null;
 
-        for (let thread of threads) {
-            if (thread.type === InspectorBackend.domains.CPUProfiler.ThreadInfoType.Main) {
+        for (let thread of this._threads) {
+            if (thread.type === InspectorBackend.Enum.CPUProfiler.ThreadInfoType.Main) {
                 console.assert(!this._mainThreadUsage, "There should only be one main thread.");
                 this._mainThreadUsage += thread.usage;
                 continue;
             }
 
-            if (thread.type === InspectorBackend.domains.CPUProfiler.ThreadInfoType.WebKit) {
+            if (thread.type === InspectorBackend.Enum.CPUProfiler.ThreadInfoType.WebKit) {
                 if (thread.targetId) {
                     if (!this._workersData)
                         this._workersData = [];
@@ -69,14 +68,47 @@ WI.CPUTimelineRecord = class CPUTimelineRecord extends WI.TimelineRecord
         }
     }
 
+    // Static
+
+    static get samplingRatePerSecond()
+    {
+        // 500ms. This matches the ResourceUsageThread sampling frequency in the backend.
+        return 0.5;
+    }
+
+    // Import / Export
+
+    static async fromJSON(json)
+    {
+        return new WI.CPUTimelineRecord(json);
+    }
+
+    toJSON()
+    {
+        return {
+            type: this.type,
+            timestamp: this._timestamp,
+            usage: this._usage,
+            threads: this._threads,
+        };
+    }
+
     // Public
 
     get timestamp() { return this._timestamp; }
     get usage() { return this._usage; }
+
+    get unadjustedStartTime() { return this._timestamp; }
 
     get mainThreadUsage() { return this._mainThreadUsage; }
     get webkitThreadUsage() { return this._webkitThreadUsage; }
     get workerThreadUsage() { return this._workerThreadUsage; }
     get unknownThreadUsage() { return this._unknownThreadUsage; }
     get workersData() { return this._workersData; }
+
+    adjustStartTime(startTime)
+    {
+        console.assert(startTime < this._endTime);
+        this._startTime = startTime;
+    }
 };

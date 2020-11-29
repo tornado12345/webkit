@@ -10,10 +10,10 @@ policies and contribution forms [3].
 [3] http://www.w3.org/2004/10/27-testcases
 */
 
-/* Documentation: http://web-platform-tests.org/writing-tests/testharness-api.html
+/* Documentation: https://web-platform-tests.org/writing-tests/testharness-api.html
  * (../docs/_writing-tests/testharness-api.md) */
 
-(function ()
+(function (global_scope)
 {
     var debug = false;
     // default timeout is 10 seconds, test can override if needed
@@ -48,9 +48,6 @@ policies and contribution forms [3].
      *
      *   // Should return the test harness timeout duration in milliseconds.
      *   float test_timeout();
-     *
-     *   // Should return the global scope object.
-     *   object global_scope();
      * };
      */
 
@@ -148,9 +145,9 @@ policies and contribution forms [3].
     };
 
     WindowTestEnvironment.prototype._forEach_windows = function(callback) {
-        // Iterate of the the windows [self ... top, opener]. The callback is passed
-        // two objects, the first one is the windows object itself, the second one
-        // is a boolean indicating whether or not its on the same origin as the
+        // Iterate over the windows [self ... top, opener]. The callback is passed
+        // two objects, the first one is the window object itself, the second one
+        // is a boolean indicating whether or not it's on the same origin as the
         // current window.
         var cache = this.window_cache;
         if (!cache) {
@@ -216,12 +213,9 @@ policies and contribution forms [3].
     }
 
     WindowTestEnvironment.prototype.next_default_test_name = function() {
-        //Don't use document.title to work around an Opera bug in XHTML documents
-        var title = document.getElementsByTagName("title")[0];
-        var prefix = (title && title.firstChild && title.firstChild.data) || "Untitled";
         var suffix = this.name_counter > 0 ? " " + this.name_counter : "";
         this.name_counter++;
-        return prefix + suffix;
+        return get_title() + suffix;
     };
 
     WindowTestEnvironment.prototype.on_new_harness_properties = function(properties) {
@@ -246,10 +240,6 @@ policies and contribution forms [3].
             }
         }
         return settings.harness_timeout.normal;
-    };
-
-    WindowTestEnvironment.prototype.global_scope = function() {
-        return window;
     };
 
     /*
@@ -295,7 +285,7 @@ policies and contribution forms [3].
     WorkerTestEnvironment.prototype.next_default_test_name = function() {
         var suffix = this.name_counter > 0 ? " " + this.name_counter : "";
         this.name_counter++;
-        return "Untitled" + suffix;
+        return get_title() + suffix;
     };
 
     WorkerTestEnvironment.prototype.on_new_harness_properties = function() {};
@@ -342,10 +332,6 @@ policies and contribution forms [3].
         // Tests running in a worker don't have a default timeout. I.e. all
         // worker tests behave as if settings.explicit_timeout is true.
         return null;
-    };
-
-    WorkerTestEnvironment.prototype.global_scope = function() {
-        return self;
     };
 
     /*
@@ -412,20 +398,7 @@ policies and contribution forms [3].
         self.addEventListener("message",
                 function(event) {
                     if (event.data && event.data.type && event.data.type === "connect") {
-                        if (event.ports && event.ports[0]) {
-                            // If a MessageChannel was passed, then use it to
-                            // send results back to the main window.  This
-                            // allows the tests to work even if the browser
-                            // does not fully support MessageEvent.source in
-                            // ServiceWorkers yet.
-                            this_obj._add_message_port(event.ports[0]);
-                            event.ports[0].start();
-                        } else {
-                            // If there is no MessageChannel, then attempt to
-                            // use the MessageEvent.source to send results
-                            // back to the main window.
-                            this_obj._add_message_port(event.source);
-                        }
+                        this_obj._add_message_port(event.source);
                     }
                 }, false);
 
@@ -462,25 +435,73 @@ policies and contribution forms [3].
         }
     };
 
+    /*
+     * JavaScript shells.
+     *
+     * This class is used as the test_environment when testharness is running
+     * inside a JavaScript shell.
+     */
+    function ShellTestEnvironment() {
+        this.name_counter = 0;
+        this.all_loaded = false;
+        this.on_loaded_callback = null;
+        Promise.resolve().then(function() {
+            this.all_loaded = true
+            if (this.on_loaded_callback) {
+                this.on_loaded_callback();
+            }
+        }.bind(this));
+        this.message_list = [];
+        this.message_ports = [];
+    }
+
+    ShellTestEnvironment.prototype.next_default_test_name = function() {
+        var suffix = this.name_counter > 0 ? " " + this.name_counter : "";
+        this.name_counter++;
+        return "Untitled" + suffix;
+    };
+
+    ShellTestEnvironment.prototype.on_new_harness_properties = function() {};
+
+    ShellTestEnvironment.prototype.on_tests_ready = function() {};
+
+    ShellTestEnvironment.prototype.add_on_loaded_callback = function(callback) {
+        if (this.all_loaded) {
+            callback();
+        } else {
+            this.on_loaded_callback = callback;
+        }
+    };
+
+    ShellTestEnvironment.prototype.test_timeout = function() {
+        // Tests running in a shell don't have a default timeout, so behave as
+        // if settings.explicit_timeout is true.
+        return null;
+    };
+
     function create_test_environment() {
-        if ('document' in self) {
+        if ('document' in global_scope) {
             return new WindowTestEnvironment();
         }
-        if ('DedicatedWorkerGlobalScope' in self &&
-            self instanceof DedicatedWorkerGlobalScope) {
+        if ('DedicatedWorkerGlobalScope' in global_scope &&
+            global_scope instanceof DedicatedWorkerGlobalScope) {
             return new DedicatedWorkerTestEnvironment();
         }
-        if ('SharedWorkerGlobalScope' in self &&
-            self instanceof SharedWorkerGlobalScope) {
+        if ('SharedWorkerGlobalScope' in global_scope &&
+            global_scope instanceof SharedWorkerGlobalScope) {
             return new SharedWorkerTestEnvironment();
         }
-        if ('ServiceWorkerGlobalScope' in self &&
-            self instanceof ServiceWorkerGlobalScope) {
+        if ('ServiceWorkerGlobalScope' in global_scope &&
+            global_scope instanceof ServiceWorkerGlobalScope) {
             return new ServiceWorkerTestEnvironment();
         }
-        if ('WorkerGlobalScope' in self &&
-            self instanceof WorkerGlobalScope) {
+        if ('WorkerGlobalScope' in global_scope &&
+            global_scope instanceof WorkerGlobalScope) {
             return new DedicatedWorkerTestEnvironment();
+        }
+
+        if (!('location' in global_scope)) {
+            return new ShellTestEnvironment();
         }
 
         throw new Error("Unsupported test environment");
@@ -489,26 +510,44 @@ policies and contribution forms [3].
     var test_environment = create_test_environment();
 
     function is_shared_worker(worker) {
-        return 'SharedWorker' in self && worker instanceof SharedWorker;
+        return 'SharedWorker' in global_scope && worker instanceof SharedWorker;
     }
 
     function is_service_worker(worker) {
         // The worker object may be from another execution context,
         // so do not use instanceof here.
-        return 'ServiceWorker' in self &&
+        return 'ServiceWorker' in global_scope &&
             Object.prototype.toString.call(worker) == '[object ServiceWorker]';
     }
 
     /*
      * API functions
      */
-
     function test(func, name, properties)
     {
+        if (tests.promise_setup_called) {
+            tests.status.status = tests.status.ERROR;
+            tests.status.message = '`test` invoked after `promise_setup`';
+            tests.complete();
+        }
         var test_name = name ? name : test_environment.next_default_test_name();
-        properties = properties ? properties : {};
         var test_obj = new Test(test_name, properties);
-        test_obj.step(func, test_obj, test_obj);
+        var value = test_obj.step(func, test_obj, test_obj);
+
+        if (value !== undefined) {
+            var msg = "Test named \"" + test_name +
+                "\" inappropriately returned a value";
+
+            try {
+                if (value && value.hasOwnProperty("then")) {
+                    msg += ", consider using `promise_test` instead";
+                }
+            } catch (err) {}
+
+            tests.status.status = tests.status.ERROR;
+            tests.status.message = msg;
+        }
+
         if (test_obj.phase === test_obj.phases.STARTED) {
             test_obj.done();
         }
@@ -516,13 +555,17 @@ policies and contribution forms [3].
 
     function async_test(func, name, properties)
     {
+        if (tests.promise_setup_called) {
+            tests.status.status = tests.status.ERROR;
+            tests.status.message = '`async_test` invoked after `promise_setup`';
+            tests.complete();
+        }
         if (typeof func !== "function") {
             properties = name;
             name = func;
             func = null;
         }
         var test_name = name ? name : test_environment.next_default_test_name();
-        properties = properties ? properties : {};
         var test_obj = new Test(test_name, properties);
         if (func) {
             test_obj.step(func, test_obj, test_obj);
@@ -531,39 +574,138 @@ policies and contribution forms [3].
     }
 
     function promise_test(func, name, properties) {
-        var test = async_test(name, properties);
+        if (typeof func !== "function") {
+            properties = name;
+            name = func;
+            func = null;
+        }
+        var test_name = name ? name : test_environment.next_default_test_name();
+        var test = new Test(test_name, properties);
+        test._is_promise_test = true;
+
         // If there is no promise tests queue make one.
         if (!tests.promise_tests) {
             tests.promise_tests = Promise.resolve();
         }
         tests.promise_tests = tests.promise_tests.then(function() {
-            var donePromise = new Promise(function(resolve) {
-                test._add_cleanup(resolve);
-            });
-            var promise = test.step(func, test, test);
-            test.step(function() {
-                assert_not_equals(promise, undefined);
-            });
-            Promise.resolve(promise).then(
-                    function() {
+            return new Promise(function(resolve) {
+                var promise = test.step(func, test, test);
+
+                test.step(function() {
+                    assert(!!promise, "promise_test", null,
+                           "test body must return a 'thenable' object (received ${value})",
+                           {value:promise});
+                    assert(typeof promise.then === "function", "promise_test", null,
+                           "test body must return a 'thenable' object (received an object with no `then` method)",
+                           null);
+                });
+
+                // Test authors may use the `step` method within a
+                // `promise_test` even though this reflects a mixture of
+                // asynchronous control flow paradigms. The "done" callback
+                // should be registered prior to the resolution of the
+                // user-provided Promise to avoid timeouts in cases where the
+                // Promise does not settle but a `step` function has thrown an
+                // error.
+                add_test_done_callback(test, resolve);
+
+                Promise.resolve(promise)
+                    .catch(test.step_func(
+                        function(value) {
+                            if (value instanceof AssertionError) {
+                                throw value;
+                            }
+                            assert(false, "promise_test", null,
+                                   "Unhandled rejection with value: ${value}", {value:value});
+                        }))
+                    .then(function() {
                         test.done();
-                    })
-                .catch(test.step_func(
-                    function(value) {
-                        if (value instanceof AssertionError) {
-                            throw value;
-                        }
-                        assert(false, "promise_test", null,
-                               "Unhandled rejection with value: ${value}", {value:value});
-                    }));
-            return donePromise;
+                    });
+                });
         });
     }
 
-    function promise_rejects(test, expected, promise, description) {
-        return promise.then(test.unreached_func("Should have rejected: " + description)).catch(function(e) {
-            assert_throws(expected, function() { throw e }, description);
-        });
+    /**
+     * Make a copy of a Promise in the current realm.
+     *
+     * @param {Promise} promise the given promise that may be from a different
+     *                          realm
+     * @returns {Promise}
+     *
+     * An arbitrary promise provided by the caller may have originated in
+     * another frame that have since navigated away, rendering the frame's
+     * document inactive. Such a promise cannot be used with `await` or
+     * Promise.resolve(), as microtasks associated with it may be prevented
+     * from being run. See https://github.com/whatwg/html/issues/5319 for a
+     * particular case.
+     *
+     * In functions we define here, there is an expectation from the caller
+     * that the promise is from the current realm, that can always be used with
+     * `await`, etc. We therefore create a new promise in this realm that
+     * inherit the value and status from the given promise.
+     */
+
+    function bring_promise_to_current_realm(promise) {
+        return new Promise(promise.then.bind(promise));
+    }
+
+    function promise_rejects_js(test, constructor, promise, description) {
+        return bring_promise_to_current_realm(promise)
+            .then(test.unreached_func("Should have rejected: " + description))
+            .catch(function(e) {
+                assert_throws_js_impl(constructor, function() { throw e },
+                                      description, "promise_rejects_js");
+            });
+    }
+
+    /**
+     * Assert that a Promise is rejected with the right DOMException.
+     *
+     * @param test the test argument passed to promise_test
+     * @param {number|string} type.  See documentation for assert_throws_dom.
+     *
+     * For the remaining arguments, there are two ways of calling
+     * promise_rejects_dom:
+     *
+     * 1) If the DOMException is expected to come from the current global, the
+     * third argument should be the promise expected to reject, and a fourth,
+     * optional, argument is the assertion description.
+     *
+     * 2) If the DOMException is expected to come from some other global, the
+     * third argument should be the DOMException constructor from that global,
+     * the fourth argument the promise expected to reject, and the fifth,
+     * optional, argument the assertion description.
+     */
+
+    function promise_rejects_dom(test, type, promiseOrConstructor, descriptionOrPromise, maybeDescription) {
+        let constructor, promise, description;
+        if (typeof promiseOrConstructor === "function" &&
+            promiseOrConstructor.name === "DOMException") {
+            constructor = promiseOrConstructor;
+            promise = descriptionOrPromise;
+            description = maybeDescription;
+        } else {
+            constructor = self.DOMException;
+            promise = promiseOrConstructor;
+            description = descriptionOrPromise;
+            assert(maybeDescription === undefined,
+                   "Too many args pased to no-constructor version of promise_rejects_dom");
+        }
+        return bring_promise_to_current_realm(promise)
+            .then(test.unreached_func("Should have rejected: " + description))
+            .catch(function(e) {
+                assert_throws_dom_impl(type, function() { throw e }, description,
+                                       "promise_rejects_dom", constructor);
+            });
+    }
+
+    function promise_rejects_exactly(test, exception, promise, description) {
+        return bring_promise_to_current_realm(promise)
+            .then(test.unreached_func("Should have rejected: " + description))
+            .catch(function(e) {
+                assert_throws_exactly_impl(exception, function() { throw e },
+                                           description, "promise_rejects_exactly");
+            });
     }
 
     /**
@@ -571,7 +713,7 @@ policies and contribution forms [3].
      * which can make it a lot easier to test a very specific series of events,
      * including ensuring that unexpected events are not fired at any point.
      */
-    function EventWatcher(test, watchedNode, eventTypes)
+    function EventWatcher(test, watchedNode, eventTypes, timeoutPromise)
     {
         if (typeof eventTypes == 'string') {
             eventTypes = [eventTypes];
@@ -616,7 +758,7 @@ policies and contribution forms [3].
 
         /**
          * Returns a Promise that will resolve after the specified event or
-         * series of events has occured.
+         * series of events has occurred.
          *
          * @param options An optional options object. If the 'record' property
          *                on this object has the value 'all', when the Promise
@@ -648,6 +790,27 @@ policies and contribution forms [3].
                 recordedEvents = [];
             }
             return new Promise(function(resolve, reject) {
+                var timeout = test.step_func(function() {
+                    // If the timeout fires after the events have been received
+                    // or during a subsequent call to wait_for, ignore it.
+                    if (!waitingFor || waitingFor.resolve !== resolve)
+                        return;
+
+                    // This should always fail, otherwise we should have
+                    // resolved the promise.
+                    assert_true(waitingFor.types.length == 0,
+                                'Timed out waiting for ' + waitingFor.types.join(', '));
+                    var result = recordedEvents;
+                    recordedEvents = null;
+                    var resolveFunc = waitingFor.resolve;
+                    waitingFor = null;
+                    resolveFunc(result);
+                });
+
+                if (timeoutPromise) {
+                    timeoutPromise().then(timeout);
+                }
+
                 waitingFor = {
                     types: types,
                     resolve: resolve,
@@ -684,11 +847,60 @@ policies and contribution forms [3].
         test_environment.on_new_harness_properties(properties);
     }
 
+    function promise_setup(func, maybe_properties)
+    {
+        if (typeof func !== "function") {
+            tests.set_status(tests.status.ERROR,
+                             "promise_test invoked without a function");
+            tests.complete();
+            return;
+        }
+        tests.promise_setup_called = true;
+
+        if (!tests.promise_tests) {
+            tests.promise_tests = Promise.resolve();
+        }
+
+        tests.promise_tests = tests.promise_tests
+            .then(function()
+                  {
+                      var properties = maybe_properties || {};
+                      var result;
+
+                      tests.setup(null, properties);
+                      result = func();
+                      test_environment.on_new_harness_properties(properties);
+
+                      if (!result || typeof result.then !== "function") {
+                          throw "Non-thenable returned by function passed to `promise_setup`";
+                      }
+                      return result;
+                  })
+            .catch(function(e)
+                   {
+                       tests.set_status(tests.status.ERROR,
+                                        String(e),
+                                        e && e.stack);
+                       tests.complete();
+                   });
+    }
+
     function done() {
         if (tests.tests.length === 0) {
-            tests.set_file_is_test();
+            // `done` is invoked after handling uncaught exceptions, so if the
+            // harness status is already set, the corresponding message is more
+            // descriptive than the generic message defined here.
+            if (tests.status.status === null) {
+                tests.status.status = tests.status.ERROR;
+                tests.status.message = "done() was called without first defining any tests";
+            }
+
+            tests.complete();
+            return;
         }
         if (tests.file_is_test) {
+            // file is test files never have asynchronous cleanup logic,
+            // meaning the fully-synchronous `done` function can be used here.
             tests.tests[0].done();
         }
         tests.end_wait();
@@ -707,6 +919,12 @@ policies and contribution forms [3].
                 });
     }
 
+    /*
+     * Register a function as a DOM event listener to the given object for the
+     * event bubbling phase.
+     *
+     * This function was deprecated in November of 2019.
+     */
     function on_event(object, event, callback)
     {
         object.addEventListener(event, callback, false);
@@ -723,9 +941,12 @@ policies and contribution forms [3].
     expose(test, 'test');
     expose(async_test, 'async_test');
     expose(promise_test, 'promise_test');
-    expose(promise_rejects, 'promise_rejects');
+    expose(promise_rejects_js, 'promise_rejects_js');
+    expose(promise_rejects_dom, 'promise_rejects_dom');
+    expose(promise_rejects_exactly, 'promise_rejects_exactly');
     expose(generate_tests, 'generate_tests');
     expose(setup, 'setup');
+    expose(promise_setup, 'promise_setup');
     expose(done, 'done');
     expose(on_event, 'on_event');
     expose(step_timeout, 'step_timeout');
@@ -827,12 +1048,20 @@ policies and contribution forms [3].
             seen.push(val);
         }
         if (Array.isArray(val)) {
-            return "[" + val.map(function(x) {return format_value(x, seen);}).join(", ") + "]";
+            let output = "[";
+            if (val.beginEllipsis !== undefined) {
+                output += "…, ";
+            }
+            output += val.map(function(x) {return format_value(x, seen);}).join(", ");
+            if (val.endEllipsis !== undefined) {
+                output += ", …";
+            }
+            return output + "]";
         }
 
         switch (typeof val) {
         case "string":
-            val = val.replace("\\", "\\\\");
+            val = val.replace(/\\/g, "\\\\");
             for (var p in replacements) {
                 var replace = "\\" + replacements[p];
                 val = val.replace(RegExp(String.fromCharCode(p), "g"), replace);
@@ -961,8 +1190,13 @@ policies and contribution forms [3].
     }
     expose(assert_in_array, "assert_in_array");
 
+    // This function was deprecated in July of 2015.
+    // See https://github.com/web-platform-tests/wpt/issues/2033
     function assert_object_equals(actual, expected, description)
     {
+         assert(typeof actual === "object" && actual !== null, "assert_object_equals", description,
+                                                               "value is ${actual}, expected object",
+                                                               {actual: actual});
          //This needs to be improved a great deal
          function check_equal(actual, expected, stack)
          {
@@ -980,7 +1214,7 @@ policies and contribution forms [3].
                  } else {
                      assert(same_value(actual[p], expected[p]), "assert_object_equals", description,
                                                        "property ${p} expected ${expected} got ${actual}",
-                                                       {p:p, expected:expected, actual:actual});
+                                                       {p:p, expected:expected[p], actual:actual[p]});
                  }
              }
              for (p in expected) {
@@ -996,25 +1230,57 @@ policies and contribution forms [3].
 
     function assert_array_equals(actual, expected, description)
     {
+        const max_array_length = 20;
+        function shorten_array(arr, offset = 0) {
+            // Make ", …" only show up when it would likely reduce the length, not accounting for
+            // fonts.
+            if (arr.length < max_array_length + 2) {
+                return arr;
+            }
+            // By default we want half the elements after the offset and half before
+            // But if that takes us past the end of the array, we have more before, and
+            // if it takes us before the start we have more after.
+            const length_after_offset = Math.floor(max_array_length / 2);
+            let upper_bound = Math.min(length_after_offset + offset, arr.length);
+            const lower_bound = Math.max(upper_bound - max_array_length, 0);
+
+            if (lower_bound === 0) {
+                upper_bound = max_array_length;
+            }
+
+            const output = arr.slice(lower_bound, upper_bound);
+            if (lower_bound > 0) {
+                output.beginEllipsis = true;
+            }
+            if (upper_bound < arr.length) {
+                output.endEllipsis = true;
+            }
+            return output;
+        }
+
         assert(typeof actual === "object" && actual !== null && "length" in actual,
                "assert_array_equals", description,
                "value is ${actual}, expected array",
                {actual:actual});
         assert(actual.length === expected.length,
                "assert_array_equals", description,
-               "lengths differ, expected ${expected} got ${actual}",
-               {expected:expected.length, actual:actual.length});
+               "lengths differ, expected array ${expected} length ${expectedLength}, got ${actual} length ${actualLength}",
+               {expected:shorten_array(expected, expected.length - 1), expectedLength:expected.length,
+                actual:shorten_array(actual, actual.length - 1), actualLength:actual.length
+               });
 
         for (var i = 0; i < actual.length; i++) {
             assert(actual.hasOwnProperty(i) === expected.hasOwnProperty(i),
                    "assert_array_equals", description,
-                   "property ${i}, property expected to be ${expected} but was ${actual}",
+                   "expected property ${i} to be ${expected} but was ${actual} (expected array ${arrayExpected} got ${arrayActual})",
                    {i:i, expected:expected.hasOwnProperty(i) ? "present" : "missing",
-                   actual:actual.hasOwnProperty(i) ? "present" : "missing"});
+                    actual:actual.hasOwnProperty(i) ? "present" : "missing",
+                    arrayExpected:shorten_array(expected, i), arrayActual:shorten_array(actual, i)});
             assert(same_value(expected[i], actual[i]),
                    "assert_array_equals", description,
-                   "property ${i}, expected ${expected} but got ${actual}",
-                   {i:i, expected:expected[i], actual:actual[i]});
+                   "expected property ${i} to be ${expected} but got ${actual} (expected array ${arrayExpected} got ${arrayActual})",
+                   {i:i, expected:expected[i], actual:actual[i],
+                    arrayExpected:shorten_array(expected, i), arrayActual:shorten_array(actual, i)});
         }
     }
     expose(assert_array_equals, "assert_array_equals");
@@ -1022,7 +1288,7 @@ policies and contribution forms [3].
     function assert_array_approx_equals(actual, expected, epsilon, description)
     {
         /*
-         * Test if two primitive arrays are equal withing +/- epsilon
+         * Test if two primitive arrays are equal within +/- epsilon
          */
         assert(actual.length === expected.length,
                "assert_array_approx_equals", description,
@@ -1034,7 +1300,7 @@ policies and contribution forms [3].
                    "assert_array_approx_equals", description,
                    "property ${i}, property expected to be ${expected} but was ${actual}",
                    {i:i, expected:expected.hasOwnProperty(i) ? "present" : "missing",
-                   actual:actual.hasOwnProperty(i) ? "present" : "missing"});
+                    actual:actual.hasOwnProperty(i) ? "present" : "missing"});
             assert(typeof actual[i] === "number",
                    "assert_array_approx_equals", description,
                    "property ${i}, expected a number but got a ${type_actual}",
@@ -1042,7 +1308,7 @@ policies and contribution forms [3].
             assert(Math.abs(actual[i] - expected[i]) <= epsilon,
                    "assert_array_approx_equals", description,
                    "property ${i}, expected ${expected} +/- ${epsilon}, expected ${expected} but got ${actual}",
-                   {i:i, expected:expected[i], actual:actual[i]});
+                   {i:i, expected:expected[i], actual:actual[i], epsilon:epsilon});
         }
     }
     expose(assert_array_approx_equals, "assert_array_approx_equals");
@@ -1050,7 +1316,7 @@ policies and contribution forms [3].
     function assert_approx_equals(actual, expected, epsilon, description)
     {
         /*
-         * Test if two primitive numbers are equal withing +/- epsilon
+         * Test if two primitive numbers are equal within +/- epsilon
          */
         assert(typeof actual === "number",
                "assert_approx_equals", description,
@@ -1180,35 +1446,35 @@ policies and contribution forms [3].
     expose(assert_regexp_match, "assert_regexp_match");
 
     function assert_class_string(object, class_string, description) {
-        assert_equals({}.toString.call(object), "[object " + class_string + "]",
-                      description);
+        var actual = {}.toString.call(object);
+        var expected = "[object " + class_string + "]";
+        assert(same_value(actual, expected), "assert_class_string", description,
+                                             "expected ${expected} but got ${actual}",
+                                             {expected:expected, actual:actual});
     }
     expose(assert_class_string, "assert_class_string");
 
 
-    function _assert_own_property(name) {
-        return function(object, property_name, description)
-        {
-            assert(object.hasOwnProperty(property_name),
-                   name, description,
-                   "expected property ${p} missing", {p:property_name});
-        };
+    function assert_own_property(object, property_name, description) {
+        assert(object.hasOwnProperty(property_name),
+               "assert_own_property", description,
+               "expected property ${p} missing", {p:property_name});
     }
-    expose(_assert_own_property("assert_exists"), "assert_exists");
-    expose(_assert_own_property("assert_own_property"), "assert_own_property");
+    expose(assert_own_property, "assert_own_property");
 
-    function assert_not_exists(object, property_name, description)
-    {
+    function assert_not_own_property(object, property_name, description) {
         assert(!object.hasOwnProperty(property_name),
-               "assert_not_exists", description,
-               "unexpected property ${p} found", {p:property_name});
+               "assert_not_own_property", description,
+               "unexpected property ${p} is found on object", {p:property_name});
     }
-    expose(assert_not_exists, "assert_not_exists");
+    expose(assert_not_own_property, "assert_not_own_property");
 
     function _assert_inherits(name) {
         return function (object, property_name, description)
         {
-            assert(typeof object === "object" || typeof object === "function",
+            assert(typeof object === "object" || typeof object === "function" ||
+                   // Or has [[IsHTMLDDA]] slot
+                   String(object) === "[object HTMLAllCollection]",
                    name, description,
                    "provided value is not an object");
 
@@ -1247,30 +1513,154 @@ policies and contribution forms [3].
     }
     expose(assert_readonly, "assert_readonly");
 
-    function assert_throws(code, func, description)
+    /**
+     * Assert a JS Error with the expected constructor is thrown.
+     *
+     * @param {object} constructor The expected exception constructor.
+     * @param {Function} func Function which should throw.
+     * @param {string} description Error description for the case that the error is not thrown.
+     */
+    function assert_throws_js(constructor, func, description)
+    {
+        assert_throws_js_impl(constructor, func, description,
+                              "assert_throws_js");
+    }
+    expose(assert_throws_js, "assert_throws_js");
+
+    /**
+     * Like assert_throws_js but allows specifying the assertion type
+     * (assert_throws_js or promise_rejects_js, in practice).
+     */
+    function assert_throws_js_impl(constructor, func, description,
+                                   assertion_type)
     {
         try {
             func.call(this);
-            assert(false, "assert_throws", description,
+            assert(false, assertion_type, description,
                    "${func} did not throw", {func:func});
         } catch (e) {
             if (e instanceof AssertionError) {
                 throw e;
             }
-            if (code === null) {
-                throw new AssertionError('Test bug: need to pass exception to assert_throws()');
+
+            // Basic sanity-checks on the thrown exception.
+            assert(typeof e === "object",
+                   assertion_type, description,
+                   "${func} threw ${e} with type ${type}, not an object",
+                   {func:func, e:e, type:typeof e});
+
+            assert(e !== null,
+                   assertion_type, description,
+                   "${func} threw null, not an object",
+                   {func:func});
+
+            // Basic sanity-check on the passed-in constructor
+            assert(typeof constructor == "function",
+                   assertion_type, description,
+                   "${constructor} is not a constructor",
+                   {constructor:constructor});
+            var obj = constructor;
+            while (obj) {
+                if (typeof obj === "function" &&
+                    obj.name === "Error") {
+                    break;
+                }
+                obj = Object.getPrototypeOf(obj);
             }
-            if (typeof code === "object") {
-                assert(typeof e == "object" && "name" in e && e.name == code.name,
-                       "assert_throws", description,
-                       "${func} threw ${actual} (${actual_name}) expected ${expected} (${expected_name})",
-                                    {func:func, actual:e, actual_name:e.name,
-                                     expected:code,
-                                     expected_name:code.name});
-                return;
+            assert(obj != null,
+                   assertion_type, description,
+                   "${constructor} is not an Error subtype",
+                   {constructor:constructor});
+
+            // And checking that our exception is reasonable
+            assert(e.constructor === constructor &&
+                   e.name === constructor.name,
+                   assertion_type, description,
+                   "${func} threw ${actual} (${actual_name}) expected instance of ${expected} (${expected_name})",
+                   {func:func, actual:e, actual_name:e.name,
+                    expected:constructor,
+                    expected_name:constructor.name});
+        }
+    }
+
+    /**
+     * Assert a DOMException with the expected type is thrown.
+     *
+     * @param {number|string} type The expected exception name or code.  See the
+     *        table of names and codes at
+     *        https://heycam.github.io/webidl/#dfn-error-names-table
+     *        If a number is passed it should be one of the numeric code values
+     *        in that table (e.g. 3, 4, etc).  If a string is passed it can
+     *        either be an exception name (e.g. "HierarchyRequestError",
+     *        "WrongDocumentError") or the name of the corresponding error code
+     *        (e.g. "HIERARCHY_REQUEST_ERR", "WRONG_DOCUMENT_ERR").
+     *
+     * For the remaining arguments, there are two ways of calling
+     * promise_rejects_dom:
+     *
+     * 1) If the DOMException is expected to come from the current global, the
+     * second argument should be the function expected to throw and a third,
+     * optional, argument is the assertion description.
+     *
+     * 2) If the DOMException is expected to come from some other global, the
+     * second argument should be the DOMException constructor from that global,
+     * the third argument the function expected to throw, and the fourth, optional,
+     * argument the assertion description.
+     */
+    function assert_throws_dom(type, funcOrConstructor, descriptionOrFunc, maybeDescription)
+    {
+        let constructor, func, description;
+        if (funcOrConstructor.name === "DOMException") {
+            constructor = funcOrConstructor;
+            func = descriptionOrFunc;
+            description = maybeDescription;
+        } else {
+            constructor = self.DOMException;
+            func = funcOrConstructor;
+            description = descriptionOrFunc;
+            assert(maybeDescription === undefined,
+                   "Too many args pased to no-constructor version of assert_throws_dom");
+        }
+        assert_throws_dom_impl(type, func, description, "assert_throws_dom", constructor)
+    }
+    expose(assert_throws_dom, "assert_throws_dom");
+
+    /**
+     * Similar to assert_throws_dom but allows specifying the assertion type
+     * (assert_throws_dom or promise_rejects_dom, in practice).  The
+     * "constructor" argument must be the DOMException constructor from the
+     * global we expect the exception to come from.
+     */
+    function assert_throws_dom_impl(type, func, description, assertion_type, constructor)
+    {
+        try {
+            func.call(this);
+            assert(false, assertion_type, description,
+                   "${func} did not throw", {func:func});
+        } catch (e) {
+            if (e instanceof AssertionError) {
+                throw e;
             }
 
-            var code_name_map = {
+            // Basic sanity-checks on the thrown exception.
+            assert(typeof e === "object",
+                   assertion_type, description,
+                   "${func} threw ${e} with type ${type}, not an object",
+                   {func:func, e:e, type:typeof e});
+
+            assert(e !== null,
+                   assertion_type, description,
+                   "${func} threw null, not an object",
+                   {func:func});
+
+            // Sanity-check our type
+            assert(typeof type == "number" ||
+                   typeof type == "string",
+                   assertion_type, description,
+                   "${type} is not a number or string",
+                   {type:type});
+
+            var codename_name_map = {
                 INDEX_SIZE_ERR: 'IndexSizeError',
                 HIERARCHY_REQUEST_ERR: 'HierarchyRequestError',
                 WRONG_DOCUMENT_ERR: 'WrongDocumentError',
@@ -1294,8 +1684,6 @@ policies and contribution forms [3].
                 INVALID_NODE_TYPE_ERR: 'InvalidNodeTypeError',
                 DATA_CLONE_ERR: 'DataCloneError'
             };
-
-            var name = code in code_name_map ? code_name_map[code] : code;
 
             var name_code_map = {
                 IndexSizeError: 1,
@@ -1333,40 +1721,94 @@ policies and contribution forms [3].
                 NotAllowedError: 0
             };
 
-            if (!(name in name_code_map)) {
-                throw new AssertionError('Test bug: unrecognized DOMException code "' + code + '" passed to assert_throws()');
+            var code_name_map = {};
+            for (var key in name_code_map) {
+                if (name_code_map[key] > 0) {
+                    code_name_map[name_code_map[key]] = key;
+                }
             }
 
-            var required_props = { code: name_code_map[name] };
+            var required_props = {};
+            var name;
+
+            if (typeof type === "number") {
+                if (type === 0) {
+                    throw new AssertionError('Test bug: ambiguous DOMException code 0 passed to assert_throws_dom()');
+                } else if (!(type in code_name_map)) {
+                    throw new AssertionError('Test bug: unrecognized DOMException code "' + type + '" passed to assert_throws_dom()');
+                }
+                name = code_name_map[type];
+                required_props.code = type;
+            } else if (typeof type === "string") {
+                name = type in codename_name_map ? codename_name_map[type] : type;
+                if (!(name in name_code_map)) {
+                    throw new AssertionError('Test bug: unrecognized DOMException code name or name "' + type + '" passed to assert_throws_dom()');
+                }
+
+                required_props.code = name_code_map[name];
+            }
 
             if (required_props.code === 0 ||
-               (typeof e == "object" &&
-                "name" in e &&
+               ("name" in e &&
                 e.name !== e.name.toUpperCase() &&
                 e.name !== "DOMException")) {
                 // New style exception: also test the name property.
                 required_props.name = name;
             }
 
-            //We'd like to test that e instanceof the appropriate interface,
-            //but we can't, because we don't know what window it was created
-            //in.  It might be an instanceof the appropriate interface on some
-            //unknown other window.  TODO: Work around this somehow?
-
-            assert(typeof e == "object",
-                   "assert_throws", description,
-                   "${func} threw ${e} with type ${type}, not an object",
-                   {func:func, e:e, type:typeof e});
-
             for (var prop in required_props) {
-                assert(typeof e == "object" && prop in e && e[prop] == required_props[prop],
-                       "assert_throws", description,
-                       "${func} threw ${e} that is not a DOMException " + code + ": property ${prop} is equal to ${actual}, expected ${expected}",
+                assert(prop in e && e[prop] == required_props[prop],
+                       assertion_type, description,
+                       "${func} threw ${e} that is not a DOMException " + type + ": property ${prop} is equal to ${actual}, expected ${expected}",
                        {func:func, e:e, prop:prop, actual:e[prop], expected:required_props[prop]});
             }
+
+            // Check that the exception is from the right global.  This check is last
+            // so more specific, and more informative, checks on the properties can
+            // happen in case a totally incorrect exception is thrown.
+            assert(e.constructor === constructor,
+                   assertion_type, description,
+                   "${func} threw an exception from the wrong global",
+                   {func});
+
         }
     }
-    expose(assert_throws, "assert_throws");
+
+    /**
+     * Assert the provided value is thrown.
+     *
+     * @param {value} exception The expected exception.
+     * @param {Function} func Function which should throw.
+     * @param {string} description Error description for the case that the error is not thrown.
+     */
+    function assert_throws_exactly(exception, func, description)
+    {
+        assert_throws_exactly_impl(exception, func, description,
+                                   "assert_throws_exactly");
+    }
+    expose(assert_throws_exactly, "assert_throws_exactly");
+
+    /**
+     * Like assert_throws_exactly but allows specifying the assertion type
+     * (assert_throws_exactly or promise_rejects_exactly, in practice).
+     */
+    function assert_throws_exactly_impl(exception, func, description,
+                                        assertion_type)
+    {
+        try {
+            func.call(this);
+            assert(false, assertion_type, description,
+                   "${func} did not throw", {func:func});
+        } catch (e) {
+            if (e instanceof AssertionError) {
+                throw e;
+            }
+
+            assert(same_value(e, exception), assertion_type, description,
+                   "${func} threw ${e} but we expected it to throw ${exception}",
+                   {func:func, e:e, exception:exception});
+        }
+    }
 
     function assert_unreached(description) {
          assert(false, "assert_unreached", description,
@@ -1395,6 +1837,43 @@ policies and contribution forms [3].
     }
     expose(assert_any, "assert_any");
 
+    /**
+     * Assert that a feature is implemented, based on a 'truthy' condition.
+     *
+     * This function should be used to early-exit from tests in which there is
+     * no point continuing without support for a non-optional spec or spec
+     * feature. For example:
+     *
+     *     assert_implements(window.Foo, 'Foo is not supported');
+     *
+     * @param {object} condition The truthy value to test
+     * @param {string} description Error description for the case that the condition is not truthy.
+     */
+    function assert_implements(condition, description) {
+        assert(!!condition, "assert_implements", description);
+    }
+    expose(assert_implements, "assert_implements")
+
+    /**
+     * Assert that an optional feature is implemented, based on a 'truthy' condition.
+     *
+     * This function should be used to early-exit from tests in which there is
+     * no point continuing without support for an explicitly optional spec or
+     * spec feature. For example:
+     *
+     *     assert_implements_optional(video.canPlayType("video/webm"),
+     *                                "webm video playback not supported");
+     *
+     * @param {object} condition The truthy value to test
+     * @param {string} description Error description for the case that the condition is not truthy.
+     */
+    function assert_implements_optional(condition, description) {
+        if (!condition) {
+            throw new OptionalFeatureUnsupportedError(description);
+        }
+    }
+    expose(assert_implements_optional, "assert_implements_optional")
+
     function Test(name, properties)
     {
         if (tests.file_is_test && tests.tests.length) {
@@ -1402,28 +1881,35 @@ policies and contribution forms [3].
         }
         this.name = name;
 
-        this.phase = tests.phase === tests.phases.ABORTED ?
+        this.phase = (tests.is_aborted || tests.phase === tests.phases.COMPLETE) ?
             this.phases.COMPLETE : this.phases.INITIAL;
 
         this.status = this.NOTRUN;
         this.timeout_id = null;
         this.index = null;
 
-        this.properties = properties;
-        var timeout = properties.timeout ? properties.timeout : settings.test_timeout;
-        if (timeout !== null) {
-            this.timeout_length = timeout * tests.timeout_multiplier;
-        } else {
-            this.timeout_length = null;
+        this.properties = properties || {};
+        this.timeout_length = settings.test_timeout;
+        if (this.timeout_length !== null) {
+            this.timeout_length *= tests.timeout_multiplier;
         }
 
         this.message = null;
         this.stack = null;
 
         this.steps = [];
+        this._is_promise_test = false;
 
         this.cleanup_callbacks = [];
         this._user_defined_cleanup_count = 0;
+        this._done_callbacks = [];
+
+        // Tests declared following harness completion are likely an indication
+        // of a programming error, but they cannot be reported
+        // deterministically.
+        if (tests.phase === tests.phases.COMPLETE) {
+            return;
+        }
 
         tests.push(this);
     }
@@ -1432,7 +1918,8 @@ policies and contribution forms [3].
         PASS:0,
         FAIL:1,
         TIMEOUT:2,
-        NOTRUN:3
+        NOTRUN:3,
+        PRECONDITION_FAILED:4
     };
 
     Test.prototype = merge({}, Test.statuses);
@@ -1441,7 +1928,8 @@ policies and contribution forms [3].
         INITIAL:0,
         STARTED:1,
         HAS_RESULT:2,
-        COMPLETE:3
+        CLEANING:3,
+        COMPLETE:4
     };
 
     Test.prototype.structured_clone = function()
@@ -1469,7 +1957,7 @@ policies and contribution forms [3].
             return;
         }
         this.phase = this.phases.STARTED;
-        //If we don't get a result before the harness times out that will be a test timout
+        //If we don't get a result before the harness times out that will be a test timeout
         this.set_status(this.TIMEOUT, "Test timed out");
 
         tests.started = true;
@@ -1491,10 +1979,11 @@ policies and contribution forms [3].
             if (this.phase >= this.phases.HAS_RESULT) {
                 return;
             }
+            var status = e instanceof OptionalFeatureUnsupportedError ? this.PRECONDITION_FAILED : this.FAIL;
             var message = String((typeof e === "object" && e !== null) ? e.message : e);
             var stack = e.stack ? e.stack : null;
 
-            this.set_status(this.FAIL, message, stack);
+            this.set_status(status, message, stack);
             this.phase = this.phases.HAS_RESULT;
             this.done();
         }
@@ -1546,6 +2035,105 @@ policies and contribution forms [3].
         return setTimeout(this.step_func(function() {
             return f.apply(test_this, args);
         }), timeout * tests.timeout_multiplier);
+    };
+
+    Test.prototype.step_wait_func = function(cond, func, description,
+                                             timeout=3000, interval=100) {
+        /**
+         * Poll for a function to return true, and call a callback
+         * function once it does, or assert if a timeout is
+         * reached. This is preferred over a simple step_timeout
+         * whenever possible since it allows the timeout to be longer
+         * to reduce intermittents without compromising test execution
+         * speed when the condition is quickly met.
+         *
+         * @param {Function} cond A function taking no arguments and
+         *                        returning a boolean. The callback is called
+         *                        when this function returns true.
+         * @param {Function} func A function taking no arguments to call once
+         *                        the condition is met.
+         * @param {string} description Error message to add to assert in case of
+         *                             failure.
+         * @param {number} timeout Timeout in ms. This is multiplied by the global
+         *                         timeout_multiplier
+         * @param {number} interval Polling interval in ms
+         *
+         **/
+
+        var timeout_full = timeout * tests.timeout_multiplier;
+        var remaining = Math.ceil(timeout_full / interval);
+        var test_this = this;
+
+        var wait_for_inner = test_this.step_func(() => {
+            if (cond()) {
+                func();
+            } else {
+                if(remaining === 0) {
+                    assert(false, "wait_for", description,
+                           "Timed out waiting on condition");
+                }
+                remaining--;
+                setTimeout(wait_for_inner, interval);
+            }
+        });
+
+        wait_for_inner();
+    };
+
+    Test.prototype.step_wait_func_done = function(cond, func, description,
+                                                  timeout=3000, interval=100) {
+        /**
+         * Poll for a function to return true, and invoke a callback
+         * followed this.done() once it does, or assert if a timeout
+         * is reached. This is preferred over a simple step_timeout
+         * whenever possible since it allows the timeout to be longer
+         * to reduce intermittents without compromising test execution speed
+         * when the condition is quickly met.
+         *
+         * @param {Function} cond A function taking no arguments and
+         *                        returning a boolean. The callback is called
+         *                        when this function returns true.
+         * @param {Function} func A function taking no arguments to call once
+         *                        the condition is met.
+         * @param {string} description Error message to add to assert in case of
+         *                             failure.
+         * @param {number} timeout Timeout in ms. This is multiplied by the global
+         *                         timeout_multiplier
+         * @param {number} interval Polling interval in ms
+         *
+         **/
+
+         this.step_wait_func(cond, () => {
+            if (func) {
+                func();
+            }
+            this.done();
+         }, description, timeout, interval);
+    }
+
+    Test.prototype.step_wait = function(cond, description, timeout=3000, interval=100) {
+        /**
+         * Poll for a function to return true, and resolve a promise
+         * once it does, or assert if a timeout is reached. This is
+         * preferred over a simple step_timeout whenever possible
+         * since it allows the timeout to be longer to reduce
+         * intermittents without compromising test execution speed
+         * when the condition is quickly met.
+         *
+         * @param {Function} cond A function taking no arguments and
+         *                        returning a boolean.
+         * @param {string} description Error message to add to assert in case of
+         *                             failure.
+         * @param {number} timeout Timeout in ms. This is multiplied by the global
+         *                         timeout_multiplier
+         * @param {number} interval Polling interval in ms
+         * @returns {Promise} Promise resolved once cond is met.
+         *
+         **/
+
+        return new Promise(resolve => {
+            this.step_wait_func(cond, resolve, description, timeout, interval);
+        });
     }
 
     /*
@@ -1567,11 +2155,6 @@ policies and contribution forms [3].
     Test.prototype.add_cleanup = function(callback) {
         this._user_defined_cleanup_count += 1;
         this._add_cleanup(callback);
-    };
-
-    Test.prototype.force_timeout = function() {
-        this.set_status(this.TIMEOUT);
-        this.phase = this.phases.HAS_RESULT;
     };
 
     Test.prototype.set_timeout = function()
@@ -1600,9 +2183,15 @@ policies and contribution forms [3].
         this.done();
     };
 
+    Test.prototype.force_timeout = Test.prototype.timeout;
+
+    /**
+     * Update the test status, initiate "cleanup" functions, and signal test
+     * completion.
+     */
     Test.prototype.done = function()
     {
-        if (this.phase == this.phases.COMPLETE) {
+        if (this.phase >= this.phases.CLEANING) {
             return;
         }
 
@@ -1610,12 +2199,22 @@ policies and contribution forms [3].
             this.set_status(this.PASS, null);
         }
 
-        this.phase = this.phases.COMPLETE;
+        if (global_scope.clearTimeout) {
+            clearTimeout(this.timeout_id);
+        }
 
-        clearTimeout(this.timeout_id);
-        tests.result(this);
         this.cleanup();
     };
+
+    function add_test_done_callback(test, callback)
+    {
+        if (test.phase === test.phases.COMPLETE) {
+            callback();
+            return;
+        }
+
+        test._done_callbacks.push(callback);
+    }
 
     /*
      * Invoke all specified cleanup functions. If one or more produce an error,
@@ -1624,29 +2223,108 @@ policies and contribution forms [3].
      */
     Test.prototype.cleanup = function() {
         var error_count = 0;
-        var total;
+        var bad_value_count = 0;
+        function on_error() {
+            error_count += 1;
+            // Abort tests immediately so that tests declared within subsequent
+            // cleanup functions are not run.
+            tests.abort();
+        }
+        var this_obj = this;
+        var results = [];
+
+        this.phase = this.phases.CLEANING;
 
         forEach(this.cleanup_callbacks,
                 function(cleanup_callback) {
+                    var result;
+
                     try {
-                        cleanup_callback();
+                        result = cleanup_callback();
                     } catch (e) {
-                        // Set test phase immediately so that tests declared
-                        // within subsequent cleanup functions are not run.
-                        tests.phase = tests.phases.ABORTED;
-                        error_count += 1;
+                        on_error();
+                        return;
                     }
+
+                    if (!is_valid_cleanup_result(this_obj, result)) {
+                        bad_value_count += 1;
+                        // Abort tests immediately so that tests declared
+                        // within subsequent cleanup functions are not run.
+                        tests.abort();
+                    }
+
+                    results.push(result);
                 });
 
-        if (error_count > 0) {
-            total = this._user_defined_cleanup_count;
-            tests.status.status = tests.status.ERROR;
-            tests.status.message = "Test named '" + this.name +
-                "' specified " + total + " 'cleanup' function" +
-                (total > 1 ? "s" : "") + ", and " + error_count + " failed.";
-            tests.status.stack = null;
+        if (!this._is_promise_test) {
+            cleanup_done(this_obj, error_count, bad_value_count);
+        } else {
+            all_async(results,
+                      function(result, done) {
+                          if (result && typeof result.then === "function") {
+                              result
+                                  .then(null, on_error)
+                                  .then(done);
+                          } else {
+                              done();
+                          }
+                      },
+                      function() {
+                          cleanup_done(this_obj, error_count, bad_value_count);
+                      });
         }
     };
+
+    /**
+     * Determine if the return value of a cleanup function is valid for a given
+     * test. Any test may return the value `undefined`. Tests created with
+     * `promise_test` may alternatively return "thenable" object values.
+     */
+    function is_valid_cleanup_result(test, result) {
+        if (result === undefined) {
+            return true;
+        }
+
+        if (test._is_promise_test) {
+            return result && typeof result.then === "function";
+        }
+
+        return false;
+    }
+
+    function cleanup_done(test, error_count, bad_value_count) {
+        if (error_count || bad_value_count) {
+            var total = test._user_defined_cleanup_count;
+
+            tests.status.status = tests.status.ERROR;
+            tests.status.message = "Test named '" + test.name +
+                "' specified " + total +
+                " 'cleanup' function" + (total > 1 ? "s" : "");
+
+            if (error_count) {
+                tests.status.message += ", and " + error_count + " failed";
+            }
+
+            if (bad_value_count) {
+                var type = test._is_promise_test ?
+                   "non-thenable" : "non-undefined";
+                tests.status.message += ", and " + bad_value_count +
+                    " returned a " + type + " value";
+            }
+
+            tests.status.message += ".";
+
+            tests.status.stack = null;
+        }
+
+        test.phase = test.phases.COMPLETE;
+        tests.result(test);
+        forEach(test._done_callbacks,
+                function(callback) {
+                    callback();
+                });
+        test._done_callbacks.length = 0;
+    }
 
     /*
      * A RemoteTest object mirrors a Test object on a remote worker. The
@@ -1664,6 +2342,7 @@ policies and contribution forms [3].
         this.index = null;
         this.phase = this.phases.INITIAL;
         this.update_state_from(clone);
+        this._done_callbacks = [];
         tests.push(this);
     }
 
@@ -1672,6 +2351,15 @@ policies and contribution forms [3].
         Object.keys(this).forEach(
                 (function(key) {
                     var value = this[key];
+                    // `RemoteTest` instances are responsible for managing
+                    // their own "done" callback functions, so those functions
+                    // are not relevant in other execution contexts. Because of
+                    // this (and because Function values cannot be serialized
+                    // for cross-realm transmittance), the property should not
+                    // be considered when cloning instances.
+                    if (key === '_done_callbacks' ) {
+                        return;
+                    }
 
                     if (typeof value === "object" && value !== null) {
                         clone[key] = merge({}, value);
@@ -1683,7 +2371,19 @@ policies and contribution forms [3].
         return clone;
     };
 
-    RemoteTest.prototype.cleanup = function() {};
+    /**
+     * `RemoteTest` instances are objects which represent tests running in
+     * another realm. They do not define "cleanup" functions (if necessary,
+     * such functions are defined on the associated `Test` instance within the
+     * external realm). However, `RemoteTests` may have "done" callbacks (e.g.
+     * as attached by the `Tests` instance responsible for tracking the overall
+     * test status in the parent realm). The `cleanup` method delegates to
+     * `done` in order to ensure that such callbacks are invoked following the
+     * completion of the `RemoteTest`.
+     */
+    RemoteTest.prototype.cleanup = function() {
+        this.done();
+    };
     RemoteTest.prototype.phases = Test.prototype.phases;
     RemoteTest.prototype.update_state_from = function(clone) {
         this.status = clone.status;
@@ -1695,6 +2395,11 @@ policies and contribution forms [3].
     };
     RemoteTest.prototype.done = function() {
         this.phase = this.phases.COMPLETE;
+
+        forEach(this._done_callbacks,
+                function(callback) {
+                    callback();
+                });
     }
 
     /*
@@ -1708,10 +2413,18 @@ policies and contribution forms [3].
      */
     function RemoteContext(remote, message_target, message_filter) {
         this.running = true;
+        this.started = false;
         this.tests = new Array();
+        this.early_exception = null;
 
         var this_obj = this;
-        remote.onerror = function(error) { this_obj.remote_error(error); };
+        // If remote context is cross origin assigning to onerror is not
+        // possible, so silently catch those errors.
+        try {
+          remote.onerror = function(error) { this_obj.remote_error(error); };
+        } catch (e) {
+          // Ignore.
+        }
 
         // Keeping a reference to the remote object and the message handler until
         // remote_done() is seen prevents the remote object and its message channel
@@ -1720,30 +2433,57 @@ policies and contribution forms [3].
         this.message_target = message_target;
         this.message_handler = function(message) {
             var passesFilter = !message_filter || message_filter(message);
+            // The reference to the `running` property in the following
+            // condition is unnecessary because that value is only set to
+            // `false` after the `message_handler` function has been
+            // unsubscribed.
+            // TODO: Simplify the condition by removing the reference.
             if (this_obj.running && message.data && passesFilter &&
                 (message.data.type in this_obj.message_handlers)) {
                 this_obj.message_handlers[message.data.type].call(this_obj, message.data);
             }
         };
 
+        if (self.Promise) {
+            this.done = new Promise(function(resolve) {
+                this_obj.doneResolve = resolve;
+            });
+        }
+
         this.message_target.addEventListener("message", this.message_handler);
     }
 
     RemoteContext.prototype.remote_error = function(error) {
+        if (error.preventDefault) {
+            error.preventDefault();
+        }
+
+        // Defer interpretation of errors until the testing protocol has
+        // started and the remote test's `allow_uncaught_exception` property
+        // is available.
+        if (!this.started) {
+            this.early_exception = error;
+        } else if (!this.allow_uncaught_exception) {
+            this.report_uncaught(error);
+        }
+    };
+
+    RemoteContext.prototype.report_uncaught = function(error) {
         var message = error.message || String(error);
         var filename = (error.filename ? " " + error.filename: "");
         // FIXME: Display remote error states separately from main document
         // error state.
-        this.remote_done({
-            status: {
-                status: tests.status.ERROR,
-                message: "Error in remote" + filename + ": " + message,
-                stack: error.stack
-            }
-        });
+        tests.set_status(tests.status.ERROR,
+                         "Error in remote" + filename + ": " + message,
+                         error.stack);
+    };
 
-        if (error.preventDefault) {
-            error.preventDefault();
+    RemoteContext.prototype.start = function(data) {
+        this.started = true;
+        this.allow_uncaught_exception = data.properties.allow_uncaught_exception;
+
+        if (this.early_exception && !this.allow_uncaught_exception) {
+            this.report_uncaught(this.early_exception);
         }
     };
 
@@ -1767,20 +2507,33 @@ policies and contribution forms [3].
     RemoteContext.prototype.remote_done = function(data) {
         if (tests.status.status === null &&
             data.status.status !== data.status.OK) {
-            tests.status.status = data.status.status;
-            tests.status.message = data.status.message;
-            tests.status.stack = data.status.stack;
+            tests.set_status(data.status.status, data.status.message, data.status.sack);
         }
+
         this.message_target.removeEventListener("message", this.message_handler);
         this.running = false;
+
+        // If remote context is cross origin assigning to onerror is not
+        // possible, so silently catch those errors.
+        try {
+          this.remote.onerror = null;
+        } catch (e) {
+          // Ignore.
+        }
+
         this.remote = null;
         this.message_target = null;
+        if (this.doneResolve) {
+            this.doneResolve();
+        }
+
         if (tests.all_done()) {
             tests.complete();
         }
     };
 
     RemoteContext.prototype.message_handlers = {
+        start: RemoteContext.prototype.start,
         test_state: RemoteContext.prototype.test_state,
         result: RemoteContext.prototype.test_done,
         complete: RemoteContext.prototype.remote_done
@@ -1800,7 +2553,8 @@ policies and contribution forms [3].
     TestsStatus.statuses = {
         OK:0,
         ERROR:1,
-        TIMEOUT:2
+        TIMEOUT:2,
+        PRECONDITION_FAILED:3
     };
 
     TestsStatus.prototype = merge({}, TestsStatus.statuses);
@@ -1829,8 +2583,7 @@ policies and contribution forms [3].
             SETUP:1,
             HAVE_TESTS:2,
             HAVE_RESULTS:3,
-            COMPLETE:4,
-            ABORTED:5
+            COMPLETE:4
         };
         this.phase = this.phases.INITIAL;
 
@@ -1842,6 +2595,10 @@ policies and contribution forms [3].
         this.allow_uncaught_exception = false;
 
         this.file_is_test = false;
+        // This value is lazily initialized in order to avoid introducing a
+        // dependency on ECMAScript 2015 Promises to all tests.
+        this.promise_tests = null;
+        this.promise_setup_called = false;
 
         this.timeout_multiplier = 1;
         this.timeout_length = test_environment.test_timeout();
@@ -1852,6 +2609,7 @@ policies and contribution forms [3].
         this.test_done_callbacks = [];
         this.all_done_callbacks = [];
 
+        this.hide_test_state = false;
         this.pending_remotes = [];
 
         this.status = new TestsStatus();
@@ -1892,8 +2650,15 @@ policies and contribution forms [3].
                     {
                         clearTimeout(this.timeout_id);
                     }
+                } else if (p == "single_test" && value) {
+                    this.set_file_is_test();
                 } else if (p == "timeout_multiplier") {
                     this.timeout_multiplier = value;
+                    if (this.timeout_length) {
+                         this.timeout_length *= this.timeout_multiplier;
+                    }
+                } else if (p == "hide_test_state") {
+                    this.hide_test_state = value;
                 }
             }
         }
@@ -1902,9 +2667,10 @@ policies and contribution forms [3].
             try {
                 func();
             } catch (e) {
-                this.status.status = this.status.ERROR;
+                this.status.status = e instanceof OptionalFeatureUnsupportedError ? this.status.PRECONDITION_FAILED : this.status.ERROR;
                 this.status.message = String(e);
                 this.status.stack = e.stack ? e.stack : null;
+                this.complete();
             }
         }
         this.set_timeout();
@@ -1920,20 +2686,55 @@ policies and contribution forms [3].
         async_test();
     };
 
+    Tests.prototype.set_status = function(status, message, stack)
+    {
+        this.status.status = status;
+        this.status.message = message;
+        this.status.stack = stack ? stack : null;
+    };
+
     Tests.prototype.set_timeout = function() {
-        var this_obj = this;
-        clearTimeout(this.timeout_id);
-        if (this.timeout_length !== null) {
-            this.timeout_id = setTimeout(function() {
-                                             this_obj.timeout();
-                                         }, this.timeout_length);
+        if (global_scope.clearTimeout) {
+            var this_obj = this;
+            clearTimeout(this.timeout_id);
+            if (this.timeout_length !== null) {
+                this.timeout_id = setTimeout(function() {
+                                                 this_obj.timeout();
+                                             }, this.timeout_length);
+            }
         }
     };
 
     Tests.prototype.timeout = function() {
+        var test_in_cleanup = null;
+
         if (this.status.status === null) {
-            this.status.status = this.status.TIMEOUT;
+            forEach(this.tests,
+                    function(test) {
+                        // No more than one test is expected to be in the
+                        // "CLEANUP" phase at any time
+                        if (test.phase === test.phases.CLEANING) {
+                            test_in_cleanup = test;
+                        }
+
+                        test.phase = test.phases.COMPLETE;
+                    });
+
+            // Timeouts that occur while a test is in the "cleanup" phase
+            // indicate that some global state was not properly reverted. This
+            // invalidates the overall test execution, so the timeout should be
+            // reported as an error and cancel the execution of any remaining
+            // tests.
+            if (test_in_cleanup) {
+                this.status.status = this.status.ERROR;
+                this.status.message = "Timeout while running cleanup for " +
+                    "test named \"" + test_in_cleanup.name + "\".";
+                tests.status.stack = null;
+            } else {
+                this.status.status = this.status.TIMEOUT;
+            }
         }
+
         this.complete();
     };
 
@@ -1964,11 +2765,10 @@ policies and contribution forms [3].
     };
 
     Tests.prototype.all_done = function() {
-        return this.phase === this.phases.ABORTED ||
-            (this.tests.length > 0 && test_environment.all_loaded &&
-                this.num_pending === 0 && !this.wait_for_finish &&
+        return this.tests.length > 0 && test_environment.all_loaded &&
+                (this.num_pending === 0 || this.is_aborted) && !this.wait_for_finish &&
                 !this.processing_callbacks &&
-                !this.pending_remotes.some(function(w) { return w.running; }));
+                !this.pending_remotes.some(function(w) { return w.running; });
     };
 
     Tests.prototype.start = function() {
@@ -1987,10 +2787,11 @@ policies and contribution forms [3].
 
     Tests.prototype.result = function(test)
     {
-        if (this.phase > this.phases.HAVE_RESULTS) {
-            return;
+        // If the harness has already transitioned beyond the `HAVE_RESULTS`
+        // phase, subsequent tests should not cause it to revert.
+        if (this.phase <= this.phases.HAVE_RESULTS) {
+            this.phase = this.phases.HAVE_RESULTS;
         }
-        this.phase = this.phases.HAVE_RESULTS;
         this.num_pending--;
         this.notify_result(test);
     };
@@ -2013,19 +2814,54 @@ policies and contribution forms [3].
         if (this.phase === this.phases.COMPLETE) {
             return;
         }
-        this.phase = this.phases.COMPLETE;
         var this_obj = this;
-        this.tests.forEach(
-            function(x)
-            {
-                if (x.phase < x.phases.COMPLETE) {
-                    this_obj.notify_result(x);
-                    x.cleanup();
-                    x.phase = x.phases.COMPLETE;
-                }
-            }
-        );
-        this.notify_complete();
+        var all_complete = function() {
+            this_obj.phase = this_obj.phases.COMPLETE;
+            this_obj.notify_complete();
+        };
+        var incomplete = filter(this.tests,
+                                function(test) {
+                                    return test.phase < test.phases.COMPLETE;
+                                });
+
+        /**
+         * To preserve legacy behavior, overall test completion must be
+         * signaled synchronously.
+         */
+        if (incomplete.length === 0) {
+            all_complete();
+            return;
+        }
+
+        all_async(incomplete,
+                  function(test, testDone)
+                  {
+                      if (test.phase === test.phases.INITIAL) {
+                          test.phase = test.phases.COMPLETE;
+                          testDone();
+                      } else {
+                          add_test_done_callback(test, testDone);
+                          test.cleanup();
+                      }
+                  },
+                  all_complete);
+    };
+
+    /**
+     * Update the harness status to reflect an unrecoverable harness error that
+     * should cancel all further testing. Update all previously-defined tests
+     * which have not yet started to indicate that they will not be executed.
+     */
+    Tests.prototype.abort = function() {
+        this.status.status = this.status.ERROR;
+        this.is_aborted = true;
+
+        forEach(this.tests,
+                function(test) {
+                    if (test.phase === test.phases.INITIAL) {
+                        test.phase = test.phases.COMPLETE;
+                    }
+                });
     };
 
     /*
@@ -2048,12 +2884,53 @@ policies and contribution forms [3].
         return duplicates;
     };
 
+    function code_unit_str(char) {
+        return 'U+' + char.charCodeAt(0).toString(16);
+    }
+
+    function sanitize_unpaired_surrogates(str) {
+        return str.replace(/([\ud800-\udbff])(?![\udc00-\udfff])/g,
+                           function(_, unpaired)
+                           {
+                               return code_unit_str(unpaired);
+                           })
+                  // This replacement is intentionally implemented without an
+                  // ES2018 negative lookbehind assertion to support runtimes
+                  // which do not yet implement that language feature.
+                  .replace(/(^|[^\ud800-\udbff])([\udc00-\udfff])/g,
+                           function(_, previous, unpaired) {
+                              if (/[\udc00-\udfff]/.test(previous)) {
+                                  previous = code_unit_str(previous);
+                              }
+
+                              return previous + code_unit_str(unpaired);
+                           });
+    }
+
+    function sanitize_all_unpaired_surrogates(tests) {
+        forEach (tests,
+                 function (test)
+                 {
+                     var sanitized = sanitize_unpaired_surrogates(test.name);
+
+                     if (test.name !== sanitized) {
+                         test.name = sanitized;
+                         delete test._structured_clone;
+                     }
+                 });
+    }
+
     Tests.prototype.notify_complete = function() {
         var this_obj = this;
         var duplicates;
 
         if (this.status.status === null) {
             duplicates = this.find_duplicates();
+
+            // Some transports adhere to UTF-8's restriction on unpaired
+            // surrogates. Sanitize the titles so that the results can be
+            // consistently sent via all transports.
+            sanitize_all_unpaired_surrogates(this.tests);
 
             // Test names are presumed to be unique within test files--this
             // allows consumers to use them for identification purposes.
@@ -2084,24 +2961,8 @@ policies and contribution forms [3].
         var message_port;
 
         if (is_service_worker(worker)) {
-            // The ServiceWorker's implicit MessagePort is currently not
-            // reliably accessible from the ServiceWorkerGlobalScope due to
-            // Blink setting MessageEvent.source to null for messages sent
-            // via ServiceWorker.postMessage(). Until that's resolved,
-            // create an explicit MessageChannel and pass one end to the
-            // worker.
-            if (window.MessageChannel && !!window.chrome) {
-                var message_channel = new MessageChannel();
-                message_port = message_channel.port1;
-                message_port.start();
-                worker.postMessage({type: "connect"}, [message_channel.port2]);
-            } else {
-                // If MessageChannel is not available, then try the
-                // ServiceWorker.postMessage() approach using MessageEvent.source
-                // on the other end.
-                message_port = navigator.serviceWorker;
-                worker.postMessage({type: "connect"});
-            }
+            message_port = navigator.serviceWorker;
+            worker.postMessage({type: "connect"});
         } else if (is_shared_worker(worker)) {
             message_port = worker.port;
             message_port.start();
@@ -2131,11 +2992,13 @@ policies and contribution forms [3].
             return;
         }
 
-        this.pending_remotes.push(this.create_remote_worker(worker));
+        var remoteContext = this.create_remote_worker(worker);
+        this.pending_remotes.push(remoteContext);
+        return remoteContext.done;
     };
 
     function fetch_tests_from_worker(port) {
-        tests.fetch_tests_from_worker(port);
+        return tests.fetch_tests_from_worker(port);
     }
     expose(fetch_tests_from_worker, 'fetch_tests_from_worker');
 
@@ -2244,6 +3107,9 @@ policies and contribution forms [3].
 
     Output.prototype.resolve_log = function() {
         var output_document;
+        if (this.output_node) {
+            return;
+        }
         if (typeof this.output_document === "function") {
             output_document = this.output_document.apply(undefined);
         } else {
@@ -2254,12 +3120,34 @@ policies and contribution forms [3].
         }
         var node = output_document.getElementById("log");
         if (!node) {
-            if (!document.body || document.readyState == "loading") {
+            if (output_document.readyState === "loading") {
                 return;
             }
-            node = output_document.createElement("div");
+            node = output_document.createElementNS("http://www.w3.org/1999/xhtml", "div");
             node.id = "log";
-            output_document.body.appendChild(node);
+            if (output_document.body) {
+                output_document.body.appendChild(node);
+            } else {
+                var root = output_document.documentElement;
+                var is_html = (root &&
+                               root.namespaceURI == "http://www.w3.org/1999/xhtml" &&
+                               root.localName == "html");
+                var is_svg = (output_document.defaultView &&
+                              "SVGSVGElement" in output_document.defaultView &&
+                              root instanceof output_document.defaultView.SVGSVGElement);
+                if (is_svg) {
+                    var foreignObject = output_document.createElementNS("http://www.w3.org/2000/svg", "foreignObject");
+                    foreignObject.setAttribute("width", "100%");
+                    foreignObject.setAttribute("height", "100%");
+                    root.appendChild(foreignObject);
+                    foreignObject.appendChild(node);
+                } else if (is_html) {
+                    root.appendChild(output_document.createElementNS("http://www.w3.org/1999/xhtml", "body"))
+                        .appendChild(node);
+                } else {
+                    root.appendChild(node);
+                }
+            }
         }
         this.output_document = output_document;
         this.output_node = node;
@@ -2269,15 +3157,15 @@ policies and contribution forms [3].
         if (this.phase < this.STARTED) {
             this.init();
         }
-        if (!this.enabled) {
+        if (!this.enabled || this.phase === this.COMPLETE) {
             return;
         }
+        this.resolve_log();
         if (this.phase < this.HAVE_RESULTS) {
-            this.resolve_log();
             this.phase = this.HAVE_RESULTS;
         }
         var done_count = tests.tests.length - tests.num_pending;
-        if (this.output_node) {
+        if (this.output_node && !tests.hide_test_state) {
             if (done_count < 100 ||
                 (done_count < 1000 && done_count % 100 === 0) ||
                 done_count % 1000 === 0) {
@@ -2310,27 +3198,25 @@ policies and contribution forms [3].
             log.removeChild(log.lastChild);
         }
 
-        var harness_url = get_harness_url();
-        if (harness_url !== undefined) {
-            var stylesheet = output_document.createElementNS(xhtml_ns, "link");
-            stylesheet.setAttribute("rel", "stylesheet");
-            stylesheet.setAttribute("href", harness_url + "testharness.css");
-            var heads = output_document.getElementsByTagName("head");
-            if (heads.length) {
-                heads[0].appendChild(stylesheet);
-            }
+        var stylesheet = output_document.createElementNS(xhtml_ns, "style");
+        stylesheet.textContent = stylesheetContent;
+        var heads = output_document.getElementsByTagName("head");
+        if (heads.length) {
+            heads[0].appendChild(stylesheet);
         }
 
         var status_text_harness = {};
         status_text_harness[harness_status.OK] = "OK";
         status_text_harness[harness_status.ERROR] = "Error";
         status_text_harness[harness_status.TIMEOUT] = "Timeout";
+        status_text_harness[harness_status.PRECONDITION_FAILED] = "Optional Feature Unsupported";
 
         var status_text = {};
         status_text[Test.prototype.PASS] = "Pass";
         status_text[Test.prototype.FAIL] = "Fail";
         status_text[Test.prototype.TIMEOUT] = "Timeout";
         status_text[Test.prototype.NOTRUN] = "Not Run";
+        status_text[Test.prototype.PRECONDITION_FAILED] = "Optional Feature Unsupported";
 
         var status_number = {};
         forEach(tests,
@@ -2484,7 +3370,7 @@ policies and contribution forms [3].
     /*
      * Template code
      *
-     * A template is just a javascript structure. An element is represented as:
+     * A template is just a JavaScript structure. An element is represented as:
      *
      * [tag_name, {attr_name:attr_value}, child1, child2]
      *
@@ -2646,13 +3532,10 @@ policies and contribution forms [3].
     }
 
     /*
-     * Utility funcions
+     * Utility functions
      */
     function assert(expected_true, function_name, description, error, substitutions)
     {
-        if (tests.tests.length === 0) {
-            tests.set_file_is_test();
-        }
         if (expected_true !== true) {
             var msg = make_message(function_name, description,
                                    error, substitutions);
@@ -2715,6 +3598,13 @@ policies and contribution forms [3].
         return lines.slice(i).join("\n");
     }
 
+    function OptionalFeatureUnsupportedError(message)
+    {
+        AssertionError.call(this, message);
+    }
+    OptionalFeatureUnsupportedError.prototype = Object.create(AssertionError.prototype);
+    expose(OptionalFeatureUnsupportedError, "OptionalFeatureUnsupportedError");
+
     function make_message(function_name, description, error, substitutions)
     {
         for (var p in substitutions) {
@@ -2768,6 +3658,57 @@ policies and contribution forms [3].
         }
     }
 
+    /**
+     * Immediately invoke a "iteratee" function with a series of values in
+     * parallel and invoke a final "done" function when all of the "iteratee"
+     * invocations have signaled completion.
+     *
+     * If all callbacks complete synchronously (or if no callbacks are
+     * specified), the `done_callback` will be invoked synchronously. It is the
+     * responsibility of the caller to ensure asynchronicity in cases where
+     * that is desired.
+     *
+     * @param {array} value Zero or more values to use in the invocation of
+     *                      `iter_callback`
+     * @param {function} iter_callback A function that will be invoked once for
+     *                                 each of the provided `values`. Two
+     *                                 arguments will be available in each
+     *                                 invocation: the value from `values` and
+     *                                 a function that must be invoked to
+     *                                 signal completion
+     * @param {function} done_callback A function that will be invoked after
+     *                                 all operations initiated by the
+     *                                 `iter_callback` function have signaled
+     *                                 completion
+     */
+    function all_async(values, iter_callback, done_callback)
+    {
+        var remaining = values.length;
+
+        if (remaining === 0) {
+            done_callback();
+        }
+
+        forEach(values,
+                function(element) {
+                    var invoked = false;
+                    var elDone = function() {
+                        if (invoked) {
+                            return;
+                        }
+
+                        invoked = true;
+                        remaining -= 1;
+
+                        if (remaining === 0) {
+                            done_callback();
+                        }
+                    };
+
+                    iter_callback(element, elDone);
+                });
+    }
+
     function merge(a,b)
     {
         var rv = {};
@@ -2784,7 +3725,7 @@ policies and contribution forms [3].
     function expose(object, name)
     {
         var components = name.split(".");
-        var target = test_environment.global_scope();
+        var target = global_scope;
         for (var i = 0; i < components.length - 1; i++) {
             if (!(components[i] in target)) {
                 target[components[i]] = {};
@@ -2806,7 +3747,7 @@ policies and contribution forms [3].
     /** Returns the 'src' URL of the first <script> tag in the page to include the file 'testharness.js'. */
     function get_script_url()
     {
-        if (!('document' in self)) {
+        if (!('document' in global_scope)) {
             return undefined;
         }
 
@@ -2828,14 +3769,23 @@ policies and contribution forms [3].
         return undefined;
     }
 
-    /** Returns the URL path at which the files for testharness.js are assumed to reside (e.g., '/resources/').
-        The path is derived from inspecting the 'src' of the <script> tag that included 'testharness.js'. */
-    function get_harness_url()
+    /** Returns the <title> or filename or "Untitled" */
+    function get_title()
     {
-        var script_url = get_script_url();
-
-        // Exclude the 'testharness.js' file from the returned path, but '+ 1' to include the trailing slash.
-        return script_url ? script_url.slice(0, script_url.lastIndexOf('/') + 1) : undefined;
+        if ('document' in global_scope) {
+            //Don't use document.title to work around an Opera bug in XHTML documents
+            var title = document.getElementsByTagName("title")[0];
+            if (title && title.firstChild && title.firstChild.data) {
+                return title.firstChild.data;
+            }
+        }
+        if ('META_TITLE' in global_scope && META_TITLE) {
+            return META_TITLE;
+        }
+        if ('location' in global_scope) {
+            return location.pathname.substring(location.pathname.lastIndexOf('/') + 1, location.pathname.indexOf('.'));
+        }
+        return "Untitled";
     }
 
     function supports_post_message(w)
@@ -2849,7 +3799,7 @@ policies and contribution forms [3].
         // Touching the postMessage prop on a window can throw if the window is
         // not from the same origin AND post message is not supported in that
         // browser. So just doing an existence test here won't do, you also need
-        // to wrap it in a try..cacth block.
+        // to wrap it in a try..catch block.
         try {
             type = typeof w.postMessage;
             if (type === "function") {
@@ -2881,38 +3831,172 @@ policies and contribution forms [3].
 
     var tests = new Tests();
 
-    var error_handler = function(e) {
-        if (tests.tests.length === 0 && !tests.allow_uncaught_exception) {
-            tests.set_file_is_test();
-        }
-
-        var stack;
-        if (e.error && e.error.stack) {
-            stack = e.error.stack;
-        } else {
-            stack = e.filename + ":" + e.lineno + ":" + e.colno;
-        }
-
-        if (tests.file_is_test) {
-            var test = tests.tests[0];
-            if (test.phase >= test.phases.HAS_RESULT) {
-                return;
+    if (global_scope.addEventListener) {
+        var error_handler = function(error, message, stack) {
+            var optional_unsupported = error instanceof OptionalFeatureUnsupportedError;
+            if (tests.file_is_test) {
+                var test = tests.tests[0];
+                if (test.phase >= test.phases.HAS_RESULT) {
+                    return;
+                }
+                var status = optional_unsupported ? test.PRECONDITION_FAILED : test.FAIL;
+                test.set_status(status, message, stack);
+                test.phase = test.phases.HAS_RESULT;
+            } else if (!tests.allow_uncaught_exception) {
+                var status = optional_unsupported ? tests.status.PRECONDITION_FAILED : tests.status.ERROR;
+                tests.status.status = status;
+                tests.status.message = message;
+                tests.status.stack = stack;
             }
-            test.set_status(test.FAIL, e.message, stack);
-            test.phase = test.phases.HAS_RESULT;
-            test.done();
-        } else if (!tests.allow_uncaught_exception) {
-            tests.status.status = tests.status.ERROR;
-            tests.status.message = e.message;
-            tests.status.stack = stack;
-        }
-        done();
-    };
 
-    addEventListener("error", error_handler, false);
-    addEventListener("unhandledrejection", function(e){ error_handler(e.reason); }, false);
+            // Do not transition to the "complete" phase if the test has been
+            // configured to allow uncaught exceptions. This gives the test an
+            // opportunity to define subtests based on the exception reporting
+            // behavior.
+            if (!tests.allow_uncaught_exception) {
+                done();
+            }
+        };
+
+        addEventListener("error", function(e) {
+            var message = e.message;
+            var stack;
+            if (e.error && e.error.stack) {
+                stack = e.error.stack;
+            } else {
+                stack = e.filename + ":" + e.lineno + ":" + e.colno;
+            }
+            error_handler(e.error, message, stack);
+        }, false);
+
+        addEventListener("unhandledrejection", function(e) {
+            var message;
+            if (e.reason && e.reason.message) {
+                message = "Unhandled rejection: " + e.reason.message;
+            } else {
+                message = "Unhandled rejection";
+            }
+            var stack;
+            if (e.reason && e.reason.stack) {
+                stack = e.reason.stack;
+            }
+            error_handler(e.reason, message, stack);
+        }, false);
+    }
 
     test_environment.on_tests_ready();
 
-})();
+    /**
+     * Stylesheet
+     */
+     var stylesheetContent = "\
+html {\
+    font-family:DejaVu Sans, Bitstream Vera Sans, Arial, Sans;\
+}\
+\
+#log .warning,\
+#log .warning a {\
+  color: black;\
+  background: yellow;\
+}\
+\
+#log .error,\
+#log .error a {\
+  color: white;\
+  background: red;\
+}\
+\
+section#summary {\
+    margin-bottom:1em;\
+}\
+\
+table#results {\
+    border-collapse:collapse;\
+    table-layout:fixed;\
+    width:100%;\
+}\
+\
+table#results th:first-child,\
+table#results td:first-child {\
+    width:8em;\
+}\
+\
+table#results th:last-child,\
+table#results td:last-child {\
+    width:50%;\
+}\
+\
+table#results.assertions th:last-child,\
+table#results.assertions td:last-child {\
+    width:35%;\
+}\
+\
+table#results th {\
+    padding:0;\
+    padding-bottom:0.5em;\
+    border-bottom:medium solid black;\
+}\
+\
+table#results td {\
+    padding:1em;\
+    padding-bottom:0.5em;\
+    border-bottom:thin solid black;\
+}\
+\
+tr.pass > td:first-child {\
+    color:green;\
+}\
+\
+tr.fail > td:first-child {\
+    color:red;\
+}\
+\
+tr.timeout > td:first-child {\
+    color:red;\
+}\
+\
+tr.notrun > td:first-child {\
+    color:blue;\
+}\
+\
+tr.optionalunsupported > td:first-child {\
+    color:blue;\
+}\
+\
+.pass > td:first-child, .fail > td:first-child, .timeout > td:first-child, .notrun > td:first-child, .optionalunsupported > td:first-child {\
+    font-variant:small-caps;\
+}\
+\
+table#results span {\
+    display:block;\
+}\
+\
+table#results span.expected {\
+    font-family:DejaVu Sans Mono, Bitstream Vera Sans Mono, Monospace;\
+    white-space:pre;\
+}\
+\
+table#results span.actual {\
+    font-family:DejaVu Sans Mono, Bitstream Vera Sans Mono, Monospace;\
+    white-space:pre;\
+}\
+\
+span.ok {\
+    color:green;\
+}\
+\
+tr.error {\
+    color:red;\
+}\
+\
+span.timeout {\
+    color:red;\
+}\
+\
+span.ok, span.timeout, span.error {\
+    font-variant:small-caps;\
+}\
+";
+
+})(this);
 // vim: set expandtab shiftwidth=4 tabstop=4:

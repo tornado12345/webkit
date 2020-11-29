@@ -1,4 +1,5 @@
 # Copyright (C) 2011 Google Inc. All rights reserved.
+# Copyright (C) 2020 Apple Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are
@@ -26,10 +27,12 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import logging
+
+from webkitcorepy import Version, OutputCapture
+
 from webkitpy.common.system.executive_mock import MockExecutive
-from webkitpy.common.system.outputcapture import OutputCapture
 from webkitpy.common.system.systemhost_mock import MockSystemHost
-from webkitpy.common.version import Version
 from webkitpy.common.version_name_map import PUBLIC_TABLE, VersionNameMap
 from webkitpy.port import port_testcase
 from webkitpy.port.win import WinPort
@@ -45,18 +48,17 @@ class WinPortTest(port_testcase.PortTestCase):
     def test_show_results_html_file(self):
         port = self.make_port()
         port._executive = MockExecutive(should_log=True)
-        capture = OutputCapture()
-        capture.capture_output()
-        port.show_results_html_file('test.html')
-        _, _, logs = capture.restore_output()
+        with OutputCapture(level=logging.INFO) as captured:
+            port.show_results_html_file('test.html')
+
         # We can't know for sure what path will be produced by cygpath, but we can assert about
         # everything else.
-        self.assertTrue(logs.startswith("MOCK run_command: ['Tools/Scripts/run-safari', '--release', '"))
-        self.assertTrue(logs.endswith("test.html'], cwd=/mock-checkout\n"))
+        self.assertTrue(captured.root.log.getvalue().startswith("MOCK run_command: ['Tools/Scripts/run-safari', '--release', '"))
+        self.assertTrue(captured.root.log.getvalue().endswith("test.html'], cwd=/mock-checkout\n"))
 
     def _assert_search_path(self, expected_search_paths, version, use_webkit2=False):
         port = self.make_port(port_name='win', os_version=version, options=MockOptions(webkit_test_runner=use_webkit2))
-        absolute_search_paths = map(port._webkit_baseline_path, expected_search_paths)
+        absolute_search_paths = list(map(port._webkit_baseline_path, expected_search_paths))
         self.assertEqual(port.baseline_search_path(), absolute_search_paths)
 
     def test_baseline_search_path(self):
@@ -92,14 +94,6 @@ class WinPortTest(port_testcase.PortTestCase):
 
     def test_operating_system(self):
         self.assertEqual('win', self.make_port().operating_system())
-
-    def test_runtime_feature_list(self):
-        port = self.make_port()
-        port._executive.run_command = lambda command, cwd=None, ignore_errors=False: "Nonsense"
-        # runtime_features_list returns None when its results are meaningless (it couldn't run DRT or parse the output, etc.)
-        self.assertEqual(port._runtime_feature_list(), None)
-        port._executive.run_command = lambda command, cwd=None, ignore_errors=False: "SupportedFeatures:foo bar"
-        self.assertEqual(port._runtime_feature_list(), ['foo', 'bar'])
 
     def test_expectations_files(self):
         self.assertEqual(len(self.make_port().expectations_files()), 3)

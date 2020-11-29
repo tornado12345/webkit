@@ -26,7 +26,7 @@
 
 #pragma once
 
-#if PLATFORM(IOS_FAMILY) || (PLATFORM(MAC) && ENABLE(VIDEO_PRESENTATION_MODE))
+#if ENABLE(VIDEO_PRESENTATION_MODE)
 
 #include "EventListener.h"
 #include "FloatRect.h"
@@ -55,12 +55,13 @@ public:
     WEBCORE_EXPORT virtual ~VideoFullscreenModelVideoElement();
     WEBCORE_EXPORT void setVideoElement(HTMLVideoElement*);
     HTMLVideoElement* videoElement() const { return m_videoElement.get(); }
+    WEBCORE_EXPORT RetainPtr<PlatformLayer> createVideoFullscreenLayer();
     WEBCORE_EXPORT void setVideoFullscreenLayer(PlatformLayer*, WTF::Function<void()>&& completionHandler = [] { });
     WEBCORE_EXPORT void willExitFullscreen();
     WEBCORE_EXPORT void waitForPreparedForInlineThen(WTF::Function<void()>&& completionHandler = [] { });
     
     WEBCORE_EXPORT void handleEvent(WebCore::ScriptExecutionContext&, WebCore::Event&) override;
-    void updateForEventName(const WTF::AtomicString&);
+    void updateForEventName(const WTF::AtomString&);
     bool operator==(const EventListener& rhs) const override { return static_cast<const WebCore::EventListener*>(this) == &rhs; }
 
     WEBCORE_EXPORT void addClient(VideoFullscreenModelClient&) override;
@@ -87,8 +88,8 @@ private:
     void willExitPictureInPicture() override;
     void didExitPictureInPicture() override;
 
-    static const Vector<WTF::AtomicString>& observedEventNames();
-    const WTF::AtomicString& eventNameAll();
+    static const Vector<WTF::AtomString>& observedEventNames();
+    const WTF::AtomString& eventNameAll();
 
     RefPtr<HTMLVideoElement> m_videoElement;
     RetainPtr<PlatformLayer> m_videoFullscreenLayer;

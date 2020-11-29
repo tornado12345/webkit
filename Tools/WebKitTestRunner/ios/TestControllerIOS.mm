@@ -42,13 +42,28 @@
 #import <WebKit/WKUserContentControllerPrivate.h>
 #import <WebKit/WKWebViewConfigurationPrivate.h>
 #import <WebKit/WKWebViewPrivate.h>
+#import <WebKit/WKWebViewPrivateForTesting.h>
 #import <objc/runtime.h>
+#import <pal/spi/ios/GraphicsServicesSPI.h>
 #import <wtf/MainThread.h>
 
 static BOOL overrideIsInHardwareKeyboardMode()
 {
     return NO;
 }
+
+static void overridePresentMenuOrPopoverOrViewController()
+{
+}
+
+#if !HAVE(NONDESTRUCTIVE_IMAGE_PASTE_SUPPORT_QUERY)
+
+static BOOL overrideKeyboardDelegateSupportsImagePaste(id, SEL)
+{
+    return NO;
+}
+
+#endif
 
 namespace WTR {
 
@@ -77,6 +92,9 @@ static void handleMenuDidHideNotification(CFNotificationCenterRef, void*, CFStri
 
 void TestController::notifyDone()
 {
+    UIView *contentView = mainWebView()->platformView().contentView;
+    UIView *selectionView = [contentView valueForKeyPath:@"interactionAssistant.selectionView"];
+    [selectionView _removeAllAnimations:YES];
 }
 
 void TestController::platformInitialize()
@@ -128,55 +146,130 @@ void TestController::platformResetPreferencesToConsistentValues()
 {
     WKPreferencesRef preferences = platformPreferences();
     WKPreferencesSetTextAutosizingEnabled(preferences, false);
+    WKPreferencesSetTextAutosizingUsesIdempotentMode(preferences, false);
     WKPreferencesSetContentChangeObserverEnabled(preferences, false);
 }
 
-void TestController::platformResetStateToConsistentValues(const TestOptions& options)
+bool TestController::platformResetStateToConsistentValues(const TestOptions& options)
 {
     cocoaResetStateToConsistentValues(options);
 
-    UIMenuController.sharedMenuController.menuVisible = NO;
+    [UIKeyboardImpl.activeInstance setCorrectionLearningAllowed:NO];
+    [UIPasteboard generalPasteboard].items = @[ ];
     [[UIApplication sharedApplication] _cancelAllTouches];
     [[UIDevice currentDevice] setOrientation:UIDeviceOrientationPortrait animated:NO];
+    UIKeyboardPreferencesController *keyboardPreferences = UIKeyboardPreferencesController.sharedPreferencesController;
+    auto globalPreferencesDomainName = CFSTR("com.apple.Preferences");
+    auto automaticMinimizationEnabledPreferenceKey = @"AutomaticMinimizationEnabled";
+    if (![keyboardPreferences boolForPreferenceKey:automaticMinimizationEnabledPreferenceKey]) {
+        [keyboardPreferences setValue:@YES forPreferenceKey:automaticMinimizationEnabledPreferenceKey];
+        CFPreferencesSetAppValue((__bridge CFStringRef)automaticMinimizationEnabledPreferenceKey, kCFBooleanTrue, globalPreferencesDomainName);
+    }
 
-    m_inputModeSwizzlers.clear();
-    m_overriddenKeyboardInputMode = nil;
-    
+    // Disables the dictation keyboard shortcut for testing.
+    auto dictationKeyboardShortcutPreferenceKey = @"HWKeyboardDictationShortcut";
+    auto dictationKeyboardShortcutValueForTesting = @(-1);
+    if (![dictationKeyboardShortcutValueForTesting isEqual:[keyboardPreferences valueForPreferenceKey:dictationKeyboardShortcutPreferenceKey]]) {
+        [keyboardPreferences setValue:dictationKeyboardShortcutValueForTesting forPreferenceKey:dictationKeyboardShortcutPreferenceKey];
+        CFPreferencesSetAppValue((__bridge CFStringRef)dictationKeyboardShortcutPreferenceKey, (__bridge CFNumberRef)dictationKeyboardShortcutValueForTesting, globalPreferencesDomainName);
+    }
+
+    GSEventSetHardwareKeyboardAttached(true, 0);
+
+#if !HAVE(NONDESTRUCTIVE_IMAGE_PASTE_SUPPORT_QUERY)
+    // FIXME: Remove this workaround once -[UIKeyboardImpl delegateSupportsImagePaste] no longer increments the general pasteboard's changeCount.
+    if (!m_keyboardDelegateSupportsImagePasteSwizzler)
+        m_keyboardDelegateSupportsImagePasteSwizzler = makeUnique<InstanceMethodSwizzler>(UIKeyboardImpl.class, @selector(delegateSupportsImagePaste), reinterpret_cast<IMP>(overrideKeyboardDelegateSupportsImagePaste));
+#endif
+
+    if (m_overriddenKeyboardInputMode) {
+        m_overriddenKeyboardInputMode = nil;
+        m_inputModeSwizzlers.clear();
+        [UIKeyboardImpl.sharedInstance prepareKeyboardInputModeFromPreferences:nil];
+    }
+
+    m_presentPopoverSwizzlers.clear();
+    if (!options.shouldPresentPopovers()) {
+#if USE(UICONTEXTMENU)
+        m_presentPopoverSwizzlers.append(makeUnique<InstanceMethodSwizzler>([UIContextMenuInteraction class], @selector(_presentMenuAtLocation:), reinterpret_cast<IMP>(overridePresentMenuOrPopoverOrViewController)));
+#endif
+        m_presentPopoverSwizzlers.append(makeUnique<InstanceMethodSwizzler>([UIPopoverController class], @selector(presentPopoverFromRect:inView:permittedArrowDirections:animated:), reinterpret_cast<IMP>(overridePresentMenuOrPopoverOrViewController)));
+        m_presentPopoverSwizzlers.append(makeUnique<InstanceMethodSwizzler>([UIViewController class], @selector(presentViewController:animated:completion:), reinterpret_cast<IMP>(overridePresentMenuOrPopoverOrViewController)));
+    }
+
     BOOL shouldRestoreFirstResponder = NO;
     if (PlatformWebView* platformWebView = mainWebView()) {
         TestRunnerWKWebView *webView = platformWebView->platformView();
         webView._stableStateOverride = nil;
+        webView._scrollingUpdatesDisabledForTesting = NO;
         webView.usesSafariLikeRotation = NO;
         webView.overrideSafeAreaInsets = UIEdgeInsetsZero;
         [webView _clearOverrideLayoutParameters];
         [webView _clearInterfaceOrientationOverride];
+        [webView resetCustomMenuAction];
+        [webView setAllowedMenuActions:nil];
 
         UIScrollView *scrollView = webView.scrollView;
         [scrollView _removeAllAnimations:YES];
         [scrollView setZoomScale:1 animated:NO];
-        scrollView.contentInset = UIEdgeInsetsMake(options.contentInsetTop, 0, 0, 0);
-        scrollView.contentOffset = CGPointMake(0, -options.contentInsetTop);
+        
+        auto contentInsetTop = options.contentInsetTop();
+        scrollView.contentInset = UIEdgeInsetsMake(contentInsetTop, 0, 0, 0);
+        scrollView.contentOffset = CGPointMake(0, -contentInsetTop);
 
         if (webView.interactingWithFormControl)
             shouldRestoreFirstResponder = [webView resignFirstResponder];
+
+        [webView immediatelyDismissContextMenuIfNeeded];
     }
+
+    UIMenuController.sharedMenuController.menuVisible = NO;
 
     runUntil(isDoneWaitingForKeyboardToDismiss, m_currentInvocation->shortTimeout());
     runUntil(isDoneWaitingForMenuToDismiss, m_currentInvocation->shortTimeout());
 
+    if (PlatformWebView* platformWebView = mainWebView()) {
+        TestRunnerWKWebView *webView = platformWebView->platformView();
+        UIViewController *webViewController = [[webView window] rootViewController];
+
+        MonotonicTime waitEndTime = MonotonicTime::now() + m_currentInvocation->shortTimeout();
+        
+        bool hasPresentedViewController = !![webViewController presentedViewController];
+        while (hasPresentedViewController && MonotonicTime::now() < waitEndTime) {
+            [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:[NSDate distantPast]];
+            hasPresentedViewController = !![webViewController presentedViewController];
+        }
+
+        if (hasPresentedViewController) {
+            // As a last resort, just dismiss the remaining presented view controller ourselves.
+            __block BOOL isDoneDismissingViewController = NO;
+            [webViewController dismissViewControllerAnimated:NO completion:^{
+                isDoneDismissingViewController = YES;
+            }];
+            runUntil(isDoneDismissingViewController, m_currentInvocation->shortTimeout());
+            hasPresentedViewController = !![webViewController presentedViewController];
+        }
+        
+        if (hasPresentedViewController) {
+            TestInvocation::dumpWebProcessUnresponsiveness("TestController::platformResetPreferencesToConsistentValues - Failed to remove presented view controller\n");
+            return false;
+        }
+    }
+
     if (shouldRestoreFirstResponder)
         [mainWebView()->platformView() becomeFirstResponder];
+
+    return true;
 }
 
 void TestController::platformConfigureViewForTest(const TestInvocation& test)
 {
-    if (!test.options().useFlexibleViewport)
-        return;
-        
+    [[GeneratedTouchesDebugWindow sharedGeneratedTouchesDebugWindow] setShouldShowTouches:test.options().shouldShowTouches()];
+
     TestRunnerWKWebView *webView = mainWebView()->platformView();
 
-    if (test.options().shouldIgnoreMetaViewport)
-        webView.configuration.preferences._shouldIgnoreMetaViewport = YES;
+    if (!test.options().useFlexibleViewport())
+        return;
 
     CGRect screenBounds = [UIScreen mainScreen].bounds;
     CGSize oldSize = webView.bounds.size;
@@ -196,10 +289,9 @@ void TestController::platformConfigureViewForTest(const TestInvocation& test)
     // WKBundlePageSetUseTestingViewportConfiguration(false).
 }
 
-void TestController::updatePlatformSpecificTestOptionsForTest(TestOptions& options, const std::string&) const
+TestFeatures TestController::platformSpecificFeatureDefaultsForTest(const TestCommand&) const
 {
-    options.shouldShowTouches = shouldShowTouches();
-    [[GeneratedTouchesDebugWindow sharedGeneratedTouchesDebugWindow] setShouldShowTouches:options.shouldShowTouches];
+    return { };
 }
 
 void TestController::platformInitializeContext()
@@ -215,9 +307,18 @@ void TestController::runModal(PlatformWebView* view)
 //    [[UIApplication sharedApplication] runModalForWindow:window];
 }
 
+void TestController::abortModal()
+{
+}
+
 const char* TestController::platformLibraryPathForTesting()
 {
-    return [[@"~/Library/Application Support/WebKitTestRunner" stringByExpandingTildeInPath] UTF8String];
+    static NSString *platformLibraryPath = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        platformLibraryPath = [[@"~/Library/Application Support/WebKitTestRunner" stringByExpandingTildeInPath] retain];
+    });
+    return platformLibraryPath.UTF8String;
 }
 
 void TestController::setHidden(bool)
@@ -246,9 +347,9 @@ void TestController::setKeyboardInputModeIdentifier(const String& identifier)
 
     auto controllerClass = UIKeyboardInputModeController.class;
     m_inputModeSwizzlers.reserveCapacity(3);
-    m_inputModeSwizzlers.uncheckedAppend(std::make_unique<InstanceMethodSwizzler>(controllerClass, @selector(currentInputMode), reinterpret_cast<IMP>(swizzleCurrentInputMode)));
-    m_inputModeSwizzlers.uncheckedAppend(std::make_unique<InstanceMethodSwizzler>(controllerClass, @selector(currentInputModeInPreference), reinterpret_cast<IMP>(swizzleCurrentInputMode)));
-    m_inputModeSwizzlers.uncheckedAppend(std::make_unique<InstanceMethodSwizzler>(controllerClass, @selector(activeInputModes), reinterpret_cast<IMP>(swizzleActiveInputModes)));
+    m_inputModeSwizzlers.uncheckedAppend(makeUnique<InstanceMethodSwizzler>(controllerClass, @selector(currentInputMode), reinterpret_cast<IMP>(swizzleCurrentInputMode)));
+    m_inputModeSwizzlers.uncheckedAppend(makeUnique<InstanceMethodSwizzler>(controllerClass, @selector(currentInputModeInPreference), reinterpret_cast<IMP>(swizzleCurrentInputMode)));
+    m_inputModeSwizzlers.uncheckedAppend(makeUnique<InstanceMethodSwizzler>(controllerClass, @selector(activeInputModes), reinterpret_cast<IMP>(swizzleActiveInputModes)));
     [UIKeyboardImpl.sharedInstance prepareKeyboardInputModeFromPreferences:nil];
 }
 

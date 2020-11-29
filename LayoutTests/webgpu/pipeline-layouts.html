@@ -1,6 +1,6 @@
-<!DOCTYPE html><!-- webkit-test-runner [ experimental:WebGPUEnabled=true ] -->
+<!DOCTYPE html>
 <meta charset=utf-8>
-<title>Create WebGPUBindGroupLayout.</title>
+<title>Create GPUBindGroupLayout.</title>
 <body>
 <script src="js/webgpu-functions.js"></script>
 <script src="../resources/testharness.js"></script>
@@ -9,25 +9,27 @@
 function createBindGroupLayoutBinding() {
     return {
         binding: 0,
-        visibility: GPUShaderStageBit.FRAGMENT | GPUShaderStageBit.VERTEX,
+        visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX,
         type: "storage-buffer"
     };
 }
 
 test(() => {
     const bindGroupLayoutDescriptor = { bindings: [createBindGroupLayoutBinding()] };
-    assert_not_equals(bindGroupLayoutDescriptor.bindings[0].visibility & GPUShaderStageBit.FRAGMENT, 0);
-    assert_not_equals(bindGroupLayoutDescriptor.bindings[0].visibility & GPUShaderStageBit.VERTEX, 0);
+    assert_not_equals(bindGroupLayoutDescriptor.bindings[0].visibility & GPUShaderStage.FRAGMENT, 0);
+    assert_not_equals(bindGroupLayoutDescriptor.bindings[0].visibility & GPUShaderStage.VERTEX, 0);
     assert_equals(bindGroupLayoutDescriptor.bindings[0].type, "storage-buffer");
-}, "Create a basic WebGPUBindGroupLayoutDescriptor."); 
+}, "Create a basic GPUBindGroupLayoutDescriptor."); 
 
-promise_test(async () => {
-    const device = await getBasicDevice();
-    const bindGroupLayout = device.createBindGroupLayout({ bindings: [createBindGroupLayoutBinding()] });
-    assert_true(bindGroupLayout instanceof WebGPUBindGroupLayout, "createBindGroupLayout returned a WebGPUBindGroupLayout");
+promise_test(() => {
+    return getBasicDevice().then(function(device) {
+        const bindGroupLayout = device.createBindGroupLayout({ bindings: [createBindGroupLayoutBinding()] });
+        assert_true(bindGroupLayout instanceof GPUBindGroupLayout, "createBindGroupLayout returned a GPUBindGroupLayout");
 
-    const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] });
-    assert_true(pipelineLayout instanceof WebGPUPipelineLayout, "createPipelineLayout returned a WebGPUPipelineLayout");
-}, "Create a basic WebGPUPipelineLayout wtih a WebGPUDevice.");
+        const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] });
+        assert_true(pipelineLayout instanceof GPUPipelineLayout, "createPipelineLayout returned a GPUPipelineLayout");
+    }, function() {
+    });
+}, "Create a basic GPUPipelineLayout wtih a GPUDevice.");
 </script>
 </body>

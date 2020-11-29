@@ -31,14 +31,13 @@
 #import <WebCore/ApplicationCacheStorage.h>
 #import <WebCore/SecurityOrigin.h>
 #import <wtf/RetainPtr.h>
+#import <wtf/cocoa/VectorCocoa.h>
 
 #if PLATFORM(IOS_FAMILY)
 #import <WebCore/RuntimeApplicationChecks.h>
 #import <WebCore/SQLiteDatabaseTracker.h>
 #import <WebCore/WebSQLiteDatabaseTrackerClient.h>
 #endif
-
-using namespace WebCore;
 
 @implementation WebApplicationCache
 
@@ -54,7 +53,7 @@ static NSString *overrideBundleIdentifier;
     if (initialized)
         return;
 
-    SQLiteDatabaseTracker::setClient(&WebSQLiteDatabaseTrackerClient::sharedWebSQLiteDatabaseTrackerClient());
+    WebCore::SQLiteDatabaseTracker::setClient(&WebCore::WebSQLiteDatabaseTrackerClient::sharedWebSQLiteDatabaseTrackerClient());
 
     ASSERT(!overrideBundleIdentifier);
     overrideBundleIdentifier = [bundleIdentifier copy];
@@ -68,7 +67,7 @@ static NSString *applicationCacheBundleIdentifier()
 #if PLATFORM(IOS_FAMILY)
     if (overrideBundleIdentifier)
         return overrideBundleIdentifier;
-    if (WebCore::IOSApplication::isMobileSafari() || WebCore::IOSApplication::isWebApp())
+    if (WebCore::IOSApplication::isMobileSafari())
         return @"com.apple.WebAppCache";
 #endif
 
@@ -123,23 +122,16 @@ static NSString *applicationCachePath()
 
 + (NSArray *)originsWithCache
 {
-    auto coreOrigins = webApplicationCacheStorage().originsWithCache();
-    
-    NSMutableArray *webOrigins = [[[NSMutableArray alloc] initWithCapacity:coreOrigins.size()] autorelease];
-    
-    for (auto& coreOrigin : coreOrigins) {
-        auto webOrigin = adoptNS([[WebSecurityOrigin alloc] _initWithWebCoreSecurityOrigin:coreOrigin.ptr()]);
-        [webOrigins addObject:webOrigin.get()];
-    }
-    
-    return webOrigins;
+    return createNSArray(webApplicationCacheStorage().originsWithCache(), [] (auto& origin) {
+        return adoptNS([[WebSecurityOrigin alloc] _initWithWebCoreSecurityOrigin:origin.ptr()]);
+    }).autorelease();
 }
 
 @end
 
 WebCore::ApplicationCacheStorage& webApplicationCacheStorage()
 {
-    static ApplicationCacheStorage& storage = ApplicationCacheStorage::create(applicationCachePath(), "ApplicationCache").leakRef();
+    static WebCore::ApplicationCacheStorage& storage = WebCore::ApplicationCacheStorage::create(applicationCachePath(), "ApplicationCache").leakRef();
 
     return storage;
 }

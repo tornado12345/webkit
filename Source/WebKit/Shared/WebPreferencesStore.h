@@ -37,7 +37,7 @@ struct WebPreferencesStore {
     WebPreferencesStore();
 
     void encode(IPC::Encoder&) const;
-    static bool decode(IPC::Decoder&, WebPreferencesStore&);
+    static WARN_UNUSED_RETURN bool decode(IPC::Decoder&, WebPreferencesStore&);
 
     // NOTE: The getters in this class have non-standard names to aid in the use of the preference macros.
 
@@ -57,6 +57,8 @@ struct WebPreferencesStore {
     void setOverrideDefaultsBoolValueForKey(const String& key, bool value);
     void setOverrideDefaultsUInt32ValueForKey(const String& key, uint32_t value);
     void setOverrideDefaultsDoubleValueForKey(const String& key, double value);
+
+    void deleteKey(const String& key);
 
     // For WebKitTestRunner usage.
     static void overrideBoolValueForKey(const String& key, bool value);

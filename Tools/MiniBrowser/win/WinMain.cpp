@@ -31,8 +31,23 @@
 #include "stdafx.h"
 #include "Common.h"
 #include "MiniBrowserLibResource.h"
-#include "MiniBrowserReplace.h"
+#include <wtf/win/SoftLinking.h>
+
+#if USE(CF)
+#include <CoreFoundation/CoreFoundation.h>
+#endif
+
+#if ENABLE(WEBKIT)
+#include "WebKitBrowserWindow.h"
+#endif
+
+#if ENABLE(WEBKIT_LEGACY)
+#include "WebKitLegacyBrowserWindow.h"
 #include <WebKitLegacy/WebKitCOMAPI.h>
+#endif
+
+SOFT_LINK_LIBRARY(user32);
+SOFT_LINK_OPTIONAL(user32, SetProcessDpiAwarenessContext, BOOL, STDAPICALLTYPE, (DPI_AWARENESS_CONTEXT));
 
 int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPWSTR lpstrCmdLine, _In_ int nCmdShow)
 {
@@ -42,7 +57,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
 #endif
 
     MSG msg { };
-    HACCEL hAccelTable;
+    HACCEL hAccelTable, hPreAccelTable;
 
     INITCOMMONCONTROLSEX InitCtrlEx;
 
@@ -58,38 +73,57 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
     // Init COM
     OleInitialize(nullptr);
 
-    ::SetProcessDPIAware();
+    if (SetProcessDpiAwarenessContextPtr())
+        SetProcessDpiAwarenessContextPtr()(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    else
+        ::SetProcessDPIAware();
 
-    auto& mainWindow = MainWindow::create(options.windowType).leakRef();
-    HRESULT hr = mainWindow.init(hInst, options.usesLayeredWebView, options.pageLoadTesting);
+#if !ENABLE(WEBKIT_LEGACY)
+    auto factory = WebKitBrowserWindow::create;
+#elif !ENABLE(WEBKIT)
+    auto factory = WebKitLegacyBrowserWindow::create;
+#else
+    auto factory = options.windowType == BrowserWindowType::WebKit ? WebKitBrowserWindow::create : WebKitLegacyBrowserWindow::create;
+#endif
+    auto& mainWindow = MainWindow::create().leakRef();
+    HRESULT hr = mainWindow.init(factory, hInst, options.usesLayeredWebView);
     if (FAILED(hr))
         goto exit;
 
     ShowWindow(mainWindow.hwnd(), nCmdShow);
 
     hAccelTable = LoadAccelerators(hInst, MAKEINTRESOURCE(IDC_MINIBROWSER));
+    hPreAccelTable = LoadAccelerators(hInst, MAKEINTRESOURCE(IDR_ACCELERATORS_PRE));
 
     if (options.requestedURL.length())
         mainWindow.loadURL(options.requestedURL.GetBSTR());
     else
-        mainWindow.browserWindow()->loadHTMLString(_bstr_t(defaultHTML).GetBSTR());
+        mainWindow.goHome();
 
 #pragma warning(disable:4509)
 
     // Main message loop:
     __try {
-        _com_ptr_t<_com_IIID<IWebKitMessageLoop, &__uuidof(IWebKitMessageLoop)>> messageLoop;
-
-        hr = WebKitCreateInstance(CLSID_WebKitMessageLoop, 0, IID_IWebKitMessageLoop, reinterpret_cast<void**>(&messageLoop.GetInterfacePtr()));
-        if (FAILED(hr))
-            goto exit;
-
-        messageLoop->run(hAccelTable);
-
+        while (GetMessage(&msg, nullptr, 0, 0)) {
+#if USE(CF)
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0, true);
+#endif
+            if (TranslateAccelerator(msg.hwnd, hPreAccelTable, &msg))
+                continue;
+            bool processed = false;
+            if (MainWindow::isInstance(msg.hwnd))
+                processed = TranslateAccelerator(msg.hwnd, hAccelTable, &msg);
+            if (!processed) {
+                TranslateMessage(&msg);
+                DispatchMessage(&msg);
+            }
+        }
     } __except(createCrashReport(GetExceptionInformation()), EXCEPTION_EXECUTE_HANDLER) { }
 
 exit:
+#if !ENABLE(WEBKIT)
     shutDownWebKit();
+#endif
 #ifdef _CRTDBG_MAP_ALLOC
     _CrtDumpMemoryLeaks();
 #endif

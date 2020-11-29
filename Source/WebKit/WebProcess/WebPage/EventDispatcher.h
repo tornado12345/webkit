@@ -23,12 +23,13 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef EventDispatcher_h
-#define EventDispatcher_h
+#pragma once
 
+#include "CallbackID.h"
 #include "Connection.h"
-
 #include "WebEvent.h"
+#include <WebCore/PageIdentifier.h>
+#include <WebCore/PlatformWheelEvent.h>
 #include <WebCore/WheelEventDeltaFilter.h>
 #include <memory>
 #include <wtf/HashMap.h>
@@ -43,32 +44,38 @@
 
 namespace WebCore {
 class ThreadedScrollingTree;
+using PlatformDisplayID = uint32_t;
 }
 
 namespace WebKit {
 
-class WebEvent;
 class WebPage;
 class WebWheelEvent;
+
+#if ENABLE(IOS_TOUCH_EVENTS)
+class WebTouchEvent;
+#endif
 
 class EventDispatcher : public IPC::Connection::WorkQueueMessageReceiver {
 public:
     static Ref<EventDispatcher> create();
     ~EventDispatcher();
 
-#if ENABLE(ASYNC_SCROLLING)
+#if ENABLE(SCROLLING_THREAD)
     void addScrollingTreeForPage(WebPage*);
     void removeScrollingTreeForPage(WebPage*);
 #endif
 
 #if ENABLE(IOS_TOUCH_EVENTS)
-    typedef Vector<WebTouchEvent, 1> TouchEventQueue;
-
-    void clearQueuedTouchEventsForPage(const WebPage&);
-    void getQueuedTouchEventsForPage(const WebPage&, TouchEventQueue&);
+    using TouchEventQueue = Vector<std::pair<WebTouchEvent, Optional<CallbackID>>, 1>;
+    void takeQueuedTouchEventsForPage(const WebPage&, TouchEventQueue&);
 #endif
 
     void initializeConnection(IPC::Connection*);
+
+#if ENABLE(WEBPROCESS_WINDOWSERVER_BLOCKING)
+    void notifyScrollingTreesDisplayWasRefreshed(WebCore::PlatformDisplayID);
+#endif
 
 private:
     EventDispatcher();
@@ -77,41 +84,48 @@ private:
     void didReceiveMessage(IPC::Connection&, IPC::Decoder&) override;
 
     // Message handlers
-    void wheelEvent(uint64_t pageID, const WebWheelEvent&, bool canRubberBandAtLeft, bool canRubberBandAtRight, bool canRubberBandAtTop, bool canRubberBandAtBottom);
+    void wheelEvent(WebCore::PageIdentifier, const WebWheelEvent&, bool canRubberBandAtLeft, bool canRubberBandAtRight, bool canRubberBandAtTop, bool canRubberBandAtBottom);
 #if ENABLE(IOS_TOUCH_EVENTS)
-    void touchEvent(uint64_t pageID, const WebTouchEvent&);
+    void touchEvent(WebCore::PageIdentifier, const WebTouchEvent&, Optional<CallbackID>);
 #endif
 #if ENABLE(MAC_GESTURE_EVENTS)
-    void gestureEvent(uint64_t pageID, const WebGestureEvent&);
+    void gestureEvent(WebCore::PageIdentifier, const WebGestureEvent&);
 #endif
 
-
     // This is called on the main thread.
-    void dispatchWheelEvent(uint64_t pageID, const WebWheelEvent&);
+    void dispatchWheelEvent(WebCore::PageIdentifier, const WebWheelEvent&, OptionSet<WebCore::WheelEventProcessingSteps>);
+    void dispatchWheelEventViaMainThread(WebCore::PageIdentifier, const WebWheelEvent&, OptionSet<WebCore::WheelEventProcessingSteps>);
+
 #if ENABLE(IOS_TOUCH_EVENTS)
     void dispatchTouchEvents();
 #endif
 #if ENABLE(MAC_GESTURE_EVENTS)
-    void dispatchGestureEvent(uint64_t pageID, const WebGestureEvent&);
+    void dispatchGestureEvent(WebCore::PageIdentifier, const WebGestureEvent&);
 #endif
 
 #if ENABLE(ASYNC_SCROLLING)
-    void sendDidReceiveEvent(uint64_t pageID, const WebEvent&, bool didHandleEvent);
+    static void sendDidReceiveEvent(WebCore::PageIdentifier, WebEvent::Type, bool didHandleEvent);
+#endif
+
+#if ENABLE(WEBPROCESS_WINDOWSERVER_BLOCKING)
+    void displayWasRefreshed(WebCore::PlatformDisplayID);
+#endif
+
+#if ENABLE(SCROLLING_THREAD)
+    void displayDidRefreshOnScrollingThread(WebCore::PlatformDisplayID);
 #endif
 
     Ref<WorkQueue> m_queue;
 
-#if ENABLE(ASYNC_SCROLLING)
+#if ENABLE(SCROLLING_THREAD)
     Lock m_scrollingTreesMutex;
-    HashMap<uint64_t, RefPtr<WebCore::ThreadedScrollingTree>> m_scrollingTrees;
+    HashMap<WebCore::PageIdentifier, RefPtr<WebCore::ThreadedScrollingTree>> m_scrollingTrees;
 #endif
     std::unique_ptr<WebCore::WheelEventDeltaFilter> m_recentWheelEventDeltaFilter;
 #if ENABLE(IOS_TOUCH_EVENTS)
     Lock m_touchEventsLock;
-    HashMap<uint64_t, TouchEventQueue> m_touchEvents;
+    HashMap<WebCore::PageIdentifier, TouchEventQueue> m_touchEvents;
 #endif
 };
 
 } // namespace WebKit
-
-#endif // EventDispatcher_h

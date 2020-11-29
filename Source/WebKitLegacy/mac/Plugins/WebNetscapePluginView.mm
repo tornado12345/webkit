@@ -68,6 +68,7 @@
 #import <WebCore/ScriptController.h>
 #import <WebCore/SecurityOrigin.h>
 #import <WebCore/UserGestureIndicator.h>
+#import <WebCore/WebCoreJITOperations.h>
 #import <WebCore/WebCoreURLResponse.h>
 #import <WebCore/npruntime_impl.h>
 #import <WebCore/runtime_root.h>
@@ -162,9 +163,9 @@ typedef struct {
 
 + (void)initialize
 {
-    JSC::initializeThreading();
-    WTF::initializeMainThreadToProcessMainThread();
-    RunLoop::initializeMainRunLoop();
+    JSC::initialize();
+    WTF::initializeMainThread();
+    WebCore::populateJITOperations();
     sendUserChangeNotifications();
 }
 
@@ -244,9 +245,7 @@ static inline void getNPRect(const NSRect& nr, NPRect& npr)
             
             ASSERT([NSView focusView] == self);
 
-            ALLOW_DEPRECATED_DECLARATIONS_BEGIN
-            CGContextRef context = static_cast<CGContextRef>([[NSGraphicsContext currentContext] graphicsPort]);
-            ALLOW_DEPRECATED_DECLARATIONS_END
+            CGContextRef context = [[NSGraphicsContext currentContext] CGContext];
 
             PortState_CG *cgPortState = (PortState_CG *)malloc(sizeof(PortState_CG));
             portState = (PortState)cgPortState;
@@ -388,9 +387,7 @@ static inline void getNPRect(const NSRect& nr, NPRect& npr)
 {
     ASSERT(_eventHandler);
     
-    ALLOW_DEPRECATED_DECLARATIONS_BEGIN
-    CGContextRef context = static_cast<CGContextRef>([[NSGraphicsContext currentContext] graphicsPort]);
-    ALLOW_DEPRECATED_DECLARATIONS_END
+    CGContextRef context = [[NSGraphicsContext currentContext] CGContext];
     _eventHandler->drawRect(context, rect);
 }
 
@@ -1655,15 +1652,15 @@ static inline void getNPRect(const NSRect& nr, NPRect& npr)
         return 0;
     
     if (!timers)
-        timers = std::make_unique<HashMap<uint32_t, std::unique_ptr<PluginTimer>>>();
+        timers = makeUnique<HashMap<uint32_t, std::unique_ptr<PluginTimer>>>();
 
-    std::unique_ptr<PluginTimer>* slot;
+    std::unique_ptr<PluginTimer>* slot = nullptr;
     uint32_t timerID;
     do
         timerID = ++currentTimerID;
     while (!timers->isValidKey(timerID) || *(slot = &timers->add(timerID, nullptr).iterator->value));
 
-    auto timer = std::make_unique<PluginTimer>(plugin, timerID, interval, repeat, timerFunc);
+    auto timer = makeUnique<PluginTimer>(plugin, timerID, interval, repeat, timerFunc);
 
     if (_shouldFireTimers)
         timer->start(_isCompletelyObscured);

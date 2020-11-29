@@ -27,14 +27,14 @@ WI.AuditTabContentView = class AuditTabContentView extends WI.ContentBrowserTabC
 {
     constructor()
     {
-        super("audit", ["audit"], WI.GeneralTabBarItem.fromTabInfo(WI.AuditTabContentView.tabInfo()), WI.AuditNavigationSidebarPanel);
+        super(AuditTabContentView.tabInfo(), {
+            navigationSidebarPanelConstructor: WI.AuditNavigationSidebarPanel,
+            disableBackForward: true,
+        });
 
         this._startStopShortcut = new WI.KeyboardShortcut(null, WI.KeyboardShortcut.Key.Space, this._handleSpace.bind(this));
         this._startStopShortcut.implicitlyPreventsDefault = false;
         this._startStopShortcut.disabled = true;
-
-        this.element.addEventListener("dragover", this._handleDragOver.bind(this));
-        this.element.addEventListener("drop", this._handleDrop.bind(this));
     }
 
     // Static
@@ -42,14 +42,15 @@ WI.AuditTabContentView = class AuditTabContentView extends WI.ContentBrowserTabC
     static tabInfo()
     {
         return {
+            identifier: AuditTabContentView.Type,
             image: "Images/Audit.svg",
-            title: WI.UIString("Audit"),
+            displayName: WI.UIString("Audit", "Audit Tab Name", "Name of Audit Tab"),
         };
     }
 
     static isTabAllowed()
     {
-        return WI.sharedApp.debuggableType === WI.DebuggableType.Web;
+        return WI.sharedApp.isWebDebuggable();
     }
 
     // Public
@@ -86,11 +87,34 @@ WI.AuditTabContentView = class AuditTabContentView extends WI.ContentBrowserTabC
         super.hidden();
     }
 
+    // DropZoneView delegate
+
+    dropZoneShouldAppearForDragEvent(dropZone, event)
+    {
+        return event.dataTransfer.types.includes("Files");
+    }
+
+    dropZoneHandleDrop(dropZone, event)
+    {
+        let files = event.dataTransfer.files;
+        if (files.length !== 1) {
+            InspectorFrontendHost.beep();
+            return;
+        }
+
+        WI.FileUtilities.readJSON(files, (result) => WI.auditManager.processJSON(result));
+    }
+
     // Protected
 
     initialLayout()
     {
         super.initialLayout();
+
+        let dropZoneView = new WI.DropZoneView(this);
+        dropZoneView.text = WI.UIString("Import Audit or Result");
+        dropZoneView.targetElement = this.element;
+        this.addSubview(dropZoneView);
 
         WI.auditManager.loadStoredTests();
     }
@@ -110,25 +134,6 @@ WI.AuditTabContentView = class AuditTabContentView extends WI.ContentBrowserTabC
             return;
 
         event.preventDefault();
-    }
-
-    _handleDragOver(event)
-    {
-        if (event.dataTransfer.types.includes("Files"))
-            event.preventDefault();
-    }
-
-    _handleDrop(event)
-    {
-        if (!event.dataTransfer.files || !event.dataTransfer.files.length)
-            return;
-
-        event.preventDefault();
-
-        WI.FileUtilities.readJSON(event.dataTransfer.files, (result) => WI.auditManager.processJSON(result))
-        .then(() => {
-            event.dataTransfer.clearData();
-        });
     }
 };
 

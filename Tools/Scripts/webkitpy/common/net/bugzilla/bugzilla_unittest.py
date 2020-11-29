@@ -1,4 +1,5 @@
 # Copyright (C) 2011 Google Inc. All rights reserved.
+# Copyright (C) 2020 Apple Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are
@@ -26,18 +27,18 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import StringIO
 import datetime
+import logging
 import unittest
 
-from .bugzilla import Bugzilla, BugzillaQueries, CommitQueueFlag, EditUsersParser
+from webkitcorepy import StringIO, OutputCapture
 
 from webkitpy.common.config import urls
 from webkitpy.common.config.committers import Reviewer, Committer, Contributor, CommitterList
-from webkitpy.common.system.outputcapture import OutputCapture
 from webkitpy.common.net.web_mock import MockBrowser
-from webkitpy.thirdparty.mock import Mock
+from webkitpy.common.net.bugzilla.bugzilla import Bugzilla, BugzillaQueries, CommitQueueFlag, EditUsersParser
 from webkitpy.thirdparty.BeautifulSoup import BeautifulSoup
+from webkitpy.thirdparty.mock import Mock
 
 
 class BugzillaTest(unittest.TestCase):
@@ -67,7 +68,7 @@ class BugzillaTest(unittest.TestCase):
         </attachment>
 '''
     _expected_example_attachment_parsing = {
-        'attach_date': datetime.datetime(2009, 07, 29, 10, 23),
+        'attach_date': datetime.datetime(2009, 7, 29, 10, 23),
         'bug_id': 100,
         'is_obsolete': True,
         'is_patch': True,
@@ -167,19 +168,6 @@ ZEZpbmlzaExvYWRXaXRoUmVhc29uOnJlYXNvbl07Cit9CisKIEBlbmQKIAogI2VuZGlmCg==
 </bugzilla>
 """ % _bug_xml
 
-    _single_not_permitted_bug_xml = """
-<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
-<!DOCTYPE bugzilla SYSTEM "https://bugs.webkit.org/bugzilla.dtd">
-<bugzilla version="3.2.3"
-          urlbase="https://bugs.webkit.org/"
-          maintainer="admin@webkit.org"
->
-    <bug error="NotPermitted">
-        <bug_id>32585</bug_id>
-    </bug>
-</bugzilla>
-"""
-
     _expected_example_bug_parsing = {
         "id" : 32585,
         "title" : u"bug to test webkit-patch's and commit-queue's failures",
@@ -199,7 +187,6 @@ ZEZpbmlzaExvYWRXaXRoUmVhc29uOnJlYXNvbl07Cit9CisKIEBlbmQKIAogI2VuZGlmCg==
             'type': 'text/plain',
             'id': 45548
         }],
-        'groups': frozenset(),
         "comments" : [{
                 'comment_date': datetime.datetime(2009, 12, 15, 15, 17, 28),
                 'comment_email': 'eric@webkit.org',
@@ -212,7 +199,7 @@ Ignore this bug.  Just for testing failure modes of webkit-patch and the commit-
     # FIXME: This should move to a central location and be shared by more unit tests.
     def _assert_dictionaries_equal(self, actual, expected):
         # Make sure we aren't parsing more or less than we expect
-        self.assertItemsEqual(actual.keys(), expected.keys())
+        self.assertEqual(sorted(actual.keys()), sorted(expected.keys()))
 
         for key, expected_value in expected.items():
             self.assertEqual(actual[key], expected_value, ("Failure for key: %s: Actual='%s' Expected='%s'" % (key, actual[key], expected_value)))
@@ -220,10 +207,6 @@ Ignore this bug.  Just for testing failure modes of webkit-patch and the commit-
     def test_parse_bug_dictionary_from_xml(self):
         bug = Bugzilla()._parse_bug_dictionary_from_xml(self._single_bug_xml)
         self._assert_dictionaries_equal(bug, self._expected_example_bug_parsing)
-
-    def test_parse_bug_dictionary_from_xml_for_not_permitted_bug(self):
-        bug = Bugzilla()._parse_bug_dictionary_from_xml(self._single_not_permitted_bug_xml)
-        self.assertEqual(bug, {})
 
     _sample_multi_bug_xml = """
 <bugzilla version="3.2.3" urlbase="https://bugs.webkit.org/" maintainer="admin@webkit.org" exporter="eric@webkit.org">
@@ -263,14 +246,15 @@ Ignore this bug.  Just for testing failure modes of webkit-patch and the commit-
 
     def test_attachment_detail_bug_parsing(self):
         bugzilla = Bugzilla()
-        self.assertEqual((27314, None), bugzilla._parse_bug_id_from_attachment_page(self._sample_attachment_detail_page))
+        self.assertEqual(27314, bugzilla._parse_bug_id_from_attachment_page(self._sample_attachment_detail_page))
 
     def test_add_cc_to_bug(self):
         bugzilla = Bugzilla()
         bugzilla.browser = MockBrowser()
         bugzilla.authenticate = lambda: None
-        expected_logs = "Adding ['adam@example.com'] to the CC list for bug 42\n"
-        OutputCapture().assert_outputs(self, bugzilla.add_cc_to_bug, [42, ["adam@example.com"]], expected_logs=expected_logs)
+        with OutputCapture(level=logging.INFO) as captured:
+            bugzilla.add_cc_to_bug(42, ['adam@example.com'])
+        self.assertEqual(captured.root.log.getvalue(), "Adding ['adam@example.com'] to the CC list for bug 42\n")
 
     def _mock_control_item(self, name):
         mock_item = Mock()
@@ -290,10 +274,9 @@ Ignore this bug.  Just for testing failure modes of webkit-patch and the commit-
 
         mock_find_control = self._mock_find_control(item_names, selected_index)
         bugzilla.browser.find_control = mock_find_control
-        expected_logs = "Re-opening bug 42\n['comment']\n"
-        if extra_logs:
-            expected_logs += extra_logs
-        OutputCapture().assert_outputs(self, bugzilla.reopen_bug, [42, ["comment"]], expected_logs=expected_logs)
+        with OutputCapture(level=logging.INFO) as captured:
+            bugzilla.reopen_bug(42, ['comment'])
+        self.assertEqual(captured.root.log.getvalue(), "Re-opening bug 42\n['comment']\n" + (extra_logs or ''))
 
     def test_reopen_bug(self):
         self._assert_reopen(item_names=["REOPENED", "RESOLVED", "CLOSED"], selected_index=1)
@@ -303,7 +286,7 @@ Ignore this bug.  Just for testing failure modes of webkit-patch and the commit-
 
     def test_file_object_for_upload(self):
         bugzilla = Bugzilla()
-        file_object = StringIO.StringIO()
+        file_object = StringIO()
         unicode_tor = u"WebKit \u2661 Tor Arne Vestb\u00F8!"
         utf8_tor = unicode_tor.encode("utf-8")
         self.assertEqual(bugzilla._file_object_for_upload(file_object), file_object)
@@ -316,7 +299,7 @@ Ignore this bug.  Just for testing failure modes of webkit-patch and the commit-
         mock_file.name = "foo"
         self.assertEqual(bugzilla._filename_for_upload(mock_file, 1234), 'foo')
         mock_timestamp = lambda: "now"
-        filename = bugzilla._filename_for_upload(StringIO.StringIO(), 1234, extension="patch", timestamp=mock_timestamp)
+        filename = bugzilla._filename_for_upload(StringIO(), 1234, extension="patch", timestamp=mock_timestamp)
         self.assertEqual(filename, "bug-1234-now.patch")
 
     def test_commit_queue_flag(self):
@@ -328,12 +311,8 @@ Ignore this bug.  Just for testing failure modes of webkit-patch and the commit-
 
         def assert_commit_queue_flag(commit_flag, expected, username=None):
             bugzilla.username = username
-            capture = OutputCapture()
-            capture.capture_output()
-            try:
+            with OutputCapture():
                 self.assertEqual(bugzilla._commit_queue_flag(commit_flag), expected)
-            finally:
-                capture.restore_output()
 
         assert_commit_queue_flag(commit_flag=CommitQueueFlag.mark_for_nothing, expected='X', username='unknown@webkit.org')
         assert_commit_queue_flag(commit_flag=CommitQueueFlag.mark_for_commit_queue, expected='?', username='unknown@webkit.org')
@@ -363,13 +342,13 @@ Ignore this bug.  Just for testing failure modes of webkit-patch and the commit-
     def test__parse_attachment_id_from_add_patch_to_bug_response(self):
         bugzilla = Bugzilla()
 
-        title_html = '<title>Attachment 317591 added to Bug 175247</title>'
+        title_html = b'<title>Attachment 317591 added to Bug 175247</title>'
         self.assertEqual(bugzilla._parse_attachment_id_from_add_patch_to_bug_response(title_html), '317591')
 
-        title_html = '<title>Attachment 317591; malformed</title>'
+        title_html = b'<title>Attachment 317591; malformed</title>'
         self.assertEqual(bugzilla._parse_attachment_id_from_add_patch_to_bug_response(title_html), None)
 
-        title_html = '<title>Attachment A added to Bug 175247</title>'
+        title_html = b'<title>Attachment A added to Bug 175247</title>'
         self.assertEqual(bugzilla._parse_attachment_id_from_add_patch_to_bug_response(title_html), None)
 
 
@@ -451,6 +430,7 @@ class BugzillaQueriesTest(unittest.TestCase):
         self._assert_result_count(queries, '<span class="bz_result_count">314 bugs found.</span><span class="bz_result_count">314 bugs found.</span>', 314)
         self._assert_result_count(queries, '<span class="bz_result_count">Zarro Boogs found.</span>', 0)
         self._assert_result_count(queries, '<span class="bz_result_count">\n \nOne bug found.</span>', 1)
+        self._assert_result_count(queries, '', 0)
         self.assertRaises(Exception, queries._parse_result_count, ['Invalid'])
 
     def test_request_page_parsing(self):

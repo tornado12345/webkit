@@ -26,19 +26,15 @@
 #include "config.h"
 #include "LLIntThunks.h"
 
-#include "CallData.h"
-#include "ExceptionHelpers.h"
-#include "Interpreter.h"
 #include "JSCJSValueInlines.h"
 #include "JSInterfaceJIT.h"
-#include "JSObject.h"
 #include "LLIntCLoop.h"
 #include "LLIntData.h"
 #include "LinkBuffer.h"
-#include "LowLevelInterpreter.h"
-#include "ProtoCallFrame.h"
-#include "StackAlignment.h"
-#include "VM.h"
+#include "VMEntryRecord.h"
+#include "WasmCallingConvention.h"
+#include "WasmContextInlines.h"
+#include <wtf/NeverDestroyed.h>
 
 namespace JSC {
 
@@ -46,59 +42,209 @@ namespace JSC {
 
 namespace LLInt {
 
-static MacroAssemblerCodeRef<JITThunkPtrTag> generateThunkWithJumpTo(VM* vm, OpcodeID opcodeID, const char *thunkKind)
+// These thunks are necessary because of nearCall used on JITed code.
+// It requires that the distance from nearCall address to the destination address
+// fits on 32-bits, and that's not the case of getCodeRef(llint_function_for_call_prologue)
+// and others LLIntEntrypoints.
+
+template<PtrTag tag>
+static MacroAssemblerCodeRef<tag> generateThunkWithJumpTo(LLIntCode target, const char *thunkKind)
 {
-    JSInterfaceJIT jit(vm);
+    JSInterfaceJIT jit;
 
-    // FIXME: there's probably a better way to do it on X86, but I'm not sure I care.
-    LLIntCode target = LLInt::getCodeFunctionPtr<JSEntryPtrTag>(opcodeID);
-    assertIsTaggedWith(target, JSEntryPtrTag);
+    assertIsTaggedWith<JSEntryPtrTag>(target);
 
-    jit.move(JSInterfaceJIT::TrustedImmPtr(target), JSInterfaceJIT::regT0);
-    jit.jump(JSInterfaceJIT::regT0, JSEntryPtrTag);
+#if ENABLE(WEBASSEMBLY)
+    CCallHelpers::RegisterID scratch = Wasm::wasmCallingConvention().prologueScratchGPRs[0];
+#else
+    CCallHelpers::RegisterID scratch = JSInterfaceJIT::regT0;
+#endif
+    jit.move(JSInterfaceJIT::TrustedImmPtr(target), scratch);
+    jit.farJump(scratch, JSEntryPtrTag);
 
     LinkBuffer patchBuffer(jit, GLOBAL_THUNK_ID);
-    return FINALIZE_CODE(patchBuffer, JITThunkPtrTag, "LLInt %s prologue thunk", thunkKind);
+    return FINALIZE_CODE(patchBuffer, tag, "LLInt %s prologue thunk", thunkKind);
 }
 
-MacroAssemblerCodeRef<JITThunkPtrTag> functionForCallEntryThunkGenerator(VM* vm)
+template<PtrTag tag>
+static MacroAssemblerCodeRef<tag> generateThunkWithJumpTo(OpcodeID opcodeID, const char *thunkKind)
 {
-    return generateThunkWithJumpTo(vm, llint_function_for_call_prologue, "function for call");
+    return generateThunkWithJumpTo<tag>(LLInt::getCodeFunctionPtr<JSEntryPtrTag>(opcodeID), thunkKind);
 }
 
-MacroAssemblerCodeRef<JITThunkPtrTag> functionForConstructEntryThunkGenerator(VM* vm)
+MacroAssemblerCodeRef<JSEntryPtrTag> functionForCallEntryThunk()
 {
-    return generateThunkWithJumpTo(vm, llint_function_for_construct_prologue, "function for construct");
+    static LazyNeverDestroyed<MacroAssemblerCodeRef<JSEntryPtrTag>> codeRef;
+    static std::once_flag onceKey;
+    std::call_once(onceKey, [&] {
+        codeRef.construct(generateThunkWithJumpTo<JSEntryPtrTag>(llint_function_for_call_prologue, "function for call"));
+    });
+    return codeRef;
 }
 
-MacroAssemblerCodeRef<JITThunkPtrTag> functionForCallArityCheckThunkGenerator(VM* vm)
+MacroAssemblerCodeRef<JSEntryPtrTag> functionForConstructEntryThunk()
 {
-    return generateThunkWithJumpTo(vm, llint_function_for_call_arity_check, "function for call with arity check");
+    static LazyNeverDestroyed<MacroAssemblerCodeRef<JSEntryPtrTag>> codeRef;
+    static std::once_flag onceKey;
+    std::call_once(onceKey, [&] {
+        codeRef.construct(generateThunkWithJumpTo<JSEntryPtrTag>(llint_function_for_construct_prologue, "function for construct"));
+    });
+    return codeRef;
 }
 
-MacroAssemblerCodeRef<JITThunkPtrTag> functionForConstructArityCheckThunkGenerator(VM* vm)
+MacroAssemblerCodeRef<JSEntryPtrTag> functionForCallArityCheckThunk()
 {
-    return generateThunkWithJumpTo(vm, llint_function_for_construct_arity_check, "function for construct with arity check");
+    static LazyNeverDestroyed<MacroAssemblerCodeRef<JSEntryPtrTag>> codeRef;
+    static std::once_flag onceKey;
+    std::call_once(onceKey, [&] {
+        codeRef.construct(generateThunkWithJumpTo<JSEntryPtrTag>(llint_function_for_call_arity_check, "function for call with arity check"));
+    });
+    return codeRef;
 }
 
-MacroAssemblerCodeRef<JITThunkPtrTag> evalEntryThunkGenerator(VM* vm)
+MacroAssemblerCodeRef<JSEntryPtrTag> functionForConstructArityCheckThunk()
 {
-    return generateThunkWithJumpTo(vm, llint_eval_prologue, "eval");
+    static LazyNeverDestroyed<MacroAssemblerCodeRef<JSEntryPtrTag>> codeRef;
+    static std::once_flag onceKey;
+    std::call_once(onceKey, [&] {
+        codeRef.construct(generateThunkWithJumpTo<JSEntryPtrTag>(llint_function_for_construct_arity_check, "function for construct with arity check"));
+    });
+    return codeRef;
 }
 
-MacroAssemblerCodeRef<JITThunkPtrTag> programEntryThunkGenerator(VM* vm)
+MacroAssemblerCodeRef<JSEntryPtrTag> evalEntryThunk()
 {
-    return generateThunkWithJumpTo(vm, llint_program_prologue, "program");
+    static LazyNeverDestroyed<MacroAssemblerCodeRef<JSEntryPtrTag>> codeRef;
+    static std::once_flag onceKey;
+    std::call_once(onceKey, [&] {
+        codeRef.construct(generateThunkWithJumpTo<JSEntryPtrTag>(llint_eval_prologue, "eval"));
+    });
+    return codeRef;
 }
 
-MacroAssemblerCodeRef<JITThunkPtrTag> moduleProgramEntryThunkGenerator(VM* vm)
+MacroAssemblerCodeRef<JSEntryPtrTag> programEntryThunk()
 {
-    return generateThunkWithJumpTo(vm, llint_module_program_prologue, "module_program");
+    static LazyNeverDestroyed<MacroAssemblerCodeRef<JSEntryPtrTag>> codeRef;
+    static std::once_flag onceKey;
+    std::call_once(onceKey, [&] {
+        codeRef.construct(generateThunkWithJumpTo<JSEntryPtrTag>(llint_program_prologue, "program"));
+    });
+    return codeRef;
+}
+
+MacroAssemblerCodeRef<JSEntryPtrTag> moduleProgramEntryThunk()
+{
+    static LazyNeverDestroyed<MacroAssemblerCodeRef<JSEntryPtrTag>> codeRef;
+    static std::once_flag onceKey;
+    std::call_once(onceKey, [&] {
+        codeRef.construct(generateThunkWithJumpTo<JSEntryPtrTag>(llint_module_program_prologue, "module_program"));
+    });
+    return codeRef;
+}
+
+#if ENABLE(WEBASSEMBLY)
+MacroAssemblerCodeRef<JITThunkPtrTag> wasmFunctionEntryThunk()
+{
+    static LazyNeverDestroyed<MacroAssemblerCodeRef<JITThunkPtrTag>> codeRef;
+    static std::once_flag onceKey;
+    std::call_once(onceKey, [&] {
+        if (Wasm::Context::useFastTLS())
+            codeRef.construct(generateThunkWithJumpTo<JITThunkPtrTag>(wasm_function_prologue, "function for call"));
+        else
+            codeRef.construct(generateThunkWithJumpTo<JITThunkPtrTag>(wasm_function_prologue_no_tls, "function for call"));
+    });
+    return codeRef;
+}
+#endif // ENABLE(WEBASSEMBLY)
+
+MacroAssemblerCodeRef<JSEntryPtrTag> getHostCallReturnValueThunk()
+{
+    static LazyNeverDestroyed<MacroAssemblerCodeRef<JSEntryPtrTag>> codeRef;
+    static std::once_flag onceKey;
+    std::call_once(onceKey, [&] {
+        CCallHelpers jit;
+
+        jit.emitFunctionPrologue();
+        jit.emitGetFromCallFrameHeaderPtr(CallFrameSlot::callee, GPRInfo::regT0);
+
+        auto preciseAllocationCase = jit.branchTestPtr(CCallHelpers::NonZero, GPRInfo::regT0, CCallHelpers::TrustedImm32(PreciseAllocation::halfAlignment));
+        jit.andPtr(CCallHelpers::TrustedImmPtr(MarkedBlock::blockMask), GPRInfo::regT0);
+        jit.loadPtr(CCallHelpers::Address(GPRInfo::regT0, MarkedBlock::offsetOfFooter + MarkedBlock::Footer::offsetOfVM()), GPRInfo::regT0);
+        auto loadedCase = jit.jump();
+
+        preciseAllocationCase.link(&jit);
+        jit.loadPtr(CCallHelpers::Address(GPRInfo::regT0, PreciseAllocation::offsetOfWeakSet() + WeakSet::offsetOfVM() - PreciseAllocation::headerSize()), GPRInfo::regT0);
+
+        loadedCase.link(&jit);
+#if USE(JSVALUE64)
+        jit.loadValue(CCallHelpers::Address(GPRInfo::regT0, VM::offsetOfEncodedHostCallReturnValue()), JSValueRegs { GPRInfo::returnValueGPR });
+#else
+        jit.loadValue(CCallHelpers::Address(GPRInfo::regT0, VM::offsetOfEncodedHostCallReturnValue()), JSValueRegs { GPRInfo::returnValueGPR2, GPRInfo::returnValueGPR });
+#endif
+        jit.emitFunctionEpilogue();
+        jit.ret();
+
+        LinkBuffer patchBuffer(jit, GLOBAL_THUNK_ID);
+        codeRef.construct(FINALIZE_CODE(patchBuffer, JSEntryPtrTag, "LLInt::getHostCallReturnValue thunk"));
+    });
+    return codeRef;
+}
+
+MacroAssemblerCodeRef<ExceptionHandlerPtrTag> callToThrowThunk()
+{
+    static LazyNeverDestroyed<MacroAssemblerCodeRef<ExceptionHandlerPtrTag>> codeRef;
+    static std::once_flag onceKey;
+    std::call_once(onceKey, [&] {
+        codeRef.construct(generateThunkWithJumpTo<ExceptionHandlerPtrTag>(llint_throw_during_call_trampoline, "LLInt::callToThrow thunk"));
+    });
+    return codeRef;
+}
+
+MacroAssemblerCodeRef<ExceptionHandlerPtrTag> handleUncaughtExceptionThunk()
+{
+    static LazyNeverDestroyed<MacroAssemblerCodeRef<ExceptionHandlerPtrTag>> codeRef;
+    static std::once_flag onceKey;
+    std::call_once(onceKey, [&] {
+        codeRef.construct(generateThunkWithJumpTo<ExceptionHandlerPtrTag>(llint_handle_uncaught_exception, "handle_uncaught_exception"));
+    });
+    return codeRef;
+}
+
+MacroAssemblerCodeRef<ExceptionHandlerPtrTag> handleCatchThunk(OpcodeSize size)
+{
+    switch (size) {
+    case OpcodeSize::Narrow: {
+        static LazyNeverDestroyed<MacroAssemblerCodeRef<ExceptionHandlerPtrTag>> codeRef;
+        static std::once_flag onceKey;
+        std::call_once(onceKey, [&] {
+            codeRef.construct(generateThunkWithJumpTo<ExceptionHandlerPtrTag>(LLInt::getCodeFunctionPtr<JSEntryPtrTag>(op_catch), "op_catch"));
+        });
+        return codeRef;
+    }
+    case OpcodeSize::Wide16: {
+        static LazyNeverDestroyed<MacroAssemblerCodeRef<ExceptionHandlerPtrTag>> codeRef;
+        static std::once_flag onceKey;
+        std::call_once(onceKey, [&] {
+            codeRef.construct(generateThunkWithJumpTo<ExceptionHandlerPtrTag>(LLInt::getWide16CodeFunctionPtr<JSEntryPtrTag>(op_catch), "op_catch16"));
+        });
+        return codeRef;
+    }
+    case OpcodeSize::Wide32: {
+        static LazyNeverDestroyed<MacroAssemblerCodeRef<ExceptionHandlerPtrTag>> codeRef;
+        static std::once_flag onceKey;
+        std::call_once(onceKey, [&] {
+            codeRef.construct(generateThunkWithJumpTo<ExceptionHandlerPtrTag>(LLInt::getWide32CodeFunctionPtr<JSEntryPtrTag>(op_catch), "op_catch32"));
+        });
+        return codeRef;
+    }
+    }
+    RELEASE_ASSERT_NOT_REACHED();
+    return { };
 }
 
 } // namespace LLInt
 
-#endif
+#endif // ENABLE(JIT)
 
 #if ENABLE(C_LOOP)
 // Non-JIT (i.e. C Loop LLINT) case:

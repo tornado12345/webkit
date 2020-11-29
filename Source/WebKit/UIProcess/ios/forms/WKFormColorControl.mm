@@ -29,6 +29,7 @@
 #if ENABLE(INPUT_TYPE_COLOR) && PLATFORM(IOS_FAMILY)
 
 #import "UIKitSPI.h"
+#import "UserInterfaceIdiom.h"
 #import "WKContentView.h"
 #import "WKFormColorPicker.h"
 #import "WKFormPopover.h"
@@ -52,7 +53,7 @@ static const CGFloat colorPopoverCornerRadius = 9;
     if (!(self = [super initWithView:view]))
         return nil;
 
-    _innerControl = adoptNS([[WKColorPicker alloc] initWithView:view]);
+    _innerControl = adoptNS([[WKColorPicker alloc] initWithView:view inPopover:self]);
 
     RetainPtr<UIViewController> popoverViewController = adoptNS([[UIViewController alloc] init]);
     RetainPtr<UIView> controlContainerView = adoptNS([[UIView alloc] initWithFrame:CGRectMake(0, 0, colorPopoverWidth, colorPopoverWidth)]);
@@ -86,42 +87,23 @@ static const CGFloat colorPopoverCornerRadius = 9;
 
 - (void)controlEndEditing
 {
+    [self dismissPopoverAnimated:NO];
 }
 
 @end
 
 #pragma mark - WKFormColorControl
 
-@implementation WKFormColorControl {
-    RetainPtr<id<WKFormControl>> _control;
-}
+@implementation WKFormColorControl
 
 - (instancetype)initWithView:(WKContentView *)view
 {
-    if (!(self = [super init]))
-        return nil;
-
-    if (currentUserInterfaceIdiomIsPad())
-        _control = adoptNS([[WKColorPopover alloc] initWithView:view]);
+    RetainPtr<NSObject <WKFormControl>> control;
+    if (WebKit::currentUserInterfaceIdiomIsPadOrMac())
+        control = adoptNS([[WKColorPopover alloc] initWithView:view]);
     else
-        _control = adoptNS([[WKColorPicker alloc] initWithView:view]);
-
-    return self;
-}
-
-- (UIView *)assistantView
-{
-    return [_control controlView];
-}
-
-- (void)beginEditing
-{
-    [_control controlBeginEditing];
-}
-
-- (void)endEditing
-{
-    [_control controlEndEditing];
+        control = adoptNS([[WKColorPicker alloc] initWithView:view]);
+    return [super initWithView:view control:WTFMove(control)];
 }
 
 @end

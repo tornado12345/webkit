@@ -37,38 +37,38 @@
 
 namespace WebCore {
 
-static MTLSamplerAddressMode mtlAddressModeForAddressMode(GPUSamplerDescriptor::AddressMode mode)
+static MTLSamplerAddressMode mtlAddressModeForAddressMode(GPUAddressMode mode)
 {
     switch (mode) {
-    case GPUSamplerDescriptor::AddressMode::ClampToEdge:
+    case GPUAddressMode::ClampToEdge:
         return MTLSamplerAddressModeClampToEdge;
-    case GPUSamplerDescriptor::AddressMode::Repeat:
+    case GPUAddressMode::Repeat:
         return MTLSamplerAddressModeRepeat;
-    case GPUSamplerDescriptor::AddressMode::MirrorRepeat:
+    case GPUAddressMode::MirrorRepeat:
         return MTLSamplerAddressModeMirrorRepeat;
     }
 
     ASSERT_NOT_REACHED();
 }
 
-static MTLSamplerMinMagFilter mtlMinMagFilterForFilterMode(GPUSamplerDescriptor::FilterMode mode)
+static MTLSamplerMinMagFilter mtlMinMagFilterForFilterMode(GPUFilterMode mode)
 {
     switch (mode) {
-    case GPUSamplerDescriptor::FilterMode::Nearest:
+    case GPUFilterMode::Nearest:
         return MTLSamplerMinMagFilterNearest;
-    case GPUSamplerDescriptor::FilterMode::Linear:
+    case GPUFilterMode::Linear:
         return MTLSamplerMinMagFilterLinear;
     }
 
     ASSERT_NOT_REACHED();
 }
 
-static MTLSamplerMipFilter mtlMipFilterForFilterMode(GPUSamplerDescriptor::FilterMode mode)
+static MTLSamplerMipFilter mtlMipFilterForFilterMode(GPUFilterMode mode)
 {
     switch (mode) {
-    case GPUSamplerDescriptor::FilterMode::Nearest:
+    case GPUFilterMode::Nearest:
         return MTLSamplerMipFilterNearest;
-    case GPUSamplerDescriptor::FilterMode::Linear:
+    case GPUFilterMode::Linear:
         return MTLSamplerMipFilterLinear;
     }
 
@@ -84,9 +84,9 @@ static RetainPtr<MTLSamplerState> tryCreateMtlSamplerState(const GPUDevice& devi
 
     RetainPtr<MTLSamplerDescriptor> mtlDescriptor;
 
-    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    BEGIN_BLOCK_OBJC_EXCEPTIONS
     mtlDescriptor = adoptNS([MTLSamplerDescriptor new]);
-    END_BLOCK_OBJC_EXCEPTIONS;
+    END_BLOCK_OBJC_EXCEPTIONS
 
     if (!mtlDescriptor) {
         LOG(WebGPU, "GPUSampler::tryCreate(): Error creating MTLSamplerDescriptor!");
@@ -95,7 +95,7 @@ static RetainPtr<MTLSamplerState> tryCreateMtlSamplerState(const GPUDevice& devi
 
     RetainPtr<MTLSamplerState> sampler;
 
-    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    BEGIN_BLOCK_OBJC_EXCEPTIONS
     [mtlDescriptor setRAddressMode:mtlAddressModeForAddressMode(descriptor.addressModeU)];
     [mtlDescriptor setSAddressMode:mtlAddressModeForAddressMode(descriptor.addressModeV)];
     [mtlDescriptor setTAddressMode:mtlAddressModeForAddressMode(descriptor.addressModeW)];
@@ -110,7 +110,7 @@ static RetainPtr<MTLSamplerState> tryCreateMtlSamplerState(const GPUDevice& devi
     [mtlDescriptor setSupportArgumentBuffers:YES];
 
     sampler = adoptNS([device.platformDevice() newSamplerStateWithDescriptor:mtlDescriptor.get()]);
-    END_BLOCK_OBJC_EXCEPTIONS;
+    END_BLOCK_OBJC_EXCEPTIONS
 
     if (!sampler)
         LOG(WebGPU, "GPUSampler::tryCreate(): Error creating MTLSamplerState!");

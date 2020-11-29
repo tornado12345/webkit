@@ -23,7 +23,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
+#import "config.h"
 
 #import "PlatformUtilities.h"
 #import "TestWKWebView.h"
@@ -169,5 +169,24 @@ TEST(WKWebViewFindString, DoNotFocusMatchWhenWebViewResigned)
     EXPECT_FALSE(focusDidStartInputSession);
 }
 #endif
+
+TEST(WKWebViewFindString, DoNotUpdateMatchIndexWhenGivenNoIndexChangeOption)
+{
+    auto findDelegate = adoptNS([[WKWebViewFindStringFindDelegate alloc] init]);
+    auto configuration = adoptNS([[WKWebViewConfiguration alloc] init]);
+    auto firstWebView = adoptNS([[TestWKWebView alloc] initWithFrame:CGRectMake(0, 0, 300, 200) configuration:configuration.get() addToWindow:YES]);
+    [firstWebView synchronouslyLoadHTMLString:@"<p>hello</p><p>hello</p>"];
+    [firstWebView _setFindDelegate:findDelegate.get()];
+
+    [firstWebView _findString:@"hello" options:0 maxCount:maxCount];
+    Util::run(&isDone);
+
+    EXPECT_EQ(0, [findDelegate matchIndex]);
+
+    [firstWebView _findString:@"hello" options:_WKFindOptionsNoIndexChange maxCount:maxCount];
+    Util::run(&isDone);
+
+    EXPECT_EQ(0, [findDelegate matchIndex]);
+}
 
 } // namespace TestWebKitAPI

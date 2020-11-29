@@ -52,13 +52,28 @@
 #include <WebCore/WebCoreInstanceHandle.h>
 #include <WebCore/WindowMessageBroadcaster.h>
 #include <WebCore/WindowsTouch.h>
-#include <cairo-win32.h>
-#include <cairo.h>
 #include <wtf/FileSystem.h>
 #include <wtf/SoftLinking.h>
 #include <wtf/text/StringBuffer.h>
 #include <wtf/text/StringBuilder.h>
 #include <wtf/text/WTFString.h>
+
+#if ENABLE(REMOTE_INSPECTOR)
+#include "RemoteInspectorProtocolHandler.h"
+#endif
+
+#if USE(CAIRO)
+#include <cairo-win32.h>
+#include <cairo.h>
+#endif 
+
+#if USE(DIRECT2D)
+#include <WebCore/Direct2DUtilities.h>
+#include <d3d11_1.h>
+#include <directxcolors.h> 
+#include <dxgi.h>
+#endif
+
 
 namespace WebKit {
 using namespace WebCore;
@@ -169,6 +184,9 @@ LRESULT WebView::wndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     case WM_MENUCOMMAND:
         lResult = onMenuCommand(hWnd, message, wParam, lParam, handled);
         break;
+    case WM_COMMAND:
+        SendMessage(GetParent(hWnd), message, wParam, lParam);
+        break;
     default:
         handled = false;
         break;
@@ -206,7 +224,7 @@ bool WebView::registerWebViewWindowClass()
 }
 
 WebView::WebView(RECT rect, const API::PageConfiguration& configuration, HWND parentWindow)
-    : m_pageClient(std::make_unique<PageClientImpl>(*this))
+    : m_pageClient(makeUnique<PageClientImpl>(*this))
 {
     registerWebViewWindowClass();
 
@@ -219,22 +237,23 @@ WebView::WebView(RECT rect, const API::PageConfiguration& configuration, HWND pa
     ASSERT(m_isVisible == static_cast<bool>(::GetWindowLong(m_window, GWL_STYLE) & WS_VISIBLE));
 
     auto pageConfiguration = configuration.copy();
-    auto* preferences = pageConfiguration->preferences();
-    if (!preferences && pageConfiguration->pageGroup()) {
-        preferences = &pageConfiguration->pageGroup()->preferences();
-        pageConfiguration->setPreferences(preferences);
-    }
-    if (preferences) {
-        // Disable accelerated compositing until it is supported.
-        preferences->setAcceleratedCompositingEnabled(false);
-    }
-
     WebProcessPool* processPool = pageConfiguration->processPool();
     m_page = processPool->createWebPage(*m_pageClient, WTFMove(pageConfiguration));
     m_page->initializeWebPage();
 
+    IntSize windowSize(rect.right - rect.left, rect.bottom - rect.top);
+#if USE(DIRECT2D)
+    Direct2D::createDeviceAndContext(m_d3dDevice, m_immediateContext);
+    m_page->setDevice(m_d3dDevice.get());
+    setupSwapChain(windowSize);
+#endif
+
     if (m_page->drawingArea())
-        m_page->drawingArea()->setSize(IntSize(rect.right - rect.left, rect.bottom - rect.top));
+        m_page->drawingArea()->setSize(windowSize);
+
+#if ENABLE(REMOTE_INSPECTOR)
+    m_page->setURLSchemeHandlerForScheme(RemoteInspectorProtocolHandler::create(*m_page), "inspector");
+#endif
 
     // FIXME: Initializing the tooltip window here matches WebKit win, but seems like something
     // we could do on demand to save resources.
@@ -441,7 +460,16 @@ LRESULT WebView::onVerticalScroll(HWND hWnd, UINT message, WPARAM wParam, LPARAM
 
 LRESULT WebView::onKeyEvent(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam, bool& handled)
 {
-    m_page->handleKeyboardEvent(NativeWebKeyboardEvent(hWnd, message, wParam, lParam));
+    Vector<MSG> pendingCharEvents;
+    if (message == WM_KEYDOWN) {
+        MSG msg;
+        // WM_SYSCHAR events should not be removed, because WebKit is using WM_SYSCHAR for access keys and they can't be canceled.
+        while (PeekMessage(&msg, hWnd, WM_CHAR, WM_DEADCHAR, PM_REMOVE)) {
+            if (msg.message == WM_CHAR)
+                pendingCharEvents.append(msg);
+        }
+    }
+    m_page->handleKeyboardEvent(NativeWebKeyboardEvent(hWnd, message, wParam, lParam, WTFMove(pendingCharEvents)));
 
     // We claim here to always have handled the event. If the event is not in fact handled, we will
     // find out later in didNotHandleKeyEvent.
@@ -466,6 +494,7 @@ void WebView::paint(HDC hdc, const IntRect& dirtyRect)
     if (auto* drawingArea = static_cast<DrawingAreaProxyCoordinatedGraphics*>(m_page->drawingArea())) {
         // FIXME: We should port WebKit1's rect coalescing logic here.
         Region unpaintedRegion;
+#if USE(CAIRO)
         cairo_surface_t* surface = cairo_win32_surface_create(hdc);
         cairo_t* context = cairo_create(surface);
 
@@ -473,8 +502,18 @@ void WebView::paint(HDC hdc, const IntRect& dirtyRect)
 
         cairo_destroy(context);
         cairo_surface_destroy(surface);
+#else
+        COMPtr<ID3D11Texture2D> backBuffer; 
+        HRESULT hr = m_swapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&backBuffer)); 
+        if (SUCCEEDED(hr)) {
+            BackingStore::DXConnections context { m_immediateContext.get(), backBuffer.get() };
+            drawingArea->paint(context, dirtyRect, unpaintedRegion);
+        }
 
-        Vector<IntRect> unpaintedRects = unpaintedRegion.rects();
+        m_swapChain->Present(0, 0); 
+#endif
+
+        auto unpaintedRects = unpaintedRegion.rects();
         for (auto& rect : unpaintedRects)
             drawPageBackground(hdc, m_page.get(), rect);
     } else
@@ -508,16 +547,33 @@ LRESULT WebView::onPrintClientEvent(HWND hWnd, UINT, WPARAM wParam, LPARAM, bool
     return 0;
 }
 
-LRESULT WebView::onSizeEvent(HWND, UINT, WPARAM, LPARAM lParam, bool& handled)
+LRESULT WebView::onSizeEvent(HWND hwnd, UINT, WPARAM, LPARAM lParam, bool& handled)
 {
     int width = LOWORD(lParam);
     int height = HIWORD(lParam);
 
+    IntSize windowSize(width, height);
+
     if (m_page && m_page->drawingArea()) {
         // FIXME specify correctly layerPosition.
-        m_page->drawingArea()->setSize(IntSize(width, height), m_nextResizeScrollOffset);
+        m_page->drawingArea()->setSize(windowSize, m_nextResizeScrollOffset);
         m_nextResizeScrollOffset = IntSize();
     }
+
+#if USE(DIRECT2D)
+    if (m_swapChain) {
+        m_immediateContext->OMSetRenderTargets(0, nullptr, nullptr);
+
+        m_renderTargetView = nullptr;
+
+        // Preserve the existing buffer count (pass zero for count) and format (by passing DXGI_FORMAT_UNKNOWN).
+        // Automatically choose the width and height to match the client rect for the backing window (pass zeros for width/height).
+        HRESULT hr = m_swapChain->ResizeBuffers(0, 0, 0, DXGI_FORMAT_UNKNOWN, DXGI_SWAP_CHAIN_FLAG_GDI_COMPATIBLE);
+        RELEASE_ASSERT(SUCCEEDED(hr));
+
+        configureBackingStore(windowSize);
+    }
+#endif
 
     handled = true;
     return 0;
@@ -737,7 +793,7 @@ void WebView::close()
 
 HCURSOR WebView::cursorToShow() const
 {
-    if (!m_page->isValid())
+    if (!m_page->hasRunningProcess())
         return 0;
 
     // We only show the override cursor if the default (arrow) cursor is showing.
@@ -864,6 +920,20 @@ void WebView::windowReceivedMessage(HWND, UINT message, WPARAM wParam, LPARAM)
     }
 }
 
+static Vector<wchar_t> truncatedString(const String& string)
+{
+    // Truncate tooltip texts because multiline mode of tooltip control does word-wrapping very slowly
+    auto maxLength = 1024;
+    auto buffer = string.wideCharacters();
+    if (buffer.size() > maxLength) {
+        buffer[maxLength - 4] = L'.';
+        buffer[maxLength - 3] = L'.';
+        buffer[maxLength - 2] = L'.';
+        buffer[maxLength - 1] = L'\0';
+    }
+    return buffer;
+}
+
 void WebView::setToolTip(const String& toolTip)
 {
     if (!m_toolTipWindow)
@@ -874,12 +944,58 @@ void WebView::setToolTip(const String& toolTip)
         info.cbSize = sizeof(info);
         info.uFlags = TTF_IDISHWND;
         info.uId = reinterpret_cast<UINT_PTR>(nativeWindow());
-        Vector<wchar_t> toolTipCharacters = toolTip.wideCharacters(); // Retain buffer long enough to make the SendMessage call
-        info.lpszText = const_cast<wchar_t*>(toolTipCharacters.data());
+        auto toolTipCharacters = truncatedString(toolTip); // Retain buffer long enough to make the SendMessage call
+        info.lpszText = toolTipCharacters.data();
         ::SendMessage(m_toolTipWindow, TTM_UPDATETIPTEXT, 0, reinterpret_cast<LPARAM>(&info));
     }
 
     ::SendMessage(m_toolTipWindow, TTM_ACTIVATE, !toolTip.isEmpty(), 0);
 }
+
+#if USE(DIRECT2D)
+void WebView::setupSwapChain(const WebCore::IntSize& size)
+{
+    if (!m_d3dDevice)
+        return;
+
+    m_swapChain = Direct2D::swapChainOfSizeForWindowAndDevice(size, m_window, m_d3dDevice);
+    RELEASE_ASSERT(m_swapChain);
+
+    auto factory = Direct2D::factoryForDXGIDevice(Direct2D::toDXGIDevice(m_d3dDevice));
+
+    factory->MakeWindowAssociation(m_window, 0);
+    configureBackingStore(size);
+}
+
+void WebView::configureBackingStore(const WebCore::IntSize& size)
+{
+    ASSERT(m_swapChain);
+    ASSERT(m_d3dDevice);
+    ASSERT(m_immediateContext);
+
+    // Create a render target view 
+    COMPtr<ID3D11Texture2D> backBuffer; 
+    HRESULT hr = m_swapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&backBuffer)); 
+    RELEASE_ASSERT(SUCCEEDED(hr));
+
+    hr = m_d3dDevice->CreateRenderTargetView(backBuffer.get(), nullptr, &m_renderTargetView); 
+    RELEASE_ASSERT(SUCCEEDED(hr));
+
+    auto* renderTargetView = m_renderTargetView.get();
+    m_immediateContext->OMSetRenderTargets(1, &renderTargetView, nullptr);
+
+    // Setup the viewport 
+    D3D11_VIEWPORT viewport;
+    viewport.Width = (FLOAT)size.width();
+    viewport.Height = (FLOAT)size.height();
+    viewport.MinDepth = 0.0f;
+    viewport.MaxDepth = 1.0f;
+    viewport.TopLeftX = 0;
+    viewport.TopLeftY = 0;
+    m_immediateContext->RSSetViewports(1, &viewport);
+
+    m_immediateContext->ClearRenderTargetView(m_renderTargetView.get(), DirectX::Colors::MidnightBlue); 
+}
+#endif
 
 } // namespace WebKit

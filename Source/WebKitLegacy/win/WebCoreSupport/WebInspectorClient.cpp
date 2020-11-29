@@ -169,7 +169,7 @@ Inspector::FrontendChannel* WebInspectorClient::openLocalFrontend(InspectorContr
         return 0;
 
     m_frontendPage = core(frontendWebView.get());
-    m_frontendClient = std::make_unique<WebInspectorFrontendClient>(m_inspectedWebView, m_inspectedWebViewHandle, frontendHwnd, frontendWebView, frontendWebViewHwnd, this, createFrontendSettings());
+    m_frontendClient = makeUnique<WebInspectorFrontendClient>(m_inspectedWebView, m_inspectedWebViewHandle, frontendHwnd, frontendWebView, frontendWebViewHwnd, this, createFrontendSettings());
     m_frontendPage->inspectorController().setInspectorFrontendClient(m_frontendClient.get());
     m_frontendHandle = frontendHwnd;
     return this;
@@ -185,7 +185,7 @@ void WebInspectorClient::highlight()
     bool creatingHighlight = !m_highlight;
 
     if (creatingHighlight)
-        m_highlight = std::make_unique<WebNodeHighlight>(m_inspectedWebView);
+        m_highlight = makeUnique<WebNodeHighlight>(m_inspectedWebView);
 
     if (m_highlight->isShowing())
         m_highlight->update();
@@ -219,8 +219,8 @@ WebInspectorFrontendClient::WebInspectorFrontendClient(WebView* inspectedWebView
     : InspectorFrontendClientLocal(&inspectedWebView->page()->inspectorController(),  core(frontendWebView.get()), WTFMove(settings))
     , m_inspectedWebView(inspectedWebView)
     , m_inspectedWebViewHwnd(inspectedWebViewHwnd)
-    , m_inspectorClient(inspectorClient)
     , m_frontendHwnd(frontendHwnd)
+    , m_inspectorClient(inspectorClient)
     , m_frontendWebView(frontendWebView)
     , m_frontendWebViewHwnd(frontendWebViewHwnd)
     , m_attached(false)
@@ -248,7 +248,7 @@ void WebInspectorFrontendClient::frontendLoaded()
     setAttachedWindow(m_attached ? DockSide::Bottom : DockSide::Undocked);
 }
 
-String WebInspectorFrontendClient::localizedStringsURL()
+String WebInspectorFrontendClient::localizedStringsURL() const
 {
     RetainPtr<CFURLRef> url = adoptCF(CFBundleCopyResourceURL(webKitBundle(), CFSTR("localizedStrings"), CFSTR("js"), CFSTR("WebInspectorUI")));
     if (!url)
@@ -276,6 +276,19 @@ void WebInspectorFrontendClient::reopen()
 
     if (Page* inspectedPage = m_inspectedWebView->page())
         inspectedPage->inspectorController().show();
+}
+
+void WebInspectorFrontendClient::resetState()
+{
+    InspectorFrontendClientLocal::resetState();
+
+    m_inspectorClient->deleteInspectorStartsAttached();
+    m_inspectorClient->deleteInspectorAttachDisabled();
+}
+
+void WebInspectorFrontendClient::setForcedAppearance(InspectorFrontendClient::Appearance)
+{
+    notImplemented();
 }
 
 void WebInspectorFrontendClient::attachWindow(DockSide)
@@ -307,6 +320,22 @@ void WebInspectorFrontendClient::detachWindow()
     showWindowWithoutNotifications();
 }
 
+bool WebInspectorFrontendClient::supportsDockSide(DockSide dockSide)
+{
+    switch (dockSide) {
+    case DockSide::Undocked:
+    case DockSide::Bottom:
+        return true;
+
+    case DockSide::Right:
+    case DockSide::Left:
+        return false;
+    }
+
+    ASSERT_NOT_REACHED();
+    return false;
+}
+
 void WebInspectorFrontendClient::setAttachedWindowHeight(unsigned height)
 {
     if (!m_attached)
@@ -319,23 +348,33 @@ void WebInspectorFrontendClient::setAttachedWindowHeight(unsigned height)
     RECT hostWindowRect;
     GetClientRect(hostWindow, &hostWindowRect);
 
+    RECT frontendRect;
+    GetClientRect(m_frontendWebViewHwnd, &frontendRect);
+
     RECT inspectedRect;
     GetClientRect(m_inspectedWebViewHwnd, &inspectedRect);
 
-    int totalHeight = hostWindowRect.bottom - hostWindowRect.top;
+    int hostWindowHeight = hostWindowRect.bottom;
     int webViewWidth = inspectedRect.right - inspectedRect.left;
+    int webViewHeight = frontendRect.bottom + inspectedRect.bottom;
+    height *= m_inspectedWebView->deviceScaleFactor();
 
-    SetWindowPos(m_frontendWebViewHwnd, 0, 0, totalHeight - height, webViewWidth, height, SWP_NOZORDER);
+    SetWindowPos(m_frontendWebViewHwnd, 0, 0, hostWindowHeight - height, webViewWidth, height, SWP_NOZORDER);
 
     // We want to set the inspected web view height to the totalHeight, because the height adjustment
     // of the inspected web view happens in onWebViewWindowPosChanging, not here.
-    SetWindowPos(m_inspectedWebViewHwnd, 0, 0, 0, webViewWidth, totalHeight, SWP_NOZORDER);
+    SetWindowPos(m_inspectedWebViewHwnd, 0, 0, hostWindowHeight - webViewHeight, webViewWidth, webViewHeight, SWP_NOZORDER);
 
     RedrawWindow(m_frontendWebViewHwnd, 0, 0, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW);
     RedrawWindow(m_inspectedWebViewHwnd, 0, 0, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW);
 }
 
 void WebInspectorFrontendClient::setAttachedWindowWidth(unsigned)
+{
+    notImplemented();
+}
+
+void WebInspectorFrontendClient::setSheetRect(const FloatRect&)
 {
     notImplemented();
 }

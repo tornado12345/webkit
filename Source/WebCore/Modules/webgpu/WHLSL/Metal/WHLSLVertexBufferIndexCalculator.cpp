@@ -26,7 +26,7 @@
 #include "config.h"
 #include "WHLSLVertexBufferIndexCalculator.h"
 
-#if ENABLE(WEBGPU)
+#if ENABLE(WHLSL_COMPILER)
 
 namespace WebCore {
 
@@ -34,7 +34,7 @@ namespace WHLSL {
 
 namespace Metal {
 
-unsigned long calculateVertexBufferIndex(unsigned long index)
+unsigned calculateVertexBufferIndex(unsigned index)
 {
     // Reserve the first few MTLBuffer slots for argument buffers for GPUBindGroups.
     return index + 8;
@@ -46,4 +46,4 @@ unsigned long calculateVertexBufferIndex(unsigned long index)
 
 }
 
-#endif // ENABLE(WEBGPU)
+#endif // ENABLE(WHLSL_COMPILER)

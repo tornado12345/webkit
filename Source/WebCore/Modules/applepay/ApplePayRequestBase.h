@@ -28,11 +28,13 @@
 #if ENABLE(APPLE_PAY)
 
 #include "ApplePayContactField.h"
+#include "ApplePayInstallmentConfigurationWebCore.h"
 #include "ApplePayMerchantCapability.h"
 #include "ApplePayPaymentContact.h"
 
 namespace WebCore {
 
+class Document;
 class PaymentCoordinator;
 
 struct ApplePayRequestBase {
@@ -48,9 +50,13 @@ struct ApplePayRequestBase {
 
     String applicationData;
     Vector<String> supportedCountries;
+
+#if ENABLE(APPLE_PAY_INSTALLMENTS)
+    Optional<ApplePayInstallmentConfiguration> installmentConfiguration;
+#endif
 };
 
-ExceptionOr<ApplePaySessionPaymentRequest> convertAndValidate(unsigned version, ApplePayRequestBase&, const PaymentCoordinator&);
+ExceptionOr<ApplePaySessionPaymentRequest> convertAndValidate(Document&, unsigned version, ApplePayRequestBase&, const PaymentCoordinator&);
 
 } // namespace WebCore
 

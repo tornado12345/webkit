@@ -27,8 +27,11 @@
 #include "config.h"
 #include "WebPageProxy.h"
 
+#include "InputMethodState.h"
 #include "PageClientImpl.h"
+#include "WebKitUserMessage.h"
 #include "WebKitWebViewBasePrivate.h"
+#include "WebKitWebViewPrivate.h"
 #include "WebPageMessages.h"
 #include "WebPasteboardProxy.h"
 #include "WebProcessProxy.h"
@@ -36,7 +39,6 @@
 #include <WebCore/NotImplemented.h>
 #include <WebCore/PlatformDisplay.h>
 #include <WebCore/UserAgent.h>
-#include <gtk/gtkx.h>
 #include <wtf/NeverDestroyed.h>
 
 namespace WebKit {
@@ -50,6 +52,15 @@ GtkWidget* WebPageProxy::viewWidget()
     return static_cast<PageClientImpl&>(pageClient()).viewWidget();
 }
 
+String WebPageProxy::userAgentForURL(const URL& url)
+{
+    if (url.isNull() || !preferences().needsSiteSpecificQuirks())
+        return this->userAgent();
+
+    auto userAgent = WebCore::standardUserAgentForURL(url);
+    return userAgent.isNull() ? this->userAgent() : userAgent;
+}
+
 String WebPageProxy::standardUserAgent(const String& applicationNameForUserAgent)
 {
     return WebCore::standardUserAgent(applicationNameForUserAgent);
@@ -57,7 +68,11 @@ String WebPageProxy::standardUserAgent(const String& applicationNameForUserAgent
 
 void WebPageProxy::bindAccessibilityTree(const String& plugID)
 {
-    m_accessibilityPlugID = plugID;
+#if !USE(GTK4)
+    auto* accessible = gtk_widget_get_accessible(viewWidget());
+    atk_socket_embed(ATK_SOCKET(accessible), const_cast<char*>(plugID.utf8().data()));
+    atk_object_notify_state_change(accessible, ATK_STATE_TRANSIENT, FALSE);
+#endif
 }
 
 void WebPageProxy::saveRecentSearches(const String&, const Vector<WebCore::RecentSearch>&)
@@ -65,9 +80,10 @@ void WebPageProxy::saveRecentSearches(const String&, const Vector<WebCore::Recen
     notImplemented();
 }
 
-void WebPageProxy::loadRecentSearches(const String&, Vector<WebCore::RecentSearch>&)
+void WebPageProxy::loadRecentSearches(const String&, CompletionHandler<void(Vector<WebCore::RecentSearch>&&)>&& completionHandler)
 {
     notImplemented();
+    completionHandler({ });
 }
 
 void WebsiteDataStore::platformRemoveRecentSearches(WallTime oldestTimeToRemove)
@@ -76,7 +92,7 @@ void WebsiteDataStore::platformRemoveRecentSearches(WallTime oldestTimeToRemove)
     notImplemented();
 }
 
-void WebPageProxy::editorStateChanged(const EditorState& editorState)
+void WebPageProxy::updateEditorState(const EditorState& editorState)
 {
     m_editorState = editorState;
     
@@ -87,76 +103,48 @@ void WebPageProxy::editorStateChanged(const EditorState& editorState)
     pageClient().selectionDidChange();
 }
 
-#if PLATFORM(X11)
-typedef HashMap<uint64_t, GtkWidget* > PluginWindowMap;
-static PluginWindowMap& pluginWindowMap()
+void WebPageProxy::setInputMethodState(Optional<InputMethodState>&& state)
 {
-    static NeverDestroyed<PluginWindowMap> map;
-    return map;
+    webkitWebViewBaseSetInputMethodState(WEBKIT_WEB_VIEW_BASE(viewWidget()), WTFMove(state));
 }
 
-static gboolean pluginContainerPlugRemoved(GtkSocket* socket)
-{
-    uint64_t windowID = static_cast<uint64_t>(gtk_socket_get_id(socket));
-    pluginWindowMap().remove(windowID);
-    return FALSE;
-}
-
-void WebPageProxy::createPluginContainer(uint64_t& windowID)
-{
-    RELEASE_ASSERT(WebCore::PlatformDisplay::sharedDisplay().type() == WebCore::PlatformDisplay::Type::X11);
-    GtkWidget* socket = gtk_socket_new();
-    g_signal_connect(socket, "plug-removed", G_CALLBACK(pluginContainerPlugRemoved), 0);
-    gtk_container_add(GTK_CONTAINER(viewWidget()), socket);
-
-    windowID = static_cast<uint64_t>(gtk_socket_get_id(GTK_SOCKET(socket)));
-    pluginWindowMap().set(windowID, socket);
-}
-
-void WebPageProxy::windowedPluginGeometryDidChange(const WebCore::IntRect& frameRect, const WebCore::IntRect& clipRect, uint64_t windowID)
-{
-    GtkWidget* plugin = pluginWindowMap().get(windowID);
-    if (!plugin)
-        return;
-
-    if (gtk_widget_get_realized(plugin)) {
-        GdkRectangle clip = clipRect;
-        cairo_region_t* clipRegion = cairo_region_create_rectangle(&clip);
-        gdk_window_shape_combine_region(gtk_widget_get_window(plugin), clipRegion, 0, 0);
-        cairo_region_destroy(clipRegion);
-    }
-
-    webkitWebViewBaseChildMoveResize(WEBKIT_WEB_VIEW_BASE(viewWidget()), plugin, frameRect);
-}
-
-void WebPageProxy::windowedPluginVisibilityDidChange(bool isVisible, uint64_t windowID)
-{
-    GtkWidget* plugin = pluginWindowMap().get(windowID);
-    if (!plugin)
-        return;
-
-    if (isVisible)
-        gtk_widget_show(plugin);
-    else
-        gtk_widget_hide(plugin);
-}
-#endif // PLATFORM(X11)
-
-void WebPageProxy::setInputMethodState(bool enabled)
-{
-    webkitWebViewBaseSetInputMethodState(WEBKIT_WEB_VIEW_BASE(viewWidget()), enabled);
-}
-
-#if HAVE(GTK_GESTURES)
 void WebPageProxy::getCenterForZoomGesture(const WebCore::IntPoint& centerInViewCoordinates, WebCore::IntPoint& center)
 {
-    process().sendSync(Messages::WebPage::GetCenterForZoomGesture(centerInViewCoordinates), Messages::WebPage::GetCenterForZoomGesture::Reply(center), m_pageID);
+    sendSync(Messages::WebPage::GetCenterForZoomGesture(centerInViewCoordinates), Messages::WebPage::GetCenterForZoomGesture::Reply(center));
 }
-#endif
 
 bool WebPageProxy::makeGLContextCurrent()
 {
     return webkitWebViewBaseMakeGLContextCurrent(WEBKIT_WEB_VIEW_BASE(viewWidget()));
+}
+
+void WebPageProxy::showEmojiPicker(const WebCore::IntRect& caretRect, CompletionHandler<void(String)>&& completionHandler)
+{
+    webkitWebViewBaseShowEmojiChooser(WEBKIT_WEB_VIEW_BASE(viewWidget()), caretRect, WTFMove(completionHandler));
+}
+
+void WebPageProxy::sendMessageToWebViewWithReply(UserMessage&& message, CompletionHandler<void(UserMessage&&)>&& completionHandler)
+{
+    if (!WEBKIT_IS_WEB_VIEW(viewWidget())) {
+        completionHandler(UserMessage(message.name, WEBKIT_USER_MESSAGE_UNHANDLED_MESSAGE));
+        return;
+    }
+
+    webkitWebViewDidReceiveUserMessage(WEBKIT_WEB_VIEW(viewWidget()), WTFMove(message), WTFMove(completionHandler));
+}
+
+void WebPageProxy::sendMessageToWebView(UserMessage&& message)
+{
+    sendMessageToWebViewWithReply(WTFMove(message), [](UserMessage&&) { });
+}
+
+void WebPageProxy::themeDidChange()
+{
+    if (!hasRunningProcess())
+        return;
+
+    send(Messages::WebPage::ThemeDidChange(pageClient().themeName()));
+    effectiveAppearanceDidChange();
 }
 
 } // namespace WebKit

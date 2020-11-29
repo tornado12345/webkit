@@ -8,7 +8,6 @@ features: [class-static-methods-private, class, class-fields-public, async-itera
 flags: [generated, async]
 includes: [propertyHelper.js]
 info: |
-    
     ClassElement :
       MethodDefinition
       static MethodDefinition
@@ -129,4 +128,4 @@ C.m().next().then(function(v) {
   }
 
   return Promise.resolve(assertions());
-}, $DONE).then($DONE, $DONE);
+}).then($DONE, $DONE);

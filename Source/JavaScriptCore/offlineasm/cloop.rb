@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2019 Apple Inc. All rights reserved.
+# Copyright (C) 2012-2020 Apple Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -88,9 +88,9 @@ class RegisterID
         when "csr0"
             "pcBase"
         when "csr1"
-            "tagTypeNumber"
+            "numberTag"
         when "csr2"
-            "tagMask"
+            "notCellMask"
         when "csr3"
             "metadataTable"
         when "cfr"
@@ -160,6 +160,7 @@ class Immediate
 
         case type
         when :int8;    "int8_t(#{valueStr})"
+        when :int16;   "int16_t(#{valueStr})"
         when :int32;   "int32_t(#{valueStr})"
         when :int64;   "int64_t(#{valueStr})"
         when :intptr;  "intptr_t(#{valueStr})"
@@ -183,6 +184,7 @@ class Address
     def clValue(type=:intptr)
         case type
         when :int8;         int8MemRef
+        when :int16;        int16MemRef
         when :int32;        int32MemRef
         when :int64;        int64MemRef
         when :intptr;       intptrMemRef
@@ -331,6 +333,9 @@ class LabelReference
     end
     def cloopEmitLea(destination, type)
         $asm.putc "#{destination.clLValue(:voidPtr)} = CAST<void*>(&#{cLabel});"
+        if offset != 0
+            $asm.putc "#{destination.clLValue(:int8Ptr)} = #{destination.clValue(:int8Ptr)} + #{offset};"
+        end
     end
 end
 
@@ -342,7 +347,7 @@ end
 class Address
     def cloopEmitLea(destination, type)
         if destination == base
-            $asm.putc "#{destination.clLValue(:int8Ptr)} += #{offset.clValue(type)};"
+            $asm.putc "#{destination.clLValue(:int8Ptr)} = #{destination.clValue(:int8Ptr)} + #{offset.clValue(type)};"
         else
             $asm.putc "#{destination.clLValue(:int8Ptr)} = #{base.clValue(:int8Ptr)} + #{offset.clValue(type)};"
         end
@@ -386,7 +391,7 @@ end
 
 def cloopEmitOperation(operands, type, operator)
     raise unless type == :intptr || type == :uintptr || type == :int32 || type == :uint32 || \
-        type == :int64 || type == :uint64 || type == :double
+        type == :int64 || type == :uint64 || type == :double || type == :int16
     if operands.size == 3
         op1 = operands[0]
         op2 = operands[1]
@@ -400,6 +405,9 @@ def cloopEmitOperation(operands, type, operator)
     raise unless not dst.is_a? Immediate
     if dst.is_a? RegisterID and (type == :int32 or type == :uint32)
         truncationHeader = "(uint32_t)("
+        truncationFooter = ")"
+    elsif dst.is_a? RegisterID and (type == :int16)
+        truncationHeader = "(uint16_t)("
         truncationFooter = ")"
     else
         truncationHeader = ""
@@ -585,6 +593,8 @@ class Instruction
             cloopEmitOperation(operands, :int64, "|")
         when "orp"
             cloopEmitOperation(operands, :intptr, "|")
+        when "orh"
+            cloopEmitOperation(operands, :int16, "|")
 
         when "xori"
             cloopEmitOperation(operands, :int32, "^")
@@ -656,16 +666,18 @@ class Instruction
             $asm.putc "#{operands[1].intptrMemRef} = #{operands[0].clValue(:intptr)};"
         when "loadb"
             $asm.putc "#{operands[1].clLValue(:intptr)} = #{operands[0].uint8MemRef};"
-        when "loadbs"
-            $asm.putc "#{operands[1].clLValue(:intptr)} = (uint32_t)(#{operands[0].int8MemRef});"
-        when "loadbsp"
-            $asm.putc "#{operands[1].clLValue(:intptr)} = #{operands[0].int8MemRef};"
+        when "loadbsi"
+            $asm.putc "#{operands[1].clLValue(:uint32)} = (uint32_t)((int32_t)#{operands[0].int8MemRef});"
+        when "loadbsq"
+            $asm.putc "#{operands[1].clLValue(:uint64)} = (int64_t)#{operands[0].int8MemRef};"
         when "storeb"
             $asm.putc "#{operands[1].uint8MemRef} = #{operands[0].clValue(:int8)};"
         when "loadh"
             $asm.putc "#{operands[1].clLValue(:intptr)} = #{operands[0].uint16MemRef};"
-        when "loadhs"
-            $asm.putc "#{operands[1].clLValue(:intptr)} = (uint32_t)(#{operands[0].int16MemRef});"
+        when "loadhsi"
+            $asm.putc "#{operands[1].clLValue(:uint32)} = (uint32_t)((int32_t)#{operands[0].int16MemRef});"
+        when "loadhsq"
+            $asm.putc "#{operands[1].clLValue(:uint64)} = (int64_t)#{operands[0].int16MemRef};"
         when "storeh"
             $asm.putc "*#{operands[1].uint16MemRef} = #{operands[0].clValue(:int16)};"
         when "loadd"
@@ -683,8 +695,8 @@ class Instruction
             cloopEmitOperation(operands, :double, "*")
 
         # Convert an int value to its double equivalent, and store it in a double register.
-        when "ci2d"
-            $asm.putc "#{operands[1].clLValue(:double)} = (double)#{operands[0].clValue(:int32)}; // ci2d"
+        when "ci2ds"
+            $asm.putc "#{operands[1].clLValue(:double)} = (double)#{operands[0].clValue(:int32)}; // ci2ds"
 
         when "bdeq"
             cloopEmitCompareAndBranch(operands, :double, "==")
@@ -1124,11 +1136,11 @@ class Instruction
 
         # We can't do generic function calls with an arbitrary set of args, but
         # fortunately we don't have to here. All native function calls always
-        # have a fixed prototype of 1 args: the passed ExecState.
+        # have a fixed prototype of 2 args: the passed JSGlobalObject* and CallFrame*.
         when "cloopCallNative"
             $asm.putc "cloopStack.setCurrentStackPointer(sp.vp());"
             $asm.putc "nativeFunc = #{operands[0].clValue(:nativeFunc)};"
-            $asm.putc "functionReturnValue = JSValue::decode(nativeFunc(t0.execState()));"
+            $asm.putc "functionReturnValue = JSValue::decode(nativeFunc(jsCast<JSGlobalObject*>(t0.cell()), t1.callFrame()));"
             $asm.putc "#if USE(JSVALUE32_64)"
             $asm.putc "    t1 = functionReturnValue.tag();"
             $asm.putc "    t0 = functionReturnValue.payload();"
@@ -1154,6 +1166,10 @@ class Instruction
         else
             lowerDefault
         end
+    end
+
+    def lowerC_LOOP_WIN
+        lowerC_LOOP
     end
 
     def recordMetaDataC_LOOP

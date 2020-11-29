@@ -82,7 +82,7 @@ typedef NS_ENUM(NSInteger, WebMediaCaptureType) {
 - (void)webView:(WebView *)webView elementDidFocusNode:(DOMNode *)node;
 - (void)webView:(WebView *)webView elementDidBlurNode:(DOMNode *)node;
 
-// PageCache support
+// BackForwardCache support
 - (void)webViewDidRestoreFromPageCache:(WebView *)webView;
 
 - (NSView *)webView:(WebView *)webView plugInViewWithArguments:(NSDictionary *)arguments fromPlugInPackage:(WebPluginPackage *)package;
@@ -126,11 +126,14 @@ typedef NS_ENUM(NSInteger, WebMediaCaptureType) {
 - (CGPoint)interactionLocation;
 - (void)showPlaybackTargetPicker:(BOOL)hasVideo fromRect:(CGRect)elementRect;
 
+- (BOOL)shouldRevealCurrentSelectionAfterInsertion;
+
+- (BOOL)shouldSuppressPasswordEcho;
+
 #if ENABLE_ORIENTATION_EVENTS
 - (int)deviceOrientation;
 #endif
 
-- (BOOL)isUnperturbedDictationResultMarker:(id)metadataForMarker;
 - (void)webView:(WebView *)webView addMessageToConsole:(NSDictionary *)message withSource:(NSString *)source;
 @end
 

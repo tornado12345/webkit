@@ -58,7 +58,6 @@
 #include <JavaScriptCore/JSObject.h>
 #include <WebCore/BString.h>
 #include <WebCore/COMPtr.h>
-#include <WebCore/CSSAnimationController.h>
 #include <WebCore/DOMWindow.h>
 #include <WebCore/Document.h>
 #include <WebCore/DocumentLoader.h>
@@ -528,7 +527,7 @@ JSGlobalContextRef WebFrame::globalContext()
     if (!coreFrame)
         return nullptr;
 
-    return toGlobalRef(coreFrame->script().globalObject(mainThreadNormalWorld())->globalExec());
+    return toGlobalRef(coreFrame->script().globalObject(mainThreadNormalWorld()));
 }
 
 JSGlobalContextRef WebFrame::globalContextForScriptWorld(IWebScriptWorld* iWorld)
@@ -541,7 +540,7 @@ JSGlobalContextRef WebFrame::globalContextForScriptWorld(IWebScriptWorld* iWorld
     if (!world)
         return 0;
 
-    return toGlobalRef(coreFrame->script().globalObject(world->world())->globalExec());
+    return toGlobalRef(coreFrame->script().globalObject(world->world()));
 }
 
 HRESULT WebFrame::loadRequest(_In_opt_ IWebURLRequest* request)
@@ -559,7 +558,7 @@ HRESULT WebFrame::loadRequest(_In_opt_ IWebURLRequest* request)
     if (!coreFrame)
         return E_UNEXPECTED;
 
-    coreFrame->loader().load(FrameLoadRequest(*coreFrame, requestImpl->resourceRequest(), ShouldOpenExternalURLsPolicy::ShouldNotAllow));
+    coreFrame->loader().load(FrameLoadRequest(*coreFrame, requestImpl->resourceRequest()));
     return S_OK;
 }
 
@@ -584,7 +583,7 @@ void WebFrame::loadData(Ref<WebCore::SharedBuffer>&& data, BSTR mimeType, BSTR t
 
     // This method is only called from IWebFrame methods, so don't ASSERT that the Frame pointer isn't null.
     if (Frame* coreFrame = core(this))
-        coreFrame->loader().load(FrameLoadRequest(*coreFrame, request, ShouldOpenExternalURLsPolicy::ShouldNotAllow, substituteData));
+        coreFrame->loader().load(FrameLoadRequest(*coreFrame, request, substituteData));
 }
 
 HRESULT WebFrame::loadData(_In_opt_ IStream* data, _In_ BSTR mimeType, _In_ BSTR textEncodingName, _In_ BSTR url)
@@ -731,7 +730,7 @@ HRESULT WebFrame::findFrameNamed(_In_ BSTR name, _COM_Outptr_opt_ IWebFrame** fr
     if (!coreFrame)
         return E_UNEXPECTED;
 
-    Frame* foundFrame = coreFrame->tree().find(AtomicString(name, SysStringLen(name)), *coreFrame);
+    Frame* foundFrame = coreFrame->tree().find(AtomString(name, SysStringLen(name)), *coreFrame);
     if (!foundFrame)
         return S_OK;
 
@@ -856,7 +855,38 @@ HRESULT WebFrame::childFrames(_COM_Outptr_opt_ IEnumVARIANT** enumFrames)
 
 // IWebFramePrivate ------------------------------------------------------
 
-HRESULT WebFrame::renderTreeAsExternalRepresentation(BOOL forPrinting, _Deref_opt_out_ BSTR* result)
+enum WebRenderTreeAsTextOption {
+    WebRenderTreeAsTextShowAllLayers           = 1 << 0,
+    WebRenderTreeAsTextShowLayerNesting        = 1 << 1,
+    WebRenderTreeAsTextShowCompositedLayers    = 1 << 2,
+    WebRenderTreeAsTextShowOverflow            = 1 << 3,
+    WebRenderTreeAsTextShowSVGGeometry         = 1 << 4,
+    WebRenderTreeAsTextShowLayerFragments      = 1 << 5
+};
+
+typedef unsigned WebRenderTreeAsTextOptions;
+
+static OptionSet<RenderAsTextFlag> toRenderAsTextFlags(WebRenderTreeAsTextOptions options)
+{
+    OptionSet<RenderAsTextFlag> flags;
+
+    if (options & WebRenderTreeAsTextShowAllLayers)
+        flags.add(RenderAsTextFlag::ShowAllLayers);
+    if (options & WebRenderTreeAsTextShowLayerNesting)
+        flags.add(RenderAsTextFlag::ShowLayerNesting);
+    if (options & WebRenderTreeAsTextShowCompositedLayers)
+        flags.add(RenderAsTextFlag::ShowCompositedLayers);
+    if (options & WebRenderTreeAsTextShowOverflow)
+        flags.add(RenderAsTextFlag::ShowOverflow);
+    if (options & WebRenderTreeAsTextShowSVGGeometry)
+        flags.add(RenderAsTextFlag::ShowSVGGeometry);
+    if (options & WebRenderTreeAsTextShowLayerFragments)
+        flags.add(RenderAsTextFlag::ShowLayerFragments);
+
+    return flags;
+}
+
+HRESULT WebFrame::renderTreeAsExternalRepresentation(unsigned options, _Deref_opt_out_ BSTR* result)
 {
     if (!result)
         return E_POINTER;
@@ -865,7 +895,20 @@ HRESULT WebFrame::renderTreeAsExternalRepresentation(BOOL forPrinting, _Deref_op
     if (!coreFrame)
         return E_UNEXPECTED;
 
-    *result = BString(externalRepresentation(coreFrame, forPrinting ? RenderAsTextPrintingMode : RenderAsTextBehaviorNormal)).release();
+    *result = BString(externalRepresentation(coreFrame, toRenderAsTextFlags(options))).release();
+    return S_OK;
+}
+
+HRESULT WebFrame::renderTreeAsExternalRepresentationForPrinting(_Deref_opt_out_ BSTR* result)
+{
+    if (!result)
+        return E_POINTER;
+
+    Frame* coreFrame = core(this);
+    if (!coreFrame)
+        return E_UNEXPECTED;
+
+    *result = BString(externalRepresentation(coreFrame, { RenderAsTextFlag::PrintingMode })).release();
     return S_OK;
 }
 
@@ -1038,7 +1081,7 @@ Ref<Frame> WebFrame::createSubframeWithOwnerElement(IWebView* webView, Page* pag
     d->webView->viewWindow(&viewWindow);
 
     this->AddRef(); // We release this ref in frameLoaderDestroyed()
-    auto frame = Frame::create(page, ownerElement, new WebFrameLoaderClient(this));
+    auto frame = Frame::create(page, ownerElement, makeUniqueRef<WebFrameLoaderClient>(this));
     d->frame = frame.ptr();
     return frame;
 }
@@ -1086,7 +1129,7 @@ HRESULT WebFrame::elementWithName(BSTR name, IDOMElement* form, IDOMElement** el
 
     HTMLFormElement* formElement = formElementFromDOMElement(form);
     if (formElement) {
-        AtomicString targetName((UChar*)name, SysStringLen(name));
+        AtomString targetName((UChar*)name, SysStringLen(name));
         for (auto& associatedElement : formElement->copyAssociatedElementsVector()) {
             if (!is<HTMLFormControlElement>(associatedElement.get()))
                 continue;
@@ -1133,64 +1176,6 @@ HRESULT WebFrame::elementDoesAutoComplete(_In_opt_ IDOMElement *element, _Out_ B
     return S_OK;
 }
 
-HRESULT WebFrame::resumeAnimations()
-{
-    Frame* frame = core(this);
-    if (!frame)
-        return E_UNEXPECTED;
-
-    frame->animation().resumeAnimations();
-    return S_OK;
-}
-
-HRESULT WebFrame::suspendAnimations()
-{
-    Frame* frame = core(this);
-    if (!frame)
-        return E_UNEXPECTED;
-
-    frame->animation().suspendAnimations();
-    return S_OK;
-}
-
-HRESULT WebFrame::pauseAnimation(_In_ BSTR animationName, _In_opt_ IDOMNode* node, double secondsFromNow, _Out_ BOOL* animationWasRunning)
-{
-    if (!node || !animationWasRunning)
-        return E_POINTER;
-
-    *animationWasRunning = FALSE;
-
-    Frame* frame = core(this);
-    if (!frame)
-        return E_UNEXPECTED;
-
-    COMPtr<DOMNode> domNode(Query, node);
-    if (!domNode)
-        return E_FAIL;
-
-    *animationWasRunning = frame->animation().pauseAnimationAtTime(downcast<Element>(*domNode->node()), String(animationName, SysStringLen(animationName)), secondsFromNow);
-    return S_OK;
-}
-
-HRESULT WebFrame::pauseTransition(_In_ BSTR propertyName, _In_opt_ IDOMNode* node, double secondsFromNow, _Out_ BOOL* transitionWasRunning)
-{
-    if (!node || !transitionWasRunning)
-        return E_POINTER;
-
-    *transitionWasRunning = FALSE;
-
-    Frame* frame = core(this);
-    if (!frame)
-        return E_UNEXPECTED;
-
-    COMPtr<DOMNode> domNode(Query, node);
-    if (!domNode)
-        return E_FAIL;
-
-    *transitionWasRunning = frame->animation().pauseTransitionAtTime(downcast<Element>(*domNode->node()), String(propertyName, SysStringLen(propertyName)), secondsFromNow);
-    return S_OK;
-}
-
 HRESULT WebFrame::visibleContentRect(_Out_ RECT* rect)
 {
     if (!rect)
@@ -1206,21 +1191,6 @@ HRESULT WebFrame::visibleContentRect(_Out_ RECT* rect)
         return E_FAIL;
 
     *rect = view->visibleContentRect();
-    return S_OK;
-}
-
-HRESULT WebFrame::numberOfActiveAnimations(_Out_ UINT* number)
-{
-    if (!number)
-        return E_POINTER;
-
-    *number = 0;
-
-    Frame* frame = core(this);
-    if (!frame)
-        return E_UNEXPECTED;
-
-    *number = frame->animation().numberOfActiveAnimations(frame->document());
     return S_OK;
 }
 
@@ -1879,13 +1849,15 @@ HRESULT WebFrame::string(_Deref_opt_out_ BSTR* result)
 
     *result = nullptr;
 
-    Frame* coreFrame = core(this);
-    if (!coreFrame)
+    auto* frame = core(this);
+    if (!frame)
         return E_UNEXPECTED;
 
-    RefPtr<Range> allRange(rangeOfContents(*coreFrame->document()));
-    String allString = plainText(allRange.get());
-    *result = BString(allString).release();
+    auto* document = frame->document();
+    if (!document)
+        return E_FAIL;
+
+    *result = BString(plainText(makeRangeSelectingNodeContents(*document))).release();
     return S_OK;
 }
 
@@ -2001,7 +1973,7 @@ HRESULT WebFrame::stringByEvaluatingJavaScriptInScriptWorld(IWebScriptWorld* iWo
 
     // The global object is probably a proxy object? - if so, we know how to use this!
     JSC::JSObject* globalObjectObj = toJS(globalObjectRef);
-    auto& vm = *globalObjectObj->vm();
+    auto& vm = globalObjectObj->vm();
     if (globalObjectObj->inherits<JSWindowProxy>(vm))
         anyWorldGlobalObject = JSC::jsDynamicCast<JSDOMWindow*>(vm, static_cast<JSWindowProxy*>(globalObjectObj)->window());
 
@@ -2011,7 +1983,7 @@ HRESULT WebFrame::stringByEvaluatingJavaScriptInScriptWorld(IWebScriptWorld* iWo
     // Get the frame frome the global object we've settled on.
     Frame* frame = anyWorldGlobalObject->wrapped().frame();
     ASSERT(frame->document());
-    JSValue result = frame->script().executeScriptInWorld(world->world(), string, true);
+    JSValue result = frame->script().executeScriptInWorldIgnoringException(world->world(), string, true);
 
     if (!frame) // In case the script removed our frame from the page.
         return S_OK;
@@ -2019,12 +1991,12 @@ HRESULT WebFrame::stringByEvaluatingJavaScriptInScriptWorld(IWebScriptWorld* iWo
     // This bizarre set of rules matches behavior from WebKit for Safari 2.0.
     // If you don't like it, use -[WebScriptObject evaluateWebScript:] or 
     // JSEvaluateScript instead, since they have less surprising semantics.
-    if (!result || !result.isBoolean() && !result.isString() && !result.isNumber())
+    if (!result || (!result.isBoolean() && !result.isString() && !result.isNumber()))
         return S_OK;
 
-    JSC::ExecState* exec = anyWorldGlobalObject->globalExec();
-    JSC::JSLockHolder lock(exec);
-    String resultString = result.toWTFString(exec);
+    JSC::JSGlobalObject* lexicalGlobalObject = anyWorldGlobalObject;
+    JSC::JSLockHolder lock(lexicalGlobalObject);
+    String resultString = result.toWTFString(lexicalGlobalObject);
     *evaluationResult = BString(resultString).release();
 
     return S_OK;
@@ -2075,7 +2047,7 @@ COMPtr<IAccessible> WebFrame::accessible() const
     else if (!m_accessible || m_accessible->document() != currentDocument) {
         // Either we've never had a wrapper for this frame's top-level Document,
         // the Document renderer was destroyed and its wrapper was detached, or
-        // the previous Document is in the page cache, and the current document
+        // the previous Document is in the back/forward cache, and the current document
         // needs to be wrapped.
         m_accessible = new AccessibleDocument(currentDocument, webView()->viewWindow());
     }
@@ -2091,7 +2063,7 @@ void WebFrame::updateBackground()
 
     Optional<Color> backgroundColor;
     if (webView()->transparent())
-        backgroundColor = Color(Color::transparent);
+        backgroundColor = Color(Color::transparentBlack);
     coreFrame->view()->updateBackgroundRecursively(backgroundColor);
 }
 

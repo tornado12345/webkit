@@ -23,12 +23,11 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#pragma once
+#if JSC_OBJC_API_ENABLED
 
 #import "JSScript.h"
 #import "SourceCode.h"
-
-#if JSC_OBJC_API_ENABLED
+#import <wtf/RefPtr.h>
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -47,12 +46,10 @@ class String;
 - (instancetype)init;
 - (unsigned)hash;
 - (const WTF::String&)source;
-- (nullable const JSC::CachedBytecode*)cachedBytecode;
+- (RefPtr<JSC::CachedBytecode>)cachedBytecode;
 - (JSC::JSSourceCode*)jsSourceCode;
-// FIXME: Remove this once we require sourceURL upon creation: https://bugs.webkit.org/show_bug.cgi?id=194909
-- (JSC::JSSourceCode*)forceRecreateJSSourceCode;
+- (JSC::SourceCode)sourceCode;
 - (BOOL)writeCache:(String&)error;
-- (void)setSourceURL:(NSURL *)url;
 
 @end
 

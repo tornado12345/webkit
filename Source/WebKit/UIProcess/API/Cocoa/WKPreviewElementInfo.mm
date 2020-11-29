@@ -28,7 +28,9 @@
 
 #if PLATFORM(IOS_FAMILY)
 
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 @implementation WKPreviewElementInfo
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 
 - (instancetype)_initWithLinkURL:(NSURL *)url
 {

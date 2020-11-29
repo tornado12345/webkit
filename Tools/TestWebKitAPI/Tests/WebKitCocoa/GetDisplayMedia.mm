@@ -34,6 +34,7 @@
 #import <WebKit/WKUIDelegatePrivate.h>
 #import <WebKit/WKWebView.h>
 #import <WebKit/WKWebViewConfiguration.h>
+#import <WebKit/WKWebViewConfigurationPrivate.h>
 
 static bool wasPrompted = false;
 static bool shouldDeny = false;
@@ -93,13 +94,15 @@ public:
     virtual void SetUp()
     {
         m_configuration = adoptNS([[WKWebViewConfiguration alloc] init]);
+        auto context = adoptWK(TestWebKitAPI::Util::createContextForInjectedBundleTest("InternalsInjectedBundleTest"));
+        m_configuration.get().processPool = (WKProcessPool *)context.get();
 
         auto handler = adoptNS([[GetDisplayMediaMessageHandler alloc] init]);
         [[m_configuration userContentController] addScriptMessageHandler:handler.get() name:@"testHandler"];
 
         auto preferences = [m_configuration preferences];
         preferences._mediaCaptureRequiresSecureConnection = NO;
-        preferences._mediaDevicesEnabled = YES;
+        m_configuration.get()._mediaCaptureEnabled = YES;
         preferences._mockCaptureDevicesEnabled = YES;
         preferences._screenCaptureEnabled = YES;
 
@@ -178,8 +181,7 @@ TEST_F(GetDisplayMediaTest, PromptOnceAfterDenial)
     shouldDeny = true;
     promptForCapture(@"{ video: true }", false);
     shouldDeny = false;
-    promptForCapture(@"{ video: true }", false);
-    promptForCapture(@"{ video: true }", false);
+    promptForCapture(@"{ video: true }", true);
 }
 
 } // namespace TestWebKitAPI

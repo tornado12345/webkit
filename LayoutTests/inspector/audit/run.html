@@ -31,7 +31,17 @@ function test()
     });
 
     suite.addTestCase({
-        name: "Audit.run.Valid.InjectedObject",
+        name: "Audit.run.Valid.InjectedObject.BeforeSetup",
+        description: "Check that an error is not thrown if trying to reference the injected object without calling setup.",
+        async test() {
+            await auditRun(`function() { return WebInspectorAudit; }`, (result) => {
+                InspectorTest.expectEqual(result.type, "undefined", "The injected WebInspectorAudit should be undefined.");
+            });
+        },
+    });
+
+    suite.addTestCase({
+        name: "Audit.run.Valid.InjectedObject.AfterSetup",
         description: "Check that an object is injected into the function that is executed.",
         async test() {
             await InspectorTest.Audit.setupAudit();
@@ -86,6 +96,30 @@ function test()
             await InspectorTest.Audit.setupAudit();
             await auditRun(`function() { return WebInspectorAudit.DOM; }`, (result) => {
                 InspectorTest.expectEqual(result.description, "InspectorAuditDOMObject", "The injected WebInspectorAudit should hold an instance of InspectorAuditDOMObject.");
+            });
+            await InspectorTest.Audit.teardownAudit();
+        },
+    });
+
+    suite.addTestCase({
+        name: "Audit.run.Valid.InjectedObject.Resources",
+        description: "Check that the injected object holds an instance of InspectorAuditResourcesObject.",
+        async test() {
+            await InspectorTest.Audit.setupAudit();
+            await auditRun(`function() { return WebInspectorAudit.Resources; }`, (result) => {
+                InspectorTest.expectEqual(result.description, "InspectorAuditResourcesObject", "The injected WebInspectorAudit should hold an instance of InspectorAuditResourcesObject.");
+            });
+            await InspectorTest.Audit.teardownAudit();
+        },
+    });
+
+    suite.addTestCase({
+        name: "Audit.run.Valid.InjectedObject.Version",
+        description: "Check that the injected object holds the current Audit::VERSION value.",
+        async test() {
+            await InspectorTest.Audit.setupAudit();
+            await auditRun(`function() { return WebInspectorAudit.Version; }`, (result) => {
+                InspectorTest.expectEqual(result.value, InspectorBackend.getVersion("Audit"), "The injected WebInspectorAudit should hold the current Audit::Version.");
             });
             await InspectorTest.Audit.teardownAudit();
         },

@@ -33,7 +33,6 @@
 #pragma once
 
 #include <wtf/Forward.h>
-#include <wtf/Optional.h>
 
 namespace WebCore {
 
@@ -51,6 +50,7 @@ enum class ReferrerPolicy : uint8_t {
 
 enum class ReferrerPolicySource : uint8_t { MetaTag, HTTPHeader, ReferrerPolicyAttribute };
 Optional<ReferrerPolicy> parseReferrerPolicy(StringView, ReferrerPolicySource);
+String referrerPolicyToString(const ReferrerPolicy&);
 
 }
 

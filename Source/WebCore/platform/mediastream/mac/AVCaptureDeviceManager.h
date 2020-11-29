@@ -51,11 +51,9 @@ public:
 
     static AVCaptureDeviceManager& singleton();
 
-    void deviceDisconnected(AVCaptureDevice*);
-
     void refreshCaptureDevices();
 
-protected:
+private:
     static bool isAvailable();
 
     AVCaptureDeviceManager();
@@ -64,6 +62,7 @@ protected:
     void registerForDeviceNotifications();
     Vector<CaptureDevice>& captureDevicesInternal();
     void updateCachedAVCaptureDevices();
+    bool isMatchingExistingCaptureDevice(AVCaptureDevice*);
 
     RetainPtr<WebCoreAVCaptureDeviceManagerObserver> m_objcObserver;
     Vector<CaptureDevice> m_devices;

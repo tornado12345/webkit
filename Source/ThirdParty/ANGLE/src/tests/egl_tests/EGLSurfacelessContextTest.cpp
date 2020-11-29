@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2017 The ANGLE Project Authors. All rights reserved.
+// Copyright 2017 The ANGLE Project Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -8,9 +8,6 @@
 //   Tests for the EGL_KHR_surfaceless_context and GL_OES_surfaceless_context
 
 #include <gtest/gtest.h>
-
-#include <EGL/egl.h>
-#include <EGL/eglext.h>
 
 #include "test_utils/ANGLETest.h"
 #include "test_utils/angle_test_configs.h"
@@ -26,13 +23,8 @@ class EGLSurfacelessContextTest : public ANGLETest
   public:
     EGLSurfacelessContextTest() : mDisplay(0) {}
 
-    void SetUp() override
+    void testSetUp() override
     {
-        PFNEGLGETPLATFORMDISPLAYEXTPROC eglGetPlatformDisplayEXT =
-            reinterpret_cast<PFNEGLGETPLATFORMDISPLAYEXTPROC>(
-                eglGetProcAddress("eglGetPlatformDisplayEXT"));
-        ASSERT_TRUE(eglGetPlatformDisplayEXT != nullptr);
-
         EGLint dispattrs[] = {EGL_PLATFORM_ANGLE_TYPE_ANGLE, GetParam().getRenderer(), EGL_NONE};
         mDisplay           = eglGetPlatformDisplayEXT(
             EGL_PLATFORM_ANGLE_ANGLE, reinterpret_cast<void *>(EGL_DEFAULT_DISPLAY), dispattrs);
@@ -55,14 +47,21 @@ class EGLSurfacelessContextTest : public ANGLETest
             eglGetConfigAttrib(mDisplay, config, EGL_SURFACE_TYPE, &surfaceType);
             if (surfaceType & EGL_PBUFFER_BIT)
             {
-                mConfig = config;
+                mConfig           = config;
+                mSupportsPbuffers = true;
                 break;
             }
         }
+
+        if (!mConfig)
+        {
+            mConfig = configs[0];
+        }
+
         ASSERT_NE(nullptr, mConfig);
     }
 
-    void TearDown() override
+    void testTearDown() override
     {
         eglMakeCurrent(mDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 
@@ -71,7 +70,7 @@ class EGLSurfacelessContextTest : public ANGLETest
             eglDestroyContext(mDisplay, mContext);
         }
 
-        if (mContext != EGL_NO_SURFACE)
+        if (mPbuffer != EGL_NO_SURFACE)
         {
             eglDestroySurface(mDisplay, mPbuffer);
         }
@@ -91,6 +90,11 @@ class EGLSurfacelessContextTest : public ANGLETest
 
     EGLSurface createPbuffer(int width, int height)
     {
+        if (!mSupportsPbuffers)
+        {
+            return EGL_NO_SURFACE;
+        }
+
         const EGLint pbufferAttribs[] = {
             EGL_WIDTH, 500, EGL_HEIGHT, 500, EGL_NONE,
         };
@@ -112,7 +116,7 @@ class EGLSurfacelessContextTest : public ANGLETest
 
     bool checkExtension(bool verbose = true) const
     {
-        if (!ANGLETest::eglDisplayExtensionEnabled(mDisplay, "EGL_KHR_surfaceless_context"))
+        if (!IsEGLDisplayExtensionEnabled(mDisplay, "EGL_KHR_surfaceless_context"))
         {
             if (verbose)
             {
@@ -124,10 +128,11 @@ class EGLSurfacelessContextTest : public ANGLETest
         return true;
     }
 
-    EGLContext mContext = EGL_NO_CONTEXT;
-    EGLSurface mPbuffer = EGL_NO_SURFACE;
-    EGLConfig mConfig   = 0;
-    EGLDisplay mDisplay = EGL_NO_DISPLAY;
+    EGLContext mContext    = EGL_NO_CONTEXT;
+    EGLSurface mPbuffer    = EGL_NO_SURFACE;
+    bool mSupportsPbuffers = false;
+    EGLConfig mConfig      = 0;
+    EGLDisplay mDisplay    = EGL_NO_DISPLAY;
 };
 
 // Test surfaceless MakeCurrent returns the correct value.
@@ -222,10 +227,8 @@ TEST_P(EGLSurfacelessContextTest, ClearReadPixelsInFBO)
 // Test clear+readpixels in an FBO in surfaceless and in the default FBO in a pbuffer
 TEST_P(EGLSurfacelessContextTest, Switcheroo)
 {
-    if (!checkExtension())
-    {
-        return;
-    }
+    ANGLE_SKIP_TEST_IF(!checkExtension());
+    ANGLE_SKIP_TEST_IF(!mSupportsPbuffers);
 
     EGLContext context = createContext();
     EGLSurface pbuffer = createPbuffer(500, 500);
@@ -265,4 +268,8 @@ TEST_P(EGLSurfacelessContextTest, Switcheroo)
 
 }  // anonymous namespace
 
-ANGLE_INSTANTIATE_TEST(EGLSurfacelessContextTest, ES2_D3D9(), ES2_D3D11(), ES2_OPENGL());
+ANGLE_INSTANTIATE_TEST(EGLSurfacelessContextTest,
+                       WithNoFixture(ES2_D3D9()),
+                       WithNoFixture(ES2_D3D11()),
+                       WithNoFixture(ES2_OPENGL()),
+                       WithNoFixture(ES2_VULKAN()));

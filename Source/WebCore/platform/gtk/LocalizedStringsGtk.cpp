@@ -88,6 +88,11 @@ String contextMenuItemTagEnterVideoFullscreen()
     return String::fromUTF8(_("Switch Video to _Fullscreen"));
 }
 
+String contextMenuItemTagPasteAsPlainText()
+{
+    return String::fromUTF8(_("Paste As Plain _Text"));
+}
+
 String contextMenuItemTagDelete()
 {
     return String::fromUTF8(_("_Delete"));
@@ -96,6 +101,11 @@ String contextMenuItemTagDelete()
 String contextMenuItemTagSelectAll()
 {
     return String::fromUTF8(_("Select _All"));
+}
+
+String contextMenuItemTagInsertEmoji()
+{
+    return String::fromUTF8(_("Insert _Emoji"));
 }
 
 String contextMenuItemTagUnicode()

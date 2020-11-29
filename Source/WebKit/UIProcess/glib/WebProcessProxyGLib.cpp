@@ -26,9 +26,7 @@
 #include "config.h"
 #include "WebProcessProxy.h"
 
-#if PLATFORM(WAYLAND) && USE(EGL)
-#include "WaylandCompositor.h"
-#endif
+#include "UserMessage.h"
 #include "WebProcessPool.h"
 #include "WebsiteDataStore.h"
 #include <WebCore/PlatformDisplay.h>
@@ -41,19 +39,33 @@ void WebProcessProxy::platformGetLaunchOptions(ProcessLauncher::LaunchOptions& l
 {
     launchOptions.extraInitializationData.set("enable-sandbox", m_processPool->sandboxEnabled() ? "true" : "false");
 
-    websiteDataStore().resolveDirectoriesIfNecessary();
-    launchOptions.extraInitializationData.set("applicationCacheDirectory", websiteDataStore().resolvedApplicationCacheDirectory());
+    if (m_processPool->sandboxEnabled()) {
+        WebsiteDataStore* dataStore = m_websiteDataStore.get();
+        if (!dataStore) {
+            // Prewarmed processes don't have a WebsiteDataStore yet, so use the primary WebsiteDataStore from the WebProcessPool.
+            // The process won't be used if current WebsiteDataStore is different than the WebProcessPool primary one.
+            dataStore = WebsiteDataStore::defaultDataStore().ptr();
+        }
 
-    launchOptions.extraWebProcessSandboxPaths = m_processPool->sandboxPaths();
+        ASSERT(dataStore);
+        dataStore->resolveDirectoriesIfNecessary();
+        launchOptions.extraInitializationData.set("webSQLDatabaseDirectory", dataStore->resolvedDatabaseDirectory());
+        launchOptions.extraInitializationData.set("mediaKeysDirectory", dataStore->resolvedMediaKeysDirectory());
+        launchOptions.extraInitializationData.set("applicationCacheDirectory", dataStore->resolvedApplicationCacheDirectory());
 
-#if PLATFORM(WAYLAND) && USE(EGL)
-    if (PlatformDisplay::sharedDisplay().type() == PlatformDisplay::Type::Wayland) {
-        String displayName = WaylandCompositor::singleton().displayName();
-        String runtimeDir(g_get_user_runtime_dir());
-        String waylandSocket = FileSystem::pathByAppendingComponent(runtimeDir, displayName);
-        launchOptions.extraInitializationData.set("waylandSocket", waylandSocket);
+        launchOptions.extraWebProcessSandboxPaths = m_processPool->sandboxPaths();
     }
-#endif
+}
+
+void WebProcessProxy::sendMessageToWebContextWithReply(UserMessage&& message, CompletionHandler<void(UserMessage&&)>&& completionHandler)
+{
+    if (const auto& userMessageHandler = m_processPool->userMessageHandler())
+        userMessageHandler(WTFMove(message), WTFMove(completionHandler));
+}
+
+void WebProcessProxy::sendMessageToWebContext(UserMessage&& message)
+{
+    sendMessageToWebContextWithReply(WTFMove(message), [](UserMessage&&) { });
 }
 
 };

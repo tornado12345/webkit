@@ -1,17 +1,17 @@
 import json
 
 def respondToCORSPreflight(request, response):
+  headers = [("Content-Type", "text/plain")]
   allow_cors = int(request.GET.first("allowCors", 0)) != 0;
   
   if not allow_cors:
     response.set_error(400, "Not allowed")
-    return "ERROR: Not allowed"
+    return headers, "ERROR: Not allowed"
   
   if not "Access-Control-Request-Method" in request.headers:
     response.set_error(400, "No Access-Control-Request-Method header")
-    return "ERROR: No access-control-request-method in preflight!"
+    return headers, "ERROR: No access-control-request-method in preflight!"
   
-  headers = [("Content-Type", "text/plain")]
   headers.append(("Access-Control-Allow-Origin", request.headers.get("Origin", "*")))
   headers.append(("Access-Control-Allow-Credentials", "true"))
   requested_method = request.headers.get("Access-Control-Request-Method", None)
@@ -44,11 +44,9 @@ def main(request, response):
       stashed_data['beacon_origin'] = request.headers.get("Origin", "")
       request.server.stash.put(test_id, stashed_data)
     return [("Content-Type", "text/plain")], ""
-  
+
   if command == "get":
-    if stashed_data is not None:
-      return [("Content-Type", "text/plain")], json.dumps(stashed_data)
-    return [("Content-Type", "text/plain")], ""
+    return [("Content-Type", "text/plain")], json.dumps(stashed_data)
 
   response.set_error(400, "Bad Command")
-  return "ERROR: Bad Command!"
+  return [("Content-Type", "text/plain")], "ERROR: Bad Command!"

@@ -31,8 +31,11 @@
 #include <set>
 #include <stdio.h>
 #include <string>
+#include <unordered_map>
 #include <vector>
 #include <wtf/Vector.h>
+#include <wtf/text/StringHash.h>
+#include <wtf/text/WTFString.h>
 
 namespace WTR {
 
@@ -42,7 +45,6 @@ struct Options {
     bool verbose { false };
     bool gcBetweenTests { false };
     bool shouldDumpPixelsForAllTests { false };
-    bool printSupportedFeatures { false };
     bool forceComplexText { false };
     bool shouldUseAcceleratedDrawing { false };
     bool shouldUseRemoteLayerTree { false };
@@ -50,8 +52,13 @@ struct Options {
     bool shouldShowTouches { false };
     bool checkForWorldLeaks { false };
     bool allowAnyHTTPSCertificateForAllowedHosts { false };
+#if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
+    bool accessibilityIsolatedTreeMode { false };
+#endif
     std::vector<std::string> paths;
     std::set<std::string> allowedHosts;
+    std::unordered_map<std::string, bool> internalFeatures;
+    std::unordered_map<std::string, bool> experimentalFeatures;
 };
 
 class Option {

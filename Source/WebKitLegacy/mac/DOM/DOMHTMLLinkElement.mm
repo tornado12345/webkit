@@ -71,7 +71,7 @@
 - (NSString *)href
 {
     WebCore::JSMainThreadNullState state;
-    return IMPL->getURLAttribute(WebCore::HTMLNames::hrefAttr);
+    return IMPL->getURLAttribute(WebCore::HTMLNames::hrefAttr).string();
 }
 
 - (void)setHref:(NSString *)newHref
@@ -200,3 +200,5 @@ WebCore::HTMLLinkElement* core(DOMHTMLLinkElement *wrapper)
 {
     return wrapper ? reinterpret_cast<WebCore::HTMLLinkElement*>(wrapper->_internal) : 0;
 }
+
+#undef IMPL

@@ -25,11 +25,14 @@
 
 #pragma once
 
-#include "CurlRequestClient.h"
 #include "NetworkDataTask.h"
-#include <WebCore/NetworkLoadMetrics.h>
+#include <WebCore/CurlRequestClient.h>
+#include <WebCore/FrameIdentifier.h>
+#include <WebCore/PageIdentifier.h>
 #include <WebCore/ProtectionSpace.h>
 #include <WebCore/ResourceResponse.h>
+#include <WebCore/ShouldRelaxThirdPartyCookieBlocking.h>
+#include <wtf/MonotonicTime.h>
 
 namespace WebCore {
 class CurlRequest;
@@ -39,15 +42,15 @@ namespace WebKit {
 
 class NetworkDataTaskCurl final : public NetworkDataTask, public WebCore::CurlRequestClient {
 public:
-    static Ref<NetworkDataTask> create(NetworkSession& session, NetworkDataTaskClient& client, const WebCore::ResourceRequest& request, WebCore::StoredCredentialsPolicy storedCredentialsPolicy, WebCore::ContentSniffingPolicy shouldContentSniff, WebCore::ContentEncodingSniffingPolicy shouldContentEncodingSniff, bool shouldClearReferrerOnHTTPSToHTTPRedirect, bool dataTaskIsForMainFrameNavigation)
+    static Ref<NetworkDataTask> create(NetworkSession& session, NetworkDataTaskClient& client, const WebCore::ResourceRequest& request, WebCore::FrameIdentifier frameID, WebCore::PageIdentifier pageID, WebCore::StoredCredentialsPolicy storedCredentialsPolicy, WebCore::ContentSniffingPolicy shouldContentSniff, WebCore::ContentEncodingSniffingPolicy shouldContentEncodingSniff, bool shouldClearReferrerOnHTTPSToHTTPRedirect, bool dataTaskIsForMainFrameNavigation, WebCore::ShouldRelaxThirdPartyCookieBlocking shouldRelaxThirdPartyCookieBlocking)
     {
-        return adoptRef(*new NetworkDataTaskCurl(session, client, request, storedCredentialsPolicy, shouldContentSniff, shouldContentEncodingSniff, shouldClearReferrerOnHTTPSToHTTPRedirect, dataTaskIsForMainFrameNavigation));
+        return adoptRef(*new NetworkDataTaskCurl(session, client, request, frameID, pageID, storedCredentialsPolicy, shouldContentSniff, shouldContentEncodingSniff, shouldClearReferrerOnHTTPSToHTTPRedirect, dataTaskIsForMainFrameNavigation, shouldRelaxThirdPartyCookieBlocking));
     }
 
     ~NetworkDataTaskCurl();
 
-    void ref() override { RefCounted<NetworkDataTask>::ref(); }
-    void deref() override { RefCounted<NetworkDataTask>::deref(); }
+    void ref() override { NetworkDataTask::ref(); }
+    void deref() override { NetworkDataTask::deref(); }
 
 private:
     enum class RequestStatus {
@@ -55,7 +58,7 @@ private:
         ReusedRequest
     };
 
-    NetworkDataTaskCurl(NetworkSession&, NetworkDataTaskClient&, const WebCore::ResourceRequest&, WebCore::StoredCredentialsPolicy, WebCore::ContentSniffingPolicy, WebCore::ContentEncodingSniffingPolicy, bool shouldClearReferrerOnHTTPSToHTTPRedirect, bool dataTaskIsForMainFrameNavigation);
+    NetworkDataTaskCurl(NetworkSession&, NetworkDataTaskClient&,  const WebCore::ResourceRequest&, WebCore::FrameIdentifier, WebCore::PageIdentifier&, WebCore::StoredCredentialsPolicy, WebCore::ContentSniffingPolicy, WebCore::ContentEncodingSniffingPolicy, bool shouldClearReferrerOnHTTPSToHTTPRedirect, bool dataTaskIsForMainFrameNavigation, WebCore::ShouldRelaxThirdPartyCookieBlocking);
 
     void cancel() override;
     void resume() override;
@@ -64,10 +67,10 @@ private:
 
     Ref<WebCore::CurlRequest> createCurlRequest(WebCore::ResourceRequest&&, RequestStatus = RequestStatus::NewRequest);
     void curlDidSendData(WebCore::CurlRequest&, unsigned long long, unsigned long long) override;
-    void curlDidReceiveResponse(WebCore::CurlRequest&, const WebCore::CurlResponse&) override;
+    void curlDidReceiveResponse(WebCore::CurlRequest&, WebCore::CurlResponse&&) override;
     void curlDidReceiveBuffer(WebCore::CurlRequest&, Ref<WebCore::SharedBuffer>&&) override;
-    void curlDidComplete(WebCore::CurlRequest&) override;
-    void curlDidFailWithError(WebCore::CurlRequest&, const WebCore::ResourceError&) override;
+    void curlDidComplete(WebCore::CurlRequest&, WebCore::NetworkLoadMetrics&&) override;
+    void curlDidFailWithError(WebCore::CurlRequest&, WebCore::ResourceError&&, WebCore::CertificateInfo&&) override;
 
     void invokeDidReceiveResponse();
 
@@ -78,8 +81,15 @@ private:
     void tryProxyAuthentication(WebCore::AuthenticationChallenge&&);
     void restartWithCredential(const WebCore::ProtectionSpace&, const WebCore::Credential&);
 
+    void tryServerTrustEvaluation(WebCore::AuthenticationChallenge&&);
+
     void appendCookieHeader(WebCore::ResourceRequest&);
     void handleCookieHeaders(const WebCore::ResourceRequest&, const WebCore::CurlResponse&);
+
+    bool isThirdPartyRequest(const WebCore::ResourceRequest&);
+    bool shouldBlockCookies(const WebCore::ResourceRequest&);
+    void blockCookies();
+    void unblockCookies();
 
     State m_state { State::Suspended };
 
@@ -88,6 +98,13 @@ private:
     unsigned m_redirectCount { 0 };
     unsigned m_authFailureCount { 0 };
     MonotonicTime m_startTime;
+
+    WebCore::FrameIdentifier m_frameID;
+    WebCore::PageIdentifier m_pageID;
+
+    bool m_blockingCookies { false };
+
+    WebCore::ShouldRelaxThirdPartyCookieBlocking m_shouldRelaxThirdPartyCookieBlocking { WebCore::ShouldRelaxThirdPartyCookieBlocking::No };
 };
 
 } // namespace WebKit

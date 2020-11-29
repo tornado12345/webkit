@@ -42,6 +42,38 @@ WI.TimelineRecord = class TimelineRecord extends WI.Object
         this._children = [];
     }
 
+    // Import / Export
+
+    static async fromJSON(json)
+    {
+        switch (json.type) {
+        case WI.TimelineRecord.Type.Network:
+            return WI.ResourceTimelineRecord.fromJSON(json);
+        case WI.TimelineRecord.Type.Layout:
+            return WI.LayoutTimelineRecord.fromJSON(json);
+        case WI.TimelineRecord.Type.Script:
+            return WI.ScriptTimelineRecord.fromJSON(json);
+        case WI.TimelineRecord.Type.RenderingFrame:
+            return WI.RenderingFrameTimelineRecord.fromJSON(json);
+        case WI.TimelineRecord.Type.CPU:
+            return WI.CPUTimelineRecord.fromJSON(json);
+        case WI.TimelineRecord.Type.Memory:
+            return WI.MemoryTimelineRecord.fromJSON(json);
+        case WI.TimelineRecord.Type.HeapAllocations:
+            return WI.HeapAllocationsTimelineRecord.fromJSON(json);
+        case WI.TimelineRecord.Type.Media:
+            return WI.MediaTimelineRecord.fromJSON(json);
+        default:
+            console.error("Unknown TimelineRecord.Type: " + json.type, json);
+            return null;
+        }
+    }
+
+    toJSON()
+    {
+        throw WI.NotImplementedError.subclassMustOverride();
+    }
+
     // Public
 
     get type()
@@ -58,13 +90,25 @@ WI.TimelineRecord = class TimelineRecord extends WI.Object
     get activeStartTime()
     {
         // Implemented by subclasses if needed.
-        return this._startTime;
+        return this.startTime;
+    }
+
+    get unadjustedStartTime()
+    {
+        // Overridden by subclasses if needed.
+        return this.startTime;
     }
 
     get endTime()
     {
         // Implemented by subclasses if needed.
         return this._endTime;
+    }
+
+    get unadjustedEndTime()
+    {
+        // Overridden by subclasses if needed.
+        return this.endTime;
     }
 
     get duration()

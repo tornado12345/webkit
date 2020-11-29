@@ -23,7 +23,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
+#import "config.h"
 #import "PlatformCALayerRemote.h"
 
 #import "PlatformCALayerRemoteCustom.h"
@@ -32,12 +32,14 @@
 #import "RemoteLayerTreeContext.h"
 #import "RemoteLayerTreePropertyApplier.h"
 #import <WebCore/AnimationUtilities.h>
+#import <WebCore/EventRegion.h>
 #import <WebCore/GraphicsContext.h>
 #import <WebCore/GraphicsLayerCA.h>
 #import <WebCore/LengthFunctions.h>
 #import <WebCore/PlatformCAFilters.h>
 #import <WebCore/PlatformCALayerCocoa.h>
 #import <WebCore/TiledBacking.h>
+#import <wtf/PointerComparison.h>
 
 namespace WebKit {
 using namespace WebCore;
@@ -61,13 +63,6 @@ Ref<PlatformCALayerRemote> PlatformCALayerRemote::create(PlatformLayer *platform
     return PlatformCALayerRemoteCustom::create(platformLayer, owner, context);
 }
 
-Ref<PlatformCALayerRemote> PlatformCALayerRemote::createForEmbeddedView(LayerType layerType, GraphicsLayer::EmbeddedViewID embeddedViewID, PlatformCALayerClient* owner, RemoteLayerTreeContext& context)
-{
-    RefPtr<PlatformCALayerRemote> layer = adoptRef(new PlatformCALayerRemote(layerType, embeddedViewID, owner, context));
-    context.layerDidEnterContext(*layer, layerType);
-    return layer.releaseNonNull();
-}
-
 Ref<PlatformCALayerRemote> PlatformCALayerRemote::create(const PlatformCALayerRemote& other, WebCore::PlatformCALayerClient* owner, RemoteLayerTreeContext& context)
 {
     auto layer = adoptRef(*new PlatformCALayerRemote(other, owner, context));
@@ -85,12 +80,6 @@ PlatformCALayerRemote::PlatformCALayerRemote(LayerType layerType, PlatformCALaye
         m_properties.contentsScale = owner->platformCALayerDeviceScaleFactor();
         m_properties.notePropertiesChanged(RemoteLayerTreeTransaction::ContentsScaleChanged);
     }
-}
-
-PlatformCALayerRemote::PlatformCALayerRemote(LayerType layerType, GraphicsLayer::EmbeddedViewID embeddedViewID, PlatformCALayerClient* owner, RemoteLayerTreeContext& context)
-    : PlatformCALayerRemote(layerType, owner, context)
-{
-    m_embeddedViewID = embeddedViewID;
 }
 
 PlatformCALayerRemote::PlatformCALayerRemote(const PlatformCALayerRemote& other, PlatformCALayerClient* owner, RemoteLayerTreeContext& context)
@@ -218,7 +207,7 @@ void PlatformCALayerRemote::ensureBackingStore()
     ASSERT(m_properties.backingStoreAttached);
 
     if (!m_properties.backingStore)
-        m_properties.backingStore = std::make_unique<RemoteLayerBackingStore>(this);
+        m_properties.backingStore = makeUnique<RemoteLayerBackingStore>(this);
 
     updateBackingStore();
 }
@@ -519,7 +508,7 @@ TransformationMatrix PlatformCALayerRemote::transform() const
 
 void PlatformCALayerRemote::setTransform(const TransformationMatrix& value)
 {
-    m_properties.transform = std::make_unique<TransformationMatrix>(value);
+    m_properties.transform = makeUnique<TransformationMatrix>(value);
     m_properties.notePropertiesChanged(RemoteLayerTreeTransaction::TransformChanged);
 }
 
@@ -530,7 +519,7 @@ TransformationMatrix PlatformCALayerRemote::sublayerTransform() const
 
 void PlatformCALayerRemote::setSublayerTransform(const TransformationMatrix& value)
 {
-    m_properties.sublayerTransform = std::make_unique<TransformationMatrix>(value);
+    m_properties.sublayerTransform = makeUnique<TransformationMatrix>(value);
     m_properties.notePropertiesChanged(RemoteLayerTreeTransaction::SublayerTransformChanged);
 }
 
@@ -736,7 +725,7 @@ void PlatformCALayerRemote::setOpacity(float value)
 
 void PlatformCALayerRemote::setFilters(const FilterOperations& filters)
 {
-    m_properties.filters = std::make_unique<FilterOperations>(filters);
+    m_properties.filters = makeUnique<FilterOperations>(filters);
     m_properties.notePropertiesChanged(RemoteLayerTreeTransaction::FiltersChanged);
 }
 
@@ -824,7 +813,7 @@ void PlatformCALayerRemote::setShapeRoundedRect(const FloatRoundedRect& roundedR
     if (m_properties.shapeRoundedRect && *m_properties.shapeRoundedRect == roundedRect)
         return;
 
-    m_properties.shapeRoundedRect = std::make_unique<FloatRoundedRect>(roundedRect);
+    m_properties.shapeRoundedRect = makeUnique<FloatRoundedRect>(roundedRect);
     m_properties.notePropertiesChanged(RemoteLayerTreeTransaction::ShapeRoundedRectChanged);
 }
 
@@ -870,9 +859,13 @@ void PlatformCALayerRemote::updateCustomAppearance(GraphicsLayer::CustomAppearan
     m_properties.notePropertiesChanged(RemoteLayerTreeTransaction::CustomAppearanceChanged);
 }
 
-GraphicsLayer::EmbeddedViewID PlatformCALayerRemote::embeddedViewID() const
+void PlatformCALayerRemote::setEventRegion(const WebCore::EventRegion& eventRegion)
 {
-    return m_embeddedViewID;
+    if (m_properties.eventRegion == eventRegion)
+        return;
+
+    m_properties.eventRegion = eventRegion;
+    m_properties.notePropertiesChanged(RemoteLayerTreeTransaction::EventRegionChanged);
 }
 
 Ref<PlatformCALayer> PlatformCALayerRemote::createCompatibleLayer(PlatformCALayer::LayerType layerType, PlatformCALayerClient* client) const
@@ -880,7 +873,7 @@ Ref<PlatformCALayer> PlatformCALayerRemote::createCompatibleLayer(PlatformCALaye
     return PlatformCALayerRemote::create(layerType, client, *m_context);
 }
 
-void PlatformCALayerRemote::enumerateRectsBeingDrawn(CGContextRef context, void (^block)(CGRect))
+void PlatformCALayerRemote::enumerateRectsBeingDrawn(WebCore::GraphicsContext& context, void (^block)(WebCore::FloatRect))
 {
     m_properties.backingStore->enumerateRectsBeingDrawn(context, block);
 }

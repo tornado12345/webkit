@@ -23,17 +23,12 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
-#include "NSFontPanelTesting.h"
+#import "config.h"
+#import "NSFontPanelTesting.h"
 
 #if PLATFORM(MAC)
 
 #import <objc/runtime.h>
-
-#if __MAC_OS_X_VERSION_MAX_ALLOWED < 101300
-static const NSCellStateValue NSControlStateValueOff = NSOffState;
-static const NSCellStateValue NSControlStateValueOn = NSOnState;
-#endif
 
 @interface NSBox (NSFontEffectsBox)
 // Invoked after a font effect (e.g. single strike-through) is chosen.

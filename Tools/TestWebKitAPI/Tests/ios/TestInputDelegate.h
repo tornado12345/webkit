@@ -23,8 +23,6 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#pragma once
-
 #if PLATFORM(IOS_FAMILY)
 
 #import <WebKit/_WKFocusedElementInfo.h>
@@ -36,6 +34,9 @@
 @interface TestInputDelegate : NSObject <_WKInputDelegate>
 @property (nonatomic, copy) _WKFocusStartsInputSessionPolicy (^focusStartsInputSessionPolicyHandler)(WKWebView *, id <_WKFocusedElementInfo>);
 @property (nonatomic, copy) void (^willStartInputSessionHandler)(WKWebView *, id <_WKFormInputSession>);
+@property (nonatomic, copy) void (^didStartInputSessionHandler)(WKWebView *, id <_WKFormInputSession>);
+@property (nonatomic, copy) NSDictionary<id, NSString *> * (^webViewAdditionalContextForStrongPasswordAssistanceHandler)(WKWebView *);
+@property (nonatomic, copy) BOOL (^focusRequiresStrongPasswordAssistanceHandler)(WKWebView *, id <_WKFocusedElementInfo>);
 @end
 
 #endif

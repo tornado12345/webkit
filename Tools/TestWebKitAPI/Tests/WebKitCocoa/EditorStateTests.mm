@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,17 +23,19 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
+#import "config.h"
 
 #import "EditingTestHarness.h"
 #import "PlatformUtilities.h"
+#import "TestCocoa.h"
+#import "TestInputDelegate.h"
 #import "TestWKWebView.h"
+#import "UserInterfaceSwizzler.h"
 #import <WebKit/WKWebViewPrivate.h>
 #import <wtf/Vector.h>
 
 #if PLATFORM(IOS_FAMILY)
 #import "UIKitSPI.h"
-#import <UIKit/UIKit.h>
 #endif
 
 static void* const SelectionAttributesObservationContext = (void*)&SelectionAttributesObservationContext;
@@ -349,6 +351,7 @@ TEST(EditorStateTests, CaretColorInContentEditable)
     auto webView = adoptNS([[TestWKWebView alloc] initWithFrame:CGRectMake(0, 0, 320, 500)]);
     [webView synchronouslyLoadHTMLString:@"<body style=\"caret-color: red;\" contenteditable=\"true\"></body>"];
     [webView stringByEvaluatingJavaScript:@"document.body.focus()"];
+    [webView waitForNextPresentationUpdate];
     UIView<UITextInputTraits_Private> *textInput = (UIView<UITextInputTraits_Private> *) [webView textInputContentView];
     UIColor *insertionPointColor = textInput.insertionPointColor;
     UIColor *redColor = [UIColor redColor];
@@ -395,6 +398,132 @@ TEST(EditorStateTests, ObserveSelectionAttributeChanges)
     [webView evaluateJavaScript:@"getSelection().removeAllRanges()" completionHandler:nil];
     [webView waitForNextPresentationUpdate];
     EXPECT_EQ(_WKSelectionAttributeNoSelection, [observer currentSelectionAttributes]);
+}
+
+TEST(EditorStateTests, ParagraphBoundary)
+{
+    auto webView = adoptNS([[TestWKWebView alloc] initWithFrame:CGRectMake(0, 0, 320, 500)]);
+    [webView synchronouslyLoadHTMLString:@"<body contenteditable><p>Hello world.</p></body>"];
+    [webView stringByEvaluatingJavaScript:@"document.body.focus()"];
+    [webView waitForNextPresentationUpdate];
+
+    auto textInput = [webView textInputContentView];
+    auto editor = adoptNS([[EditingTestHarness alloc] initWithWebView:webView.get()]);
+    [editor selectAll];
+
+    EXPECT_TRUE([textInput isPosition:textInput.selectedTextRange.start atBoundary:UITextGranularityParagraph inDirection:UITextStorageDirectionBackward]);
+    EXPECT_TRUE([textInput isPosition:textInput.selectedTextRange.end atBoundary:UITextGranularityParagraph inDirection:UITextStorageDirectionForward]);
+
+    [editor moveForward];
+    [editor moveBackward];
+    [editor moveBackward];
+
+    EXPECT_FALSE([textInput isPosition:textInput.selectedTextRange.start atBoundary:UITextGranularityParagraph inDirection:UITextStorageDirectionBackward]);
+    EXPECT_FALSE([textInput isPosition:textInput.selectedTextRange.end atBoundary:UITextGranularityParagraph inDirection:UITextStorageDirectionForward]);
+}
+
+TEST(EditorStateTests, SelectedText)
+{
+    auto webView = adoptNS([[TestWKWebView alloc] initWithFrame:CGRectMake(0, 0, 320, 500)]);
+    [webView synchronouslyLoadTestPageNamed:@"lots-of-text"];
+    [webView _synchronouslyExecuteEditCommand:@"SelectAll" argument:nil];
+    [webView waitForNextPresentationUpdate];
+    EXPECT_GT([[webView textInputContentView] selectedText].length, 0U);
+}
+
+constexpr unsigned glyphWidth { 25 }; // pixels
+
+static NSString *applyAhemStyle(NSString *htmlString)
+{
+    return [NSString stringWithFormat:@"<style>@font-face { font-family: Ahem; src: url(Ahem.ttf); } body { margin: 0; } * { font: %upx/1 Ahem; -webkit-text-size-adjust: none; }</style><meta name='viewport' content='width=980, initial-scale=1.0'>%@", glyphWidth, htmlString];
+}
+
+TEST(EditorStateTests, MarkedTextRange_HorizontalCaretSelection)
+{
+    IPhoneUserInterfaceSwizzler userInterfaceSwizzler;
+
+    auto webView = adoptNS([[TestWKWebView alloc] initWithFrame:NSMakeRect(0, 0, 800, 600)]);
+    [webView synchronouslyLoadHTMLStringAndWaitUntilAllImmediateChildFramesPaint:applyAhemStyle(@"<body contenteditable='true'>.</body>")]; // . is dummy to force Ahem to load
+    [webView stringByEvaluatingJavaScript:@"document.body.focus()"];
+
+    auto *contentView = [webView textInputContentView];
+    [contentView setMarkedText:@"hello" selectedRange:NSMakeRange(0, 0)];
+    [webView waitForNextPresentationUpdate];
+
+    UITextRange *markedTextRange = [contentView markedTextRange];
+    NSArray<UITextSelectionRect *> *rects = [contentView selectionRectsForRange:markedTextRange];
+    EXPECT_EQ(1U, rects.count);
+    EXPECT_EQ(CGRectMake(0, 0, 5 * glyphWidth, glyphWidth), rects[0].rect);
+    EXPECT_EQ(CGRectMake(0, 0, 2, glyphWidth), [contentView caretRectForPosition:markedTextRange.start]);
+    EXPECT_EQ(CGRectMake(124, 0, 2, glyphWidth), [contentView caretRectForPosition:markedTextRange.end]);
+    EXPECT_FALSE(rects[0].isVertical);
+}
+
+TEST(EditorStateTests, MarkedTextRange_HorizontalRangeSelection)
+{
+    IPhoneUserInterfaceSwizzler userInterfaceSwizzler;
+
+    auto webView = adoptNS([[TestWKWebView alloc] initWithFrame:NSMakeRect(0, 0, 800, 600)]);
+    [webView synchronouslyLoadHTMLStringAndWaitUntilAllImmediateChildFramesPaint:applyAhemStyle(@"<body contenteditable='true'>.</body>")]; // . is dummy to force Ahem to load
+    [webView stringByEvaluatingJavaScript:@"document.body.focus()"];
+    [webView _synchronouslyExecuteEditCommand:@"InsertText" argument:@"Hello world"];
+
+    auto *contentView = [webView textInputContentView];
+    [contentView selectWordBackward];
+    [contentView setMarkedText:@"world" selectedRange:NSMakeRange(0, 5)];
+    [webView waitForNextPresentationUpdate];
+
+    UITextRange *markedTextRange = [contentView markedTextRange];
+    NSArray<UITextSelectionRect *> *rects = [contentView selectionRectsForRange:markedTextRange];
+    EXPECT_EQ(1U, rects.count);
+    EXPECT_EQ(CGRectMake(150, 0, 5 * glyphWidth, glyphWidth), rects[0].rect);
+    EXPECT_EQ(CGRectMake(149, 0, 2, glyphWidth), [contentView caretRectForPosition:markedTextRange.start]);
+    EXPECT_EQ(CGRectMake(274, 0, 2, glyphWidth), [contentView caretRectForPosition:markedTextRange.end]);
+    EXPECT_FALSE(rects[0].isVertical);
+}
+
+TEST(EditorStateTests, MarkedTextRange_VerticalCaretSelection)
+{
+    IPhoneUserInterfaceSwizzler userInterfaceSwizzler;
+
+    auto webView = adoptNS([[TestWKWebView alloc] initWithFrame:NSMakeRect(0, 0, 800, 600)]);
+    [webView synchronouslyLoadHTMLStringAndWaitUntilAllImmediateChildFramesPaint:applyAhemStyle(@"<body style='writing-mode: vertical-lr' contenteditable='true'>.</body>")]; // . is dummy to force Ahem to load
+    [webView stringByEvaluatingJavaScript:@"document.body.focus()"];
+
+    auto *contentView = [webView textInputContentView];
+    [contentView setMarkedText:@"hello" selectedRange:NSMakeRange(0, 0)];
+    [webView waitForNextPresentationUpdate];
+
+    UITextRange *markedTextRange = [contentView markedTextRange];
+    NSArray<UITextSelectionRect *> *rects = [contentView selectionRectsForRange:markedTextRange];
+    EXPECT_EQ(1U, rects.count);
+    EXPECT_EQ(CGRectMake(0, 0, glyphWidth, 5 * glyphWidth), rects[0].rect);
+    EXPECT_EQ(CGRectMake(0, 0, glyphWidth, 2), [contentView caretRectForPosition:markedTextRange.start]);
+    EXPECT_EQ(CGRectMake(0, 124, glyphWidth, 2), [contentView caretRectForPosition:markedTextRange.end]);
+    EXPECT_TRUE(rects[0].isVertical);
+}
+
+TEST(EditorStateTests, MarkedTextRange_VerticalRangeSelection)
+{
+    IPhoneUserInterfaceSwizzler userInterfaceSwizzler;
+
+    auto webView = adoptNS([[TestWKWebView alloc] initWithFrame:NSMakeRect(0, 0, 800, 600)]);
+    [webView synchronouslyLoadHTMLString:applyAhemStyle(@"<body style='writing-mode: vertical-lr' contenteditable='true'>.</body>")]; // . is dummy to force Ahem to load
+    [webView stringByEvaluatingJavaScript:@"document.body.focus()"];
+    [webView _synchronouslyExecuteEditCommand:@"InsertText" argument:@"Hello world"];
+
+    auto *contentView = [webView textInputContentView];
+    [contentView selectWordBackward];
+    [contentView setMarkedText:@"world" selectedRange:NSMakeRange(0, 5)];
+    [webView waitForNextPresentationUpdate];
+
+    UITextRange *markedTextRange = [contentView markedTextRange];
+    NSArray<UITextSelectionRect *> *rects = [contentView selectionRectsForRange:markedTextRange];
+    EXPECT_EQ(1U, rects.count);
+    EXPECT_EQ(CGRectMake(0, 150, glyphWidth, 5 * glyphWidth), rects[0].rect);
+    EXPECT_EQ(CGRectMake(0, 149, glyphWidth, 2), [contentView caretRectForPosition:markedTextRange.start]);
+    EXPECT_EQ(CGRectMake(0, 274, glyphWidth, 2), [contentView caretRectForPosition:markedTextRange.end]);
+    EXPECT_TRUE(rects[0].isVertical);
 }
 
 #endif // PLATFORM(IOS_FAMILY)

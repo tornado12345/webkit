@@ -34,20 +34,21 @@ namespace WebCore {
 
 class MediaSampleAVFObjC : public MediaSample {
 public:
-    static Ref<MediaSampleAVFObjC> create(CMSampleBufferRef sample, int trackID) { return adoptRef(*new MediaSampleAVFObjC(sample, trackID)); }
-    static Ref<MediaSampleAVFObjC> create(CMSampleBufferRef sample, AtomicString trackID) { return adoptRef(*new MediaSampleAVFObjC(sample, trackID)); }
+    static Ref<MediaSampleAVFObjC> create(CMSampleBufferRef sample, uint64_t trackID) { return adoptRef(*new MediaSampleAVFObjC(sample, trackID)); }
+    static Ref<MediaSampleAVFObjC> create(CMSampleBufferRef sample, AtomString trackID) { return adoptRef(*new MediaSampleAVFObjC(sample, trackID)); }
     static Ref<MediaSampleAVFObjC> create(CMSampleBufferRef sample, VideoRotation rotation = VideoRotation::None, bool mirrored = false) { return adoptRef(*new MediaSampleAVFObjC(sample, rotation, mirrored)); }
-    static RefPtr<MediaSampleAVFObjC> createImageSample(Vector<uint8_t>&&, unsigned long width, unsigned long height);
+    static RefPtr<MediaSampleAVFObjC> createImageSample(Vector<uint8_t>&&, unsigned width, unsigned height);
+
+    WEBCORE_EXPORT static void setAsDisplayImmediately(MediaSample&);
+    static RetainPtr<CMSampleBufferRef> cloneSampleBufferAndSetAsDisplayImmediately(CMSampleBufferRef);
 
     RefPtr<JSC::Uint8ClampedArray> getRGBAImageData() const override;
 
     MediaTime presentationTime() const override;
-    MediaTime outputPresentationTime() const override;
     MediaTime decodeTime() const override;
     MediaTime duration() const override;
-    MediaTime outputDuration() const override;
 
-    AtomicString trackID() const override { return m_id; }
+    AtomString trackID() const override { return m_id; }
     void setTrackID(const String& id) override { m_id = id; }
 
     size_t sizeInBytes() const override;
@@ -68,7 +69,8 @@ public:
 
     CMSampleBufferRef sampleBuffer() const { return m_sample.get(); }
 
-    String toJSONString() const override;
+    bool isHomogeneous() const;
+    Vector<Ref<MediaSampleAVFObjC>> divideIntoHomogeneousSamples();
 
 protected:
     MediaSampleAVFObjC(RetainPtr<CMSampleBufferRef>&& sample)
@@ -79,14 +81,14 @@ protected:
         : m_sample(sample)
     {
     }
-    MediaSampleAVFObjC(CMSampleBufferRef sample, AtomicString trackID)
+    MediaSampleAVFObjC(CMSampleBufferRef sample, AtomString trackID)
         : m_sample(sample)
         , m_id(trackID)
     {
     }
-    MediaSampleAVFObjC(CMSampleBufferRef sample, int trackID)
+    MediaSampleAVFObjC(CMSampleBufferRef sample, uint64_t trackID)
         : m_sample(sample)
-        , m_id(AtomicString::number(trackID))
+        , m_id(AtomString::number(trackID))
     {
     }
     MediaSampleAVFObjC(CMSampleBufferRef sample, VideoRotation rotation, bool mirrored)
@@ -98,7 +100,7 @@ protected:
 
     virtual ~MediaSampleAVFObjC() = default;
     RetainPtr<CMSampleBufferRef> m_sample;
-    AtomicString m_id;
+    AtomString m_id;
     VideoRotation m_rotation { VideoRotation::None };
     bool m_mirrored { false };
 };

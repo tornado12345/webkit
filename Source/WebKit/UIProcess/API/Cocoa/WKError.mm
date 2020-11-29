@@ -67,12 +67,31 @@ NSString *localizedDescriptionForErrorCode(WKErrorCode errorCode)
 
     case WKErrorContentRuleListStoreRemoveFailed:
         return WEB_UI_STRING("Removing a WKContentRuleList failed", "WKErrorContentRuleListStoreRemoveFailed description");
+
+    case WKErrorAttributedStringContentFailedToLoad:
+        return WEB_UI_STRING("Attributed string content failed to load", "WKErrorAttributedStringContentFailedToLoad description");
+
+    case WKErrorAttributedStringContentLoadTimedOut:
+        return WEB_UI_STRING("Timed out while loading attributed string content", "WKErrorAttributedStringContentLoadTimedOut description");
+
+    case WKErrorJavaScriptInvalidFrameTarget:
+        return WEB_UI_STRING("JavaScript execution targeted an invalid frame", "WKErrorJavaScriptInvalidFrameTarget description");
+
+    case WKErrorNavigationAppBoundDomain:
+        return WEB_UI_STRING("Attempted to navigate away from an app-bound domain or navigate after using restricted APIs", "WKErrorNavigationAppBoundDomain description");
+
+    case WKErrorJavaScriptAppBoundDomain:
+        return WEB_UI_STRING("JavaScript execution targeted a frame that is not in an app-bound domain", "WKErrorJavaScriptAppBoundDomain description");
     }
 }
 
-RetainPtr<NSError> createNSError(WKErrorCode errorCode)
+RetainPtr<NSError> createNSError(WKErrorCode errorCode, NSError* underlyingError)
 {
-    auto userInfo = adoptNS([[NSDictionary alloc] initWithObjectsAndKeys:localizedDescriptionForErrorCode(errorCode), NSLocalizedDescriptionKey, nil]);
+    NSDictionary *userInfo = nil;
+    if (underlyingError)
+        userInfo = @{ NSLocalizedDescriptionKey: localizedDescriptionForErrorCode(errorCode), NSUnderlyingErrorKey: underlyingError };
+    else
+        userInfo = @{ NSLocalizedDescriptionKey: localizedDescriptionForErrorCode(errorCode) };
 
-    return adoptNS([[NSError alloc] initWithDomain:WKErrorDomain code:errorCode userInfo:userInfo.get()]);
+    return adoptNS([[NSError alloc] initWithDomain:WKErrorDomain code:errorCode userInfo:userInfo]);
 }

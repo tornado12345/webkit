@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- webkit-test-runner [ enableModernMediaControls=false ] -->
+<!DOCTYPE html><!-- webkit-test-runner [ ModernMediaControlsEnabled=false ] -->
 <html>
 <head>
 <script src="../../http/tests/inspector/resources/inspector-test.js"></script>
@@ -40,7 +40,7 @@ function test() {
     }
 
     WI.domManager.requestDocument(function(documentNode) {
-        WI.domManager.querySelector(documentNode.id, "#node1", function(contentNodeId) {
+        documentNode.querySelector("#node1", function(contentNodeId) {
             try { 
                 if (contentNodeId) {
                     var domNode = WI.domManager.nodeForId(contentNodeId);

@@ -27,7 +27,7 @@
 
 #import "FocusedElementInformation.h"
 #import "UIKitSPI.h"
-#import "WKFormPeripheral.h"
+#import "WKFormPeripheralBase.h"
 #import "WKFormPopover.h"
 #import <UIKit/UIPickerView.h>
 
@@ -35,18 +35,20 @@ CGFloat adjustedFontSize(CGFloat textWidth, UIFont *, CGFloat initialFontSize, c
 
 @class WKContentView;
 
-@interface WKFormSelectControl : NSObject<WKFormPeripheral>
+@interface WKFormSelectControl : WKFormPeripheralBase
 - (instancetype)initWithView:(WKContentView *)view;
 @end
 
 @interface WKFormSelectControl(WKTesting)
 - (void)selectRow:(NSInteger)rowIndex inComponent:(NSInteger)componentIndex extendingSelection:(BOOL)extendingSelection;
+- (BOOL)selectFormAccessoryHasCheckedItemAtRow:(long)rowIndex;
 @property (nonatomic, readonly) NSString *selectFormPopoverTitle;
 @end
 
 @protocol WKSelectTesting
 @optional
 - (void)selectRow:(NSInteger)rowIndex inComponent:(NSInteger)componentIndex extendingSelection:(BOOL)extendingSelection;
+- (BOOL)selectFormAccessoryHasCheckedItemAtRow:(long)rowIndex;
 @end
 
 #endif // PLATFORM(IOS_FAMILY)

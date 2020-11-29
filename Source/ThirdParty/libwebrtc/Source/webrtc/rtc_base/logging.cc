@@ -33,14 +33,14 @@ static const int kMaxLogLineSize = 1024 - 60;
 #include <cstdarg>
 #include <vector>
 
-#include "rtc_base/criticalsection.h"
+#include "rtc_base/critical_section.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/platform_thread_types.h"
 #include "rtc_base/never_destroyed.h"
-#include "rtc_base/stringencode.h"
+#include "rtc_base/string_encode.h"
 #include "rtc_base/strings/string_builder.h"
-#include "rtc_base/stringutils.h"
-#include "rtc_base/timeutils.h"
+#include "rtc_base/string_utils.h"
+#include "rtc_base/time_utils.h"
 
 namespace rtc {
 namespace {
@@ -52,6 +52,7 @@ static LoggingSeverity g_dbg_sev = LS_INFO;
 static LoggingSeverity g_min_sev = LS_NONE;
 static LoggingSeverity g_dbg_sev = LS_NONE;
 #endif
+static LogMessage::LogOutputCallback g_log_output_callback = nullptr;
 
 // Return the filename portion of the string (that following the last slash).
 const char* FilenameFromPath(const char* file) {
@@ -168,11 +169,13 @@ LogMessage::LogMessage(const char* file,
       }
 #endif  // WEBRTC_WIN
 #if defined(WEBRTC_MAC) && !defined(WEBRTC_IOS)
+/*
       case ERRCTX_OSSTATUS: {
         std::string desc(DescriptionFromOSStatus(err));
         tmp << " " << (desc.empty() ? "Unknown error" : desc.c_str());
         break;
       }
+*/
 #endif  // WEBRTC_MAC && !defined(WEBRTC_IOS)
       default:
         break;
@@ -267,6 +270,14 @@ void LogMessage::LogToDebug(LoggingSeverity min_sev) {
   g_dbg_sev = min_sev;
   CritScope cs(&logCriticalScope());
   UpdateMinLogSeverity();
+}
+
+void LogMessage::SetLogOutput(LoggingSeverity min_sev, LogOutputCallback callback)
+{
+  g_dbg_sev = min_sev;
+  CritScope cs(&logCriticalScope());
+  UpdateMinLogSeverity();
+  g_log_output_callback = callback;
 }
 
 void LogMessage::SetLogToStderr(bool log_to_stderr) {
@@ -455,6 +466,9 @@ void LogMessage::OutputToDebug(const std::string& str,
     }
   }
 #endif  // WEBRTC_ANDROID
+  if (g_log_output_callback) {
+    g_log_output_callback(severity, str.c_str());
+  }
   if (log_to_stderr) {
     fprintf(stderr, "%s", str.c_str());
     fflush(stderr);

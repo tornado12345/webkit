@@ -27,6 +27,7 @@
 #include <wtf/Lock.h>
 #include <wtf/Threading.h>
 #include <wtf/ThreadingPrimitives.h>
+#include <wtf/UniqueArray.h>
 #include <wtf/WordLock.h>
 
 namespace TestWebKitAPI {
@@ -42,9 +43,9 @@ struct LockInspector {
 template<typename LockType>
 void runLockTest(unsigned numThreadGroups, unsigned numThreadsPerGroup, unsigned workPerCriticalSection, unsigned numIterations)
 {
-    std::unique_ptr<LockType[]> locks = std::make_unique<LockType[]>(numThreadGroups);
-    std::unique_ptr<double[]> words = std::make_unique<double[]>(numThreadGroups);
-    std::unique_ptr<RefPtr<Thread>[]> threads = std::make_unique<RefPtr<Thread>[]>(numThreadGroups * numThreadsPerGroup);
+    std::unique_ptr<LockType[]> locks = makeUniqueWithoutFastMallocCheck<LockType[]>(numThreadGroups);
+    auto words = makeUniqueArray<double>(numThreadGroups);
+    std::unique_ptr<RefPtr<Thread>[]> threads = makeUniqueWithoutFastMallocCheck<RefPtr<Thread>[]>(numThreadGroups * numThreadsPerGroup);
 
     for (unsigned threadGroupIndex = numThreadGroups; threadGroupIndex--;) {
         words[threadGroupIndex] = 0;
@@ -142,12 +143,14 @@ TEST(WTF_Lock, UncontendedLongSection)
     runLockTest<Lock>(1, 1, 10000, 1000);
 }
 
+#if !PLATFORM(IOS_SIMULATOR) || defined(NDEBUG)
 TEST(WTF_Lock, ContendedShortSection)
 {
     if (skipSlow())
         return;
     runLockTest<Lock>(1, 10, 1, 10000000);
 }
+#endif
 
 TEST(WTF_Lock, ContendedLongSection)
 {

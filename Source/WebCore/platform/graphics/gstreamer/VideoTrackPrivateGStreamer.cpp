@@ -25,7 +25,7 @@
 
 #include "config.h"
 
-#if ENABLE(VIDEO) && USE(GSTREAMER) && ENABLE(VIDEO_TRACK)
+#if ENABLE(VIDEO) && USE(GSTREAMER)
 
 #include "VideoTrackPrivateGStreamer.h"
 
@@ -40,10 +40,8 @@ VideoTrackPrivateGStreamer::VideoTrackPrivateGStreamer(WeakPtr<MediaPlayerPrivat
 {
     // FIXME: Get a real ID from the tkhd atom.
     m_id = "V" + String::number(index);
-    notifyTrackOfActiveChanged();
 }
 
-#if GST_CHECK_VERSION(1, 10, 0)
 VideoTrackPrivateGStreamer::VideoTrackPrivateGStreamer(WeakPtr<MediaPlayerPrivateGStreamer> player, gint index, GRefPtr<GstStream> stream)
     : TrackPrivateBaseGStreamer(this, index, stream)
     , m_player(player)
@@ -57,9 +55,6 @@ VideoTrackPrivateGStreamer::VideoTrackPrivateGStreamer(WeakPtr<MediaPlayerPrivat
     }
 
     m_id = gst_stream_get_stream_id(stream.get());
-    if (gst_stream_get_stream_flags(stream.get()) & GST_STREAM_FLAG_SELECT)
-        markAsActive();
-    notifyTrackOfActiveChanged();
 }
 
 VideoTrackPrivate::Kind VideoTrackPrivateGStreamer::kind() const
@@ -69,17 +64,11 @@ VideoTrackPrivate::Kind VideoTrackPrivateGStreamer::kind() const
 
     return VideoTrackPrivate::kind();
 }
-#endif
 
 void VideoTrackPrivateGStreamer::disconnect()
 {
     m_player = nullptr;
     TrackPrivateBaseGStreamer::disconnect();
-}
-
-void VideoTrackPrivateGStreamer::markAsActive()
-{
-    VideoTrackPrivate::setSelected(true);
 }
 
 void VideoTrackPrivateGStreamer::setSelected(bool selected)
@@ -88,10 +77,10 @@ void VideoTrackPrivateGStreamer::setSelected(bool selected)
         return;
     VideoTrackPrivate::setSelected(selected);
 
-    if (selected && m_player)
-        m_player->enableTrack(TrackPrivateBaseGStreamer::TrackType::Video, m_index);
+    if (m_player)
+        m_player->updateEnabledVideoTrack();
 }
 
 } // namespace WebCore
 
-#endif // ENABLE(VIDEO) && USE(GSTREAMER) && ENABLE(VIDEO_TRACK)
+#endif // ENABLE(VIDEO) && USE(GSTREAMER)

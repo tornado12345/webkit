@@ -38,11 +38,8 @@ WI.CPUTimelineOverviewGraph = class CPUTimelineOverviewGraph extends WI.Timeline
         this._cpuTimeline.addEventListener(WI.Timeline.Event.RecordAdded, this._cpuTimelineRecordAdded, this);
 
         let size = new WI.Size(0, this.height);
-        if (WI.settings.experimentalEnableCPUUsageEnhancements.value) {
-            this._chart = new WI.StackedColumnChart(size);
-            this._chart.initializeSections(["main-thread-usage", "worker-thread-usage", "total-usage"]);
-        } else
-            this._chart = new WI.ColumnChart(size);
+        this._chart = new WI.StackedColumnChart(size);
+        this._chart.initializeSections(["main-thread-usage", "worker-thread-usage", "total-usage"]);
         this.addSubview(this._chart);
         this.element.appendChild(this._chart.element);
 
@@ -54,14 +51,9 @@ WI.CPUTimelineOverviewGraph = class CPUTimelineOverviewGraph extends WI.Timeline
         this._lastSelectedRecordInLayout = null;
 
         this.reset();
-    }
 
-    // Static
-
-    static get samplingRatePerSecond()
-    {
-        // 500ms. This matches the ResourceUsageThread sampling frequency in the backend.
-        return 0.5;
+        for (let record of this._cpuTimeline.records)
+            this._processRecord(record);
     }
 
     // Protected
@@ -115,30 +107,22 @@ WI.CPUTimelineOverviewGraph = class CPUTimelineOverviewGraph extends WI.Timeline
             return (size / maxCapacity) * height;
         }
 
-        const includeRecordBeforeStart = true;
-        let visibleRecords = this._cpuTimeline.recordsInTimeRange(graphStartTime, visibleEndTime + (CPUTimelineOverviewGraph.samplingRatePerSecond / 2), includeRecordBeforeStart);
+        let visibleRecords = this._cpuTimeline.recordsInTimeRange(graphStartTime, visibleEndTime, {
+            includeRecordBeforeStart: true,
+        });
         if (!visibleRecords.length)
             return;
 
-        function yScaleForRecord(record) {
-            return yScale(record.usage);
-        }
-
-        let intervalWidth = (CPUTimelineOverviewGraph.samplingRatePerSecond / secondsPerPixel);
         const minimumDisplayHeight = 4;
 
-        // Bars for each record.
         for (let record of visibleRecords) {
-            let w = intervalWidth;
+            let additionalClass = record === this.selectedRecord ? "selected" : undefined;
+            let w = (record.endTime - record.startTime) / secondsPerPixel;
+            let x = xScale(record.startTime);
+            let h1 = Math.max(minimumDisplayHeight, yScale(record.mainThreadUsage));
+            let h2 = Math.max(minimumDisplayHeight, yScale(record.mainThreadUsage + record.workerThreadUsage));
             let h3 = Math.max(minimumDisplayHeight, yScale(record.usage));
-            let x = xScale(record.startTime - (CPUTimelineOverviewGraph.samplingRatePerSecond / 2));
-            if (WI.settings.experimentalEnableCPUUsageEnhancements.value) {
-                let additionalClass = record === this.selectedRecord ? "selected" : undefined;
-                let h1 = Math.max(minimumDisplayHeight, yScale(record.mainThreadUsage));
-                let h2 = Math.max(minimumDisplayHeight, yScale(record.mainThreadUsage + record.workerThreadUsage));
-                this._chart.addColumnSet(x, height, w, [h1, h2, h3], additionalClass);
-            } else
-                this._chart.addColumn(x, height - h3, w, h3);
+            this._chart.addColumnSet(x, height, w, [h1, h2, h3], additionalClass);
         }
     }
 
@@ -218,8 +202,13 @@ WI.CPUTimelineOverviewGraph = class CPUTimelineOverviewGraph extends WI.Timeline
     {
         let cpuTimelineRecord = event.data.record;
 
-        this._maxUsage = Math.max(this._maxUsage, cpuTimelineRecord.usage);
+        this._processRecord(cpuTimelineRecord);
 
         this.needsLayout();
+    }
+
+    _processRecord(cpuTimelineRecord)
+    {
+        this._maxUsage = Math.max(this._maxUsage, cpuTimelineRecord.usage);
     }
 };

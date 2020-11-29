@@ -28,13 +28,13 @@ target_test((target, test) => {
     ]).then(() => {
         eventTracker.assertMatchesEvents([
             { id: 1, type: "pointerdown" },
-            { id: 1, type: "gotpointercapture", isPrimary: true },
             { id: 2, type: "pointerdown" },
-            { id: 2, type: "gotpointercapture", isPrimary: false },
+            { id: 1, type: "gotpointercapture", isPrimary: true },
             { id: 1, type: "pointermove" },
+            { id: 2, type: "gotpointercapture", isPrimary: false },
             { id: 2, type: "pointermove" },
             { id: 1, type: "pointerup" },
-            { id: 1, type: "lostpointercapture", isPrimary: false },
+            { id: 1, type: "lostpointercapture", isPrimary: true },
             { id: 2, type: "pointerup" },
             { id: 2, type: "lostpointercapture", isPrimary: false }
         ]);

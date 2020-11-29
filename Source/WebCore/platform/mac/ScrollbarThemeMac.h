@@ -45,23 +45,23 @@ public:
     bool paint(Scrollbar&, GraphicsContext&, const IntRect& damageRect) override;
     void paintScrollCorner(GraphicsContext&, const IntRect& cornerRect) override;
 
-    int scrollbarThickness(ScrollbarControlSize = RegularScrollbar, ScrollbarExpansionState = ScrollbarExpansionState::Expanded) override;
+    int scrollbarThickness(ScrollbarControlSize = ScrollbarControlSize::Regular, ScrollbarExpansionState = ScrollbarExpansionState::Expanded) override;
     
     bool supportsControlTints() const override { return true; }
     bool usesOverlayScrollbars() const  override;
     void usesOverlayScrollbarsChanged() override;
     void updateScrollbarOverlayStyle(Scrollbar&)  override;
 
-    Seconds initialAutoscrollTimerDelay() override;
-    Seconds autoscrollTimerDelay() override;
+    Seconds initialAutoscrollTimerDelay() override { return 500_ms; }
+    Seconds autoscrollTimerDelay() override { return 50_ms; }
 
     ScrollbarButtonsPlacement buttonsPlacement() const override;
 
     void registerScrollbar(Scrollbar&) override;
     void unregisterScrollbar(Scrollbar&) override;
 
-    void setNewPainterForScrollbar(Scrollbar&, NSScrollerImp *);
-    NSScrollerImp *painterForScrollbar(Scrollbar&);
+    void setNewPainterForScrollbar(Scrollbar&, RetainPtr<NSScrollerImp>&&);
+    static NSScrollerImp *painterForScrollbar(Scrollbar&);
 
     void setPaintCharacteristicsForScrollbar(Scrollbar&);
 

@@ -34,11 +34,9 @@ WI.TimelineOverview = class TimelineOverview extends WI.View
         this._timelinesViewModeSettings = this._createViewModeSettings(WI.TimelineOverview.ViewMode.Timelines, WI.TimelineOverview.MinimumDurationPerPixel, WI.TimelineOverview.MaximumDurationPerPixel, 0.01, 0, 15);
         this._instrumentTypes = WI.TimelineManager.availableTimelineTypes();
 
-        if (WI.FPSInstrument.supported()) {
-            let minimumDurationPerPixel = 1 / WI.TimelineRecordFrame.MaximumWidthPixels;
-            let maximumDurationPerPixel = 1 / WI.TimelineRecordFrame.MinimumWidthPixels;
-            this._renderingFramesViewModeSettings = this._createViewModeSettings(WI.TimelineOverview.ViewMode.RenderingFrames, minimumDurationPerPixel, maximumDurationPerPixel, minimumDurationPerPixel, 0, 100);
-        }
+        let minimumDurationPerPixel = 1 / WI.TimelineRecordFrame.MaximumWidthPixels;
+        let maximumDurationPerPixel = 1 / WI.TimelineRecordFrame.MinimumWidthPixels;
+        this._renderingFramesViewModeSettings = this._createViewModeSettings(WI.TimelineOverview.ViewMode.RenderingFrames, minimumDurationPerPixel, maximumDurationPerPixel, minimumDurationPerPixel, 0, 100);
 
         this._recording = timelineRecording;
         this._recording.addEventListener(WI.TimelineRecording.Event.InstrumentAdded, this._instrumentAdded, this);
@@ -116,8 +114,25 @@ WI.TimelineOverview = class TimelineOverview extends WI.View
 
         this._viewModeDidChange();
 
-        WI.timelineManager.addEventListener(WI.TimelineManager.Event.CapturingStarted, this._capturingStarted, this);
-        WI.timelineManager.addEventListener(WI.TimelineManager.Event.CapturingStopped, this._capturingStopped, this);
+        WI.timelineManager.addEventListener(WI.TimelineManager.Event.CapturingStateChanged, this._handleTimelineCapturingStateChanged, this);
+        WI.timelineManager.addEventListener(WI.TimelineManager.Event.RecordingImported, this._recordingImported, this);
+    }
+
+    // Import / Export
+
+    exportData()
+    {
+        let json = {
+            secondsPerPixel: this.secondsPerPixel,
+            scrollStartTime: this.scrollStartTime,
+            selectionStartTime: this.selectionStartTime,
+            selectionDuration: this.selectionDuration,
+        };
+
+        if (this._selectedTimeline)
+            json.selectedTimelineType = this._selectedTimeline.type;
+
+        return json;
     }
 
     // Public
@@ -657,6 +672,8 @@ WI.TimelineOverview = class TimelineOverview extends WI.View
             overviewGraph.hidden();
             treeElement.hidden = true;
         }
+
+        this.needsLayout();
     }
 
     _instrumentRemoved(event)
@@ -765,12 +782,7 @@ WI.TimelineOverview = class TimelineOverview extends WI.View
 
             let startTime = firstRecord instanceof WI.RenderingFrameTimelineRecord ? firstRecord.frameIndex : firstRecord.startTime;
             let endTime = lastRecord instanceof WI.RenderingFrameTimelineRecord ? lastRecord.frameIndex : lastRecord.endTime;
-
-            if (firstRecord instanceof WI.CPUTimelineRecord) {
-                let selectionPadding = WI.CPUTimelineOverviewGraph.samplingRatePerSecond * 2.25;
-                this.selectionStartTime = startTime - selectionPadding;
-                this.selectionDuration = endTime - startTime + (selectionPadding * 2);
-            } else if (startTime < this.selectionStartTime || endTime > this.selectionStartTime + this.selectionDuration) {
+            if (startTime < this.selectionStartTime || (endTime > this.selectionStartTime + this.selectionDuration) || firstRecord instanceof WI.CPUTimelineRecord) {
                 let selectionPadding = this.secondsPerPixel * 10;
                 this.selectionStartTime = startTime - selectionPadding;
                 this.selectionDuration = endTime - startTime + (selectionPadding * 2);
@@ -801,6 +813,7 @@ WI.TimelineOverview = class TimelineOverview extends WI.View
     _recordingReset(event)
     {
         this._timelineRuler.clearMarkers();
+
         this._timelineRuler.addMarker(this._currentTimeMarker);
     }
 
@@ -1012,15 +1025,41 @@ WI.TimelineOverview = class TimelineOverview extends WI.View
         this._editingInstrumentsDidChange();
     }
 
-    _capturingStarted()
+    _handleTimelineCapturingStateChanged(event)
     {
-        this._editInstrumentsButton.enabled = false;
-        this._stopEditingInstruments();
+        switch (WI.timelineManager.capturingState) {
+        case WI.TimelineManager.CapturingState.Active:
+            this._editInstrumentsButton.enabled = false;
+            this._stopEditingInstruments();
+            break;
+
+        case WI.TimelineManager.CapturingState.Inactive:
+            this._editInstrumentsButton.enabled = true;
+            break;
+        }
     }
 
-    _capturingStopped()
+    _recordingImported(event)
     {
-        this._editInstrumentsButton.enabled = true;
+        let {overviewData} = event.data;
+
+        if (overviewData.secondsPerPixel !== undefined)
+            this.secondsPerPixel = overviewData.secondsPerPixel;
+        if (overviewData.scrollStartTime !== undefined)
+            this.scrollStartTime = overviewData.scrollStartTime;
+        if (overviewData.selectionStartTime !== undefined)
+            this.selectionStartTime = overviewData.selectionStartTime;
+        if (overviewData.selectionDuration !== undefined) {
+            if (overviewData.selectionDuration === Number.MAX_VALUE)
+                this._timelineRuler.selectEntireRange();
+            else
+                this.selectionDuration = overviewData.selectionDuration;
+        }
+        if (overviewData.selectedTimelineType !== undefined) {
+            let timeline = this._recording.timelineForRecordType(overviewData.selectedTimelineType);
+            if (timeline)
+                this.selectedTimeline = timeline;
+        }
     }
 
     _compareTimelineTreeElements(a, b)

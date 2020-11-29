@@ -34,7 +34,7 @@
 
 #if !PLATFORM(IOS_FAMILY)
 #import "WebJavaScriptTextInputPanel.h"
-#import "WebKitVersionChecks.h"
+#import <WebCore/VersionChecks.h>
 #endif
 
 #if PLATFORM(IOS_FAMILY)
@@ -216,11 +216,10 @@ static WebDefaultUIDelegate *sharedDelegate = nil;
 {
 }
 
-
 #if !PLATFORM(IOS_FAMILY)
 - (NSUInteger)webView:(WebView *)webView dragDestinationActionMaskForDraggingInfo:(id <NSDraggingInfo>)draggingInfo
 {
-    if (!linkedOnOrAfter(SDKVersion::FirstWithDropToNavigateDisallowedByDefault))
+    if (!linkedOnOrAfter(WebCore::SDKVersion::FirstWithDropToNavigateDisallowedByDefault))
         return WebDragDestinationActionAny;
 
     return WebDragDestinationActionAny & ~WebDragDestinationActionLoad;
@@ -254,16 +253,6 @@ static WebDefaultUIDelegate *sharedDelegate = nil;
 
 - (void)webView:(WebView *)sender exceededApplicationCacheOriginQuotaForSecurityOrigin:(WebSecurityOrigin *)origin totalSpaceNeeded:(NSUInteger)totalSpaceNeeded
 {
-}
-
-- (BOOL)webView:(WebView *)sender shouldReplaceUploadFile:(NSString *)path usingGeneratedFilename:(NSString **)filename
-{
-    return NO;
-}
-
-- (NSString *)webView:(WebView *)sender generateReplacementFile:(NSString *)path
-{
-    return nil;
 }
 
 #if PLATFORM(IOS_FAMILY)
